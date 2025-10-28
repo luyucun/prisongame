@@ -284,6 +284,17 @@ end
 -- ==================== 货币获取渠道接口(预留) ====================
 
 --[[
+通过GM命令获得金币(测试用)
+@param player Player - 玩家对象
+@param amount number - 金币数量
+@return boolean, number - 是否成功, 新的金币数量
+]]
+function CurrencySystem.AddCoinsFromGM(player, amount)
+    local reason = "GM命令"
+    return CurrencySystem.AddCoins(player, amount, reason)
+end
+
+--[[
 通过战斗获得金币
 @param player Player - 玩家对象
 @param amount number - 金币数量

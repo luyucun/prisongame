@@ -29,6 +29,8 @@ local PlayerManager = require(ServerScriptService.Core.PlayerManager)
 -- 引用系统模块
 local CurrencySystem = require(ServerScriptService.Systems.CurrencySystem)
 local HomeSystem = require(ServerScriptService.Systems.HomeSystem)
+local InventorySystem = require(ServerScriptService.Systems.InventorySystem)
+local GMCommandSystem = require(ServerScriptService.Systems.GMCommandSystem)
 
 -- ==================== 系统初始化顺序 ====================
 
@@ -82,6 +84,32 @@ local function InitializeServer()
         initializationFailed = true
     else
         print(GameConfig.LOG_PREFIX, "玩家管理器初始化成功")
+    end
+
+    -- 4. 初始化背包系统(连接背包事件)
+    print(GameConfig.LOG_PREFIX, "步骤4: 初始化背包系统...")
+    success, result = pcall(function()
+        InventorySystem.Initialize()
+        return true
+    end)
+    if not success then
+        warn(GameConfig.LOG_PREFIX, "背包系统初始化失败(异常):", result)
+        -- 背包系统不是关键系统,失败不影响游戏运行
+    else
+        print(GameConfig.LOG_PREFIX, "背包系统初始化成功")
+    end
+
+    -- 5. 初始化GM命令系统(连接聊天事件)
+    print(GameConfig.LOG_PREFIX, "步骤5: 初始化GM命令系统...")
+    success, result = pcall(function()
+        GMCommandSystem.Initialize()
+        return true
+    end)
+    if not success then
+        warn(GameConfig.LOG_PREFIX, "GM命令系统初始化失败(异常):", result)
+        -- GM系统不是关键系统,失败不影响游戏运行
+    else
+        print(GameConfig.LOG_PREFIX, "GM命令系统初始化成功")
     end
 
     -- 检查是否有关键系统初始化失败
