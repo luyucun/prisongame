@@ -26,6 +26,7 @@ local RunService = game:GetService("RunService")
 -- 引用工具模块
 local PlacementHelper = require(script.Parent.Parent.Utils.PlacementHelper)
 local HighlightHelper = require(script.Parent.Parent.Utils.HighlightHelper)
+local GridHelper = require(script.Parent.Parent.Utils.GridHelper)  -- V1.2.1: 新增Grid管理
 
 -- 玩家引用
 local player = Players.LocalPlayer
@@ -46,6 +47,7 @@ local placementState = {
     lastGridX = nil,             -- 上次的网格X
     lastGridZ = nil,             -- 上次的网格Z
     isMobile = false,            -- 是否为移动设备
+    placedModels = {},           -- V1.2.1: 客户端跟踪已放置的模型 {model = {gridX, gridZ, gridSize}}
 }
 
 -- ==================== 初始化 ====================
@@ -55,6 +57,9 @@ local placementState = {
 ]]
 function PlacementController.Initialize()
     print("[PlacementController] 正在初始化...")
+
+    -- 初始化GridHelper (V1.2.1)
+    GridHelper.Initialize()
 
     -- 检测设备类型
     placementState.isMobile = PlacementHelper.IsMobileDevice()
@@ -303,6 +308,14 @@ function PlacementController.CancelPlacement()
 
     print("[PlacementController] 取消放置")
 
+    -- V1.2.1: 移除Grid提示块
+    GridHelper.HideGrid()
+
+    -- V1.2.1: 移除Highlight效果
+    if placementState.previewModel then
+        HighlightHelper.RemoveHighlight(placementState.previewModel)
+    end
+
     -- 移除预览模型
     if placementState.previewModel then
         placementState.previewModel:Destroy()
@@ -334,6 +347,50 @@ end
 -- ==================== 预览位置更新 ====================
 
 --[[
+检查当前位置是否有效（客户端预检测）
+@param gridX number
+@param gridZ number
+@return boolean - true表示有效（绿色），false表示冲突（红色）
+]]
+local function IsPositionValid(gridX, gridZ)
+    -- V1.2.1: 基于网格坐标的碰撞检测
+    if not placementState.idleFloor then
+        return true
+    end
+
+    -- 获取当前兵种占据的网格宽度
+    local currentGridWidth = math.sqrt(placementState.currentGridSize)  -- 1, 2, 3
+
+    -- 检查当前位置是否与已放置的模型重叠
+    for model, data in pairs(placementState.placedModels) do
+        -- 确保模型还存在
+        if model and model.Parent then
+            local placedGridX = data.gridX
+            local placedGridZ = data.gridZ
+            local placedGridWidth = math.sqrt(data.gridSize)
+
+            -- 检查网格是否重叠
+            -- 当前模型占据的网格范围: [gridX, gridX + currentGridWidth)
+            -- 已放置模型占据的网格范围: [placedGridX, placedGridX + placedGridWidth)
+            local overlapX = not (gridX + currentGridWidth <= placedGridX or gridX >= placedGridX + placedGridWidth)
+            local overlapZ = not (gridZ + currentGridWidth <= placedGridZ or gridZ >= placedGridZ + placedGridWidth)
+
+            if overlapX and overlapZ then
+                print(string.format("[PlacementController] 检测到冲突 - 当前网格:(%d,%d) 大小:%d 已放置:(%d,%d) 大小:%d",
+                    gridX, gridZ, placementState.currentGridSize,
+                    placedGridX, placedGridZ, data.gridSize))
+                return false  -- 位置冲突
+            end
+        else
+            -- 模型已被移除，清理缓存
+            placementState.placedModels[model] = nil
+        end
+    end
+
+    return true  -- 位置有效
+end
+
+--[[
 更新预览模型位置
 @param worldPos Vector3 - 原始世界坐标
 ]]
@@ -361,8 +418,11 @@ function UpdatePreviewPosition(worldPos)
     -- 更新模型位置
     PlacementHelper.SetModelPosition(placementState.previewModel, snappedPos)
 
-    -- 更新高光（这里简化，都显示绿色，服务端会做验证）
-    HighlightHelper.UpdatePreviewHighlight(placementState.previewModel, true)
+    -- V1.2.1: 检测位置是否有效（用于切换Grid颜色）
+    local isValid = IsPositionValid(gridX, gridZ)
+
+    -- V1.2.1: 更新Grid提示块（绿色或红色）
+    GridHelper.ShowGrid(placementState.currentGridSize, snappedPos, isValid)
 
     -- 记录当前网格
     placementState.lastGridX = gridX
@@ -531,6 +591,62 @@ function OnPlacementResponse(success, message, data)
     print("[PlacementController] 服务端响应:", success, message)
 
     if success then
+        -- V1.2.1: 记录放置的位置，用于后续碰撞检测
+        if placementState.lastGridX and placementState.lastGridZ and placementState.currentGridSize then
+            -- 延迟一帧后查找服务端创建的模型
+            task.spawn(function()
+                task.wait(0.1)  -- 等待服务端模型同步到客户端
+
+                -- 查找IdleFloor上新增的模型
+                local floorCenter = placementState.idleFloor.Position
+                local placedPos = PlacementHelper.GridToWorld(placementState.lastGridX, placementState.lastGridZ, floorCenter)
+
+                -- 在该位置附近查找模型
+                local nearbyModels = {}
+                for _, obj in ipairs(Workspace:GetChildren()) do
+                    if obj:IsA("Model") and obj.PrimaryPart then
+                        local distance = (obj.PrimaryPart.Position - placedPos).Magnitude
+                        if distance < 5 then  -- 5 studs范围内
+                            table.insert(nearbyModels, obj)
+                        end
+                    end
+                end
+
+                -- 找到最近的模型
+                local closestModel = nil
+                local closestDistance = math.huge
+                for _, model in ipairs(nearbyModels) do
+                    if not placementState.placedModels[model] then  -- 排除已记录的
+                        local distance = (model.PrimaryPart.Position - placedPos).Magnitude
+                        if distance < closestDistance then
+                            closestDistance = distance
+                            closestModel = model
+                        end
+                    end
+                end
+
+                if closestModel then
+                    placementState.placedModels[closestModel] = {
+                        gridX = placementState.lastGridX,
+                        gridZ = placementState.lastGridZ,
+                        gridSize = placementState.currentGridSize
+                    }
+                    print(string.format("[PlacementController] 记录已放置模型: %s 网格:(%d,%d) 大小:%d",
+                        closestModel.Name, placementState.lastGridX, placementState.lastGridZ, placementState.currentGridSize))
+                else
+                    warn("[PlacementController] 未找到放置的模型!")
+                end
+            end)
+        end
+
+        -- V1.2.1: 移除Grid提示块
+        GridHelper.HideGrid()
+
+        -- V1.2.1: 移除Highlight效果
+        if placementState.previewModel then
+            HighlightHelper.RemoveHighlight(placementState.previewModel)
+        end
+
         -- 放置成功，清理预览模型
         if placementState.previewModel then
             placementState.previewModel:Destroy()

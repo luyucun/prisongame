@@ -27,6 +27,7 @@ local PlacementConfig = require(ServerScriptService.Config.PlacementConfig)
 local UnitConfig = require(ServerScriptService.Config.UnitConfig)
 local DataManager = require(ServerScriptService.Core.DataManager)
 local InventorySystem = require(ServerScriptService.Systems.InventorySystem)
+local PhysicsManager = require(ServerScriptService.Systems.PhysicsManager)
 
 -- 远程事件(延迟获取)
 local PlacementEvents = nil
@@ -225,11 +226,10 @@ local function CreateUnitModel(unitId, position)
         model.HumanoidRootPart.CFrame = CFrame.new(position)
     end
 
-    -- 放置后的模型设置：锚定+禁用碰撞（防止被玩家推动）
+    -- 放置后的模型设置：锚定
     for _, descendant in ipairs(model:GetDescendants()) do
         if descendant:IsA("BasePart") then
             descendant.Anchored = true       -- 固定不动
-            descendant.CanCollide = false    -- 不与玩家碰撞，避免被推动
         end
     end
 
@@ -376,6 +376,9 @@ function PlacementSystem.PlaceUnit(player, instanceId, position)
             finalPosition.X, finalPosition.Y, finalPosition.Z, gridX, gridZ
         ))
     end
+
+    -- 配置兵种物理（禁用与玩家的碰撞）
+    PhysicsManager.ConfigureUnitPhysics(model)
 
     -- 通知InventorySystem刷新客户端背包显示
     InventorySystem.RefreshClientInventory(player)

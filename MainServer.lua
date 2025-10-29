@@ -31,6 +31,7 @@ local CurrencySystem = require(ServerScriptService.Systems.CurrencySystem)
 local HomeSystem = require(ServerScriptService.Systems.HomeSystem)
 local InventorySystem = require(ServerScriptService.Systems.InventorySystem)
 local PlacementSystem = require(ServerScriptService.Systems.PlacementSystem)
+local PhysicsManager = require(ServerScriptService.Systems.PhysicsManager)
 local GMCommandSystem = require(ServerScriptService.Systems.GMCommandSystem)
 
 -- ==================== 系统初始化顺序 ====================
@@ -40,6 +41,21 @@ local function InitializeServer()
     print(GameConfig.LOG_PREFIX, "调试模式:", GameConfig.DEBUG_MODE and "开启" or "关闭")
 
     local initializationFailed = false
+
+    -- 0. 初始化物理管理系统(必须首先初始化)
+    print(GameConfig.LOG_PREFIX, "步骤0: 初始化物理管理系统...")
+    local success, result = pcall(function()
+        return PhysicsManager.Initialize()
+    end)
+    if not success then
+        warn(GameConfig.LOG_PREFIX, "物理管理系统初始化失败(异常):", result)
+        initializationFailed = true
+    elseif result == false then
+        warn(GameConfig.LOG_PREFIX, "物理管理系统初始化失败(返回false)")
+        initializationFailed = true
+    else
+        print(GameConfig.LOG_PREFIX, "物理管理系统初始化成功")
+    end
 
     -- 1. 初始化基地系统(验证地图结构)
     print(GameConfig.LOG_PREFIX, "步骤1: 初始化基地系统...")

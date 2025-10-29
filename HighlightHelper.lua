@@ -15,20 +15,17 @@
 
 local HighlightHelper = {}
 
--- 高光配置
-local HIGHLIGHT_COLOR_VALID = Color3.fromRGB(0, 255, 0)      -- 绿色 - 有效位置
-local HIGHLIGHT_COLOR_INVALID = Color3.fromRGB(255, 0, 0)    -- 红色 - 无效位置
-local HIGHLIGHT_FILL_TRANSPARENCY = 0.4
+-- 高光配置 (V1.2.1: 使用OutlineColor而不是FillColor)
+local HIGHLIGHT_OUTLINE_COLOR = Color3.fromRGB(0, 255, 0)    -- 绿色 - 轮廓颜色
 
 -- ==================== 高光管理 ====================
 
 --[[
-为模型添加高光效果
+为模型添加高光效果 (V1.2.1: 只使用OutlineColor)
 @param model Model - 目标模型
-@param isValid boolean - 是否为有效位置 (true=绿色, false=红色)
 @return Highlight|nil - 创建的Highlight对象
 ]]
-function HighlightHelper.AddHighlight(model, isValid)
+function HighlightHelper.AddHighlight(model)
     if not model then
         warn("[HighlightHelper] 模型为空，无法添加高光")
         return nil
@@ -37,18 +34,16 @@ function HighlightHelper.AddHighlight(model, isValid)
     -- 检查模型是否已有Highlight
     local existingFolder = model:FindFirstChild("HighlightContainer")
     if existingFolder then
-        -- 更新现有高光
-        HighlightHelper.SetHighlightColor(model, isValid)
         return existingFolder:FindFirstChildOfClass("Highlight")
     end
 
-    -- 为模型的所有Part添加Highlight
+    -- 为模型添加Highlight
     local highlight = Instance.new("Highlight")
     highlight.Name = "Highlight"
     highlight.Adornee = model
-    highlight.FillColor = isValid and HIGHLIGHT_COLOR_VALID or HIGHLIGHT_COLOR_INVALID
-    highlight.FillTransparency = HIGHLIGHT_FILL_TRANSPARENCY
-    highlight.OutlineTransparency = 1  -- 完全隐藏描边
+    highlight.OutlineColor = HIGHLIGHT_OUTLINE_COLOR  -- V1.2.1: 使用OutlineColor
+    highlight.FillTransparency = 1  -- V1.2.1: 完全透明填充
+    highlight.OutlineTransparency = 0  -- V1.2.1: 显示轮廓
 
     -- 创建容器存储Highlight（用于追踪）
     local container = Instance.new("Folder")
@@ -56,18 +51,17 @@ function HighlightHelper.AddHighlight(model, isValid)
     highlight.Parent = container
     container.Parent = model
 
-    print(string.format("[HighlightHelper] 添加高光 - 颜色:(%.0f, %.0f, %.0f) 透明度:%.1f",
-        highlight.FillColor.R * 255,
-        highlight.FillColor.G * 255,
-        highlight.FillColor.B * 255,
-        highlight.FillTransparency
+    print(string.format("[HighlightHelper] 添加高光 - OutlineColor:(%.0f, %.0f, %.0f)",
+        highlight.OutlineColor.R * 255,
+        highlight.OutlineColor.G * 255,
+        highlight.OutlineColor.B * 255
     ))
 
     return highlight
 end
 
 --[[
-移除模型的高光效果
+移除模型的高光效果 (V1.2.1: 放置结束后移除)
 @param model Model - 目标模型
 ]]
 function HighlightHelper.RemoveHighlight(model)
@@ -78,57 +72,21 @@ function HighlightHelper.RemoveHighlight(model)
     local container = model:FindFirstChild("HighlightContainer")
     if container then
         container:Destroy()
+        print("[HighlightHelper] 已移除高光效果")
     end
 end
 
---[[
-设置高光颜色
-@param model Model - 目标模型
-@param isValid boolean - 是否为有效位置
-]]
-function HighlightHelper.SetHighlightColor(model, isValid)
-    if not model then
-        return
-    end
-
-    local container = model:FindFirstChild("HighlightContainer")
-    if not container then
-        HighlightHelper.AddHighlight(model, isValid)
-        return
-    end
-
-    local highlight = container:FindFirstChildOfClass("Highlight")
-    if highlight then
-        local color = isValid and HIGHLIGHT_COLOR_VALID or HIGHLIGHT_COLOR_INVALID
-        highlight.FillColor = color
-        print(string.format("[HighlightHelper] 更新高光颜色 - (%.0f, %.0f, %.0f)",
-            highlight.FillColor.R * 255,
-            highlight.FillColor.G * 255,
-            highlight.FillColor.B * 255
-        ))
-    end
-end
+-- (V1.2.1: 移除SetHighlightColor函数，因为现在只用绿色轮廓)
 
 --[[
-为预览模型启用高光
+为预览模型启用高光 (V1.2.1)
 @param model Model
 ]]
 function HighlightHelper.EnablePreviewHighlight(model)
-    return HighlightHelper.AddHighlight(model, true)
+    return HighlightHelper.AddHighlight(model)
 end
 
---[[
-更新预览高光状态
-@param model Model
-@param isValidPosition boolean - 当前位置是否有效
-]]
-function HighlightHelper.UpdatePreviewHighlight(model, isValidPosition)
-    if not model then
-        return
-    end
-
-    HighlightHelper.SetHighlightColor(model, isValidPosition)
-end
+-- (V1.2.1: 移除UpdatePreviewHighlight函数，因为不再需要切换颜色)
 
 -- ==================== 模型透明度控制 ====================
 
@@ -289,7 +247,7 @@ end
 -- ==================== 调试函数 ====================
 
 --[[
-打印高光信息
+打印高光信息 (V1.2.1: 更新为OutlineColor)
 @param model Model
 ]]
 function HighlightHelper.DebugPrintHighlight(model)
@@ -300,10 +258,10 @@ function HighlightHelper.DebugPrintHighlight(model)
 
     local highlight = HighlightHelper.GetHighlight(model)
     if highlight then
-        print(string.format("[HighlightHelper] 高光存在 - 颜色:(%.0f, %.0f, %.0f) FillTransparency:%.2f OutlineTransparency:%.2f",
-            highlight.FillColor.R * 255,
-            highlight.FillColor.G * 255,
-            highlight.FillColor.B * 255,
+        print(string.format("[HighlightHelper] 高光存在 - OutlineColor:(%.0f, %.0f, %.0f) FillTransparency:%.2f OutlineTransparency:%.2f",
+            highlight.OutlineColor.R * 255,
+            highlight.OutlineColor.G * 255,
+            highlight.OutlineColor.B * 255,
             highlight.FillTransparency,
             highlight.OutlineTransparency
         ))
