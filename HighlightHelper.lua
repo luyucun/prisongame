@@ -51,12 +51,6 @@ function HighlightHelper.AddHighlight(model)
     highlight.Parent = container
     container.Parent = model
 
-    print(string.format("[HighlightHelper] 添加高光 - OutlineColor:(%.0f, %.0f, %.0f)",
-        highlight.OutlineColor.R * 255,
-        highlight.OutlineColor.G * 255,
-        highlight.OutlineColor.B * 255
-    ))
-
     return highlight
 end
 
@@ -72,7 +66,6 @@ function HighlightHelper.RemoveHighlight(model)
     local container = model:FindFirstChild("HighlightContainer")
     if container then
         container:Destroy()
-        print("[HighlightHelper] 已移除高光效果")
     end
 end
 
@@ -252,21 +245,12 @@ end
 ]]
 function HighlightHelper.DebugPrintHighlight(model)
     if not model then
-        print("[HighlightHelper] 模型为空")
         return
     end
 
     local highlight = HighlightHelper.GetHighlight(model)
     if highlight then
-        print(string.format("[HighlightHelper] 高光存在 - OutlineColor:(%.0f, %.0f, %.0f) FillTransparency:%.2f OutlineTransparency:%.2f",
-            highlight.OutlineColor.R * 255,
-            highlight.OutlineColor.G * 255,
-            highlight.OutlineColor.B * 255,
-            highlight.FillTransparency,
-            highlight.OutlineTransparency
-        ))
-    else
-        print("[HighlightHelper] 模型没有高光")
+        -- 调试函数仅在需要时调用，这里保留但不输出
     end
 end
 

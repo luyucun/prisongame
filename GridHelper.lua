@@ -35,8 +35,6 @@ local currentGridPart = nil
 初始化Grid模板引用
 ]]
 function GridHelper.Initialize()
-    print("[GridHelper] 开始初始化...")
-
     -- 尝试多次查找Grid文件夹
     local maxRetries = 5
     local retryCount = 0
@@ -55,8 +53,6 @@ function GridHelper.Initialize()
         return false
     end
 
-    print("[GridHelper] 找到Grid文件夹:", gridFolder:GetFullName())
-
     -- 预定义需要的模板列表
     local requiredTemplates = {"GridGreen1", "GridGreen2", "GridGreen3", "GridRed1", "GridRed2", "GridRed3"}
 
@@ -65,24 +61,19 @@ function GridHelper.Initialize()
         gridTemplates[name] = nil
     end
 
-    print("[GridHelper] 开始查找模板，Grid文件夹中有", #gridFolder:GetChildren(), "个子对象")
-
     -- 尝试从Grid文件夹中查找所有模板
     local foundCount = 0
     for _, name in ipairs(requiredTemplates) do
         local template = gridFolder:FindFirstChild(name)
         if template then
             gridTemplates[name] = template
-            print(string.format("[GridHelper] 成功加载模板: %s (类型: %s)", name, template.ClassName))
             foundCount = foundCount + 1
         else
-            print(string.format("[GridHelper] 等待模板加载: %s", name))
             -- 异步等待模板出现
             task.spawn(function()
                 local found = gridFolder:WaitForChild(name, 10)
                 if found then
                     gridTemplates[name] = found
-                    print(string.format("[GridHelper] 延迟加载成功: %s", name))
                 else
                     warn(string.format("[GridHelper] 10秒内未找到模板: %s", name))
                 end
@@ -90,13 +81,10 @@ function GridHelper.Initialize()
         end
     end
 
-    print(string.format("[GridHelper] 初始化完成，立即找到%d/%d个模板", foundCount, #requiredTemplates))
-
     -- 监听Grid文件夹的新增子对象（动态等待加载）
     gridFolder.ChildAdded:Connect(function(child)
         if gridTemplates[child.Name] == nil and table.find(requiredTemplates, child.Name) then
             gridTemplates[child.Name] = child
-            print(string.format("[GridHelper] 动态加载模板: %s", child.Name))
         end
     end)
 
@@ -130,11 +118,9 @@ function GridHelper.ShowGrid(gridSize, position, isValid)
 
     if template == nil then
         -- 模板键不存在，说明还没初始化，尝试等待
-        print(string.format("[GridHelper] 模板%s不在缓存中，尝试等待加载...", templateName))
         template = gridFolder:WaitForChild(templateName, 5)
         if template then
             gridTemplates[templateName] = template
-            print(string.format("[GridHelper] 模板%s加载成功", templateName))
         end
     end
 
@@ -195,7 +181,6 @@ function GridHelper.HideGrid()
     if currentGridPart and currentGridPart.Parent then
         currentGridPart:Destroy()
         currentGridPart = nil
-        -- print("[GridHelper] 已隐藏Grid")
     end
 end
 

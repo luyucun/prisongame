@@ -275,17 +275,6 @@ function PlacementSystem.ValidatePlacement(player, instanceId, position)
     local floorCenter = idleFloor.Position
     local gridX, gridZ = PlacementConfig.WorldToGrid(position, floorCenter)
 
-    -- 调试日志：输出网格坐标和地板中心
-    if GameConfig.DEBUG_MODE then
-        print(string.format(
-            "%s 验证放置 - 玩家:%s 世界坐标:(%.2f, %.2f, %.2f) 地板中心:(%.2f, %.2f, %.2f) 网格:(%d, %d) 占地:%d",
-            GameConfig.LOG_PREFIX, player.Name,
-            position.X, position.Y, position.Z,
-            floorCenter.X, floorCenter.Y, floorCenter.Z,
-            gridX, gridZ, unitInstance.GridSize
-        ))
-    end
-
     -- 6. 检查边界
     if not PlacementConfig.IsGridInBounds(gridX, gridZ, unitInstance.GridSize) then
         if GameConfig.DEBUG_MODE then
@@ -369,14 +358,6 @@ function PlacementSystem.PlaceUnit(player, instanceId, position)
         PlacedTime = os.time(),
     }
 
-    if GameConfig.DEBUG_MODE then
-        print(string.format(
-            "%s 放置兵种成功 - 玩家:%s 兵种:%s 位置:(%.1f, %.1f, %.1f) 网格:(%d, %d)",
-            GameConfig.LOG_PREFIX, player.Name, unitInstance.UnitId,
-            finalPosition.X, finalPosition.Y, finalPosition.Z, gridX, gridZ
-        ))
-    end
-
     -- 配置兵种物理（禁用与玩家的碰撞）
     PhysicsManager.ConfigureUnitPhysics(model)
 
@@ -418,10 +399,6 @@ function PlacementSystem.RemovePlacedUnit(player, instanceId)
     -- 移除放置数据
     placedUnits[userId][instanceId] = nil
 
-    if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "移除已放置兵种:", player.Name, instanceId)
-    end
-
     return true, "移除成功"
 end
 
@@ -461,10 +438,6 @@ function PlacementSystem.ClearAllPlacedUnits(player)
         count = count + 1
     end
 
-    if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "清除所有已放置兵种:", player.Name, "数量:", count)
-    end
-
     return count
 end
 
@@ -489,10 +462,6 @@ function PlacementSystem.OnPlayerLeaving(player)
     if gridOccupancy[userId] then
         gridOccupancy[userId] = nil
     end
-
-    if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "清理玩家放置数据:", player.Name)
-    end
 end
 
 -- ==================== 远程事件处理 ====================
@@ -503,10 +472,6 @@ end
 @param instanceId string
 ]]
 local function OnStartPlacement(player, instanceId)
-    if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "开始放置请求:", player.Name, instanceId)
-    end
-
     -- 验证兵种实例
     local unitInstance = InventorySystem.GetUnitByInstanceId(player, instanceId)
     if not unitInstance then
@@ -542,10 +507,6 @@ end
 @param position Vector3
 ]]
 local function OnConfirmPlacement(player, instanceId, position)
-    if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "确认放置请求:", player.Name, instanceId, position)
-    end
-
     local success, message = PlacementSystem.PlaceUnit(player, instanceId, position)
 
     -- 通知客户端结果
@@ -563,10 +524,6 @@ end
 @param instanceId string
 ]]
 local function OnCancelPlacement(player, instanceId)
-    if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "取消放置请求:", player.Name, instanceId)
-    end
-
     -- 客户端取消，不需要特殊处理
 end
 
@@ -574,10 +531,6 @@ end
 初始化放置系统
 ]]
 function PlacementSystem.Initialize()
-    if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "初始化PlacementSystem...")
-    end
-
     -- 初始化事件
     if not InitializeEvents() then
         warn(GameConfig.LOG_PREFIX, "PlacementEvents未找到，放置系统将不可用!")
@@ -588,33 +541,20 @@ function PlacementSystem.Initialize()
     local startEvent = PlacementEvents:FindFirstChild("StartPlacement")
     if startEvent then
         startEvent.OnServerEvent:Connect(OnStartPlacement)
-        if GameConfig.DEBUG_MODE then
-            print(GameConfig.LOG_PREFIX, "已连接StartPlacement事件")
-        end
     end
 
     local confirmEvent = PlacementEvents:FindFirstChild("ConfirmPlacement")
     if confirmEvent then
         confirmEvent.OnServerEvent:Connect(OnConfirmPlacement)
-        if GameConfig.DEBUG_MODE then
-            print(GameConfig.LOG_PREFIX, "已连接ConfirmPlacement事件")
-        end
     end
 
     local cancelEvent = PlacementEvents:FindFirstChild("CancelPlacement")
     if cancelEvent then
         cancelEvent.OnServerEvent:Connect(OnCancelPlacement)
-        if GameConfig.DEBUG_MODE then
-            print(GameConfig.LOG_PREFIX, "已连接CancelPlacement事件")
-        end
     end
 
     -- 连接玩家离开事件
     game.Players.PlayerRemoving:Connect(PlacementSystem.OnPlayerLeaving)
-
-    if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "PlacementSystem初始化完成")
-    end
 
     return true
 end

@@ -56,14 +56,11 @@ local placementState = {
 初始化放置控制器
 ]]
 function PlacementController.Initialize()
-    print("[PlacementController] 正在初始化...")
-
     -- 初始化GridHelper (V1.2.1)
     GridHelper.Initialize()
 
     -- 检测设备类型
     placementState.isMobile = PlacementHelper.IsMobileDevice()
-    print("[PlacementController] 设备类型:", placementState.isMobile and "移动端" or "PC端")
 
     -- 多次尝试获取远程事件（避免时序问题）
     local maxRetries = 10
@@ -74,7 +71,6 @@ function PlacementController.Initialize()
             placementEvents = eventsFolder:FindFirstChild("PlacementEvents")
         end
         if not placementEvents then
-            print("[PlacementController] 第", retryCount + 1, "次尝试：PlacementEvents未找到，等待0.5秒后重试...")
             task.wait(0.5)
             retryCount = retryCount + 1
         end
@@ -85,28 +81,22 @@ function PlacementController.Initialize()
         return false
     end
 
-    print("[PlacementController] 找到PlacementEvents")
-
     -- 连接服务端响应事件
     local responseEvent = placementEvents:FindFirstChild("PlacementResponse")
     if responseEvent then
         responseEvent.OnClientEvent:Connect(OnPlacementResponse)
-        print("[PlacementController] 已连接PlacementResponse事件")
     end
 
     -- 等待IdleFloor加载
     task.spawn(function()
         -- 等待玩家角色加载
         local character = player.Character or player.CharacterAdded:Wait()
-        print("[PlacementController] 玩家角色已加载")
 
         -- 再等待一段时间确保基地分配完成
         task.wait(2)
 
         placementState.idleFloor = FindPlayerIdleFloor()
-        if placementState.idleFloor then
-            print("[PlacementController] 找到IdleFloor:", placementState.idleFloor:GetFullName())
-        else
+        if not placementState.idleFloor then
             warn("[PlacementController] 找不到IdleFloor!")
         end
     end)
@@ -118,7 +108,6 @@ function PlacementController.Initialize()
         ConnectPCInput()
     end
 
-    print("[PlacementController] 初始化完成")
     return true
 end
 
@@ -129,18 +118,13 @@ end
 @return Part|nil
 ]]
 function FindPlayerIdleFloor()
-    print("[PlacementController] 开始查找IdleFloor...")
-
     -- 等待玩家角色加载
     local character = player.Character
     if not character then
-        print("[PlacementController] 玩家角色不存在，等待加载...")
         character = player.CharacterAdded:Wait()
-        print("[PlacementController] 玩家角色已加载")
     end
 
     if not character.PrimaryPart then
-        print("[PlacementController] 等待PrimaryPart加载...")
         task.wait(0.5)
         if not character.PrimaryPart then
             warn("[PlacementController] PrimaryPart加载失败")
@@ -149,15 +133,12 @@ function FindPlayerIdleFloor()
     end
 
     local playerPos = character.PrimaryPart.Position
-    print("[PlacementController] 玩家位置:", playerPos)
 
     local homeFolder = Workspace:FindFirstChild("Home")
     if not homeFolder then
         warn("[PlacementController] Home文件夹不存在")
         return nil
     end
-
-    print("[PlacementController] 找到Home文件夹")
 
     local nearestFloor = nil
     local nearestDistance = math.huge
@@ -166,28 +147,15 @@ function FindPlayerIdleFloor()
     for i = 1, 6 do
         local playerHome = homeFolder:FindFirstChild("PlayerHome" .. i)
         if playerHome then
-            print("[PlacementController] 检查PlayerHome" .. i)
             local idleFloor = playerHome:FindFirstChild("IdleFloor")
             if idleFloor then
                 local distance = (idleFloor.Position - playerPos).Magnitude
-                print("[PlacementController] PlayerHome" .. i .. " - IdleFloor距离:", distance)
                 if distance < nearestDistance then
                     nearestDistance = distance
                     nearestFloor = idleFloor
-                    print("[PlacementController] 更新最近的IdleFloor: PlayerHome" .. i)
                 end
-            else
-                print("[PlacementController] PlayerHome" .. i .. " - 没有IdleFloor")
             end
-        else
-            print("[PlacementController] PlayerHome" .. i .. " 不存在")
         end
-    end
-
-    if nearestFloor then
-        print("[PlacementController] 最终找到的IdleFloor:", nearestFloor:GetFullName(), "距离:", nearestDistance)
-    else
-        print("[PlacementController] 没有找到任何IdleFloor")
     end
 
     return nearestFloor
@@ -203,13 +171,11 @@ end
 ]]
 function PlacementController.StartPlacement(instanceId, unitId, gridSize)
     if placementState.isPlacing then
-        print("[PlacementController] 已经在放置中，取消当前放置")
         PlacementController.CancelPlacement()
     end
 
     -- 如果还没有找到IdleFloor，立即查找一次
     if not placementState.idleFloor then
-        print("[PlacementController] IdleFloor未缓存，立即查找...")
         placementState.idleFloor = FindPlayerIdleFloor()
     end
 
@@ -217,8 +183,6 @@ function PlacementController.StartPlacement(instanceId, unitId, gridSize)
         warn("[PlacementController] IdleFloor不存在，无法放置")
         return
     end
-
-    print("[PlacementController] 开始放置:", unitId, "InstanceId:", instanceId)
 
     -- 更新状态
     placementState.isPlacing = true
@@ -264,8 +228,6 @@ function PlacementController.StartPlacement(instanceId, unitId, gridSize)
         -- PC端：跟随鼠标
         -- 位置会在RenderStepped中更新
     end
-
-    print("[PlacementController] 预览模型已创建")
 end
 
 --[[
@@ -275,8 +237,6 @@ function PlacementController.ConfirmPlacement()
     if not placementState.isPlacing or not placementState.previewModel then
         return
     end
-
-    print("[PlacementController] 确认放置")
 
     -- 获取最终位置
     local finalPosition = PlacementHelper.GetModelPosition(placementState.previewModel)
@@ -291,7 +251,6 @@ function PlacementController.ConfirmPlacement()
         local confirmEvent = placementEvents:FindFirstChild("ConfirmPlacement")
         if confirmEvent then
             confirmEvent:FireServer(placementState.currentInstanceId, finalPosition)
-            print("[PlacementController] 已发送确认请求到服务端")
         end
     end
 
@@ -305,8 +264,6 @@ function PlacementController.CancelPlacement()
     if not placementState.isPlacing then
         return
     end
-
-    print("[PlacementController] 取消放置")
 
     -- V1.2.1: 移除Grid提示块
     GridHelper.HideGrid()
@@ -376,9 +333,6 @@ local function IsPositionValid(gridX, gridZ)
             local overlapZ = not (gridZ + currentGridWidth <= placedGridZ or gridZ >= placedGridZ + placedGridWidth)
 
             if overlapX and overlapZ then
-                print(string.format("[PlacementController] 检测到冲突 - 当前网格:(%d,%d) 大小:%d 已放置:(%d,%d) 大小:%d",
-                    gridX, gridZ, placementState.currentGridSize,
-                    placedGridX, placedGridZ, data.gridSize))
                 return false  -- 位置冲突
             end
         else
@@ -435,8 +389,6 @@ end
 连接PC端输入事件
 ]]
 function ConnectPCInput()
-    print("[PlacementController] 连接PC端输入事件")
-
     -- 鼠标移动 - 使用RenderStepped实时更新
     RunService.RenderStepped:Connect(function()
         if not placementState.isPlacing or not placementState.previewModel then
@@ -482,8 +434,6 @@ end
 连接移动端输入事件
 ]]
 function ConnectMobileInput()
-    print("[PlacementController] 连接移动端输入事件")
-
     -- 触摸开始 - 用于初始拖动
     UserInputService.TouchStarted:Connect(function(touch, gameProcessed)
         if gameProcessed then
@@ -554,14 +504,12 @@ function ConnectMobileUI()
         confirmButton.MouseButton1Click:Connect(function()
             PlacementController.ConfirmPlacement()
         end)
-        print("[PlacementController] 已连接确认按钮")
     end
 
     if cancelButton then
         cancelButton.MouseButton1Click:Connect(function()
             PlacementController.CancelPlacement()
         end)
-        print("[PlacementController] 已连接取消按钮")
     end
 end
 
@@ -575,7 +523,6 @@ function ShowMobileConfirmUI(show)
 
     if putConfirmGui then
         putConfirmGui.Enabled = show
-        print("[PlacementController] 移动端UI:", show and "显示" or "隐藏")
     end
 end
 
@@ -588,8 +535,6 @@ end
 @param data table|nil
 ]]
 function OnPlacementResponse(success, message, data)
-    print("[PlacementController] 服务端响应:", success, message)
-
     if success then
         -- V1.2.1: 记录放置的位置，用于后续碰撞检测
         if placementState.lastGridX and placementState.lastGridZ and placementState.currentGridSize then
@@ -631,8 +576,6 @@ function OnPlacementResponse(success, message, data)
                         gridZ = placementState.lastGridZ,
                         gridSize = placementState.currentGridSize
                     }
-                    print(string.format("[PlacementController] 记录已放置模型: %s 网格:(%d,%d) 大小:%d",
-                        closestModel.Name, placementState.lastGridX, placementState.lastGridZ, placementState.currentGridSize))
                 else
                     warn("[PlacementController] 未找到放置的模型!")
                 end
@@ -662,8 +605,6 @@ function OnPlacementResponse(success, message, data)
         placementState.isPlacing = false
         placementState.currentInstanceId = nil
         placementState.currentUnitId = nil
-
-        print("[PlacementController] 放置完成!")
     else
         -- 放置失败，显示错误信息
         warn("[PlacementController] 放置失败:", message)
