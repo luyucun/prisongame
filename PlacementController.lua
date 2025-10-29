@@ -1,0 +1,569 @@
+--[[
+脚本名称: PlacementController
+脚本类型: LocalScript (客户端控制器)
+脚本位置: StarterPlayer/StarterPlayerScripts/Controllers/PlacementController
+]]
+
+--[[
+兵种放置控制器
+职责:
+1. 处理PC端和移动端的放置交互
+2. 管理放置预览模型
+3. 实现网格吸附和边界限制
+4. 与服务端通信完成放置
+版本: V1.2
+]]
+
+local PlacementController = {}
+
+-- 引用服务
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+
+-- 引用工具模块
+local PlacementHelper = require(script.Parent.Parent.Utils.PlacementHelper)
+local HighlightHelper = require(script.Parent.Parent.Utils.HighlightHelper)
+
+-- 玩家引用
+local player = Players.LocalPlayer
+local mouse = player:GetMouse()
+local camera = Workspace.CurrentCamera
+
+-- 远程事件
+local placementEvents = nil
+
+-- ==================== 放置状态 ====================
+local placementState = {
+    isPlacing = false,           -- 是否正在放置
+    previewModel = nil,          -- 预览模型
+    currentInstanceId = nil,     -- 当前放置的实例ID
+    currentUnitId = nil,         -- 当前兵种ID
+    currentGridSize = 1,         -- 当前兵种占地大小
+    idleFloor = nil,             -- 玩家的IdleFloor
+    lastGridX = nil,             -- 上次的网格X
+    lastGridZ = nil,             -- 上次的网格Z
+    isMobile = false,            -- 是否为移动设备
+}
+
+-- ==================== 初始化 ====================
+
+--[[
+初始化放置控制器
+]]
+function PlacementController.Initialize()
+    print("[PlacementController] 正在初始化...")
+
+    -- 检测设备类型
+    placementState.isMobile = PlacementHelper.IsMobileDevice()
+    print("[PlacementController] 设备类型:", placementState.isMobile and "移动端" or "PC端")
+
+    -- 多次尝试获取远程事件（避免时序问题）
+    local maxRetries = 10
+    local retryCount = 0
+    while not placementEvents and retryCount < maxRetries do
+        local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
+        if eventsFolder then
+            placementEvents = eventsFolder:FindFirstChild("PlacementEvents")
+        end
+        if not placementEvents then
+            print("[PlacementController] 第", retryCount + 1, "次尝试：PlacementEvents未找到，等待0.5秒后重试...")
+            task.wait(0.5)
+            retryCount = retryCount + 1
+        end
+    end
+
+    if not placementEvents then
+        warn("[PlacementController] PlacementEvents未找到，放置功能将不可用!")
+        return false
+    end
+
+    print("[PlacementController] 找到PlacementEvents")
+
+    -- 连接服务端响应事件
+    local responseEvent = placementEvents:FindFirstChild("PlacementResponse")
+    if responseEvent then
+        responseEvent.OnClientEvent:Connect(OnPlacementResponse)
+        print("[PlacementController] 已连接PlacementResponse事件")
+    end
+
+    -- 等待IdleFloor加载
+    task.spawn(function()
+        -- 等待玩家角色加载
+        local character = player.Character or player.CharacterAdded:Wait()
+        print("[PlacementController] 玩家角色已加载")
+
+        -- 再等待一段时间确保基地分配完成
+        task.wait(2)
+
+        placementState.idleFloor = FindPlayerIdleFloor()
+        if placementState.idleFloor then
+            print("[PlacementController] 找到IdleFloor:", placementState.idleFloor:GetFullName())
+        else
+            warn("[PlacementController] 找不到IdleFloor!")
+        end
+    end)
+
+    -- 连接输入事件
+    if placementState.isMobile then
+        ConnectMobileInput()
+    else
+        ConnectPCInput()
+    end
+
+    print("[PlacementController] 初始化完成")
+    return true
+end
+
+-- ==================== 查找IdleFloor ====================
+
+--[[
+查找玩家的IdleFloor
+@return Part|nil
+]]
+function FindPlayerIdleFloor()
+    print("[PlacementController] 开始查找IdleFloor...")
+
+    -- 等待玩家角色加载
+    local character = player.Character
+    if not character then
+        print("[PlacementController] 玩家角色不存在，等待加载...")
+        character = player.CharacterAdded:Wait()
+        print("[PlacementController] 玩家角色已加载")
+    end
+
+    if not character.PrimaryPart then
+        print("[PlacementController] 等待PrimaryPart加载...")
+        task.wait(0.5)
+        if not character.PrimaryPart then
+            warn("[PlacementController] PrimaryPart加载失败")
+            return nil
+        end
+    end
+
+    local playerPos = character.PrimaryPart.Position
+    print("[PlacementController] 玩家位置:", playerPos)
+
+    local homeFolder = Workspace:FindFirstChild("Home")
+    if not homeFolder then
+        warn("[PlacementController] Home文件夹不存在")
+        return nil
+    end
+
+    print("[PlacementController] 找到Home文件夹")
+
+    local nearestFloor = nil
+    local nearestDistance = math.huge
+
+    -- 找到距离最近的基地的IdleFloor
+    for i = 1, 6 do
+        local playerHome = homeFolder:FindFirstChild("PlayerHome" .. i)
+        if playerHome then
+            print("[PlacementController] 检查PlayerHome" .. i)
+            local idleFloor = playerHome:FindFirstChild("IdleFloor")
+            if idleFloor then
+                local distance = (idleFloor.Position - playerPos).Magnitude
+                print("[PlacementController] PlayerHome" .. i .. " - IdleFloor距离:", distance)
+                if distance < nearestDistance then
+                    nearestDistance = distance
+                    nearestFloor = idleFloor
+                    print("[PlacementController] 更新最近的IdleFloor: PlayerHome" .. i)
+                end
+            else
+                print("[PlacementController] PlayerHome" .. i .. " - 没有IdleFloor")
+            end
+        else
+            print("[PlacementController] PlayerHome" .. i .. " 不存在")
+        end
+    end
+
+    if nearestFloor then
+        print("[PlacementController] 最终找到的IdleFloor:", nearestFloor:GetFullName(), "距离:", nearestDistance)
+    else
+        print("[PlacementController] 没有找到任何IdleFloor")
+    end
+
+    return nearestFloor
+end
+
+-- ==================== 公共接口 ====================
+
+--[[
+开始放置兵种
+@param instanceId string - 兵种实例ID
+@param unitId string - 兵种配置ID
+@param gridSize number - 占地大小
+]]
+function PlacementController.StartPlacement(instanceId, unitId, gridSize)
+    if placementState.isPlacing then
+        print("[PlacementController] 已经在放置中，取消当前放置")
+        PlacementController.CancelPlacement()
+    end
+
+    -- 如果还没有找到IdleFloor，立即查找一次
+    if not placementState.idleFloor then
+        print("[PlacementController] IdleFloor未缓存，立即查找...")
+        placementState.idleFloor = FindPlayerIdleFloor()
+    end
+
+    if not placementState.idleFloor then
+        warn("[PlacementController] IdleFloor不存在，无法放置")
+        return
+    end
+
+    print("[PlacementController] 开始放置:", unitId, "InstanceId:", instanceId)
+
+    -- 更新状态
+    placementState.isPlacing = true
+    placementState.currentInstanceId = instanceId
+    placementState.currentUnitId = unitId
+    placementState.currentGridSize = gridSize or 1
+
+    -- 克隆预览模型
+    local previewModel = PlacementHelper.CloneUnitModel(unitId)
+    if not previewModel then
+        warn("[PlacementController] 无法创建预览模型")
+        PlacementController.CancelPlacement()
+        return
+    end
+
+    placementState.previewModel = previewModel
+    previewModel.Parent = Workspace
+
+    -- 设置预览模式
+    HighlightHelper.SetPreviewMode(previewModel)
+
+    -- 初始位置（PC端用鼠标，移动端用角色前方）
+    if placementState.isMobile then
+        -- 移动端：放在角色前方，但要限制在IdleFloor范围内
+        local character = player.Character
+        if character and character.PrimaryPart then
+            local forwardPos = character.PrimaryPart.Position + character.PrimaryPart.CFrame.LookVector * 3
+            -- 将位置投影到IdleFloor的Y轴上
+            local floorY = placementState.idleFloor.Position.Y
+            local initialPos = Vector3.new(forwardPos.X, floorY, forwardPos.Z)
+            -- 通过吸附函数确保在范围内
+            local floorCenter = placementState.idleFloor.Position
+            local snappedPos = PlacementHelper.GetNearestGridPosition(initialPos, floorCenter, placementState.currentGridSize)
+            UpdatePreviewPosition(snappedPos)
+        else
+            -- 如果没有角色，放在IdleFloor中心
+            UpdatePreviewPosition(placementState.idleFloor.Position)
+        end
+
+        -- 显示确认UI
+        ShowMobileConfirmUI(true)
+    else
+        -- PC端：跟随鼠标
+        -- 位置会在RenderStepped中更新
+    end
+
+    print("[PlacementController] 预览模型已创建")
+end
+
+--[[
+确认放置
+]]
+function PlacementController.ConfirmPlacement()
+    if not placementState.isPlacing or not placementState.previewModel then
+        return
+    end
+
+    print("[PlacementController] 确认放置")
+
+    -- 获取最终位置
+    local finalPosition = PlacementHelper.GetModelPosition(placementState.previewModel)
+    if not finalPosition then
+        warn("[PlacementController] 无法获取模型位置")
+        PlacementController.CancelPlacement()
+        return
+    end
+
+    -- 发送确认请求到服务端
+    if placementEvents then
+        local confirmEvent = placementEvents:FindFirstChild("ConfirmPlacement")
+        if confirmEvent then
+            confirmEvent:FireServer(placementState.currentInstanceId, finalPosition)
+            print("[PlacementController] 已发送确认请求到服务端")
+        end
+    end
+
+    -- 暂时不清理，等待服务端响应
+end
+
+--[[
+取消放置
+]]
+function PlacementController.CancelPlacement()
+    if not placementState.isPlacing then
+        return
+    end
+
+    print("[PlacementController] 取消放置")
+
+    -- 移除预览模型
+    if placementState.previewModel then
+        placementState.previewModel:Destroy()
+        placementState.previewModel = nil
+    end
+
+    -- 隐藏移动端UI
+    if placementState.isMobile then
+        ShowMobileConfirmUI(false)
+    end
+
+    -- 通知服务端取消
+    if placementEvents then
+        local cancelEvent = placementEvents:FindFirstChild("CancelPlacement")
+        if cancelEvent then
+            cancelEvent:FireServer(placementState.currentInstanceId)
+        end
+    end
+
+    -- 重置状态
+    placementState.isPlacing = false
+    placementState.currentInstanceId = nil
+    placementState.currentUnitId = nil
+    placementState.currentGridSize = 1
+    placementState.lastGridX = nil
+    placementState.lastGridZ = nil
+end
+
+-- ==================== 预览位置更新 ====================
+
+--[[
+更新预览模型位置
+@param worldPos Vector3 - 原始世界坐标
+]]
+function UpdatePreviewPosition(worldPos)
+    if not placementState.previewModel or not placementState.idleFloor then
+        return
+    end
+
+    local floorCenter = placementState.idleFloor.Position
+
+    -- 转换为网格索引
+    local gridX, gridZ = PlacementHelper.WorldToGrid(worldPos, floorCenter)
+
+    -- 检查是否需要更新 (只有网格变化时才更新，实现吸附效果)
+    if gridX == placementState.lastGridX and gridZ == placementState.lastGridZ then
+        return
+    end
+
+    -- 限制在边界内
+    gridX, gridZ = PlacementHelper.ClampGridToBounds(gridX, gridZ, placementState.currentGridSize)
+
+    -- 转换回世界坐标
+    local snappedPos = PlacementHelper.GridToWorld(gridX, gridZ, floorCenter)
+
+    -- 更新模型位置
+    PlacementHelper.SetModelPosition(placementState.previewModel, snappedPos)
+
+    -- 更新高光（这里简化，都显示绿色，服务端会做验证）
+    HighlightHelper.UpdatePreviewHighlight(placementState.previewModel, true)
+
+    -- 记录当前网格
+    placementState.lastGridX = gridX
+    placementState.lastGridZ = gridZ
+end
+
+-- ==================== PC端输入处理 ====================
+
+--[[
+连接PC端输入事件
+]]
+function ConnectPCInput()
+    print("[PlacementController] 连接PC端输入事件")
+
+    -- 鼠标移动 - 使用RenderStepped实时更新
+    RunService.RenderStepped:Connect(function()
+        if not placementState.isPlacing or not placementState.previewModel then
+            return
+        end
+
+        if not placementState.idleFloor then
+            return
+        end
+
+        -- 获取鼠标在地板上的位置
+        local mouseWorldPos = PlacementHelper.GetMouseWorldPosition(camera, mouse, placementState.idleFloor)
+        if mouseWorldPos then
+            UpdatePreviewPosition(mouseWorldPos)
+        end
+    end)
+
+    -- 鼠标点击
+    UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then
+            return
+        end
+
+        if not placementState.isPlacing then
+            return
+        end
+
+        -- 左键确认
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            PlacementController.ConfirmPlacement()
+        end
+
+        -- 右键取消
+        if input.UserInputType == Enum.UserInputType.MouseButton2 then
+            PlacementController.CancelPlacement()
+        end
+    end)
+end
+
+-- ==================== 移动端输入处理 ====================
+
+--[[
+连接移动端输入事件
+]]
+function ConnectMobileInput()
+    print("[PlacementController] 连接移动端输入事件")
+
+    -- 触摸开始 - 用于初始拖动
+    UserInputService.TouchStarted:Connect(function(touch, gameProcessed)
+        if gameProcessed then
+            return
+        end
+
+        if not placementState.isPlacing or not placementState.previewModel then
+            return
+        end
+
+        if not placementState.idleFloor then
+            return
+        end
+
+        -- 获取触摸点在地板上的位置
+        local touchWorldPos = PlacementHelper.GetTouchWorldPosition(camera, touch.Position, placementState.idleFloor)
+        if touchWorldPos then
+            UpdatePreviewPosition(touchWorldPos)
+        end
+    end)
+
+    -- 触摸拖动
+    UserInputService.TouchMoved:Connect(function(touch, gameProcessed)
+        if gameProcessed then
+            return
+        end
+
+        if not placementState.isPlacing or not placementState.previewModel then
+            return
+        end
+
+        if not placementState.idleFloor then
+            return
+        end
+
+        -- 获取触摸点在地板上的位置
+        local touchWorldPos = PlacementHelper.GetTouchWorldPosition(camera, touch.Position, placementState.idleFloor)
+        if touchWorldPos then
+            UpdatePreviewPosition(touchWorldPos)
+        end
+    end)
+
+    -- 连接移动端确认/取消按钮
+    ConnectMobileUI()
+end
+
+--[[
+连接移动端UI按钮
+]]
+function ConnectMobileUI()
+    local playerGui = player:WaitForChild("PlayerGui")
+    local putConfirmGui = playerGui:WaitForChild("PutConfirm", 10)
+
+    if not putConfirmGui then
+        warn("[PlacementController] 找不到PutConfirm UI")
+        return
+    end
+
+    local buttonBg = putConfirmGui:WaitForChild("ButtonBg", 5)
+    if not buttonBg then
+        return
+    end
+
+    local confirmButton = buttonBg:FindFirstChild("Confirm")
+    local cancelButton = buttonBg:FindFirstChild("Cancel")
+
+    if confirmButton then
+        confirmButton.MouseButton1Click:Connect(function()
+            PlacementController.ConfirmPlacement()
+        end)
+        print("[PlacementController] 已连接确认按钮")
+    end
+
+    if cancelButton then
+        cancelButton.MouseButton1Click:Connect(function()
+            PlacementController.CancelPlacement()
+        end)
+        print("[PlacementController] 已连接取消按钮")
+    end
+end
+
+--[[
+显示/隐藏移动端确认UI
+@param show boolean
+]]
+function ShowMobileConfirmUI(show)
+    local playerGui = player:WaitForChild("PlayerGui")
+    local putConfirmGui = playerGui:FindFirstChild("PutConfirm")
+
+    if putConfirmGui then
+        putConfirmGui.Enabled = show
+        print("[PlacementController] 移动端UI:", show and "显示" or "隐藏")
+    end
+end
+
+-- ==================== 服务端响应处理 ====================
+
+--[[
+处理服务端放置响应
+@param success boolean
+@param message string
+@param data table|nil
+]]
+function OnPlacementResponse(success, message, data)
+    print("[PlacementController] 服务端响应:", success, message)
+
+    if success then
+        -- 放置成功，清理预览模型
+        if placementState.previewModel then
+            placementState.previewModel:Destroy()
+            placementState.previewModel = nil
+        end
+
+        -- 隐藏移动端UI
+        if placementState.isMobile then
+            ShowMobileConfirmUI(false)
+        end
+
+        -- 重置状态
+        placementState.isPlacing = false
+        placementState.currentInstanceId = nil
+        placementState.currentUnitId = nil
+
+        print("[PlacementController] 放置完成!")
+    else
+        -- 放置失败，显示错误信息
+        warn("[PlacementController] 放置失败:", message)
+        -- 可以在这里添加UI提示
+    end
+end
+
+-- ==================== 全局访问 ====================
+
+-- 提供全局访问接口（供BackpackDisplay调用）
+_G.PlacementController = PlacementController
+
+-- 自动初始化
+task.spawn(function()
+    task.wait(1)  -- 等待其他系统加载
+    PlacementController.Initialize()
+end)
+
+return PlacementController

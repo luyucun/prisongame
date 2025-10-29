@@ -30,6 +30,7 @@ local PlayerManager = require(ServerScriptService.Core.PlayerManager)
 local CurrencySystem = require(ServerScriptService.Systems.CurrencySystem)
 local HomeSystem = require(ServerScriptService.Systems.HomeSystem)
 local InventorySystem = require(ServerScriptService.Systems.InventorySystem)
+local PlacementSystem = require(ServerScriptService.Systems.PlacementSystem)
 local GMCommandSystem = require(ServerScriptService.Systems.GMCommandSystem)
 
 -- ==================== 系统初始化顺序 ====================
@@ -99,8 +100,22 @@ local function InitializeServer()
         print(GameConfig.LOG_PREFIX, "背包系统初始化成功")
     end
 
-    -- 5. 初始化GM命令系统(连接聊天事件)
-    print(GameConfig.LOG_PREFIX, "步骤5: 初始化GM命令系统...")
+    -- 5. 初始化放置系统(连接放置事件) V1.2新增
+    print(GameConfig.LOG_PREFIX, "步骤5: 初始化放置系统...")
+    success, result = pcall(function()
+        return PlacementSystem.Initialize()
+    end)
+    if not success then
+        warn(GameConfig.LOG_PREFIX, "放置系统初始化失败(异常):", result)
+        -- 放置系统不是关键系统,失败不影响游戏运行
+    elseif result == false then
+        warn(GameConfig.LOG_PREFIX, "放置系统初始化失败(返回false),放置功能将不可用")
+    else
+        print(GameConfig.LOG_PREFIX, "放置系统初始化成功")
+    end
+
+    -- 6. 初始化GM命令系统(连接聊天事件)
+    print(GameConfig.LOG_PREFIX, "步骤6: 初始化GM命令系统...")
     success, result = pcall(function()
         GMCommandSystem.Initialize()
         return true

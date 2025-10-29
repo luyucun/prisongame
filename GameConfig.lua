@@ -51,6 +51,13 @@ GameConfig.MAIN_GUI_NAME = "MainGui"
 -- 金币显示TextLabel名称
 GameConfig.COIN_DISPLAY_NAME = "CoinNum"
 
+-- ==================== 放置系统配置 (V1.2) ====================
+-- IdleFloor名称
+GameConfig.IDLE_FLOOR_NAME = "IdleFloor"
+
+-- 放置确认UI名称
+GameConfig.PUT_CONFIRM_GUI_NAME = "PutConfirm"
+
 -- ==================== 调试配置 ====================
 -- 是否启用调试模式
 GameConfig.DEBUG_MODE = true

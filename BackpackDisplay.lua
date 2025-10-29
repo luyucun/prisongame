@@ -72,7 +72,89 @@ local COUNT_TEXT_COLOR = Color3.fromRGB(100, 200, 255)
 -- 存储已创建的UI条目 [unitId] = Frame
 local itemFrames = {}
 
+-- 存储背包实例数据 [unitId] = {Name, Count, Instances}
+local inventoryDataCache = {}
+
 -- ==================== 私有函数 ====================
+
+--[[
+处理兵种条目点击
+@param unitId string
+@param unitName string
+]]
+local function OnUnitItemClicked(unitId, unitName)
+    print("[BackpackDisplay] 点击兵种:", unitName, unitId)
+
+    -- 调试：打印缓存内容
+    print("[BackpackDisplay] inventoryDataCache:", inventoryDataCache)
+    if inventoryDataCache[unitId] then
+        print("[BackpackDisplay] unitData存在")
+        print("[BackpackDisplay] unitData.Instances:", inventoryDataCache[unitId].Instances)
+        if inventoryDataCache[unitId].Instances then
+            print("[BackpackDisplay] Instances数量:", #inventoryDataCache[unitId].Instances)
+        end
+    else
+        print("[BackpackDisplay] unitData不存在!")
+    end
+
+    -- 关闭背包UI
+    backpackGui.Enabled = false
+
+    -- 从缓存中获取第一个未放置的实例
+    local unitData = inventoryDataCache[unitId]
+    if unitData and unitData.Instances then
+        for _, instanceInfo in ipairs(unitData.Instances) do
+            if not instanceInfo.IsPlaced then
+                -- 调用PlacementController开始放置
+                if _G.PlacementController then
+                    print("[BackpackDisplay] 开始放置实例:", instanceInfo.InstanceId)
+                    _G.PlacementController.StartPlacement(
+                        instanceInfo.InstanceId,
+                        unitId,
+                        instanceInfo.GridSize
+                    )
+                else
+                    warn("[BackpackDisplay] PlacementController未找到!")
+                end
+                return
+            end
+        end
+    else
+        -- 如果没有实例数据，重新请求背包数据并延迟重试
+        print("[BackpackDisplay] 没有实例数据，请求刷新背包...")
+        local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
+        if eventsFolder then
+            local inventoryEvents = eventsFolder:FindFirstChild("InventoryEvents")
+            if inventoryEvents then
+                local requestEvent = inventoryEvents:FindFirstChild("RequestInventory")
+                if requestEvent then
+                    requestEvent:FireServer()
+                    -- 等待一小段时间让数据刷新
+                    task.wait(0.1)
+                    -- 重新尝试
+                    local updatedUnitData = inventoryDataCache[unitId]
+                    if updatedUnitData and updatedUnitData.Instances then
+                        for _, instanceInfo in ipairs(updatedUnitData.Instances) do
+                            if not instanceInfo.IsPlaced then
+                                if _G.PlacementController then
+                                    print("[BackpackDisplay] 重试：开始放置实例:", instanceInfo.InstanceId)
+                                    _G.PlacementController.StartPlacement(
+                                        instanceInfo.InstanceId,
+                                        unitId,
+                                        instanceInfo.GridSize
+                                    )
+                                end
+                                return
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    warn("[BackpackDisplay] 没有可放置的", unitName, "实例")
+end
 
 --[[
 创建一个兵种条目UI
@@ -107,6 +189,23 @@ local function CreateItemFrame(unitId, unitName, count)
     nameLabel.Font = Enum.Font.SourceSans
     nameLabel.BackgroundTransparency = 1
     nameLabel.Parent = itemFrame
+
+    -- 创建点击按钮（透明覆盖整个Frame）
+    local clickButton = Instance.new("TextButton")
+    clickButton.Name = "ClickButton"
+    clickButton.Size = UDim2.new(1, 0, 1, 0)
+    clickButton.Position = UDim2.new(0, 0, 0, 0)
+    clickButton.BackgroundTransparency = 1
+    clickButton.Text = ""
+    clickButton.Parent = itemFrame
+
+    -- 存储unitId到按钮
+    clickButton:SetAttribute("UnitId", unitId)
+
+    -- 点击事件
+    clickButton.MouseButton1Click:Connect(function()
+        OnUnitItemClicked(unitId, unitName)
+    end)
 
     return itemFrame
 end
@@ -144,20 +243,54 @@ end
 
 --[[
 刷新整个背包显示
-@param inventoryData table - 背包数据 {[unitId] = {Name, Count}}
+@param inventoryData table - 背包数据 {[unitId] = {Name, Count, Instances}}
 ]]
 local function RefreshInventory(inventoryData)
+    print("[BackpackDisplay] RefreshInventory 被调用")
+
+    -- 调试：打印收到的数据
+    if inventoryData then
+        for unitId, data in pairs(inventoryData) do
+            print(string.format("[BackpackDisplay] RefreshInventory - %s: Count=%d, HasInstances=%s",
+                unitId,
+                data.Count or 0,
+                data.Instances and "是" or "否"
+            ))
+            if data.Instances then
+                print(string.format("[BackpackDisplay] RefreshInventory - %s 有 %d 个实例", unitId, #data.Instances))
+            end
+        end
+    else
+        print("[BackpackDisplay] RefreshInventory - inventoryData 为 nil")
+    end
+
     -- 清空现有UI
     for _, frame in pairs(itemFrames) do
         frame:Destroy()
     end
     itemFrames = {}
 
+    -- 缓存背包数据
+    inventoryDataCache = inventoryData or {}
+    print("[BackpackDisplay] inventoryDataCache 已更新")
+
     -- 重新创建所有条目
     if inventoryData then
         for unitId, data in pairs(inventoryData) do
-            if data.Count > 0 then
-                local frame = CreateItemFrame(unitId, data.Name, data.Count)
+            -- 只显示未放置的兵种数量
+            local availableCount = 0
+            if data.Instances then
+                for _, instance in ipairs(data.Instances) do
+                    if not instance.IsPlaced then
+                        availableCount = availableCount + 1
+                    end
+                end
+            else
+                availableCount = data.Count
+            end
+
+            if availableCount > 0 then
+                local frame = CreateItemFrame(unitId, data.Name, availableCount)
                 itemFrames[unitId] = frame
             end
         end

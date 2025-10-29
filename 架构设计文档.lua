@@ -40,26 +40,44 @@ ServerScriptService/          (服务端脚本目录)
 │
 ├── Systems/                   (游戏系统)
 │   ├── CurrencySystem.lua     (货币系统 - 负责金币的增减/验证)
-│   └── HomeSystem.lua         (基地系统 - 负责基地管理和初始化)
+│   ├── HomeSystem.lua         (基地系统 - 负责基地管理和初始化)
+│   ├── InventorySystem.lua    (背包系统 - 负责兵种背包管理)
+│   ├── PlacementSystem.lua    (放置系统 - 负责兵种放置验证 V1.2)
+│   └── GMCommandSystem.lua    (GM命令系统 - 负责调试命令处理)
 │
 └── Config/                    (配置文件)
-    └── GameConfig.lua         (游戏配置 - 存储游戏常量和配置)
+    ├── GameConfig.lua         (游戏配置 - 存储游戏常量和配置)
+    ├── UnitConfig.lua         (兵种配置 - 存储兵种属性)
+    └── PlacementConfig.lua    (放置配置 - 存储放置系统配置 V1.2)
 
 StarterPlayer/
 └── StarterPlayerScripts/      (客户端脚本目录)
     ├── UI/                    (UI相关脚本)
-    │   └── CoinDisplay.lua    (金币显示控制器)
+    │   ├── CoinDisplay.lua    (金币显示控制器)
+    │   └── BackpackDisplay.lua (背包显示控制器)
     │
     ├── Controllers/           (客户端控制器)
-    │   └── PlayerController.lua (玩家控制器 - 客户端玩家逻辑)
+    │   ├── PlayerController.lua (玩家控制器 - 客户端玩家逻辑)
+    │   └── PlacementController.lua (放置控制器 - 兵种放置交互 V1.2)
     │
     └── Utils/                 (工具类)
-        └── UIHelper.lua       (UI辅助工具)
+        ├── UIHelper.lua       (UI辅助工具)
+        ├── PlacementHelper.lua (放置辅助工具 - 网格吸附/边界检测 V1.2)
+        └── HighlightHelper.lua (高光辅助工具 - 模型高光效果 V1.2)
 
 ReplicatedStorage/             (共享资源目录)
 ├── Events/                    (远程事件)
-│   ├── CurrencyEvents.lua     (货币相关事件)
-│   └── PlayerEvents.lua       (玩家相关事件)
+│   ├── CurrencyEvents         (货币相关事件 RemoteEvent)
+│   ├── PlayerEvents           (玩家相关事件 RemoteEvent)
+│   ├── InventoryEvents/       (背包相关事件 Folder)
+│   │   ├── InventoryRefresh   (背包刷新 RemoteEvent)
+│   │   ├── RequestInventory   (请求背包 RemoteEvent)
+│   │   └── UnitUpdated        (兵种更新 RemoteEvent)
+│   └── PlacementEvents/       (放置相关事件 Folder V1.2)
+│       ├── StartPlacement     (开始放置 RemoteEvent)
+│       ├── ConfirmPlacement   (确认放置 RemoteEvent)
+│       ├── CancelPlacement    (取消放置 RemoteEvent)
+│       └── PlacementResponse  (放置响应 RemoteEvent)
 │
 └── Modules/                   (共享模块)
     └── FormatHelper.lua       (格式化辅助工具 - 如金币显示格式化)
@@ -262,11 +280,15 @@ ReplicatedStorage.Events.CurrencyEvents/
 七、后续版本扩展预留
 =====================================================
 
+【V1.2 已完成功能】
+- 兵种放置系统: 拖放兵种到基地
+- 网格吸附系统: 自动对齐到格子
+- 边界限制系统: 防止放置超出范围
+- 高光预览系统: 放置前预览效果
+
 【V2.0 预期功能】
 - 商店系统: 购买兵种
-- 兵种系统: 兵种数据管理
 - 兵种合成系统
-- 兵种放置系统
 
 【V3.0 预期功能】
 - 关卡系统: 主线关卡挑战

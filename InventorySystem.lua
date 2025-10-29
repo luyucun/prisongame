@@ -162,7 +162,7 @@ local function NotifyClientInventoryRefresh(player)
         return
     end
 
-    -- 统计每种兵种的数量
+    -- 统计每种兵种的数量和实例列表
     local inventoryData = {}
     for _, instance in ipairs(units) do
         local unitId = instance.UnitId
@@ -170,10 +170,17 @@ local function NotifyClientInventoryRefresh(player)
             local unitConfig = UnitConfig.GetUnitById(unitId)
             inventoryData[unitId] = {
                 Name = unitConfig and unitConfig.Name or unitId,
-                Count = 0
+                Count = 0,
+                Instances = {}  -- 添加实例列表
             }
         end
         inventoryData[unitId].Count = inventoryData[unitId].Count + 1
+        -- 只传递必要的实例信息给客户端
+        table.insert(inventoryData[unitId].Instances, {
+            InstanceId = instance.InstanceId,
+            IsPlaced = instance.IsPlaced or false,
+            GridSize = instance.GridSize,
+        })
     end
 
     local inventoryRefreshEvent = InventoryEvents:FindFirstChild("InventoryRefresh")
@@ -379,6 +386,14 @@ function InventorySystem.ClearInventory(player)
 end
 
 --[[
+刷新客户端背包显示（供其他系统调用）
+@param player Player - 玩家对象
+]]
+function InventorySystem.RefreshClientInventory(player)
+    NotifyClientInventoryRefresh(player)
+end
+
+--[[
 打印玩家背包内容(调试用)
 @param player Player - 玩家对象
 @return string - 背包内容的文本描述
@@ -421,6 +436,52 @@ local function OnClientRequestInventory(player)
 end
 
 --[[
+处理客户端请求可放置的兵种实例
+@param player Player
+@param unitId string
+]]
+local function OnClientRequestUnitInstance(player, unitId)
+    if GameConfig.DEBUG_MODE then
+        print(GameConfig.LOG_PREFIX, "客户端请求兵种实例:", player.Name, unitId)
+    end
+
+    -- 获取该兵种的第一个未放置的实例
+    local instances = InventorySystem.GetUnitsByUnitId(player, unitId)
+    for _, instance in ipairs(instances) do
+        if not instance.IsPlaced then
+            -- 通知客户端可以开始放置
+            local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
+            if eventsFolder then
+                local placementEvents = eventsFolder:FindFirstChild("PlacementEvents")
+                if placementEvents then
+                    local startEvent = placementEvents:FindFirstChild("StartPlacement")
+                    if startEvent then
+                        -- 直接在服务端触发PlacementController的逻辑，发送实例信息
+                        -- 但实际上StartPlacement应该由客户端发起，所以这里改为通知客户端
+                        local inventoryEvents = eventsFolder:FindFirstChild("InventoryEvents")
+                        if inventoryEvents then
+                            local responseEvent = inventoryEvents:FindFirstChild("UnitInstanceResponse")
+                            if responseEvent then
+                                responseEvent:FireClient(player, true, {
+                                    InstanceId = instance.InstanceId,
+                                    UnitId = unitId,
+                                    GridSize = instance.GridSize,
+                                })
+                                return
+                            end
+                        end
+                    end
+                end
+            end
+            return
+        end
+    end
+
+    -- 没有可用实例
+    warn(GameConfig.LOG_PREFIX, "没有可放置的", unitId, "实例")
+end
+
+--[[
 初始化背包系统
 连接远程事件
 ]]
@@ -439,6 +500,15 @@ function InventorySystem.Initialize()
             requestEvent.OnServerEvent:Connect(OnClientRequestInventory)
             if GameConfig.DEBUG_MODE then
                 print(GameConfig.LOG_PREFIX, "已连接RequestInventory事件")
+            end
+        end
+
+        -- 连接请求实例事件
+        local requestInstanceEvent = InventoryEvents:FindFirstChild("RequestUnitInstance")
+        if requestInstanceEvent then
+            requestInstanceEvent.OnServerEvent:Connect(OnClientRequestUnitInstance)
+            if GameConfig.DEBUG_MODE then
+                print(GameConfig.LOG_PREFIX, "已连接RequestUnitInstance事件")
             end
         end
     end

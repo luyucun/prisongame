@@ -32,6 +32,7 @@ local UnitConfig = require(ServerScriptService.Config.UnitConfig)
 local DataManager = require(ServerScriptService.Core.DataManager)
 local InventorySystem = require(ServerScriptService.Systems.InventorySystem)
 local CurrencySystem = require(ServerScriptService.Systems.CurrencySystem)
+local PlacementSystem = nil  -- 延迟加载，避免循环依赖
 
 -- ==================== 配置 ====================
 
@@ -236,9 +237,57 @@ local function CMD_Help(player, args)
 /clearunits - 清空背包
 /unitlist - 查看所有可用兵种
 /addcoins <amount> - 添加金币
+/listplaced - 查看已放置的兵种 V1.2
+/clearplaced - 清除所有已放置的兵种 V1.2
 /help - 显示此帮助
     ]]
     SendMessage(player, helpText)
+end
+
+--[[
+命令: /listplaced
+查看已放置的兵种 V1.2
+]]
+local function CMD_ListPlaced(player, args)
+    -- 延迟加载PlacementSystem
+    if not PlacementSystem then
+        PlacementSystem = require(ServerScriptService.Systems.PlacementSystem)
+    end
+
+    local placedUnits = PlacementSystem.GetPlacedUnits(player)
+
+    if #placedUnits == 0 then
+        SendMessage(player, "当前没有已放置的兵种")
+        return
+    end
+
+    local message = string.format("已放置的兵种 (共%d个):\n", #placedUnits)
+    for _, placedData in ipairs(placedUnits) do
+        local unitConfig = UnitConfig.GetUnitById(placedData.UnitId)
+        local unitName = unitConfig and unitConfig.Name or placedData.UnitId
+        message = message .. string.format("  - %s (位置: %.1f, %.1f, %.1f)\n",
+            unitName,
+            placedData.Position.X,
+            placedData.Position.Y,
+            placedData.Position.Z
+        )
+    end
+
+    SendMessage(player, message)
+end
+
+--[[
+命令: /clearplaced
+清除所有已放置的兵种 V1.2
+]]
+local function CMD_ClearPlaced(player, args)
+    -- 延迟加载PlacementSystem
+    if not PlacementSystem then
+        PlacementSystem = require(ServerScriptService.Systems.PlacementSystem)
+    end
+
+    local count = PlacementSystem.ClearAllPlacedUnits(player)
+    SendMessage(player, string.format("已清除 %d 个已放置的兵种", count))
 end
 
 -- 命令映射表
@@ -248,6 +297,8 @@ local COMMAND_HANDLERS = {
     ["clearunits"] = CMD_ClearUnits,
     ["unitlist"] = CMD_UnitList,
     ["addcoins"] = CMD_AddCoins,
+    ["listplaced"] = CMD_ListPlaced,      -- V1.2新增
+    ["clearplaced"] = CMD_ClearPlaced,    -- V1.2新增
     ["help"] = CMD_Help,
 }
 
