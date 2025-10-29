@@ -50,9 +50,9 @@ end
 
 print("[BackpackDisplay] UI组件加载完成")
 
--- 确保背包默认可见
-backpackFrame.Visible = true
-print("[BackpackDisplay] 背包UI已设置为可见")
+-- 确保背包默认关闭
+backpackGui.Enabled = false
+print("[BackpackDisplay] 背包UI已设置为默认关闭")
 
 -- 获取远程事件
 local eventsFolder = ReplicatedStorage:WaitForChild("Events", 10)
@@ -95,31 +95,18 @@ local function CreateItemFrame(unitId, unitName, count)
     corner.CornerRadius = UDim.new(0, 8)
     corner.Parent = itemFrame
 
-    -- 创建名称标签
+    -- 创建名称和数量标签（合并显示）
     local nameLabel = Instance.new("TextLabel")
     nameLabel.Name = "NameLabel"
-    nameLabel.Size = UDim2.new(0.7, 0, 1, 0)
+    nameLabel.Size = UDim2.new(1, -20, 1, 0)
     nameLabel.Position = UDim2.new(0, 10, 0, 0)
-    nameLabel.Text = unitName
+    nameLabel.Text = unitName .. "*" .. count
     nameLabel.TextSize = 16
     nameLabel.TextColor3 = ITEM_TEXT_COLOR
     nameLabel.TextXAlignment = Enum.TextXAlignment.Left
     nameLabel.Font = Enum.Font.SourceSans
     nameLabel.BackgroundTransparency = 1
     nameLabel.Parent = itemFrame
-
-    -- 创建数量标签
-    local countLabel = Instance.new("TextLabel")
-    countLabel.Name = "CountLabel"
-    countLabel.Size = UDim2.new(0.25, 0, 1, 0)
-    countLabel.Position = UDim2.new(0.75, 0, 0, 0)
-    countLabel.Text = "x" .. count
-    countLabel.TextSize = 16
-    countLabel.TextColor3 = COUNT_TEXT_COLOR
-    countLabel.TextXAlignment = Enum.TextXAlignment.Right
-    countLabel.Font = Enum.Font.SourceSansBold
-    countLabel.BackgroundTransparency = 1
-    countLabel.Parent = itemFrame
 
     return itemFrame
 end
@@ -137,9 +124,9 @@ local function UpdateItemDisplay(unitId, unitName, count)
         -- 如果数量大于0，更新或创建UI
         if itemFrame then
             -- 更新现有条目
-            local countLabel = itemFrame:FindFirstChild("CountLabel")
-            if countLabel then
-                countLabel.Text = "x" .. count
+            local nameLabel = itemFrame:FindFirstChild("NameLabel")
+            if nameLabel then
+                nameLabel.Text = unitName .. "*" .. count
             end
         else
             -- 创建新条目
@@ -181,7 +168,8 @@ end
 
 -- 关闭按钮点击事件
 closeButton.MouseButton1Click:Connect(function()
-    backpackFrame.Visible = false
+    backpackGui.Enabled = false
+    print("[BackpackDisplay] 背包已关闭")
 end)
 
 -- 监听背包更新事件
@@ -243,8 +231,8 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 
     -- 按B键切换背包
     if input.KeyCode == Enum.KeyCode.B then
-        backpackFrame.Visible = not backpackFrame.Visible
-        print("[BackpackDisplay] 背包切换:", backpackFrame.Visible and "显示" or "隐藏")
+        backpackGui.Enabled = not backpackGui.Enabled
+        print("[BackpackDisplay] 背包切换:", backpackGui.Enabled and "显示" or "隐藏")
     end
 end)
 
@@ -252,7 +240,8 @@ end)
 
 -- 全局函数用于切换背包显示
 _G.ToggleBackpack = function()
-    backpackFrame.Visible = not backpackFrame.Visible
+    backpackGui.Enabled = not backpackGui.Enabled
+    print("[BackpackDisplay] 背包切换:", backpackGui.Enabled and "显示" or "隐藏")
 end
 
 print("[BackpackDisplay] 背包显示控制器已加载")
