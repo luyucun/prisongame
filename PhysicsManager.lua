@@ -151,7 +151,7 @@ function DisablePlayerCollisions(player, character)
     for _, part in ipairs(playerParts) do
         if part:IsA("BasePart") then
             local success, err = pcall(function()
-                PhysicsService:SetPartCollisionGroup(part, "Players")
+                part.CollisionGroup = "Players"
                 addedCount = addedCount + 1
             end)
 
@@ -165,7 +165,7 @@ function DisablePlayerCollisions(player, character)
     character.DescendantAdded:Connect(function(descendant)
         if descendant:IsA("BasePart") then
             pcall(function()
-                PhysicsService:SetPartCollisionGroup(descendant, "Players")
+                descendant.CollisionGroup = "Players"
                 if GameConfig.DEBUG_MODE then
                     print(GameConfig.LOG_PREFIX, "动态添加玩家Part到碰撞组:", descendant:GetFullName())
                 end
@@ -200,7 +200,7 @@ function PhysicsManager.ConfigureUnitPhysics(model)
     for _, part in ipairs(unitParts) do
         if part:IsA("BasePart") then
             local success, err = pcall(function()
-                PhysicsService:SetPartCollisionGroup(part, "Units")
+                part.CollisionGroup = "Units"
                 addedCount = addedCount + 1
             end)
 
@@ -214,7 +214,7 @@ function PhysicsManager.ConfigureUnitPhysics(model)
     model.DescendantAdded:Connect(function(descendant)
         if descendant:IsA("BasePart") then
             pcall(function()
-                PhysicsService:SetPartCollisionGroup(descendant, "Units")
+                descendant.CollisionGroup = "Units"
                 if GameConfig.DEBUG_MODE then
                     print(GameConfig.LOG_PREFIX, "动态添加兵种Part到碰撞组:", descendant:GetFullName())
                 end

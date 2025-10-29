@@ -35,44 +35,72 @@ local currentGridPart = nil
 初始化Grid模板引用
 ]]
 function GridHelper.Initialize()
-    gridFolder = Workspace:FindFirstChild("Grid")
+    print("[GridHelper] 开始初始化...")
 
-    if not gridFolder then
-        warn("[GridHelper] 找不到Workspace/Grid文件夹!")
-        return false
-    end
+    -- 尝试多次查找Grid文件夹
+    local maxRetries = 5
+    local retryCount = 0
 
-    print("[GridHelper] 找到Grid文件夹，开始缓存模板...")
-
-    -- 缓存所有Grid模板（绿色和红色）
-    gridTemplates["GridGreen1"] = gridFolder:FindFirstChild("GridGreen1")
-    gridTemplates["GridGreen2"] = gridFolder:FindFirstChild("GridGreen2")
-    gridTemplates["GridGreen3"] = gridFolder:FindFirstChild("GridGreen3")
-    gridTemplates["GridRed1"] = gridFolder:FindFirstChild("GridRed1")
-    gridTemplates["GridRed2"] = gridFolder:FindFirstChild("GridRed2")
-    gridTemplates["GridRed3"] = gridFolder:FindFirstChild("GridRed3")
-
-    -- 验证所有模板
-    local allValid = true
-    local missingTemplates = {}
-
-    for name, template in pairs(gridTemplates) do
-        if not template then
-            warn(string.format("[GridHelper] 找不到%s模板!", name))
-            table.insert(missingTemplates, name)
-            allValid = false
-        else
-            print(string.format("[GridHelper] 成功加载模板: %s", name))
+    while not gridFolder and retryCount < maxRetries do
+        gridFolder = Workspace:FindFirstChild("Grid")
+        if not gridFolder then
+            warn(string.format("[GridHelper] 第%d次尝试：找不到Workspace/Grid文件夹，等待0.5秒后重试...", retryCount + 1))
+            task.wait(0.5)
+            retryCount = retryCount + 1
         end
     end
 
-    if allValid then
-        print("[GridHelper] 初始化成功，所有Grid模板已加载")
-    else
-        warn(string.format("[GridHelper] 初始化失败，缺少模板: %s", table.concat(missingTemplates, ", ")))
+    if not gridFolder then
+        warn("[GridHelper] 最终未找到Workspace/Grid文件夹！Grid提示功能将被禁用。")
+        return false
     end
 
-    return allValid
+    print("[GridHelper] 找到Grid文件夹:", gridFolder:GetFullName())
+
+    -- 预定义需要的模板列表
+    local requiredTemplates = {"GridGreen1", "GridGreen2", "GridGreen3", "GridRed1", "GridRed2", "GridRed3"}
+
+    -- 初始化所有键
+    for _, name in ipairs(requiredTemplates) do
+        gridTemplates[name] = nil
+    end
+
+    print("[GridHelper] 开始查找模板，Grid文件夹中有", #gridFolder:GetChildren(), "个子对象")
+
+    -- 尝试从Grid文件夹中查找所有模板
+    local foundCount = 0
+    for _, name in ipairs(requiredTemplates) do
+        local template = gridFolder:FindFirstChild(name)
+        if template then
+            gridTemplates[name] = template
+            print(string.format("[GridHelper] 成功加载模板: %s (类型: %s)", name, template.ClassName))
+            foundCount = foundCount + 1
+        else
+            print(string.format("[GridHelper] 等待模板加载: %s", name))
+            -- 异步等待模板出现
+            task.spawn(function()
+                local found = gridFolder:WaitForChild(name, 10)
+                if found then
+                    gridTemplates[name] = found
+                    print(string.format("[GridHelper] 延迟加载成功: %s", name))
+                else
+                    warn(string.format("[GridHelper] 10秒内未找到模板: %s", name))
+                end
+            end)
+        end
+    end
+
+    print(string.format("[GridHelper] 初始化完成，立即找到%d/%d个模板", foundCount, #requiredTemplates))
+
+    -- 监听Grid文件夹的新增子对象（动态等待加载）
+    gridFolder.ChildAdded:Connect(function(child)
+        if gridTemplates[child.Name] == nil and table.find(requiredTemplates, child.Name) then
+            gridTemplates[child.Name] = child
+            print(string.format("[GridHelper] 动态加载模板: %s", child.Name))
+        end
+    end)
+
+    return true
 end
 
 -- ==================== Grid管理 ====================
@@ -85,6 +113,11 @@ end
 @return Part|nil - 创建的Grid Part
 ]]
 function GridHelper.ShowGrid(gridSize, position, isValid)
+    -- 如果Grid文件夹不存在，静默失败
+    if not gridFolder then
+        return nil
+    end
+
     -- 移除旧的Grid
     GridHelper.HideGrid()
 
@@ -92,11 +125,26 @@ function GridHelper.ShowGrid(gridSize, position, isValid)
     local gridWidth = math.sqrt(gridSize)  -- 1, 2, 3
     local templateName = isValid and ("GridGreen" .. gridWidth) or ("GridRed" .. gridWidth)
 
-    -- 从缓存中获取模板
+    -- 从缓存中获取模板，如果是nil则等待
     local template = gridTemplates[templateName]
 
+    if template == nil then
+        -- 模板键不存在，说明还没初始化，尝试等待
+        print(string.format("[GridHelper] 模板%s不在缓存中，尝试等待加载...", templateName))
+        template = gridFolder:WaitForChild(templateName, 5)
+        if template then
+            gridTemplates[templateName] = template
+            print(string.format("[GridHelper] 模板%s加载成功", templateName))
+        end
+    end
+
+    -- 如果模板仍然是nil或false，则无法创建
     if not template then
-        warn(string.format("[GridHelper] 找不到Grid模板: %s", templateName))
+        -- 只在第一次失败时警告
+        if not gridTemplates["_warned_" .. templateName] then
+            warn(string.format("[GridHelper] 模板%s暂未加载，Grid功能将被禁用（若持续出现请检查Streaming设置）", templateName))
+            gridTemplates["_warned_" .. templateName] = true
+        end
         return nil
     end
 
@@ -105,8 +153,6 @@ function GridHelper.ShowGrid(gridSize, position, isValid)
     currentGridPart.Name = "ActiveGridIndicator"
 
     -- 设置位置（贴在地面上）
-    -- Grid应该放在IdleFloor的表面上，模型在地面上方PLACEMENT_Y_OFFSET
-    -- Grid需要在模型下方，所以Y坐标为 position.Y - PLACEMENT_Y_OFFSET
     local gridY = position.Y - PLACEMENT_Y_OFFSET
     currentGridPart.Position = Vector3.new(position.X, gridY, position.Z)
 
@@ -116,9 +162,6 @@ function GridHelper.ShowGrid(gridSize, position, isValid)
 
     -- 放入Workspace
     currentGridPart.Parent = Workspace
-
-    print(string.format("[GridHelper] 显示Grid - 模板:%s 大小:%d 位置:(%.1f, %.1f, %.1f)",
-        templateName, gridSize, position.X, position.Y, position.Z))
 
     return currentGridPart
 end
@@ -152,7 +195,7 @@ function GridHelper.HideGrid()
     if currentGridPart and currentGridPart.Parent then
         currentGridPart:Destroy()
         currentGridPart = nil
-        print("[GridHelper] 已隐藏Grid")
+        -- print("[GridHelper] 已隐藏Grid")
     end
 end
 
