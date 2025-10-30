@@ -16,7 +16,8 @@
 local HighlightHelper = {}
 
 -- 高光配置 (V1.2.1: 使用OutlineColor而不是FillColor)
-local HIGHLIGHT_OUTLINE_COLOR = Color3.fromRGB(0, 255, 0)    -- 绿色 - 轮廓颜色
+local HIGHLIGHT_OUTLINE_COLOR_GREEN = Color3.fromRGB(0, 255, 0)    -- 绿色 - 轮廓颜色
+local HIGHLIGHT_OUTLINE_COLOR_RED = Color3.fromRGB(255, 0, 0)      -- 红色 - 轮廓颜色（V1.4.1）
 
 -- ==================== 高光管理 ====================
 
@@ -41,7 +42,7 @@ function HighlightHelper.AddHighlight(model)
     local highlight = Instance.new("Highlight")
     highlight.Name = "Highlight"
     highlight.Adornee = model
-    highlight.OutlineColor = HIGHLIGHT_OUTLINE_COLOR  -- V1.2.1: 使用OutlineColor
+    highlight.OutlineColor = HIGHLIGHT_OUTLINE_COLOR_GREEN  -- V1.2.1: 使用OutlineColor
     highlight.FillTransparency = 1  -- V1.2.1: 完全透明填充
     highlight.OutlineTransparency = 0  -- V1.2.1: 显示轮廓
 
@@ -109,11 +110,28 @@ function HighlightHelper.SetPreviewMode(model)
         return
     end
 
-    -- 禁用碰撞
+    -- V1.4.1: 彻底禁用Humanoid的自动行为（防止自动切回Running状态）
+    local humanoid = model:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        -- 使用PlatformStand完全禁用Humanoid的移动和物理行为
+        humanoid.PlatformStand = true
+        -- 切换到Physics状态并保持
+        humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+        -- 禁用所有动画
+        local animator = humanoid:FindFirstChildOfClass("Animator")
+        if animator then
+            local tracks = animator:GetPlayingAnimationTracks()
+            for _, track in ipairs(tracks) do
+                track:Stop()
+            end
+        end
+    end
+
+    -- 锚定所有部件并禁用碰撞
     for _, descendant in ipairs(model:GetDescendants()) do
         if descendant:IsA("BasePart") then
+            descendant.Anchored = true   -- 锚定防止物理影响
             descendant.CanCollide = false
-            descendant.Anchored = true
         end
     end
 
@@ -128,6 +146,13 @@ end
 function HighlightHelper.RestoreNormalMode(model)
     if not model then
         return
+    end
+
+    -- V1.4.1: 恢复Humanoid的正常行为
+    local humanoid = model:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        humanoid.PlatformStand = false  -- 恢复Humanoid控制
+        humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)  -- 切换回正常状态
     end
 
     -- 启用碰撞
@@ -252,6 +277,62 @@ function HighlightHelper.DebugPrintHighlight(model)
     if highlight then
         -- 调试函数仅在需要时调用，这里保留但不输出
     end
+end
+
+-- ==================== V1.4.1 拖动状态描边管理 ====================
+
+--[[
+设置拖动中的描边高光（绿色或红色）
+@param model Model - 目标模型
+@param isValid boolean - true=绿色（可放置/合成），false=红色（冲突/无法合成）
+]]
+function HighlightHelper.SetDraggingHighlight(model, isValid)
+    if not model then
+        return
+    end
+
+    -- 获取或创建Highlight
+    local highlight = HighlightHelper.GetHighlight(model)
+    if not highlight then
+        highlight = HighlightHelper.AddHighlight(model)
+    end
+
+    if not highlight then
+        return
+    end
+
+    -- 设置颜色和透明度
+    if isValid then
+        highlight.OutlineColor = HIGHLIGHT_OUTLINE_COLOR_GREEN  -- 绿色
+    else
+        highlight.OutlineColor = HIGHLIGHT_OUTLINE_COLOR_RED    -- 红色
+    end
+    highlight.OutlineTransparency = 0  -- 显示轮廓
+    highlight.FillTransparency = 1     -- 填充透明
+end
+
+--[[
+设置默认状态的描边（透明，模型放置完成后的状态）
+@param model Model - 目标模型
+]]
+function HighlightHelper.SetDefaultHighlight(model)
+    if not model then
+        return
+    end
+
+    -- 获取或创建Highlight
+    local highlight = HighlightHelper.GetHighlight(model)
+    if not highlight then
+        highlight = HighlightHelper.AddHighlight(model)
+    end
+
+    if not highlight then
+        return
+    end
+
+    -- 设置为透明状态（但保留Highlight对象）
+    highlight.OutlineTransparency = 1  -- 轮廓透明
+    highlight.FillTransparency = 1     -- 填充透明
 end
 
 return HighlightHelper

@@ -26,6 +26,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 -- 引用工具模块
 local PlacementHelper = require(script.Parent.Parent.Utils.PlacementHelper)
 local GridHelper = require(script.Parent.Parent.Utils.GridHelper)
+local HighlightHelper = require(script.Parent.Parent.Utils.HighlightHelper)  -- V1.4.1
 
 -- 玩家引用
 local player = Players.LocalPlayer
@@ -46,12 +47,14 @@ local dragState = {
     placedUnits = {},          -- 追踪所有已放置的兵种
     targetModel = nil,         -- V1.4: 当前悬停的目标模型
     canMerge = false,          -- V1.4: 是否可以合成
+    isRelocating = false,      -- V1.4.1: 是否为换位模式
     isMobile = false,          -- V1.4: 是否为移动设备
     currentTouch = nil,        -- V1.4: 当前触摸输入对象
 }
 
 -- 远程事件
 local mergeEvents = nil
+local placementEvents = nil  -- V1.4.1
 
 -- ==================== 初始化 ====================
 
@@ -105,6 +108,29 @@ function DragSystem.Initialize()
         local responseEvent = mergeEvents:FindFirstChild("MergeResponse")
         if responseEvent then
             responseEvent.OnClientEvent:Connect(OnMergeResponse)
+        end
+    end
+
+    -- V1.4.1: 获取放置事件（用于换位功能）
+    retryCount = 0
+    while not placementEvents and retryCount < maxRetries do
+        local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
+        if eventsFolder then
+            placementEvents = eventsFolder:FindFirstChild("PlacementEvents")
+        end
+        if not placementEvents then
+            task.wait(0.5)
+            retryCount = retryCount + 1
+        end
+    end
+
+    if not placementEvents then
+        warn("[DragSystem] PlacementEvents未找到，换位功能将不可用!")
+    else
+        -- 连接位置更新响应事件
+        local updateResponseEvent = placementEvents:FindFirstChild("UpdateResponse")
+        if updateResponseEvent then
+            updateResponseEvent.OnClientEvent:Connect(OnUpdateResponse)
         end
     end
 
@@ -334,21 +360,46 @@ function StartDragging(model)
     dragState.draggedLevel = level
     dragState.draggedGridSize = gridSize
 
+    -- 保存原始位置
+    local originalPos = GetModelPosition(model)
+    dragState.dragStartPos = originalPos
+
     -- 保存原始CanCollide状态
     local hrp = model:FindFirstChild("HumanoidRootPart")
     if hrp then
         dragState.originalCanCollide = hrp.CanCollide
     end
 
-    -- 拖动时取消锚固和碰撞，允许移动和穿过其他物体
-    for _, descendant in ipairs(model:GetDescendants()) do
-        if descendant:IsA("BasePart") then
-            descendant.CanCollide = false
-            descendant.Anchored = false  -- 取消锚固以允许拖动
+    -- V1.4.1: 彻底禁用Humanoid的自动行为（防止自动切回Running状态导致下沉）
+    local humanoid = model:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        -- 使用PlatformStand完全禁用Humanoid的移动和物理行为
+        humanoid.PlatformStand = true
+        -- 切换到Physics状态并保持
+        humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+        -- 禁用所有动画
+        local animator = humanoid:FindFirstChildOfClass("Animator")
+        if animator then
+            local tracks = animator:GetPlayingAnimationTracks()
+            for _, track in ipairs(tracks) do
+                track:Stop()
+            end
         end
     end
 
-    dragState.dragStartPos = GetModelPosition(model)
+    -- 拖动时取消碰撞，保持锚定，防止物理影响
+    for _, descendant in ipairs(model:GetDescendants()) do
+        if descendant:IsA("BasePart") then
+            descendant.CanCollide = false
+            descendant.Anchored = true  -- V1.4.1: 保持锚定状态，配合PlatformStand防止下沉
+        end
+    end
+
+    -- V1.4.1: 设置绿色描边（默认拖动状态）
+    HighlightHelper.SetDraggingHighlight(model, true)
+
+    -- 显示绿色Grid（默认状态，保持原高度）
+    GridHelper.ShowGrid(gridSize, originalPos, true)
 end
 
 --[[
@@ -411,14 +462,14 @@ function UpdateDragPositionTouch(touchPosition)
 end
 
 --[[
-处理拖动更新（统一处理PC和移动端）
+处理拖动更新（统一处理PC和移动端）V1.4.1重写
 @param raycastResult RaycastResult
 ]]
 function ProcessDragUpdate(raycastResult)
     local hitPart = raycastResult.Instance
     local hitModel = nil
 
-    -- 查找被射线击中的模型
+    -- V1.4.1: 优先查找被射线击中的兵种模型（避免先判断地板导致闪烁）
     if hitPart then
         local parent = hitPart.Parent
         while parent and parent ~= Workspace do
@@ -430,8 +481,9 @@ function ProcessDragUpdate(raycastResult)
         end
     end
 
-    -- V1.4: 检测是否悬停在可合成的目标上
+    -- V1.4.1: 判断拖动模式 - 优先判断合成模式
     if hitModel and hitModel ~= dragState.draggedModel then
+        -- ==================== 合成模式（优先） ====================
         local targetInstanceId = hitModel:GetAttribute("InstanceId")
         local targetUnitId = hitModel:GetAttribute("UnitId")
         local targetLevel = hitModel:GetAttribute("Level") or 1
@@ -444,34 +496,60 @@ function ProcessDragUpdate(raycastResult)
 
         dragState.targetModel = hitModel
         dragState.canMerge = canMerge
+        dragState.isRelocating = false  -- 不是换位模式
 
-        -- 显示Grid提示
+        -- 显示Grid提示（在目标脚底）
         local targetPos = GetModelPosition(hitModel)
         GridHelper.ShowGrid(targetGridSize, targetPos, canMerge)
 
-        -- 移动拖动的模型到目标位置
+        -- V1.4.1: 设置拖动模型的描边颜色
+        HighlightHelper.SetDraggingHighlight(dragState.draggedModel, canMerge)
+
+        -- 移动拖动的模型到目标位置（保持原高度）
         local currentPos = GetModelPosition(dragState.draggedModel)
         local newPos = Vector3.new(targetPos.X, currentPos.Y, targetPos.Z)
         SetModelPosition(dragState.draggedModel, newPos)
-    else
-        -- 没有悬停在其他模型上
+
+    elseif raycastResult.Instance == dragState.idleFloor then
+        -- ==================== 换位模式（在IdleFloor上且没有击中其他兵种）====================
         dragState.targetModel = nil
         dragState.canMerge = false
-        GridHelper.HideGrid()
+        dragState.isRelocating = true  -- 换位模式
 
-        -- 检查是否在IdleFloor上
-        if raycastResult.Instance == dragState.idleFloor then
-            local newPos = raycastResult.Position
-            local model = dragState.draggedModel
-            local currentPos = GetModelPosition(model)
-            newPos = Vector3.new(newPos.X, currentPos.Y, newPos.Z)
-            SetModelPosition(model, newPos)
-        end
+        local model = dragState.draggedModel
+        local floorCenter = dragState.idleFloor.Position
+
+        -- 使用PlacementHelper进行网格吸附
+        local snappedPos = PlacementHelper.GetNearestGridPosition(
+            raycastResult.Position,
+            floorCenter,
+            dragState.draggedGridSize
+        )
+
+        -- 检测该位置是否有冲突（排除自己）
+        local isValid = IsPositionValidForRelocate(snappedPos)
+
+        -- 显示Grid提示（在拖动模型脚底）
+        GridHelper.ShowGrid(dragState.draggedGridSize, snappedPos, isValid)
+
+        -- V1.4.1: 设置拖动模型的描边颜色
+        HighlightHelper.SetDraggingHighlight(model, isValid)
+
+        -- 移动模型（保持原高度）
+        SetModelPosition(model, snappedPos)
+
+    else
+        -- ==================== 其他情况（不在IdleFloor上或其他未识别情况）====================
+        dragState.targetModel = nil
+        dragState.canMerge = false
+        dragState.isRelocating = false
+        GridHelper.HideGrid()
+        HighlightHelper.SetDraggingHighlight(dragState.draggedModel, false)
     end
 end
 
 --[[
-停止拖动
+停止拖动 V1.4.1重写
 ]]
 function StopDragging()
     if not dragState.isDragging or not dragState.draggedModel then
@@ -482,8 +560,9 @@ function StopDragging()
 
     local model = dragState.draggedModel
 
-    -- V1.4: 检查是否可以合成
+    -- V1.4.1: 判断拖动模式并处理
     if dragState.canMerge and dragState.targetModel and mergeEvents then
+        -- ==================== 合成模式 ====================
         local targetInstanceId = dragState.targetModel:GetAttribute("InstanceId")
 
         print("[DragSystem] 请求合成:", dragState.draggedInstanceId, "->", targetInstanceId)
@@ -494,27 +573,40 @@ function StopDragging()
             requestEvent:FireServer(dragState.draggedInstanceId, targetInstanceId)
         end
 
-        -- 暂时不恢复，等待服务端响应
+        -- 隐藏Grid，等待服务端响应
         GridHelper.HideGrid()
-    else
-        -- 不能合成，恢复到原位置
-        if dragState.dragStartPos then
-            SetModelPosition(model, dragState.dragStartPos)
-        end
+        -- 注意：不在这里恢复模型状态，等待服务端合成响应
 
-        -- 恢复锚固和碰撞设置
-        for _, descendant in ipairs(model:GetDescendants()) do
-            if descendant:IsA("BasePart") then
-                descendant.Anchored = true  -- 恢复锚固
-                if descendant:FindFirstChild("HumanoidRootPart") then
-                    descendant.CanCollide = dragState.originalCanCollide or false
-                else
-                    descendant.CanCollide = false
+    elseif dragState.isRelocating and placementEvents then
+        -- ==================== 换位模式 ====================
+        local currentPos = GetModelPosition(model)
+        if currentPos then
+            -- 检查该位置是否有效
+            if IsPositionValidForRelocate(currentPos) then
+                print("[DragSystem] 请求换位:", dragState.draggedInstanceId, "新位置:", currentPos)
+
+                -- 发送位置更新请求到服务端
+                local updateEvent = placementEvents:FindFirstChild("UpdatePosition")
+                if updateEvent then
+                    updateEvent:FireServer(dragState.draggedInstanceId, currentPos)
                 end
+
+                -- 恢复模型状态（在服务端确认前）
+                RestoreModelAfterDrag(model)
+                GridHelper.HideGrid()
+            else
+                -- 位置无效，回到原位
+                print("[DragSystem] 换位位置无效，回到原位")
+                ReturnToOriginalPosition(model)
             end
+        else
+            ReturnToOriginalPosition(model)
         end
 
-        GridHelper.HideGrid()
+    else
+        -- ==================== 取消拖动（回到原位） ====================
+        print("[DragSystem] 取消拖动，回到原位")
+        ReturnToOriginalPosition(model)
     end
 
     -- 重置拖动状态
@@ -527,10 +619,62 @@ function StopDragging()
     dragState.dragStartPos = nil
     dragState.targetModel = nil
     dragState.canMerge = false
-    dragState.currentTouch = nil  -- V1.4: 清理触摸引用
+    dragState.isRelocating = false  -- V1.4.1
+    dragState.currentTouch = nil
 end
 
 -- ==================== 工具函数 ====================
+
+--[[
+恢复模型拖动后的状态（V1.4.1）
+@param model Model
+]]
+function RestoreModelAfterDrag(model)
+    if not model then
+        return
+    end
+
+    -- V1.4.1: 恢复Humanoid的正常行为
+    local humanoid = model:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        humanoid.PlatformStand = false  -- 恢复Humanoid控制
+        humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)  -- 切换回正常状态
+    end
+
+    -- 恢复锚固和碰撞
+    for _, descendant in ipairs(model:GetDescendants()) do
+        if descendant:IsA("BasePart") then
+            descendant.Anchored = true  -- 恢复锚固
+            if descendant.Name == "HumanoidRootPart" then
+                descendant.CanCollide = dragState.originalCanCollide or false
+            else
+                descendant.CanCollide = false
+            end
+        end
+    end
+
+    -- V1.4.1: 设置默认描边（透明）
+    HighlightHelper.SetDefaultHighlight(model)
+end
+
+--[[
+返回到原始位置（V1.4.1）
+@param model Model
+]]
+function ReturnToOriginalPosition(model)
+    if not model or not dragState.dragStartPos then
+        return
+    end
+
+    -- 移动回原位
+    SetModelPosition(model, dragState.dragStartPos)
+
+    -- 恢复模型状态
+    RestoreModelAfterDrag(model)
+
+    -- 隐藏Grid
+    GridHelper.HideGrid()
+end
 
 --[[
 检查模型是否在IdleFloor上
@@ -555,6 +699,51 @@ function IsModelOnIdleFloor(model)
     local distZ = math.abs(modelPos.Z - floorPos.Z)
 
     return distX <= floorSize.X / 2 and distZ <= floorSize.Z / 2
+end
+
+--[[
+检查换位时的位置是否有效（V1.4.1）
+@param worldPos Vector3 - 世界坐标
+@return boolean - true表示有效，false表示有冲突
+]]
+function IsPositionValidForRelocate(worldPos)
+    if not dragState.idleFloor then
+        return false
+    end
+
+    local floorCenter = dragState.idleFloor.Position
+
+    -- 转换为网格坐标
+    local gridX, gridZ = PlacementHelper.WorldToGrid(worldPos, floorCenter)
+
+    -- 获取当前兵种占据的网格宽度
+    local currentGridWidth = math.sqrt(dragState.draggedGridSize)  -- 1, 2, 3
+
+    -- 检查与已放置的模型是否重叠（需要排除自己）
+    for _, obj in ipairs(Workspace:GetChildren()) do
+        if obj:IsA("Model") and obj ~= dragState.draggedModel then
+            local objInstanceId = obj:GetAttribute("InstanceId")
+            if objInstanceId and objInstanceId ~= dragState.draggedInstanceId then
+                -- 这是另一个已放置的兵种
+                local objPos = GetModelPosition(obj)
+                if objPos then
+                    local objGridX, objGridZ = PlacementHelper.WorldToGrid(objPos, floorCenter)
+                    local objGridSize = obj:GetAttribute("GridSize") or 1
+                    local objGridWidth = math.sqrt(objGridSize)
+
+                    -- 检查网格是否重叠
+                    local overlapX = not (gridX + currentGridWidth <= objGridX or gridX >= objGridX + objGridWidth)
+                    local overlapZ = not (gridZ + currentGridWidth <= objGridZ or gridZ >= objGridZ + objGridWidth)
+
+                    if overlapX and overlapZ then
+                        return false  -- 位置冲突
+                    end
+                end
+            end
+        end
+    end
+
+    return true  -- 位置有效
 end
 
 --[[
@@ -611,6 +800,27 @@ function OnMergeResponse(success, message, newUnitData)
     else
         warn("[DragSystem] 合成失败:", message)
         -- 可以在这里添加UI提示
+    end
+end
+
+-- ==================== V1.4.1: 换位响应处理 ====================
+
+--[[
+处理服务端位置更新响应
+@param success boolean - 是否成功
+@param message string - 消息
+@param instanceId string - 兵种实例ID
+]]
+function OnUpdateResponse(success, message, instanceId)
+    print("[DragSystem] 收到位置更新响应:", success, message, instanceId)
+
+    if success then
+        print("[DragSystem] 换位成功!")
+        -- 服务端已经更新了位置，客户端已经在StopDragging中做了处理
+    else
+        warn("[DragSystem] 换位失败:", message)
+        -- 可以在这里添加UI提示
+        -- 如果失败，可能需要将模型恢复到原位（但通常服务端会拒绝前客户端已经检查了）
     end
 end
 

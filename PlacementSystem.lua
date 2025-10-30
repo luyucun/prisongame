@@ -500,6 +500,92 @@ function PlacementSystem.RemoveUnit(player, instanceId)
 end
 
 --[[
+更新已放置兵种的位置（V1.4.1：拖动换位功能）
+@param player Player
+@param instanceId string - 兵种实例ID
+@param newPosition Vector3 - 新的世界坐标
+@return boolean, string - 是否成功, 消息
+]]
+function PlacementSystem.UpdateUnitPosition(player, instanceId, newPosition)
+    local userId = player.UserId
+
+    -- 1. 检查兵种是否已放置
+    if not placedUnits[userId] or not placedUnits[userId][instanceId] then
+        return false, "兵种未放置"
+    end
+
+    local placedData = placedUnits[userId][instanceId]
+    local unitInstance = InventorySystem.GetUnitByInstanceId(player, instanceId)
+    if not unitInstance then
+        return false, "兵种实例不存在"
+    end
+
+    -- 2. 获取IdleFloor
+    local idleFloor = GetPlayerIdleFloor(player)
+    if not idleFloor then
+        return false, "找不到放置地板"
+    end
+
+    -- 3. 转换为网格坐标
+    local floorCenter = idleFloor.Position
+    local newGridX, newGridZ = PlacementConfig.WorldToGrid(newPosition, floorCenter)
+
+    -- 4. 检查边界
+    if not PlacementConfig.IsGridInBounds(newGridX, newGridZ, unitInstance.GridSize) then
+        if GameConfig.DEBUG_MODE then
+            print(string.format(
+                "%s 更新位置边界检查失败 - 网格:(%d, %d) 占地:%d",
+                GameConfig.LOG_PREFIX, newGridX, newGridZ, unitInstance.GridSize
+            ))
+        end
+        return false, "超出放置范围"
+    end
+
+    -- 5. 检查新位置是否与其他兵种冲突（排除自己）
+    if PlacementConfig.ENABLE_COLLISION_CHECK then
+        local isOccupied, occupyingId = IsGridOccupied(player, newGridX, newGridZ, unitInstance.GridSize)
+        if isOccupied and occupyingId ~= instanceId then
+            return false, "位置已被占用"
+        end
+    end
+
+    -- 6. 释放旧位置的网格
+    ReleaseGrid(player, placedData.GridX, placedData.GridZ, placedData.GridSize)
+
+    -- 7. 计算新的精确位置
+    local finalPosition = PlacementConfig.GridToWorld(newGridX, newGridZ, floorCenter)
+
+    -- 8. 更新模型位置
+    if placedData.Model and placedData.Model.Parent then
+        if placedData.Model.PrimaryPart then
+            placedData.Model:SetPrimaryPartCFrame(CFrame.new(finalPosition))
+        elseif placedData.Model:FindFirstChild("HumanoidRootPart") then
+            placedData.Model.HumanoidRootPart.CFrame = CFrame.new(finalPosition)
+        end
+    end
+
+    -- 9. 占据新位置的网格
+    OccupyGrid(player, newGridX, newGridZ, unitInstance.GridSize, instanceId)
+
+    -- 10. 更新placedData
+    placedData.Position = finalPosition
+    placedData.GridX = newGridX
+    placedData.GridZ = newGridZ
+
+    -- 11. 更新InventorySystem中的位置
+    unitInstance.PlacedPosition = finalPosition
+
+    if GameConfig.DEBUG_MODE then
+        print(string.format(
+            "%s 更新兵种位置成功 - 玩家:%s 实例ID:%s 新网格:(%d, %d)",
+            GameConfig.LOG_PREFIX, player.Name, instanceId, newGridX, newGridZ
+        ))
+    end
+
+    return true, "位置更新成功"
+end
+
+--[[
 获取玩家所有已放置的兵种
 @param player Player
 @return table - 已放置兵种数据数组
@@ -647,6 +733,29 @@ local function OnRemoveUnit(player, instanceId)
 end
 
 --[[
+处理更新兵种位置请求 (V1.4.1)
+@param player Player
+@param instanceId string
+@param newPosition Vector3
+]]
+local function OnUpdatePosition(player, instanceId, newPosition)
+    if GameConfig.DEBUG_MODE then
+        print(GameConfig.LOG_PREFIX, "处理位置更新请求:", player.Name, instanceId)
+    end
+
+    -- 调用UpdateUnitPosition更新位置
+    local success, message = PlacementSystem.UpdateUnitPosition(player, instanceId, newPosition)
+
+    -- 通知客户端结果
+    if InitializeEvents() then
+        local responseEvent = PlacementEvents:FindFirstChild("UpdateResponse")
+        if responseEvent then
+            responseEvent:FireClient(player, success, message, instanceId)
+        end
+    end
+end
+
+--[[
 初始化放置系统
 ]]
 function PlacementSystem.Initialize()
@@ -678,6 +787,15 @@ function PlacementSystem.Initialize()
         removeEvent.OnServerEvent:Connect(OnRemoveUnit)
         if GameConfig.DEBUG_MODE then
             print(GameConfig.LOG_PREFIX, "已连接RemoveUnit事件")
+        end
+    end
+
+    -- V1.4.1: 连接位置更新事件
+    local updateEvent = PlacementEvents:FindFirstChild("UpdatePosition")
+    if updateEvent then
+        updateEvent.OnServerEvent:Connect(OnUpdatePosition)
+        if GameConfig.DEBUG_MODE then
+            print(GameConfig.LOG_PREFIX, "已连接UpdatePosition事件")
         end
     end
 

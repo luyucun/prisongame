@@ -58,6 +58,10 @@ GameConfig.IDLE_FLOOR_NAME = "IdleFloor"
 -- 放置确认UI名称
 GameConfig.PUT_CONFIRM_GUI_NAME = "PutConfirm"
 
+-- ==================== 拖动系统配置 (V1.4.1) ====================
+-- 拖动时模型抬高的高度（studs）
+GameConfig.DRAG_LIFT_HEIGHT = 2
+
 -- ==================== 调试配置 ====================
 -- 是否启用调试模式
 GameConfig.DEBUG_MODE = true
