@@ -31,6 +31,7 @@ local CurrencySystem = require(ServerScriptService.Systems.CurrencySystem)
 local HomeSystem = require(ServerScriptService.Systems.HomeSystem)
 local InventorySystem = require(ServerScriptService.Systems.InventorySystem)
 local PlacementSystem = require(ServerScriptService.Systems.PlacementSystem)
+local MergeSystem = require(ServerScriptService.Systems.MergeSystem)  -- V1.4新增
 local PhysicsManager = require(ServerScriptService.Systems.PhysicsManager)
 local GMCommandSystem = require(ServerScriptService.Systems.GMCommandSystem)
 
@@ -128,6 +129,20 @@ local function InitializeServer()
         warn(GameConfig.LOG_PREFIX, "放置系统初始化失败(返回false),放置功能将不可用")
     else
         print(GameConfig.LOG_PREFIX, "放置系统初始化成功")
+    end
+
+    -- 5.5. 初始化合成系统(连接合成事件) V1.4新增
+    print(GameConfig.LOG_PREFIX, "步骤5.5: 初始化合成系统...")
+    success, result = pcall(function()
+        return MergeSystem.Initialize()
+    end)
+    if not success then
+        warn(GameConfig.LOG_PREFIX, "合成系统初始化失败(异常):", result)
+        -- 合成系统不是关键系统,失败不影响游戏运行
+    elseif result == false then
+        warn(GameConfig.LOG_PREFIX, "合成系统初始化失败(返回false),合成功能将不可用")
+    else
+        print(GameConfig.LOG_PREFIX, "合成系统初始化成功")
     end
 
     -- 6. 初始化GM命令系统(连接聊天事件)

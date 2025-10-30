@@ -17,6 +17,16 @@ UnitConfig.UnitType = {
     RANGED = "Ranged",    -- 远程单位
 }
 
+-- ==================== 等级配置 V1.4 ====================
+UnitConfig.MAX_LEVEL = 3  -- 最高等级
+
+-- 等级系数配置
+UnitConfig.LevelCoefficients = {
+    [1] = 1,      -- 1级系数: 1.0
+    [2] = 1.2,    -- 2级系数: 1.2
+    [3] = 1.5,    -- 3级系数: 1.5
+}
+
 -- ==================== 兵种数据结构 ====================
 --[[
 UnitData = {
@@ -28,6 +38,10 @@ UnitData = {
     Price = number,            -- 购买价格(金币)
     GridSize = number,         -- 占地面积(格子数:1或4)
     Description = string,      -- 描述
+    -- V1.4新增属性
+    BaseHealth = number,       -- 基础生命值
+    BaseAttack = number,       -- 基础攻击力
+    BaseAttackSpeed = number,  -- 基础攻击速度(每次攻击间隔秒数)
 }
 ]]
 
@@ -44,6 +58,10 @@ UnitConfig.Units = {
         Price = 100,
         GridSize = 1,
         Description = "最基础的近战单位,适合新手使用",
+        -- V1.4新增属性
+        BaseHealth = 100,       -- 基础生命值
+        BaseAttack = 10,        -- 基础攻击力
+        BaseAttackSpeed = 1,    -- 基础攻击速度(1秒/次)
     },
 
     -- 兵种2: Rookie
@@ -56,6 +74,10 @@ UnitConfig.Units = {
         Price = 200,
         GridSize = 1,
         Description = "进阶的近战单位,比Noob更强力",
+        -- V1.4新增属性
+        BaseHealth = 100,       -- 基础生命值
+        BaseAttack = 10,        -- 基础攻击力
+        BaseAttackSpeed = 1,    -- 基础攻击速度(1秒/次)
     },
 
     -- 后续可以继续添加更多兵种...
@@ -144,6 +166,71 @@ function UnitConfig.CanAfford(unitId, playerCoins)
         return false
     end
     return playerCoins >= unitData.Price
+end
+
+-- ==================== V1.4新增: 属性计算接口 ====================
+
+--[[
+计算兵种实际生命值
+@param unitId string - 兵种ID
+@param level number - 等级
+@return number - 实际生命值
+]]
+function UnitConfig.CalculateHealth(unitId, level)
+    local unitData = UnitConfig.GetUnitById(unitId)
+    if not unitData or not unitData.BaseHealth then
+        return 0
+    end
+
+    local coefficient = UnitConfig.LevelCoefficients[level] or 1
+    return unitData.BaseHealth * level * coefficient
+end
+
+--[[
+计算兵种实际攻击力
+@param unitId string - 兵种ID
+@param level number - 等级
+@return number - 实际攻击力
+]]
+function UnitConfig.CalculateAttack(unitId, level)
+    local unitData = UnitConfig.GetUnitById(unitId)
+    if not unitData or not unitData.BaseAttack then
+        return 0
+    end
+
+    local coefficient = UnitConfig.LevelCoefficients[level] or 1
+    return unitData.BaseAttack * level * coefficient
+end
+
+--[[
+获取兵种攻击速度(不受等级影响)
+@param unitId string - 兵种ID
+@return number - 攻击速度
+]]
+function UnitConfig.GetAttackSpeed(unitId)
+    local unitData = UnitConfig.GetUnitById(unitId)
+    if not unitData or not unitData.BaseAttackSpeed then
+        return 1
+    end
+    return unitData.BaseAttackSpeed
+end
+
+--[[
+检查是否可以升级
+@param level number - 当前等级
+@return boolean - 是否可以升级
+]]
+function UnitConfig.CanLevelUp(level)
+    return level < UnitConfig.MAX_LEVEL
+end
+
+--[[
+获取等级系数
+@param level number - 等级
+@return number - 系数
+]]
+function UnitConfig.GetLevelCoefficient(level)
+    return UnitConfig.LevelCoefficients[level] or 1
 end
 
 return UnitConfig

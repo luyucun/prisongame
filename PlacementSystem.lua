@@ -191,13 +191,69 @@ local function ReleaseGrid(player, gridX, gridZ, gridSize)
 end
 
 --[[
+更新模型等级显示 V1.4
+@param model Model - 兵种模型
+@param level number - 等级
+]]
+local function UpdateLevelDisplay(model, level)
+    if not model then
+        if GameConfig.DEBUG_MODE then
+            warn(GameConfig.LOG_PREFIX, "UpdateLevelDisplay: 模型为空")
+        end
+        return
+    end
+
+    -- 查找Head下的BillboardGui
+    local head = model:FindFirstChild("Head")
+    if not head then
+        if GameConfig.DEBUG_MODE then
+            warn(GameConfig.LOG_PREFIX, "UpdateLevelDisplay: 模型没有Head部件:", model.Name)
+        end
+        return
+    end
+
+    local billboardGui = head:FindFirstChild("BillboardGui")
+    if not billboardGui then
+        if GameConfig.DEBUG_MODE then
+            warn(GameConfig.LOG_PREFIX, "UpdateLevelDisplay: Head下没有BillboardGui:", model.Name)
+        end
+        return
+    end
+
+    local textLabel = billboardGui:FindFirstChild("TextLabel")
+    if not textLabel then
+        if GameConfig.DEBUG_MODE then
+            warn(GameConfig.LOG_PREFIX, "UpdateLevelDisplay: BillboardGui下没有TextLabel:", model.Name)
+        end
+        return
+    end
+
+    -- 更新等级显示
+    if level >= UnitConfig.MAX_LEVEL then
+        textLabel.Text = "Lv.Max"
+    else
+        textLabel.Text = "Lv." .. tostring(level)
+    end
+
+    if GameConfig.DEBUG_MODE then
+        print(GameConfig.LOG_PREFIX, "更新等级显示成功:", model.Name, "Level:", level, "显示:", textLabel.Text)
+    end
+end
+
+--[[
 创建兵种模型到世界
 @param unitId string
 @param position Vector3
 @param instanceId string - V1.3: 添加instanceId参数用于标记模型
+@param level number - V1.4: 添加等级参数
+@param gridSize number - V1.4: 添加占地大小参数
 @return Model|nil
 ]]
-local function CreateUnitModel(unitId, position, instanceId)
+local function CreateUnitModel(unitId, position, instanceId, level, gridSize)
+    -- V1.4: 处理默认参数
+    level = level or 1
+    gridSize = gridSize or 1
+
     local unitConfig = UnitConfig.GetUnitById(unitId)
     if not unitConfig then
         return nil
@@ -224,6 +280,14 @@ local function CreateUnitModel(unitId, position, instanceId)
     if instanceId then
         model:SetAttribute("InstanceId", instanceId)
     end
+
+    -- V1.4: 设置等级和UnitId属性，用于拖动合成时识别
+    model:SetAttribute("Level", level)
+    model:SetAttribute("UnitId", unitId)
+    model:SetAttribute("GridSize", gridSize)
+
+    -- V1.4: 更新等级显示
+    UpdateLevelDisplay(model, level)
 
     -- 设置位置
     if model.PrimaryPart then
@@ -335,7 +399,8 @@ function PlacementSystem.PlaceUnit(player, instanceId, position)
     local finalPosition = PlacementConfig.GridToWorld(gridX, gridZ, floorCenter)
 
     -- V1.3: 传递instanceId到CreateUnitModel
-    local model = CreateUnitModel(unitInstance.UnitId, finalPosition, instanceId)
+    -- V1.4: 传递level和gridSize到CreateUnitModel
+    local model = CreateUnitModel(unitInstance.UnitId, finalPosition, instanceId, unitInstance.Level, unitInstance.GridSize)
     if not model then
         return false, "创建模型失败"
     end

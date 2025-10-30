@@ -4,8 +4,8 @@
 =====================================================
 
 项目名称: Roblox 兵种塔防游戏
-版本: V1.0
-设计日期: 2025-10-28
+版本: V1.4
+设计日期: 2025-10-30
 
 =====================================================
 一、架构设计原则
@@ -43,11 +43,12 @@ ServerScriptService/          (服务端脚本目录)
 │   ├── HomeSystem.lua         (基地系统 - 负责基地管理和初始化)
 │   ├── InventorySystem.lua    (背包系统 - 负责兵种背包管理)
 │   ├── PlacementSystem.lua    (放置系统 - 负责兵种放置验证 V1.2)
+│   ├── MergeSystem.lua        (合成系统 - 负责兵种合成逻辑 V1.4)
 │   └── GMCommandSystem.lua    (GM命令系统 - 负责调试命令处理)
 │
 └── Config/                    (配置文件)
     ├── GameConfig.lua         (游戏配置 - 存储游戏常量和配置)
-    ├── UnitConfig.lua         (兵种配置 - 存储兵种属性)
+    ├── UnitConfig.lua         (兵种配置 - 存储兵种属性 V1.4更新)
     └── PlacementConfig.lua    (放置配置 - 存储放置系统配置 V1.2)
 
 StarterPlayer/
@@ -58,7 +59,8 @@ StarterPlayer/
     │
     ├── Controllers/           (客户端控制器)
     │   ├── PlayerController.lua (玩家控制器 - 客户端玩家逻辑)
-    │   └── PlacementController.lua (放置控制器 - 兵种放置交互 V1.2)
+    │   ├── PlacementController.lua (放置控制器 - 兵种放置交互 V1.2)
+    │   └── DragSystem.lua     (拖动系统 - 兵种拖动与合成 V1.4)
     │
     └── Utils/                 (工具类)
         ├── UIHelper.lua       (UI辅助工具)
@@ -72,12 +74,19 @@ ReplicatedStorage/             (共享资源目录)
 │   ├── InventoryEvents/       (背包相关事件 Folder)
 │   │   ├── InventoryRefresh   (背包刷新 RemoteEvent)
 │   │   ├── RequestInventory   (请求背包 RemoteEvent)
-│   │   └── UnitUpdated        (兵种更新 RemoteEvent)
-│   └── PlacementEvents/       (放置相关事件 Folder V1.2)
-│       ├── StartPlacement     (开始放置 RemoteEvent)
-│       ├── ConfirmPlacement   (确认放置 RemoteEvent)
-│       ├── CancelPlacement    (取消放置 RemoteEvent)
-│       └── PlacementResponse  (放置响应 RemoteEvent)
+│   │   ├── UnitUpdated        (兵种更新 RemoteEvent)
+│   │   ├── RequestUnitInstance (请求兵种实例 RemoteEvent V1.2)
+│   │   └── UnitInstanceResponse (兵种实例响应 RemoteEvent V1.2)
+│   ├── PlacementEvents/       (放置相关事件 Folder V1.2)
+│   │   ├── StartPlacement     (开始放置 RemoteEvent)
+│   │   ├── ConfirmPlacement   (确认放置 RemoteEvent)
+│   │   ├── CancelPlacement    (取消放置 RemoteEvent)
+│   │   ├── PlacementResponse  (放置响应 RemoteEvent)
+│   │   ├── RemoveUnit         (回收兵种 RemoteEvent V1.3)
+│   │   └── RemoveResponse     (回收响应 RemoteEvent V1.3)
+│   └── MergeEvents/           (合成相关事件 Folder V1.4)
+│       ├── RequestMerge       (请求合成 RemoteEvent)
+│       └── MergeResponse      (合成响应 RemoteEvent)
 │
 └── Modules/                   (共享模块)
     └── FormatHelper.lua       (格式化辅助工具 - 如金币显示格式化)
@@ -285,6 +294,16 @@ ReplicatedStorage.Events.CurrencyEvents/
 - 网格吸附系统: 自动对齐到格子
 - 边界限制系统: 防止放置超出范围
 - 高光预览系统: 放置前预览效果
+
+【V1.3 已完成功能】
+- 兵种回收系统: 从场地收回兵种到背包
+- 回收模式UI: 专门的回收操作界面
+
+【V1.4 已完成功能】
+- 兵种属性系统: 生命值、攻击力、攻击速度
+- 兵种等级系统: 1-3级，等级系数计算
+- 兵种合成系统: 拖动相同兵种合成升级
+- 等级显示系统: 模型头顶显示Lv.X
 
 【V2.0 预期功能】
 - 商店系统: 购买兵种
