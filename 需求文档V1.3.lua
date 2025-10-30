@@ -166,3 +166,27 @@ V1.2.1
 2.在放置过程中，如果模型当前的位置与其他已经放置了模型的位置重叠了，那走跟上面一样的表现逻辑，也是去Grid下复制模型，只不过复制的分别是GridRed1/GridRed2/GridRed3
 3.这两种应该是实时切换的，我当前的位置支持放下去，就是绿色的Grid，如果发现位置冲突无法放下，就需要把绿色的Grid换成红色的Grid,然后我又挪开后发现又支持放下去了，就再改成绿色的Grid
 
+
+V1.3 兵种回收
+
+我们在基地上放下的兵种，支持再收回背包中
+
+具体逻辑是:
+1.玩家点击StarterGui - MainGui - Remove这个按钮，触发回收流程：
+2.回收流程下：需要：
+    a.自动将背包按钮切换为显示状态，同时将MainGui - Start的visible属性改成false，将MainGui - CoinNum的visible属性也改成False
+    b.将StarterGui - MainGui-RemoveTips的Visible属性改成True
+    c.将StarterGui - MainGui - Remove的Visible属性改成false
+    d.将StarterGui - MainGui - Exit的Visible属性改成True
+
+3.玩家点击Exit按钮，或者当场中没有任何一个摆放中的兵种模型时，退出回收流程，退出回收流程后：
+    a.将StarterGui - MainGui - Exit的Visible属性改成false
+    b.将StarterGui - MainGui-RemoveTips的Visible属性改成false
+    c.将StarterGui - MainGui - Remove的Visible属性改成true
+    d.自动将背包按钮切换为隐藏状态，同时将MainGui - Start的visible属性改成true，将MainGui - CoinNum的visible属性也改成true
+
+回收操作：
+在回收流程中时，玩家点击场中已经摆放的模型，可以将该模型从场中移除，释放出占据的位置，并将该模型收回到自己的背包中
+回收状态下点击模型时，需要将模型的HighLight的描边改成红色
+
+注意：在回收状态下，点击背包中的兵种信息，无法触发摆放操作，一定要退出回收模式，才能点击背包中的兵种信息触发摆放操作

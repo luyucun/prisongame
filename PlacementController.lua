@@ -87,6 +87,22 @@ function PlacementController.Initialize()
         responseEvent.OnClientEvent:Connect(OnPlacementResponse)
     end
 
+    -- V1.3: 监听回收事件，清理placedModels（Bug修复）
+    local removeResponseEvent = placementEvents:FindFirstChild("RemoveResponse")
+    if removeResponseEvent then
+        removeResponseEvent.OnClientEvent:Connect(function(success, message, instanceId)
+            if success then
+                -- 回收成功，清理placedModels中对应的模型
+                for model, data in pairs(placementState.placedModels) do
+                    if model:GetAttribute("InstanceId") == instanceId then
+                        placementState.placedModels[model] = nil
+                        break
+                    end
+                end
+            end
+        end)
+    end
+
     -- 等待IdleFloor加载
     task.spawn(function()
         -- 等待玩家角色加载
@@ -170,6 +186,12 @@ end
 @param gridSize number - 占地大小
 ]]
 function PlacementController.StartPlacement(instanceId, unitId, gridSize)
+    -- V1.3: 检查是否处于回收模式
+    if _G.RemovalController and _G.RemovalController.IsRemovalMode() then
+        warn("[PlacementController] 回收模式下无法放置兵种")
+        return
+    end
+
     if placementState.isPlacing then
         PlacementController.CancelPlacement()
     end

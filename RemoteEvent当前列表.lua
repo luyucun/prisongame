@@ -14,7 +14,9 @@ ReplicatedStorage
         ├──StartPlacement（RemoteEvent） - 客户端请求开始放置兵种
         ├──ConfirmPlacement（RemoteEvent） - 客户端确认放置兵种
         ├──CancelPlacement（RemoteEvent） - 客户端取消放置兵种
-        └──PlacementResponse（RemoteEvent） - 服务端返回放置结果
+        ├──PlacementResponse（RemoteEvent） - 服务端返回放置结果
+        ├──RemoveUnit（RemoteEvent） 【V1.3新增】 - 客户端请求回收兵种
+        └──RemoveResponse（RemoteEvent） 【V1.3新增】 - 服务端返回回收结果
 
 
 

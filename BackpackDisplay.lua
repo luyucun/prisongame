@@ -85,6 +85,12 @@ local inventoryDataCache = {}
 local function OnUnitItemClicked(unitId, unitName)
     print("[BackpackDisplay] 点击兵种:", unitName, unitId)
 
+    -- V1.3: 检查是否处于回收模式
+    if _G.RemovalController and _G.RemovalController.IsRemovalMode() then
+        warn("[BackpackDisplay] 回收模式下无法点击背包放置兵种")
+        return
+    end
+
     -- 调试：打印缓存内容
     print("[BackpackDisplay] inventoryDataCache:", inventoryDataCache)
     if inventoryDataCache[unitId] then

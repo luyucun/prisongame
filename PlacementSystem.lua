@@ -194,9 +194,10 @@ end
 创建兵种模型到世界
 @param unitId string
 @param position Vector3
+@param instanceId string - V1.3: 添加instanceId参数用于标记模型
 @return Model|nil
 ]]
-local function CreateUnitModel(unitId, position)
+local function CreateUnitModel(unitId, position, instanceId)
     local unitConfig = UnitConfig.GetUnitById(unitId)
     if not unitConfig then
         return nil
@@ -218,6 +219,11 @@ local function CreateUnitModel(unitId, position)
 
     -- 克隆模型
     local model = modelTemplate:Clone()
+
+    -- V1.3: 设置InstanceId属性，用于回收时识别
+    if instanceId then
+        model:SetAttribute("InstanceId", instanceId)
+    end
 
     -- 设置位置
     if model.PrimaryPart then
@@ -328,8 +334,8 @@ function PlacementSystem.PlaceUnit(player, instanceId, position)
     -- 计算精确的放置位置 (对齐到网格中心)
     local finalPosition = PlacementConfig.GridToWorld(gridX, gridZ, floorCenter)
 
-    -- 创建模型
-    local model = CreateUnitModel(unitInstance.UnitId, finalPosition)
+    -- V1.3: 传递instanceId到CreateUnitModel
+    local model = CreateUnitModel(unitInstance.UnitId, finalPosition, instanceId)
     if not model then
         return false, "创建模型失败"
     end
@@ -400,6 +406,32 @@ function PlacementSystem.RemovePlacedUnit(player, instanceId)
     placedUnits[userId][instanceId] = nil
 
     return true, "移除成功"
+end
+
+--[[
+回收兵种（V1.3：移除已放置的兵种并返回背包）
+@param player Player
+@param instanceId string
+@return boolean, string
+]]
+function PlacementSystem.RemoveUnit(player, instanceId)
+    -- 1. 移除放置的兵种
+    local success, message = PlacementSystem.RemovePlacedUnit(player, instanceId)
+    if not success then
+        return false, message
+    end
+
+    -- 2. 刷新客户端背包显示（兵种已经存在于InventorySystem中，只是IsPlaced变为false）
+    InventorySystem.RefreshClientInventory(player)
+
+    if GameConfig.DEBUG_MODE then
+        print(string.format(
+            "%s 回收兵种成功 - 玩家:%s 实例ID:%s",
+            GameConfig.LOG_PREFIX, player.Name, instanceId
+        ))
+    end
+
+    return true, "回收成功"
 end
 
 --[[
@@ -528,6 +560,28 @@ local function OnCancelPlacement(player, instanceId)
 end
 
 --[[
+处理回收兵种请求 (V1.3)
+@param player Player
+@param instanceId string
+]]
+local function OnRemoveUnit(player, instanceId)
+    if GameConfig.DEBUG_MODE then
+        print(GameConfig.LOG_PREFIX, "处理回收请求:", player.Name, instanceId)
+    end
+
+    -- 调用RemoveUnit移除兵种
+    local success, message = PlacementSystem.RemoveUnit(player, instanceId)
+
+    -- 通知客户端结果
+    if InitializeEvents() then
+        local responseEvent = PlacementEvents:FindFirstChild("RemoveResponse")
+        if responseEvent then
+            responseEvent:FireClient(player, success, message, instanceId)
+        end
+    end
+end
+
+--[[
 初始化放置系统
 ]]
 function PlacementSystem.Initialize()
@@ -551,6 +605,15 @@ function PlacementSystem.Initialize()
     local cancelEvent = PlacementEvents:FindFirstChild("CancelPlacement")
     if cancelEvent then
         cancelEvent.OnServerEvent:Connect(OnCancelPlacement)
+    end
+
+    -- V1.3: 连接回收事件
+    local removeEvent = PlacementEvents:FindFirstChild("RemoveUnit")
+    if removeEvent then
+        removeEvent.OnServerEvent:Connect(OnRemoveUnit)
+        if GameConfig.DEBUG_MODE then
+            print(GameConfig.LOG_PREFIX, "已连接RemoveUnit事件")
+        end
     end
 
     -- 连接玩家离开事件
