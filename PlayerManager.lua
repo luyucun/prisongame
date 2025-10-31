@@ -18,6 +18,7 @@ local PlayerManager = {}
 -- 引用服务
 local Players = game:GetService("Players")
 local ServerScriptService = game:GetService("ServerScriptService")
+local RunService = game:GetService("RunService")
 
 -- 引用模块
 local GameConfig = require(ServerScriptService.Config.GameConfig)
@@ -191,6 +192,51 @@ local function TeleportPlayerToHome(player, homeSlot)
     return true
 end
 
+--[[
+判断是否应该跳过家园分配
+当在Studio中使用"从此处开始游戏"功能时，跳过家园分配
+@param player Player - 玩家对象
+@return boolean - 是否应该跳过家园分配
+]]
+local function ShouldSkipHomeAssignment(player)
+    -- 首先检查是否在Studio环境中
+    if not RunService:IsStudio() then
+        return false
+    end
+
+    -- 尝试获取玩家的 JoinData
+    local success, joinData = pcall(function()
+        return player:GetJoinData()
+    end)
+
+    if GameConfig.DEBUG_MODE then
+        print(GameConfig.LOG_PREFIX, "GetJoinData success:", success)
+        if success and joinData then
+            print(GameConfig.LOG_PREFIX, "JoinData type:", typeof(joinData))
+            for k, v in pairs(joinData) do
+                print(GameConfig.LOG_PREFIX, "  JoinData." .. tostring(k) .. " =", tostring(v))
+            end
+        else
+            print(GameConfig.LOG_PREFIX, "JoinData is nil or error")
+        end
+    end
+
+    -- 在 Studio 的 PlayHere 模式下，GetJoinData 通常返回空表或 nil
+    -- 正式服务器或普通 Play 模式会有 TeleportData 等字段
+    if not success or not joinData or (type(joinData) == "table" and next(joinData) == nil) then
+        if GameConfig.DEBUG_MODE then
+            print(GameConfig.LOG_PREFIX, "检测到Studio PlayHere模式（joinData为空），跳过家园分配：", player.Name)
+        end
+        return true
+    end
+
+    if GameConfig.DEBUG_MODE then
+        print(GameConfig.LOG_PREFIX, "joinData存在且有内容，保持默认家园分配行为")
+    end
+
+    return false
+end
+
 -- ==================== 公共接口 ====================
 
 --[[
@@ -205,7 +251,16 @@ function PlayerManager.OnPlayerAdded(player)
     -- 1. 初始化玩家数据
     DataManager.InitializePlayerData(player)
 
-    -- 2. 随机选择可用基地
+    -- 2. 检查是否应该跳过家园分配（Studio的"从此处开始游戏"模式）
+    if ShouldSkipHomeAssignment(player) then
+        if GameConfig.DEBUG_MODE then
+            print(GameConfig.LOG_PREFIX, "跳过家园分配，玩家将在原地出生:", player.Name)
+        end
+        -- homeSlot保持默认值0，不占用基地，不进行传送
+        return
+    end
+
+    -- 3. 随机选择可用基地
     local homeSlot = SelectRandomHome()
     if not homeSlot then
         warn(GameConfig.LOG_PREFIX, "无法为玩家分配基地,服务器已满!", player.Name)
@@ -213,20 +268,20 @@ function PlayerManager.OnPlayerAdded(player)
         return
     end
 
-    -- 3. 占用基地
+    -- 4. 占用基地
     if not OccupyHome(homeSlot, player) then
         warn(GameConfig.LOG_PREFIX, "占用基地失败:", player.Name, homeSlot)
         return
     end
 
-    -- 4. 设置玩家数据中的基地编号
+    -- 5. 设置玩家数据中的基地编号
     DataManager.SetPlayerHomeSlot(player, homeSlot)
 
-    -- 5. 初始化玩家基地(HomeSystem)
+    -- 6. 初始化玩家基地(HomeSystem)
     local HomeSystem = require(ServerScriptService.Systems.HomeSystem)
     HomeSystem.InitializePlayerHome(player)
 
-    -- 6. 处理角色传送 - 使用异步方式避免阻塞
+    -- 7. 处理角色传送 - 使用异步方式避免阻塞
     local function HandleCharacterSpawn(character)
         task.spawn(function()
             -- 等待一小段时间确保角色完全加载
