@@ -29,10 +29,13 @@ local ServerScriptService = game:GetService("ServerScriptService")
 -- 引用模块
 local GameConfig = require(ServerScriptService.Config.GameConfig)
 local UnitConfig = require(ServerScriptService.Config.UnitConfig)
+local BattleConfig = require(ServerScriptService.Config.BattleConfig)
 local DataManager = require(ServerScriptService.Core.DataManager)
 local InventorySystem = require(ServerScriptService.Systems.InventorySystem)
 local CurrencySystem = require(ServerScriptService.Systems.CurrencySystem)
 local PlacementSystem = nil  -- 延迟加载，避免循环依赖
+local BattleTestSystem = nil  -- 延迟加载，避免循环依赖
+local BattleManager = nil     -- 延迟加载，避免循环依赖
 
 -- ==================== 配置 ====================
 
@@ -232,14 +235,31 @@ end
 local function CMD_Help(player, args)
     local helpText = [[
 === GM命令帮助 ===
+兵种管理:
 /addunit <unitId> [count] - 添加兵种(默认1个)
 /listunits - 查看背包
 /clearunits - 清空背包
 /unitlist - 查看所有可用兵种
+
+放置管理:
+/listplaced - 查看已放置的兵种
+/clearplaced - 清除所有已放置的兵种
+
+战斗测试:
+/battletest - 快速开始测试战斗(自动生成兵种)
+/spawnunit <team> <unitId> <level> <pos> - 生成测试兵种
+  team: attack/defense, level: 1-3, pos: 1-5
+/startbattle - 开始战斗
+/stopbattle - 强制结束战斗
+/clearbattle - 清理战场
+
+货币管理:
 /addcoins <amount> - 添加金币
-/listplaced - 查看已放置的兵种 V1.2
-/clearplaced - 清除所有已放置的兵种 V1.2
+
+其他:
 /help - 显示此帮助
+
+提示: 按V键打开战斗测试UI
     ]]
     SendMessage(player, helpText)
 end
@@ -290,6 +310,183 @@ local function CMD_ClearPlaced(player, args)
     SendMessage(player, string.format("已清除 %d 个已放置的兵种", count))
 end
 
+--[[
+命令: /battletest
+快速开始一场测试战斗 V1.5
+]]
+local function CMD_BattleTest(player, args)
+    -- 延迟加载BattleTestSystem和BattleManager
+    if not BattleTestSystem then
+        BattleTestSystem = require(ServerScriptService.Systems.BattleTestSystem)
+    end
+    if not BattleManager then
+        BattleManager = require(ServerScriptService.Systems.BattleManager)
+    end
+
+    -- 创建简单的测试数据：双方各1个1级Noob在位置1
+    local attackUnitsData = {
+        {UnitId = "Noob", Level = 1, Position = 1}
+    }
+    local defenseUnitsData = {
+        {UnitId = "Noob", Level = 1, Position = 1}
+    }
+
+    -- 调用战斗测试系统
+    BattleTestSystem.HandleBattleTestRequest(player, attackUnitsData, defenseUnitsData)
+    SendMessage(player, "战斗测试已启动！观察Attack位置1和Defense位置1")
+end
+
+--[[
+命令: /spawnunit <team> <unitId> <level> <position>
+在战斗测试区域生成兵种 V1.5
+]]
+local function CMD_SpawnUnit(player, args)
+    if #args < 4 then
+        SendMessage(player, "用法: /spawnunit <team> <unitId> <level> <position>")
+        SendMessage(player, "例如: /spawnunit attack Noob 1 1")
+        SendMessage(player, "team可选: attack, defense")
+        SendMessage(player, "level范围: 1-3")
+        SendMessage(player, "position范围: 1-5")
+        return
+    end
+
+    -- 延迟加载BattleTestSystem
+    if not BattleTestSystem then
+        BattleTestSystem = require(ServerScriptService.Systems.BattleTestSystem)
+    end
+
+    local teamStr = string.lower(args[1])
+    local unitId = args[2]
+    local level = tonumber(args[3])
+    local positionIndex = tonumber(args[4])
+
+    -- 验证参数
+    local team = nil
+    if teamStr == "attack" then
+        team = BattleConfig.Team.ATTACK
+    elseif teamStr == "defense" then
+        team = BattleConfig.Team.DEFENSE
+    else
+        SendMessage(player, "错误: team必须是attack或defense")
+        return
+    end
+
+    if not UnitConfig.IsValidUnit(unitId) then
+        SendMessage(player, "错误: 无效的兵种ID: " .. unitId)
+        return
+    end
+
+    if not level or level < 1 or level > 3 then
+        SendMessage(player, "错误: level必须在1-3之间")
+        return
+    end
+
+    if not positionIndex or positionIndex < 1 or positionIndex > 5 then
+        SendMessage(player, "错误: position必须在1-5之间")
+        return
+    end
+
+    -- 生成兵种
+    local success = BattleTestSystem.SpawnSingleTestUnit(player, unitId, level, team, positionIndex)
+
+    if success then
+        SendMessage(player, string.format("已在%s位置%d生成 Lv.%d %s", team, positionIndex, level, unitId))
+    else
+        SendMessage(player, "生成失败，请检查参数或战斗实例状态")
+    end
+end
+
+--[[
+命令: /startbattle
+开始当前玩家的战斗测试 V1.5
+]]
+local function CMD_StartBattle(player, args)
+    -- 延迟加载BattleManager
+    if not BattleManager then
+        BattleManager = require(ServerScriptService.Systems.BattleManager)
+    end
+
+    -- 获取玩家当前的战斗实例
+    local battle = BattleManager.GetPlayerBattle(player.UserId)
+
+    if not battle then
+        SendMessage(player, "错误: 你还没有创建战斗实例")
+        SendMessage(player, "请先使用 /spawnunit 生成兵种，或使用 /battletest 快速测试")
+        return
+    end
+
+    if battle.State ~= BattleConfig.BattleState.PREPARING then
+        SendMessage(player, "错误: 战斗已经开始或已结束")
+        return
+    end
+
+    -- 检查是否至少有一方有兵种
+    if #battle.AttackUnits == 0 and #battle.DefenseUnits == 0 then
+        SendMessage(player, "错误: 至少需要生成一个兵种才能开始战斗")
+        return
+    end
+
+    -- 开始战斗
+    local success = BattleManager.StartBattle(battle.BattleId)
+
+    if success then
+        SendMessage(player, string.format("战斗开始! 战斗ID: %d", battle.BattleId))
+    else
+        SendMessage(player, "战斗启动失败")
+    end
+end
+
+--[[
+命令: /stopbattle
+立即结束当前玩家的战斗 V1.5
+]]
+local function CMD_StopBattle(player, args)
+    -- 延迟加载BattleManager
+    if not BattleManager then
+        BattleManager = require(ServerScriptService.Systems.BattleManager)
+    end
+
+    -- 获取玩家当前的战斗实例
+    local battle = BattleManager.GetPlayerBattle(player.UserId)
+
+    if not battle then
+        SendMessage(player, "错误: 你没有正在进行的战斗")
+        return
+    end
+
+    -- 强制结束战斗
+    local success = BattleManager.EndBattle(battle.BattleId, nil)
+
+    if success then
+        SendMessage(player, "战斗已强制结束")
+    else
+        SendMessage(player, "结束战斗失败")
+    end
+end
+
+--[[
+命令: /clearbattle
+清理战斗测试区域的所有兵种 V1.5
+]]
+local function CMD_ClearBattle(player, args)
+    -- 延迟加载BattleManager
+    if not BattleManager then
+        BattleManager = require(ServerScriptService.Systems.BattleManager)
+    end
+
+    -- 获取玩家当前的战斗实例
+    local battle = BattleManager.GetPlayerBattle(player.UserId)
+
+    if not battle then
+        SendMessage(player, "你没有战斗实例需要清理")
+        return
+    end
+
+    -- 清理战场
+    BattleManager.CleanupBattle(battle.BattleId)
+    SendMessage(player, "已清理战斗测试区域")
+end
+
 -- 命令映射表
 local COMMAND_HANDLERS = {
     ["addunit"] = CMD_AddUnit,
@@ -299,6 +496,11 @@ local COMMAND_HANDLERS = {
     ["addcoins"] = CMD_AddCoins,
     ["listplaced"] = CMD_ListPlaced,      -- V1.2新增
     ["clearplaced"] = CMD_ClearPlaced,    -- V1.2新增
+    ["battletest"] = CMD_BattleTest,      -- V1.5新增
+    ["spawnunit"] = CMD_SpawnUnit,        -- V1.5新增
+    ["startbattle"] = CMD_StartBattle,    -- V1.5新增
+    ["stopbattle"] = CMD_StopBattle,      -- V1.5新增
+    ["clearbattle"] = CMD_ClearBattle,    -- V1.5新增
     ["help"] = CMD_Help,
 }
 

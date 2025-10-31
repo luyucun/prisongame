@@ -42,6 +42,13 @@ UnitData = {
     BaseHealth = number,       -- 基础生命值
     BaseAttack = number,       -- 基础攻击力
     BaseAttackSpeed = number,  -- 基础攻击速度(每次攻击间隔秒数)
+    -- V1.5新增战斗属性
+    BaseAttackRange = number,  -- 基础攻击距离(studs)
+    BaseMoveSpeed = number,    -- 基础移动速度(studs/秒)
+    ProjectileSpeed = number,  -- 弹道速度(studs/秒) 近战填0
+    MoveAnimationId = string,  -- 移动动画ID (如果为空则不播放)
+    AttackAnimationId = string,-- 普通攻击动画ID
+    WeaponName = string,       -- 武器名称(模型中的Tool或Part名称)
 }
 ]]
 
@@ -62,6 +69,13 @@ UnitConfig.Units = {
         BaseHealth = 100,       -- 基础生命值
         BaseAttack = 10,        -- 基础攻击力
         BaseAttackSpeed = 1,    -- 基础攻击速度(1秒/次)
+        -- V1.5新增战斗属性
+        BaseAttackRange = 5,    -- 近战攻击距离5 studs
+        BaseMoveSpeed = 16,     -- 移动速度16 studs/秒
+        ProjectileSpeed = 0,    -- 近战无弹道
+        MoveAnimationId = "",   -- 移动动画ID (从角色Animate脚本的run中获取, 为空则不播放)
+        AttackAnimationId = "", -- 攻击动画ID (如果为空则使用Humanoid默认动作, 格式: "12345678")
+        WeaponName = "Sword",   -- 武器名称
     },
 
     -- 兵种2: Rookie
@@ -78,6 +92,13 @@ UnitConfig.Units = {
         BaseHealth = 100,       -- 基础生命值
         BaseAttack = 10,        -- 基础攻击力
         BaseAttackSpeed = 1,    -- 基础攻击速度(1秒/次)
+        -- V1.5新增战斗属性
+        BaseAttackRange = 5,    -- 近战攻击距离5 studs
+        BaseMoveSpeed = 16,     -- 移动速度16 studs/秒
+        ProjectileSpeed = 0,    -- 近战无弹道
+        MoveAnimationId = "",   -- 移动动画ID (从角色Animate脚本的run中获取, 为空则不播放)
+        AttackAnimationId = "", -- 攻击动画ID (如果为空则使用Humanoid默认动作, 格式: "12345678")
+        WeaponName = "Sword",   -- 武器名称
     },
 
     -- 后续可以继续添加更多兵种...
@@ -231,6 +252,112 @@ end
 ]]
 function UnitConfig.GetLevelCoefficient(level)
     return UnitConfig.LevelCoefficients[level] or 1
+end
+
+-- ==================== V1.5新增: 战斗属性获取接口 ====================
+
+--[[
+获取兵种攻击距离(不受等级影响)
+@param unitId string - 兵种ID
+@return number - 攻击距离
+]]
+function UnitConfig.GetAttackRange(unitId)
+    local unitData = UnitConfig.GetUnitById(unitId)
+    if not unitData or not unitData.BaseAttackRange then
+        return 5  -- 默认5 studs
+    end
+    return unitData.BaseAttackRange
+end
+
+--[[
+获取兵种移动速度(不受等级影响)
+@param unitId string - 兵种ID
+@return number - 移动速度
+]]
+function UnitConfig.GetMoveSpeed(unitId)
+    local unitData = UnitConfig.GetUnitById(unitId)
+    if not unitData or not unitData.BaseMoveSpeed then
+        return 16  -- 默认16 studs/秒
+    end
+    return unitData.BaseMoveSpeed
+end
+
+--[[
+获取弹道速度(不受等级影响)
+@param unitId string - 兵种ID
+@return number - 弹道速度 (0表示近战)
+]]
+function UnitConfig.GetProjectileSpeed(unitId)
+    local unitData = UnitConfig.GetUnitById(unitId)
+    if not unitData or not unitData.ProjectileSpeed then
+        return 0  -- 默认近战
+    end
+    return unitData.ProjectileSpeed
+end
+
+--[[
+获取攻击动画ID
+@param unitId string - 兵种ID
+@return string - 动画ID
+]]
+function UnitConfig.GetAttackAnimationId(unitId)
+    local unitData = UnitConfig.GetUnitById(unitId)
+    if not unitData or not unitData.AttackAnimationId then
+        return ""
+    end
+    return unitData.AttackAnimationId
+end
+
+--[[
+获取移动动画ID
+@param unitId string - 兵种ID
+@return string - 动画ID
+]]
+function UnitConfig.GetMoveAnimationId(unitId)
+    local unitData = UnitConfig.GetUnitById(unitId)
+    if not unitData or not unitData.MoveAnimationId then
+        return ""
+    end
+    return unitData.MoveAnimationId
+end
+
+--[[
+获取武器名称
+@param unitId string - 兵种ID
+@return string - 武器名称
+]]
+function UnitConfig.GetWeaponName(unitId)
+    local unitData = UnitConfig.GetUnitById(unitId)
+    if not unitData or not unitData.WeaponName then
+        return "Sword"  -- 默认为Sword
+    end
+    return unitData.WeaponName
+end
+
+--[[
+检查是否为远程单位
+@param unitId string - 兵种ID
+@return boolean - 是否为远程单位
+]]
+function UnitConfig.IsRangedUnit(unitId)
+    local unitData = UnitConfig.GetUnitById(unitId)
+    if not unitData then
+        return false
+    end
+    return unitData.Type == UnitConfig.UnitType.RANGED
+end
+
+--[[
+检查是否为近战单位
+@param unitId string - 兵种ID
+@return boolean - 是否为近战单位
+]]
+function UnitConfig.IsMeleeUnit(unitId)
+    local unitData = UnitConfig.GetUnitById(unitId)
+    if not unitData then
+        return false
+    end
+    return unitData.Type == UnitConfig.UnitType.MELEE
 end
 
 return UnitConfig

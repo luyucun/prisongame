@@ -34,6 +34,12 @@ local PlacementSystem = require(ServerScriptService.Systems.PlacementSystem)
 local MergeSystem = require(ServerScriptService.Systems.MergeSystem)  -- V1.4新增
 local PhysicsManager = require(ServerScriptService.Systems.PhysicsManager)
 local GMCommandSystem = require(ServerScriptService.Systems.GMCommandSystem)
+-- V1.5新增 - 战斗系统
+local CombatSystem = require(ServerScriptService.Systems.CombatSystem)
+local ProjectileSystem = require(ServerScriptService.Systems.ProjectileSystem)
+local UnitAI = require(ServerScriptService.Systems.UnitAI)
+local BattleManager = require(ServerScriptService.Systems.BattleManager)
+local BattleTestSystem = require(ServerScriptService.Systems.BattleTestSystem)
 
 -- ==================== 系统初始化顺序 ====================
 
@@ -156,6 +162,74 @@ local function InitializeServer()
         -- GM系统不是关键系统,失败不影响游戏运行
     else
         print(GameConfig.LOG_PREFIX, "GM命令系统初始化成功")
+    end
+
+    -- 7. 初始化战斗系统(V1.5新增)
+    print(GameConfig.LOG_PREFIX, "步骤7: 初始化战斗系统...")
+
+    -- 7.1 初始化CombatSystem
+    print(GameConfig.LOG_PREFIX, "步骤7.1: 初始化战斗系统...")
+    success, result = pcall(function()
+        return CombatSystem.Initialize()
+    end)
+    if not success then
+        warn(GameConfig.LOG_PREFIX, "战斗系统初始化失败(异常):", result)
+    elseif result == false then
+        warn(GameConfig.LOG_PREFIX, "战斗系统初始化失败(返回false)")
+    else
+        print(GameConfig.LOG_PREFIX, "战斗系统初始化成功")
+    end
+
+    -- 7.2 初始化ProjectileSystem
+    print(GameConfig.LOG_PREFIX, "步骤7.2: 初始化弹道系统...")
+    success, result = pcall(function()
+        return ProjectileSystem.Initialize()
+    end)
+    if not success then
+        warn(GameConfig.LOG_PREFIX, "弹道系统初始化失败(异常):", result)
+    elseif result == false then
+        warn(GameConfig.LOG_PREFIX, "弹道系统初始化失败(返回false)")
+    else
+        print(GameConfig.LOG_PREFIX, "弹道系统初始化成功")
+    end
+
+    -- 7.3 初始化UnitAI
+    print(GameConfig.LOG_PREFIX, "步骤7.3: 初始化兵种AI系统...")
+    success, result = pcall(function()
+        return UnitAI.Initialize()
+    end)
+    if not success then
+        warn(GameConfig.LOG_PREFIX, "兵种AI系统初始化失败(异常):", result)
+    elseif result == false then
+        warn(GameConfig.LOG_PREFIX, "兵种AI系统初始化失败(返回false)")
+    else
+        print(GameConfig.LOG_PREFIX, "兵种AI系统初始化成功")
+    end
+
+    -- 7.4 初始化BattleManager
+    print(GameConfig.LOG_PREFIX, "步骤7.4: 初始化战斗管理器...")
+    success, result = pcall(function()
+        return BattleManager.Initialize()
+    end)
+    if not success then
+        warn(GameConfig.LOG_PREFIX, "战斗管理器初始化失败(异常):", result)
+    elseif result == false then
+        warn(GameConfig.LOG_PREFIX, "战斗管理器初始化失败(返回false)")
+    else
+        print(GameConfig.LOG_PREFIX, "战斗管理器初始化成功")
+    end
+
+    -- 7.5 初始化BattleTestSystem
+    print(GameConfig.LOG_PREFIX, "步骤7.5: 初始化战斗测试系统...")
+    success, result = pcall(function()
+        return BattleTestSystem.Initialize()
+    end)
+    if not success then
+        warn(GameConfig.LOG_PREFIX, "战斗测试系统初始化失败(异常):", result)
+    elseif result == false then
+        warn(GameConfig.LOG_PREFIX, "战斗测试系统初始化失败(返回false)")
+    else
+        print(GameConfig.LOG_PREFIX, "战斗测试系统初始化成功")
     end
 
     -- 检查是否有关键系统初始化失败

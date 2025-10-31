@@ -19,9 +19,14 @@ ReplicatedStorage
     │   ├──RemoveResponse（RemoteEvent） 【V1.3新增】 - 服务端返回回收结果
     │   ├──UpdatePosition（RemoteEvent） 【V1.4.1新增】 - 客户端请求更新兵种位置（拖动换位）
     │   └──UpdateResponse（RemoteEvent） 【V1.4.1新增】 - 服务端返回位置更新结果
-    └──MergeEvents（Folder）/  【V1.4新增】
-        ├──RequestMerge（RemoteEvent） - 客户端请求合成兵种
-        └──MergeResponse（RemoteEvent） - 服务端返回合成结果
+    ├──MergeEvents（Folder）/  【V1.4新增】
+    │   ├──RequestMerge（RemoteEvent） - 客户端请求合成兵种
+    │   └──MergeResponse（RemoteEvent） - 服务端返回合成结果
+    └──BattleEvents（Folder）/  【V1.5新增】
+        ├──RequestBattleTest（RemoteEvent） - 客户端请求开始战斗测试
+        ├──BattleTestResponse（RemoteEvent） - 服务端返回战斗测试结果
+        ├──BattleStateUpdate（RemoteEvent） - 服务端通知客户端战斗状态更新
+        └──UnitDeath（BindableEvent） - 服务端内部兵种死亡通知
 
 
 
