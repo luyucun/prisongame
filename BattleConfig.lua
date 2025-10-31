@@ -39,6 +39,9 @@ BattleConfig.CLEANUP_DELAY = 3
 -- AI更新间隔(秒) 每0.1秒更新一次
 BattleConfig.AI_UPDATE_INTERVAL = 0.1
 
+-- AI批量更新间隔(秒) V1.5.1新增 - 用于节流
+BattleConfig.AI_BATCH_UPDATE_INTERVAL = 0.2
+
 -- 目标搜索范围(studs)
 BattleConfig.TARGET_SEARCH_RANGE = 200
 
@@ -121,6 +124,76 @@ BattleConfig.MELEE_DAMAGE_COOLDOWN = 0.1
 BattleConfig.ENABLE_UNIT_COLLISION = true
 
 -- 移动到目标时的停止距离容差(studs)
-BattleConfig.MOVE_STOP_TOLERANCE = 1
+-- V1.5.1优化: 增加容差防止边界摇摆
+BattleConfig.MOVE_STOP_TOLERANCE = 2
+
+-- 攻击距离宽容值(studs) - 额外的宽容范围,防止攻击距离边界摇摆
+BattleConfig.ATTACK_RANGE_TOLERANCE = 0.5
+
+-- ==================== V1.5.1新增配置 ====================
+
+-- 碰撞判定默认值
+BattleConfig.HITBOX_DEFAULT_RADIUS = 5       -- 默认碰撞半径
+BattleConfig.HITBOX_DEFAULT_ANGLE = 90       -- 默认扇形角度
+BattleConfig.HITBOX_DEFAULT_HEIGHT = 8       -- 默认碰撞高度
+BattleConfig.HITBOX_DEFAULT_MAX_TARGETS = 1  -- 默认最大命中数
+
+-- 性能优化配置
+BattleConfig.UNIT_POSITION_UPDATE_THRESHOLD = 3  -- 单位位置更新阈值(studs)
+BattleConfig.HITBOX_SAME_FRAME_COOLDOWN = 0.05   -- 同帧命中冷却(秒)
+
+-- 攻击超时配置
+BattleConfig.ATTACK_TIMEOUT = 5              -- 攻击阶段超时时间(秒,防止动画失败卡死)
+BattleConfig.ANIMATION_FALLBACK_RATIO = 0.5  -- 动画回退延迟系数(BaseAttackSpeed * 此值)
+
+-- 动画事件配置
+BattleConfig.DEFAULT_ANIMATION_EVENT_NAME = "Damage"  -- 默认动画事件名称
+
+-- 攻击阶段枚举
+BattleConfig.AttackPhase = {
+	IDLE = "Idle",           -- 空闲,可以开始攻击
+	ATTACKING = "Attacking", -- 攻击中(等待Damage事件)
+	RECOVERY = "Recovery",   -- 收招阶段(攻击冷却)
+}
+
+-- ==================== 近战停靠配置 ====================
+-- 避免隔空挥拳,让单位保持合适的战斗距离
+
+-- 接触缓冲距离(studs) - 让单位之间保持合适间距，既不隔空也不贴太紧
+-- 建议值: 1.0-1.5 (可根据实际效果调整)
+BattleConfig.CONTACT_BUFFER = -1.2
+
+-- 最小停靠距离(studs) - 防止计算结果为负
+BattleConfig.MIN_DOCKING_DISTANCE = 0.5
+
+-- ==================== 伤害冒字配置 ====================
+-- 伤害数字显示相关配置
+
+-- 是否启用伤害冒字
+BattleConfig.ENABLE_DAMAGE_NUMBERS = true
+
+-- 冒字移动距离(studs)
+BattleConfig.DAMAGE_NUMBER_RISE_DISTANCE = 3
+
+-- 冒字持续时间(秒)
+BattleConfig.DAMAGE_NUMBER_DURATION = 1.5
+
+-- 冒字字体大小
+BattleConfig.DAMAGE_NUMBER_TEXT_SIZE = 24
+
+-- 冒字颜色(正常伤害)
+BattleConfig.DAMAGE_NUMBER_COLOR = Color3.fromRGB(255, 50, 50)  -- 红色
+
+-- 冒字描边颜色
+BattleConfig.DAMAGE_NUMBER_STROKE_COLOR = Color3.fromRGB(0, 0, 0)  -- 黑色
+
+-- 冒字描边粗细
+BattleConfig.DAMAGE_NUMBER_STROKE_THICKNESS = 2
+
+-- 冒字随机水平偏移范围(studs)
+BattleConfig.DAMAGE_NUMBER_RANDOM_OFFSET_X = 1
+
+-- 冒字随机水平偏移范围(studs)
+BattleConfig.DAMAGE_NUMBER_RANDOM_OFFSET_Z = 1
 
 return BattleConfig

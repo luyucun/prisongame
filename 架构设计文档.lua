@@ -45,18 +45,20 @@ ServerScriptService/          (服务端脚本目录)
 │   ├── PlacementSystem.lua    (放置系统 - 负责兵种放置验证 V1.2)
 │   ├── MergeSystem.lua        (合成系统 - 负责兵种合成逻辑 V1.4)
 │   ├── PhysicsManager.lua     (物理管理 - 负责碰撞组管理 V1.4)
-│   ├── BattleManager.lua      (战斗管理器 - 管理战斗实例 V1.5新增)
-│   ├── CombatSystem.lua       (战斗系统 - 伤害计算/血量管理 V1.5新增)
-│   ├── UnitAI.lua             (兵种AI - 目标寻找/移动/攻击 V1.5新增)
-│   ├── ProjectileSystem.lua   (弹道系统 - 远程弹道管理 V1.5新增)
-│   ├── BattleTestSystem.lua   (战斗测试系统 - 测试工具 V1.5新增)
+│   ├── BattleManager.lua      (战斗管理器 - 管理战斗实例 V1.5)
+│   ├── CombatSystem.lua       (战斗系统 - 伤害计算/血量管理/攻击阶段驱动 V1.5+V1.5.1重构)
+│   ├── UnitAI.lua             (兵种AI - 目标寻找/移动/攻击 V1.5+V1.5.1性能优化)
+│   ├── ProjectileSystem.lua   (弹道系统 - 远程弹道管理 V1.5)
+│   ├── BattleTestSystem.lua   (战斗测试系统 - 测试工具 V1.5)
+│   ├── HitboxService.lua      (碰撞服务 - 服务端权威命中判定 V1.5.1新增)
+│   ├── UnitManager.lua        (单位管理器 - 单位索引与分组 V1.5.1新增)
 │   └── GMCommandSystem.lua    (GM命令系统 - 负责调试命令处理)
 │
 └── Config/                    (配置文件)
     ├── GameConfig.lua         (游戏配置 - 存储游戏常量和配置)
-    ├── UnitConfig.lua         (兵种配置 - 存储兵种属性 V1.5更新)
+    ├── UnitConfig.lua         (兵种配置 - 存储兵种属性 V1.5更新 + V1.5.1扩展战斗参数)
     ├── PlacementConfig.lua    (放置配置 - 存储放置系统配置 V1.2)
-    └── BattleConfig.lua       (战斗配置 - 存储战斗系统配置 V1.5新增)
+    └── BattleConfig.lua       (战斗配置 - 存储战斗系统配置 V1.5 + V1.5.1扩展)
 
 StarterPlayer/
 └── StarterPlayerScripts/      (客户端脚本目录)
@@ -326,6 +328,14 @@ ReplicatedStorage.Events.CurrencyEvents/
 - 战斗系统: 伤害计算、血量管理、死亡流程
 - 弹道系统: 远程单位弹道追踪
 - 战斗测试工具: 简易UI测试战斗功能
+
+【V1.5.1 架构优化 - 战斗系统重构】
+- HitboxService: 服务端权威的命中判定服务(OverlapParams + 扇形过滤)
+- UnitManager: 单位索引与分组管理,优化寻敌性能
+- CombatSystem 重构: 完整攻击阶段状态机(Windup → Release → Recovery)
+- UnitAI 性能优化: AI节流(0.2-0.3秒更新)、移除Touched依赖
+- 动画 Marker 系统: 精确命中时机控制
+- 战斗配置扩展: 添加攻击时序、碰撞判定等精细参数
 
 【V2.0 预期功能】
 - 商店系统: 购买兵种
@@ -856,5 +866,539 @@ UI逻辑 (BattleTestUI.lua):
 
 =====================================================
 V1.5 战斗系统设计完成
+=====================================================
+]]
+
+
+--[[
+=====================================================
+十、V1.5.1 战斗系统架构优化设计
+=====================================================
+
+【10.1 优化背景与目标】
+----------------------------------
+V1.5 初版战斗系统存在以下问题:
+1. ❌ 近战完全依赖 Touched 事件,多人环境不稳定
+2. ❌ 缺少完整的攻击阶段控制(起手/生效/收招)
+3. ❌ UnitAI 直接调用 TakeDamage,违反服务器权威原则
+4. ❌ AI 每帧更新,全量遍历寻敌,性能低下
+5. ❌ 缺少统一的单位索引管理
+
+V1.5.1 优化目标:
+1. ✅ 服务端权威的命中判定(OverlapParams + 扇形过滤)
+2. ✅ 完整的攻击阶段状态机(Windup → Release → Recovery)
+3. ✅ 统一的伤害结算流程(CombatSystem内部触发)
+4. ✅ AI性能优化(节流 + 分组索引)
+5. ✅ 动画 Marker 集成,支持精确命中时机
+
+
+【10.2 新增模块设计】
+----------------------------------
+
+█ HitboxService (碰撞判定服务)
+职责:
+- 提供服务端权威的近战命中判定
+- 使用 OverlapParams 替代 Touched 事件
+- 支持扇形角度过滤、距离过滤
+- 多段命中控制(同帧去重)
+- 友军碰撞忽略
+
+数据结构:
+HitboxConfig = {
+    Radius = number,           -- 碰撞半径(studs)
+    Angle = number,            -- 扇形角度(度数,0-180)
+    Height = number,           -- 碰撞高度(studs)
+    MaxTargets = number,       -- 最大命中目标数
+    IgnoreList = {Instance},   -- 忽略列表
+}
+
+HitResult = {
+    Targets = {Model},         -- 命中的目标列表
+    HitCount = number,         -- 命中数量
+}
+
+主要接口:
+- ResolveMeleeHit(attackerModel, targetTeam, battleId, config) : 执行近战命中判定
+- CreateHitboxConfig(radius, angle, height, maxTargets) : 创建碰撞配置
+- FilterByAngle(attackerPos, attackerLook, targetPos, maxAngle) : 扇形角度过滤
+- FilterByDistance(attackerPos, targetPos, maxDistance) : 距离过滤
+
+实现要点:
+1. 使用 Workspace:GetPartBoundsInRadius() 或 OverlapParams 进行范围查询
+2. 使用 Vector3.Dot 计算角度,过滤非朝向目标
+3. 维护 LastHitFrame[attacker][target] 防止同帧重复命中
+4. 使用 PhysicsService 碰撞组排除友军
+
+
+█ UnitManager (单位索引管理器)
+职责:
+- 管理所有战斗中的单位,按 battleId 和 team 分组
+- 提供高效的寻敌接口
+- 维护单位位置缓存,减少重复计算
+- 广播单位死亡/位置变化事件
+
+数据结构:
+BattleUnits = {
+    [battleId] = {
+        [Team.ATTACK] = {unitModel1, unitModel2, ...},
+        [Team.DEFENSE] = {unitModel1, unitModel2, ...},
+    }
+}
+
+UnitCache = {
+    [unitModel] = {
+        Position = Vector3,
+        LastUpdateTime = number,
+    }
+}
+
+主要接口:
+- RegisterUnit(battleId, team, unitModel) : 注册单位
+- UnregisterUnit(unitModel) : 注销单位
+- GetBattleUnits(battleId, team) : 获取指定队伍的所有单位
+- GetClosestEnemy(unitModel, maxDistance) : 获取最近的敌人(优化版)
+- IterEnemies(battleId, team, callback) : 遍历敌方单位
+- UpdateUnitPosition(unitModel, position) : 更新单位位置缓存
+- GetUnitCount(battleId, team) : 获取队伍单位数量
+
+性能优化:
+1. 按 battleId 分组,避免跨战斗遍历
+2. 按 team 分组,寻敌时只遍历敌方列表
+3. 位置缓存,避免频繁访问 HumanoidRootPart.Position
+4. 死亡单位立即从索引中移除
+
+
+【10.3 核心模块重构】
+----------------------------------
+
+█ CombatSystem 重构 - 动画事件驱动的攻击系统
+
+【重要说明】
+用户的近战单位攻击动画中包含 "Damage" 动画事件(Animation Event/Marker)
+伤害判定完全由该事件触发,而非基于时间计算
+
+新增攻击阶段枚举:
+AttackPhase = {
+    IDLE = "Idle",             -- 空闲,可以开始攻击
+    ATTACKING = "Attacking",   -- 攻击中(播放动画,等待Damage事件)
+    RECOVERY = "Recovery",     -- 收招阶段(攻击冷却,防止连续攻击)
+}
+
+扩展 UnitCombatState 数据结构:
+UnitCombatState = {
+    ... (原有字段)
+
+    -- V1.5.1 新增攻击阶段相关
+    AttackPhase = string,      -- 当前攻击阶段
+    AttackStartTime = number,  -- 攻击开始时间(用于超时检测)
+    RecoveryEndTime = number,  -- 冷却结束时间
+    CurrentAnimTrack = AnimationTrack, -- 当前播放的攻击动画轨道
+    LastHitFrame = {},         -- 上次命中帧记录 [target] = frame
+}
+
+主要接口改造:
+- BeginAttack(unitModel, target) : 开始攻击
+  1. 检查是否可以攻击(当前阶段必须是Idle且冷却结束)
+  2. 设置 AttackPhase = Attacking
+  3. 记录 AttackStartTime = tick()
+  4. 返回 true (成功) 或 false (失败)
+  5. 由 UnitAI 负责播放动画并监听 "Damage" 事件
+
+- OnDamageEvent(unitModel) : 动画 "Damage" 事件触发时调用
+  1. 检查当前阶段是否为 Attacking
+  2. 如果不是,忽略本次调用(防止异常触发)
+  3. 调用 HitboxService.ResolveMeleeHit() 进行命中判定
+  4. 获取命中目标列表
+  5. 对每个目标调用 TakeDamage()
+  6. 进入 Recovery 阶段:
+     - AttackPhase = Recovery
+     - RecoveryEndTime = tick() + AttackSpeed (来自配置)
+  7. 返回命中目标数量
+
+- Update(dt) : 驱动攻击阶段更新(由主循环调用)
+  1. 遍历所有 unitStates
+  2. 处理 Recovery 阶段的单位:
+     - 如果 tick() >= RecoveryEndTime,切换到 Idle
+  3. 处理 Attacking 阶段超时(防止动画失败导致卡死):
+     - 如果 tick() - AttackStartTime > 5秒,强制切换到 Recovery
+
+- CanAttack(unitModel) : 检查是否可以攻击
+  1. 检查 AttackPhase == Idle
+  2. 检查 tick() >= RecoveryEndTime (冷却已结束)
+  3. 检查单位存活
+
+- TakeDamage(unitModel, damage, attacker) : 保持不变,但只能从 CombatSystem 内部调用
+
+伤害结算流程:
+UnitAI.AttackTarget() →
+  CombatSystem.BeginAttack() → 返回true →
+  UnitAI 播放攻击动画 →
+  监听 AnimationTrack:GetMarkerReachedSignal("Damage") →
+  动画到达 "Damage" 事件 →
+  调用 CombatSystem.OnDamageEvent() →
+  HitboxService.ResolveMeleeHit() →
+  对命中目标调用 TakeDamage() →
+  进入 Recovery 阶段 →
+  (AttackSpeed秒后) →
+  切换到 Idle,允许下次攻击
+
+回退机制(动画失败时):
+如果动画加载失败或没有 "Damage" 标记:
+- 使用 task.delay(BaseAttackSpeed * 0.5) 模拟伤害判定时机
+- 调用 CombatSystem.OnDamageEvent() 触发伤害
+- 确保即使动画失败也能正常战斗
+
+
+█ UnitAI 重构 - 动画事件驱动 + 性能优化
+
+主要改造:
+1. 移除所有 SetupWeaponTouch / weaponTouchConnections 相关代码
+2. 移除 weaponCooldowns 冷却机制(改用CombatSystem统一管理)
+
+3. AttackTarget() 核心改造:
+   ```lua
+   function UnitAI.AttackTarget(unitModel, target, state, aiData)
+       -- 检查攻击冷却 (现在由CombatSystem管理)
+       if not CombatSystem.CanAttack(unitModel) then
+           return
+       end
+
+       -- 面向目标
+       local targetPart = target:FindFirstChild("HumanoidRootPart")
+       if targetPart then
+           local lookVector = (targetPart.Position - aiData.HumanoidRootPart.Position).Unit
+           aiData.HumanoidRootPart.CFrame = CFrame.new(
+               aiData.HumanoidRootPart.Position,
+               aiData.HumanoidRootPart.Position + lookVector
+           )
+       end
+
+       -- 开始攻击 (进入Attacking阶段)
+       local success = CombatSystem.BeginAttack(unitModel, target)
+       if not success then
+           return
+       end
+
+       -- 播放攻击动画
+       local animationId = UnitConfig.GetAttackAnimationId(state.UnitId)
+       if animationId and animationId ~= "" then
+           local animTrack = PlayAttackAnimation(aiData.Humanoid, animationId)
+
+           if animTrack then
+               -- 监听动画的 "Damage" 事件
+               animTrack:GetMarkerReachedSignal("Damage"):Connect(function()
+                   -- 动画到达关键帧,触发伤害判定
+                   CombatSystem.OnDamageEvent(unitModel)
+               end)
+
+               DebugLog(string.format("%s 播放攻击动画,监听Damage事件", state.UnitId))
+           else
+               -- 动画加载失败,使用回退机制
+               WarnLog(string.format("%s 动画加载失败,使用回退机制", state.UnitId))
+               local fallbackDelay = state.AttackSpeed * 0.5
+               task.delay(fallbackDelay, function()
+                   CombatSystem.OnDamageEvent(unitModel)
+               end)
+           end
+       else
+           -- 没有配置动画,使用回退机制
+           DebugLog(string.format("%s 无攻击动画配置,使用回退机制", state.UnitId))
+           local fallbackDelay = state.AttackSpeed * 0.5
+           task.delay(fallbackDelay, function()
+               CombatSystem.OnDamageEvent(unitModel)
+           end)
+       end
+   end
+   ```
+
+4. UpdateAllAIs() 性能优化:
+   - 使用累积时间,达到 0.2-0.3秒 才执行一次批量更新
+   ```lua
+   local accumulatedTime = 0
+   RunService.Heartbeat:Connect(function(dt)
+       accumulatedTime = accumulatedTime + dt
+       if accumulatedTime >= BattleConfig.AI_BATCH_UPDATE_INTERVAL then
+           UpdateAllAIs()
+           accumulatedTime = 0
+       end
+   end)
+   ```
+
+5. FindNearestEnemy() 改用 UnitManager:
+   - 调用 UnitManager.GetClosestEnemy(unitModel, maxDistance)
+   - 不再遍历 CombatSystem.GetAllUnitStates()
+
+
+【10.4 配置扩展】
+----------------------------------
+
+█ UnitConfig.lua 新增字段
+
+【重要】基于用户说明,配置大幅简化,移除基于时间的攻击阶段配置
+
+为每个兵种添加以下战斗配置:
+
+CombatProfile = {
+    -- 碰撞判定配置
+    HitboxRadius = 5,          -- 碰撞半径(studs)
+    HitboxAngle = 90,          -- 扇形角度(度,0-180,180表示全方位)
+    HitboxHeight = 8,          -- 碰撞高度(studs)
+    HitboxMaxTargets = 1,      -- 最大命中数量(群攻支持,1为单体)
+
+    -- 动画相关
+    UseAnimationEvent = true,  -- 是否使用动画事件驱动伤害(默认true)
+    AnimationEventName = "Damage", -- 动画事件名称(默认"Damage")
+}
+
+说明:
+1. 移除 AttackWindup/AttackRelease/AttackRecovery - 不再需要
+2. 攻击间隔由原有的 BaseAttackSpeed 控制
+3. 伤害判定时机完全由动画 "Damage" 事件驱动
+4. 如果动画加载失败,使用 BaseAttackSpeed * 0.5 作为回退延迟
+
+示例配置:
+["Noob"] = {
+    -- ... 原有配置 ...
+    BaseAttackSpeed = 1.0,     -- 攻击间隔1秒
+    AttackAnimationId = "109394128574270",
+
+    -- V1.5.1 新增战斗配置(简化版)
+    CombatProfile = {
+        HitboxRadius = 5,
+        HitboxAngle = 90,
+        HitboxHeight = 8,
+        HitboxMaxTargets = 1,
+        UseAnimationEvent = true,
+        AnimationEventName = "Damage",
+    }
+}
+
+["群攻兵种示例"] = {
+    -- ... 其他配置 ...
+    CombatProfile = {
+        HitboxRadius = 8,          -- 更大的范围
+        HitboxAngle = 120,         -- 更大的扇形角度
+        HitboxHeight = 8,
+        HitboxMaxTargets = 3,      -- 最多命中3个目标
+        UseAnimationEvent = true,
+        AnimationEventName = "Damage",
+    }
+}
+
+接口:
+- UnitConfig.GetCombatProfile(unitId) : 获取战斗配置
+  如果没有配置 CombatProfile,返回默认值
+
+
+█ BattleConfig.lua 新增配置
+
+-- AI节流配置
+AI_BATCH_UPDATE_INTERVAL = 0.2  -- AI批量更新间隔(秒)
+
+-- 碰撞判定配置
+HITBOX_DEFAULT_RADIUS = 5       -- 默认碰撞半径
+HITBOX_DEFAULT_ANGLE = 90       -- 默认扇形角度
+HITBOX_DEFAULT_HEIGHT = 8       -- 默认碰撞高度
+HITBOX_DEFAULT_MAX_TARGETS = 1  -- 默认最大命中数
+
+-- 性能优化配置
+UNIT_POSITION_UPDATE_THRESHOLD = 3  -- 单位位置更新阈值(studs)
+HITBOX_SAME_FRAME_COOLDOWN = 0.05   -- 同帧命中冷却(秒)
+
+-- 攻击超时配置
+ATTACK_TIMEOUT = 5              -- 攻击阶段超时时间(秒,防止动画失败卡死)
+ANIMATION_FALLBACK_RATIO = 0.5  -- 动画回退延迟系数(BaseAttackSpeed * 此值)
+
+-- 动画事件配置
+DEFAULT_ANIMATION_EVENT_NAME = "Damage"  -- 默认动画事件名称
+
+
+【10.5 动画 "Damage" 事件集成】
+----------------------------------
+
+【核心机制】
+用户的所有近战单位攻击动画包含 "Damage" 动画事件
+系统完全基于此事件触发伤害判定,而非时间计算
+
+工作流程:
+1. UnitAI.AttackTarget() 被调用
+2. 调用 CombatSystem.BeginAttack(unitModel, target)
+3. CombatSystem 检查冷却,设置 AttackPhase = Attacking
+4. UnitAI 播放攻击动画并监听 "Damage" 事件:
+   ```lua
+   local animTrack = PlayAttackAnimation(humanoid, animationId)
+   if animTrack then
+       animTrack:GetMarkerReachedSignal("Damage"):Connect(function()
+           CombatSystem.OnDamageEvent(unitModel)
+       end)
+   end
+   ```
+5. 动画播放到 "Damage" 关键帧时,自动触发回调
+6. 调用 CombatSystem.OnDamageEvent(unitModel)
+7. CombatSystem 执行:
+   - 验证攻击阶段 (必须是 Attacking)
+   - 调用 HitboxService.ResolveMeleeHit() 进行碰撞检测
+   - 对命中目标逐个调用 TakeDamage()
+   - 进入 Recovery 阶段 (冷却 AttackSpeed 秒)
+8. Recovery 结束后,切换回 Idle,允许下次攻击
+
+回退机制(容错设计):
+如果动画加载失败或没有 "Damage" 标记:
+```lua
+-- 使用延迟模拟伤害判定
+local fallbackDelay = state.AttackSpeed * 0.5
+task.delay(fallbackDelay, function()
+    if CombatSystem.GetAttackPhase(unitModel) == "Attacking" then
+        CombatSystem.OnDamageEvent(unitModel)
+    end
+end)
+```
+
+超时保护:
+防止动画失败导致单位永久卡在 Attacking 状态:
+```lua
+-- 在 CombatSystem.Update() 中检测
+if state.AttackPhase == "Attacking" then
+    if tick() - state.AttackStartTime > BattleConfig.ATTACK_TIMEOUT then
+        WarnLog("攻击超时,强制进入Recovery")
+        state.AttackPhase = "Recovery"
+        state.RecoveryEndTime = tick() + state.AttackSpeed
+    end
+end
+```
+
+优势:
+✅ 动画与伤害精确同步
+✅ 支持不同攻击节奏的兵种
+✅ 配置简单,只需标记 "Damage" 事件
+✅ 优雅降级,动画失败也能战斗
+✅ 超时保护,防止卡死
+
+
+【10.6 性能优化总结】
+----------------------------------
+
+优化项 | 优化前 | 优化后 | 提升
+------|--------|--------|------
+AI更新频率 | 每帧(60次/秒) | 0.2秒一次(5次/秒) | 12倍
+寻敌遍历 | 全局遍历所有单位 | 只遍历敌方队伍 | 2-10倍
+近战判定 | Touched事件(不稳定) | OverlapParams(服务端) | 稳定性+
+位置查询 | 每次读取 HumanoidRootPart | 缓存位置 | 减少实例访问
+伤害触发 | 客户端可能触发 | 仅服务端触发 | 安全性+
+
+
+【10.7 开发任务清单 (V1.5.1)】
+----------------------------------
+
+【阶段1: 基础架构 - 2-3天】
+1. ✅ 创建 HitboxService.lua
+   - 实现 ResolveMeleeHit 核心逻辑
+   - 实现扇形角度过滤
+   - 实现同帧去重机制
+
+2. ✅ 创建 UnitManager.lua
+   - 实现单位注册/注销
+   - 实现分组索引
+   - 实现高效寻敌接口
+
+3. ✅ 扩展配置文件
+   - UnitConfig 添加 CombatProfile
+   - BattleConfig 添加新配置项
+
+4. ✅ 重构 CombatSystem.lua
+   - 添加攻击阶段状态机
+   - 实现 BeginAttack / Update / RequestHit
+   - 集成 HitboxService
+
+【阶段2: AI优化 - 1-2天】
+5. ✅ 重构 UnitAI.lua
+   - 移除所有 Touched 相关代码
+   - 改造 AttackTarget 使用 BeginAttack
+   - 实现 AI 节流机制
+   - 集成 UnitManager 寻敌接口
+
+【阶段3: 动画集成 - 0.5-1天】
+6. ✅ 动画 Marker 支持
+   - 实现 GetMarkerReachedSignal("Hit") 监听
+   - 实现 task.delay 回退机制
+
+【阶段4: 测试验证 - 1天】
+7. ✅ 单元测试
+   - HitboxService 碰撞判定测试
+   - UnitManager 索引管理测试
+   - CombatSystem 攻击阶段测试
+
+8. ✅ 性能测试
+   - 多兵种混战性能测试
+   - AI更新频率验证
+
+9. ✅ 兼容性测试
+   - 与现有系统集成测试
+   - 远程单位兼容性测试
+
+
+【10.8 迁移指南】
+----------------------------------
+
+从 V1.5 迁移到 V1.5.1:
+
+步骤1: 更新配置
+- 为所有兵种添加 CombatProfile 配置
+- 更新 BattleConfig 添加新配置项
+
+步骤2: 添加新模块
+- 添加 HitboxService.lua
+- 添加 UnitManager.lua
+
+步骤3: 更新 MainServer.lua
+- 初始化 HitboxService
+- 初始化 UnitManager
+
+步骤4: 替换旧代码
+- 替换 CombatSystem.lua
+- 替换 UnitAI.lua
+
+步骤5: 测试验证
+- 运行战斗测试UI
+- 验证近战命中判定
+- 验证性能提升
+
+注意事项:
+- V1.5.1 完全向后兼容 V1.5
+- 如果暂时不添加 CombatProfile,系统会使用默认值
+- 可以逐步迁移,不需要一次性完成
+
+
+【10.9 技术要点】
+----------------------------------
+
+1. 服务端权威原则
+   - 所有命中判定在服务端完成
+   - 客户端只播放动画,不参与结算
+   - 使用 RemoteEvent 单向通知客户端
+
+2. 状态机设计
+   - 明确的状态转换规则
+   - 时间驱动的阶段切换
+   - 防御性编程(检查非法状态转换)
+
+3. 性能优化技巧
+   - 批量更新代替每帧更新
+   - 分组索引减少遍历范围
+   - 位置缓存减少实例访问
+   - 死亡单位立即清理
+
+4. 扩展性设计
+   - HitboxService 支持未来的技能系统
+   - UnitManager 支持更多查询类型
+   - CombatSystem 支持多段攻击、连击等
+
+5. 调试与监控
+   - 保留详细的调试日志开关
+   - 可视化攻击范围(调试模式)
+   - 性能统计接口(AI数量、命中次数等)
+
+=====================================================
+V1.5.1 战斗系统架构优化设计完成
 =====================================================
 ]]

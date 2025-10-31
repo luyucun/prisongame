@@ -30,6 +30,8 @@ local BattleConfig = require(ServerScriptService.Config.BattleConfig)
 -- 引用系统
 local CombatSystem = require(ServerScriptService.Systems.CombatSystem)
 local UnitAI = require(ServerScriptService.Systems.UnitAI)
+local UnitManager = require(ServerScriptService.Systems.UnitManager)  -- V1.5.1新增
+local HitboxService = require(ServerScriptService.Systems.HitboxService)  -- V1.5.1新增
 
 -- ==================== 私有变量 ====================
 
@@ -252,6 +254,15 @@ function BattleManager.StartBattle(battleId)
     battle.State = BattleConfig.BattleState.FIGHTING
     battle.StartTime = tick()
 
+    -- V1.5.1: 将所有单位注册到UnitManager
+    for _, unit in ipairs(battle.AttackUnits) do
+        UnitManager.RegisterUnit(battleId, BattleConfig.Team.ATTACK, unit)
+    end
+
+    for _, unit in ipairs(battle.DefenseUnits) do
+        UnitManager.RegisterUnit(battleId, BattleConfig.Team.DEFENSE, unit)
+    end
+
     -- 启动所有兵种的AI
     for _, unit in ipairs(battle.AttackUnits) do
         UnitAI.StartAI(unit)
@@ -261,7 +272,8 @@ function BattleManager.StartBattle(battleId)
         UnitAI.StartAI(unit)
     end
 
-    DebugLog(string.format("战斗开始: BattleId=%d", battleId))
+    DebugLog(string.format("战斗开始: BattleId=%d, 攻击方%d个单位, 防守方%d个单位",
+        battleId, #battle.AttackUnits, #battle.DefenseUnits))
 
     -- 通知客户端战斗状态更新
     if battleStateUpdateEvent then
@@ -349,8 +361,24 @@ function BattleManager.CleanupBattle(battleId)
         end
     end
 
+    -- V1.5.1 Bug修复: 清理HitboxService的命中记录,防止污染下一个战斗
+    for _, unit in ipairs(battle.AttackUnits) do
+        if unit then
+            HitboxService.ClearAttackerHitRecords(unit)
+        end
+    end
+
+    for _, unit in ipairs(battle.DefenseUnits) do
+        if unit then
+            HitboxService.ClearAttackerHitRecords(unit)
+        end
+    end
+
     -- 清理战斗状态
     CombatSystem.ClearBattleUnits(battleId)
+
+    -- V1.5.1: 清理UnitManager中的单位索引
+    UnitManager.ClearBattle(battleId)
 
     -- 移除战斗实例
     battles[battleId] = nil

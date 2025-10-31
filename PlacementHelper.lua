@@ -39,8 +39,18 @@ function PlacementHelper.WorldToGrid(worldPos, floorCenter)
     local offsetX = worldPos.X - floorCenter.X
     local offsetZ = worldPos.Z - floorCenter.Z
 
+    -- V1.5.1修复: 计算网格索引前先限制在地板范围内
+    -- 地板范围: [-60, 60]
+    local halfSize = IDLE_FLOOR_SIZE.X / 2
+    offsetX = math.clamp(offsetX, -halfSize, halfSize - 0.01)  -- 减去0.01避免刚好在边界
+    offsetZ = math.clamp(offsetZ, -halfSize, halfSize - 0.01)
+
     local gridX = math.floor((offsetX + IDLE_FLOOR_SIZE.X / 2) / GRID_UNIT_SIZE)
     local gridZ = math.floor((offsetZ + IDLE_FLOOR_SIZE.Z / 2) / GRID_UNIT_SIZE)
+
+    -- V1.5.1修复: 再次确保索引在有效范围内 (0 到 GRID_COUNT-1)
+    gridX = math.clamp(gridX, 0, GRID_COUNT - 1)
+    gridZ = math.clamp(gridZ, 0, GRID_COUNT - 1)
 
     return gridX, gridZ
 end
@@ -82,16 +92,22 @@ end
 限制网格索引在边界内
 @param gridX number
 @param gridZ number
-@param gridSize number - 兵种占地大小
+@param gridSize number - 兵种占地大小 (1, 4, 9)
 @return number, number - 限制后的网格X, Z
 ]]
 function PlacementHelper.ClampGridToBounds(gridX, gridZ, gridSize)
-    local gridWidth = math.sqrt(gridSize)
-    local maxGridX = GRID_COUNT - gridWidth
-    local maxGridZ = GRID_COUNT - gridWidth
+    local gridWidth = math.sqrt(gridSize)  -- 1格=1, 4格=2, 9格=3
 
-    gridX = math.clamp(gridX, 0, maxGridX)
-    gridZ = math.clamp(gridZ, 0, maxGridZ)
+    -- V1.5.1修复: 边界计算
+    -- 地板是30x30格(索引0-29)
+    -- 1x1兵种: 可以放在0-29格(占据1格)
+    -- 2x2兵种: 可以放在0-28格(占据2格,范围0-29)
+    -- 3x3兵种: 可以放在0-27格(占据3格,范围0-29)
+    -- 所以最大索引 = GRID_COUNT - gridWidth
+    local maxGridIndex = GRID_COUNT - gridWidth
+
+    gridX = math.clamp(gridX, 0, maxGridIndex)
+    gridZ = math.clamp(gridZ, 0, maxGridIndex)
 
     return gridX, gridZ
 end
@@ -100,7 +116,7 @@ end
 检查网格是否在边界内
 @param gridX number
 @param gridZ number
-@param gridSize number
+@param gridSize number - 兵种占地大小 (1, 4, 9)
 @return boolean - 是否在边界内
 ]]
 function PlacementHelper.IsGridInBounds(gridX, gridZ, gridSize)
@@ -108,7 +124,15 @@ function PlacementHelper.IsGridInBounds(gridX, gridZ, gridSize)
         return false
     end
 
-    local gridWidth = math.sqrt(gridSize)
+    local gridWidth = math.sqrt(gridSize)  -- 1格=1, 4格=2, 9格=3
+
+    -- V1.5.1修复: 边界检查
+    -- 兵种占据 gridWidth 个格子
+    -- 起始索引是 gridX, 结束索引是 gridX + gridWidth - 1
+    -- 所以 gridX + gridWidth - 1 < GRID_COUNT
+    -- 即 gridX + gridWidth <= GRID_COUNT
+    -- 即 gridX < GRID_COUNT - gridWidth + 1
+    -- 但为了统一，我们用 gridX + gridWidth > GRID_COUNT 作为越界条件
     if gridX + gridWidth > GRID_COUNT or gridZ + gridWidth > GRID_COUNT then
         return false
     end

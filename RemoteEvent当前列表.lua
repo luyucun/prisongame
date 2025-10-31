@@ -26,9 +26,13 @@ ReplicatedStorage
         ├──RequestBattleTest（RemoteEvent） - 客户端请求开始战斗测试
         ├──BattleTestResponse（RemoteEvent） - 服务端返回战斗测试结果
         ├──BattleStateUpdate（RemoteEvent） - 服务端通知客户端战斗状态更新
-        └──UnitDeath（BindableEvent） - 服务端内部兵种死亡通知
+        ├──UnitDeath（BindableEvent） - 服务端内部兵种死亡通知
+        └──ShowDamageNumber（RemoteEvent） 【V1.5.1新增】 - 服务端通知客户端显示伤害数字
 
 
 
 如果需要补充新的RemoteEvent或者Remotefunction，请在这里列出来，我会自己去创建
+
+需要创建的新RemoteEvent:
+- ReplicatedStorage/Events/BattleEvents/ShowDamageNumber (RemoteEvent)
 

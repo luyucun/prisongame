@@ -40,6 +40,9 @@ local ProjectileSystem = require(ServerScriptService.Systems.ProjectileSystem)
 local UnitAI = require(ServerScriptService.Systems.UnitAI)
 local BattleManager = require(ServerScriptService.Systems.BattleManager)
 local BattleTestSystem = require(ServerScriptService.Systems.BattleTestSystem)
+-- V1.5.1新增 - 战斗基础服务
+local HitboxService = require(ServerScriptService.Systems.HitboxService)
+local UnitManager = require(ServerScriptService.Systems.UnitManager)
 
 -- ==================== 系统初始化顺序 ====================
 
@@ -164,8 +167,34 @@ local function InitializeServer()
         print(GameConfig.LOG_PREFIX, "GM命令系统初始化成功")
     end
 
-    -- 7. 初始化战斗系统(V1.5新增)
+    -- 7. 初始化战斗系统(V1.5新增, V1.5.1优化)
     print(GameConfig.LOG_PREFIX, "步骤7: 初始化战斗系统...")
+
+    -- 7.0 初始化HitboxService (V1.5.1新增 - 碰撞判定服务)
+    print(GameConfig.LOG_PREFIX, "步骤7.0a: 初始化碰撞判定服务...")
+    success, result = pcall(function()
+        return HitboxService.Initialize()
+    end)
+    if not success then
+        warn(GameConfig.LOG_PREFIX, "碰撞判定服务初始化失败(异常):", result)
+    elseif result == false then
+        warn(GameConfig.LOG_PREFIX, "碰撞判定服务初始化失败(返回false)")
+    else
+        print(GameConfig.LOG_PREFIX, "碰撞判定服务初始化成功")
+    end
+
+    -- 7.0b 初始化UnitManager (V1.5.1新增 - 单位索引管理)
+    print(GameConfig.LOG_PREFIX, "步骤7.0b: 初始化单位索引管理...")
+    success, result = pcall(function()
+        return UnitManager.Initialize()
+    end)
+    if not success then
+        warn(GameConfig.LOG_PREFIX, "单位索引管理初始化失败(异常):", result)
+    elseif result == false then
+        warn(GameConfig.LOG_PREFIX, "单位索引管理初始化失败(返回false)")
+    else
+        print(GameConfig.LOG_PREFIX, "单位索引管理初始化成功")
+    end
 
     -- 7.1 初始化CombatSystem
     print(GameConfig.LOG_PREFIX, "步骤7.1: 初始化战斗系统...")
