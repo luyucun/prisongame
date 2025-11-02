@@ -296,10 +296,12 @@ local function CreateUnitModel(unitId, position, instanceId, level, gridSize)
         model.HumanoidRootPart.CFrame = CFrame.new(position)
     end
 
-    -- 放置后的模型设置：锚定
+    -- 放置后的模型设置：锚定所有部件
+    -- Bug修复：确保所有部件都正确锚定，防止下沉
     for _, descendant in ipairs(model:GetDescendants()) do
         if descendant:IsA("BasePart") then
             descendant.Anchored = true       -- 固定不动
+            descendant.CanCollide = true     -- 启用碰撞（与地板碰撞）
         end
     end
 
@@ -341,6 +343,18 @@ function PlacementSystem.ValidatePlacement(player, instanceId, position)
         return false, "找不到放置地板"
     end
 
+    -- 4.1 调试信息：打印客户端传来的位置和服务端的IdleFloor信息
+    if GameConfig.DEBUG_MODE then
+        local floorCenter = idleFloor.Position
+        print(string.format(
+            "%s ValidatePlacement - 客户端位置:(%.2f, %.2f, %.2f), IdleFloor中心:(%.2f, %.2f, %.2f), 玩家:%s",
+            GameConfig.LOG_PREFIX,
+            position.X, position.Y, position.Z,
+            floorCenter.X, floorCenter.Y, floorCenter.Z,
+            player.Name
+        ))
+    end
+
     -- 5. 转换为网格坐标
     local floorCenter = idleFloor.Position
     local gridX, gridZ = PlacementConfig.WorldToGrid(position, floorCenter)
@@ -349,8 +363,14 @@ function PlacementSystem.ValidatePlacement(player, instanceId, position)
     if not PlacementConfig.IsGridInBounds(gridX, gridZ, unitInstance.GridSize) then
         if GameConfig.DEBUG_MODE then
             print(string.format(
-                "%s 边界检查失败 - 网格:(%d, %d) 占地:%d 最大网格:(120, 120)",
-                GameConfig.LOG_PREFIX, gridX, gridZ, unitInstance.GridSize
+                "%s 边界检查失败 - 网格:(%d, %d) 占地:%d 最大网格:(120, 120) - 玩家:%s",
+                GameConfig.LOG_PREFIX, gridX, gridZ, unitInstance.GridSize, player.Name
+            ))
+            print(string.format(
+                "%s 详细信息 - 客户端位置:(%.2f, %.2f, %.2f), IdleFloor中心:(%.2f, %.2f, %.2f)",
+                GameConfig.LOG_PREFIX,
+                position.X, position.Y, position.Z,
+                floorCenter.X, floorCenter.Y, floorCenter.Z
             ))
         end
         return false, "超出放置范围"

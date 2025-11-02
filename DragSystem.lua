@@ -151,6 +151,7 @@ end
 
 --[[
 查找玩家的IdleFloor
+优先使用玩家实际所在的基地，而不是就近原则
 @return Part|nil
 ]]
 function FindPlayerIdleFloor()
@@ -159,12 +160,43 @@ function FindPlayerIdleFloor()
         return nil
     end
 
+    if not character.PrimaryPart then
+        return nil
+    end
+
+    local playerPos = character.PrimaryPart.Position
+
     local homeFolder = Workspace:FindFirstChild("Home")
     if not homeFolder then
         return nil
     end
 
-    -- 遍历所有基地找最近的
+    -- 策略1: 先尝试找到玩家当前实际所在的基地（距离阈值内）
+    local currentFloor = nil
+    local minDistance = math.huge
+
+    for i = 1, 6 do
+        local playerHome = homeFolder:FindFirstChild("PlayerHome" .. i)
+        if playerHome then
+            local idleFloor = playerHome:FindFirstChild("IdleFloor")
+            if idleFloor then
+                local distance = (idleFloor.Position - playerPos).Magnitude
+                -- 如果玩家在这个基地的合理范围内（比如100studs），认为这是他的基地
+                if distance < 100 and distance < minDistance then
+                    minDistance = distance
+                    currentFloor = idleFloor
+                end
+            end
+        end
+    end
+
+    -- 如果在合理范围内找到了基地，优先使用
+    if currentFloor then
+        print("[DragSystem] 找到玩家当前基地，距离:", minDistance)
+        return currentFloor
+    end
+
+    -- 策略2: 如果没有在合理范围内找到，则使用最近的基地（兼容性）
     local nearestFloor = nil
     local nearestDistance = math.huge
 
@@ -173,13 +205,17 @@ function FindPlayerIdleFloor()
         if playerHome then
             local idleFloor = playerHome:FindFirstChild("IdleFloor")
             if idleFloor then
-                local distance = (idleFloor.Position - character.PrimaryPart.Position).Magnitude
+                local distance = (idleFloor.Position - playerPos).Magnitude
                 if distance < nearestDistance then
                     nearestDistance = distance
                     nearestFloor = idleFloor
                 end
             end
         end
+    end
+
+    if nearestFloor then
+        warn("[DragSystem] 未在合理范围内找到基地，使用最近基地，距离:", nearestDistance)
     end
 
     return nearestFloor

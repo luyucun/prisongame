@@ -20,7 +20,11 @@ local GridHelper = {}
 local Workspace = game:GetService("Workspace")
 
 -- 配置常量
-local PLACEMENT_Y_OFFSET = 2.5  -- 模型在地面上方的偏移量（与PlacementConfig保持一致）
+-- Grid应该正好贴在IdleFloor表面，所以需要减去兵种的Y偏移量
+-- 兵种的Y = floorTop + PLACEMENT_Y_OFFSET (3)
+-- Grid的Y应该 = floorTop + 0.01 (略微高于地板防止Z-fighting)
+local PLACEMENT_Y_OFFSET = 3  -- 兵种脚底距离地板上表面的距离
+local GRID_Y_OFFSET = 0.01     -- Grid距离地板上表面的微小偏移
 
 -- Grid引用
 local gridFolder = nil
@@ -160,7 +164,10 @@ function GridHelper.ShowGrid(gridSize, position, isValid)
 
     -- V1.4.1: 无论是否切换模板，都更新位置（如果位置改变）
     if currentGridPart and currentGridPart.Parent then
-        local gridY = position.Y - PLACEMENT_Y_OFFSET
+        -- Grid 的 Y 坐标计算：
+        -- position.Y 是兵种的Y (floorTop + PLACEMENT_Y_OFFSET)
+        -- Grid 应该贴在地板上，所以 Y = position.Y - PLACEMENT_Y_OFFSET + GRID_Y_OFFSET
+        local gridY = position.Y - PLACEMENT_Y_OFFSET + GRID_Y_OFFSET
         local newPos = Vector3.new(position.X, gridY, position.Z)
 
         -- 只在位置真正改变时才更新（避免不必要的CFrame操作）
@@ -179,7 +186,8 @@ end
 ]]
 function GridHelper.UpdateGridPosition(position)
     if currentGridPart and currentGridPart.Parent then
-        local gridY = position.Y - PLACEMENT_Y_OFFSET
+        -- Grid 的 Y 坐标计算：贴在地板上
+        local gridY = position.Y - PLACEMENT_Y_OFFSET + GRID_Y_OFFSET
         currentGridPart.Position = Vector3.new(position.X, gridY, position.Z)
     end
 end

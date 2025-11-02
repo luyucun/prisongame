@@ -251,16 +251,13 @@ function PlayerManager.OnPlayerAdded(player)
     -- 1. 初始化玩家数据
     DataManager.InitializePlayerData(player)
 
-    -- 2. 检查是否应该跳过家园分配（Studio的"从此处开始游戏"模式）
-    if ShouldSkipHomeAssignment(player) then
-        if GameConfig.DEBUG_MODE then
-            print(GameConfig.LOG_PREFIX, "跳过家园分配，玩家将在原地出生:", player.Name)
-        end
-        -- homeSlot保持默认值0，不占用基地，不进行传送
-        return
+    -- 2. 检查是否在Studio模式下
+    local skipHomeAssignment = ShouldSkipHomeAssignment(player)
+    if skipHomeAssignment and GameConfig.DEBUG_MODE then
+        print(GameConfig.LOG_PREFIX, "检测到Studio模式，将分配基地并传送到正确位置:", player.Name)
     end
 
-    -- 3. 随机选择可用基地
+    -- 3. 随机选择可用基地（无论是否Studio模式都需要分配）
     local homeSlot = SelectRandomHome()
     if not homeSlot then
         warn(GameConfig.LOG_PREFIX, "无法为玩家分配基地,服务器已满!", player.Name)
@@ -277,6 +274,13 @@ function PlayerManager.OnPlayerAdded(player)
     -- 5. 设置玩家数据中的基地编号
     DataManager.SetPlayerHomeSlot(player, homeSlot)
 
+    -- 5.1 同步HomeSlot到客户端（用于客户端确定正确的IdleFloor）
+    player:SetAttribute("HomeSlot", homeSlot)
+
+    if GameConfig.DEBUG_MODE then
+        print(GameConfig.LOG_PREFIX, "同步HomeSlot到客户端:", player.Name, "HomeSlot:", homeSlot)
+    end
+
     -- 6. 初始化玩家基地(HomeSystem)
     local HomeSystem = require(ServerScriptService.Systems.HomeSystem)
     HomeSystem.InitializePlayerHome(player)
@@ -290,6 +294,10 @@ function PlayerManager.OnPlayerAdded(player)
             local success = TeleportPlayerToHome(player, homeSlot)
             if not success then
                 warn(GameConfig.LOG_PREFIX, "传送失败,将在角色重生时重试:", player.Name)
+            else
+                if GameConfig.DEBUG_MODE then
+                    print(GameConfig.LOG_PREFIX, "成功传送玩家到基地:", player.Name, "HomeSlot:", homeSlot)
+                end
             end
         end)
     end

@@ -36,6 +36,9 @@ local camera = Workspace.CurrentCamera
 -- 远程事件
 local placementEvents = nil
 
+-- 调试模式（客户端无法访问ServerScriptService中的GameConfig）
+local DEBUG_MODE = true
+
 -- ==================== 放置状态 ====================
 local placementState = {
     isPlacing = false,           -- 是否正在放置
@@ -131,50 +134,124 @@ end
 
 --[[
 查找玩家的IdleFloor
+优先使用玩家属性中的 HomeSlot（来自服务端），否则使用距离判断
 @return Part|nil
 ]]
 function FindPlayerIdleFloor()
-    -- 等待玩家角色加载
-    local character = player.Character
-    if not character then
-        character = player.CharacterAdded:Wait()
-    end
+    local homeSlot = nil
 
-    if not character.PrimaryPart then
-        task.wait(0.5)
-        if not character.PrimaryPart then
-            warn("[PlacementController] PrimaryPart加载失败")
-            return nil
+    -- 策略1: 优先从玩家属性中读取权威的HomeSlot（由服务端下发）
+    local homeSlotAttr = player:GetAttribute("HomeSlot")
+    if homeSlotAttr and homeSlotAttr > 0 then
+        homeSlot = homeSlotAttr
+        if DEBUG_MODE then
+            print("[PlacementController] 从玩家属性获取权威 HomeSlot:", homeSlot)
         end
     end
 
-    local playerPos = character.PrimaryPart.Position
+    -- 如果属性缺失，回退到距离判断
+    if not homeSlot then
+        if DEBUG_MODE then
+            print("[PlacementController] 玩家属性中没有 HomeSlot，进行距离判断")
+        end
 
+        -- 等待玩家角色加载
+        local character = player.Character
+        if not character then
+            character = player.CharacterAdded:Wait()
+        end
+
+        if not character.PrimaryPart then
+            task.wait(0.5)
+            if not character.PrimaryPart then
+                warn("[PlacementController] PrimaryPart加载失败")
+                return nil
+            end
+        end
+
+        local playerPos = character.PrimaryPart.Position
+        local homeFolder = Workspace:FindFirstChild("Home")
+        if not homeFolder then
+            warn("[PlacementController] Home文件夹不存在")
+            return nil
+        end
+
+        -- 策略2: 先尝试找到玩家当前实际所在的基地（距离阈值内）
+        local currentFloor = nil
+        local minDistance = math.huge
+
+        for i = 1, 6 do
+            local playerHome = homeFolder:FindFirstChild("PlayerHome" .. i)
+            if playerHome then
+                local idleFloor = playerHome:FindFirstChild("IdleFloor")
+                if idleFloor then
+                    local distance = (idleFloor.Position - playerPos).Magnitude
+                    -- 如果玩家在这个基地的合理范围内（比如100studs），认为这是他的基地
+                    if distance < 100 and distance < minDistance then
+                        minDistance = distance
+                        currentFloor = idleFloor
+                    end
+                end
+            end
+        end
+
+        -- 如果在合理范围内找到了基地，优先使用
+        if currentFloor then
+            if DEBUG_MODE then
+                print("[PlacementController] 找到玩家当前基地，距离:", minDistance)
+            end
+            return currentFloor
+        end
+
+        -- 策略3: 如果没有在合理范围内找到，则使用最近的基地（兼容性）
+        local nearestFloor = nil
+        local nearestDistance = math.huge
+
+        for i = 1, 6 do
+            local playerHome = homeFolder:FindFirstChild("PlayerHome" .. i)
+            if playerHome then
+                local idleFloor = playerHome:FindFirstChild("IdleFloor")
+                if idleFloor then
+                    local distance = (idleFloor.Position - playerPos).Magnitude
+                    if distance < nearestDistance then
+                        nearestDistance = distance
+                        nearestFloor = idleFloor
+                    end
+                end
+            end
+        end
+
+        if nearestFloor then
+            warn("[PlacementController] 未在合理范围内找到基地，使用最近基地，距离:", nearestDistance)
+        end
+
+        return nearestFloor
+    end
+
+    -- 如果有 HomeSlot，直接通过它查找 IdleFloor
     local homeFolder = Workspace:FindFirstChild("Home")
     if not homeFolder then
         warn("[PlacementController] Home文件夹不存在")
         return nil
     end
 
-    local nearestFloor = nil
-    local nearestDistance = math.huge
-
-    -- 找到距离最近的基地的IdleFloor
-    for i = 1, 6 do
-        local playerHome = homeFolder:FindFirstChild("PlayerHome" .. i)
-        if playerHome then
-            local idleFloor = playerHome:FindFirstChild("IdleFloor")
-            if idleFloor then
-                local distance = (idleFloor.Position - playerPos).Magnitude
-                if distance < nearestDistance then
-                    nearestDistance = distance
-                    nearestFloor = idleFloor
-                end
-            end
-        end
+    local playerHome = homeFolder:FindFirstChild("PlayerHome" .. homeSlot)
+    if not playerHome then
+        warn("[PlacementController] 找不到基地:", "PlayerHome" .. homeSlot)
+        return nil
     end
 
-    return nearestFloor
+    local idleFloor = playerHome:FindFirstChild("IdleFloor")
+    if not idleFloor then
+        warn("[PlacementController] 找不到IdleFloor")
+        return nil
+    end
+
+    if DEBUG_MODE then
+        print("[PlacementController] 通过 HomeSlot 找到 IdleFloor:", playerHome.Name)
+    end
+
+    return idleFloor
 end
 
 -- ==================== 公共接口 ====================
@@ -196,10 +273,8 @@ function PlacementController.StartPlacement(instanceId, unitId, gridSize)
         PlacementController.CancelPlacement()
     end
 
-    -- 如果还没有找到IdleFloor，立即查找一次
-    if not placementState.idleFloor then
-        placementState.idleFloor = FindPlayerIdleFloor()
-    end
+    -- 每次开始放置时重新获取IdleFloor（确保使用最新的权威HomeSlot）
+    placementState.idleFloor = FindPlayerIdleFloor()
 
     if not placementState.idleFloor then
         warn("[PlacementController] IdleFloor不存在，无法放置")
@@ -260,12 +335,27 @@ function PlacementController.ConfirmPlacement()
         return
     end
 
+    -- 防御性检查：确保IdleFloor仍然有效
+    if not placementState.idleFloor or not placementState.idleFloor.Parent then
+        warn("[PlacementController] IdleFloor已失效或被删除，无法放置")
+        PlacementController.CancelPlacement()
+        return
+    end
+
     -- 获取最终位置
     local finalPosition = PlacementHelper.GetModelPosition(placementState.previewModel)
     if not finalPosition then
         warn("[PlacementController] 无法获取模型位置")
         PlacementController.CancelPlacement()
         return
+    end
+
+    if DEBUG_MODE then
+        print(string.format(
+            "[PlacementController] 确认放置 - IdleFloor: %s, Position: (%.2f, %.2f, %.2f)",
+            placementState.idleFloor.Name,
+            finalPosition.X, finalPosition.Y, finalPosition.Z
+        ))
     end
 
     -- 发送确认请求到服务端

@@ -24,7 +24,9 @@ local UserInputService = game:GetService("UserInputService")
 -- 说明: 1格兵种占据4x4 studs，2格兵种(2x2格)占据8x8 studs，3格兵种(3x3格)占据12x12 studs
 local GRID_UNIT_SIZE = 4
 local IDLE_FLOOR_SIZE = Vector3.new(120, 1, 120)
-local PLACEMENT_Y_OFFSET = 2.5
+-- 兵种脚底距离地板上表面的距离(studs)
+-- 标准Roblox人物腰部到脚底约3-3.5 studs,这里用3确保站立在地板上
+local PLACEMENT_Y_OFFSET = 3
 local GRID_COUNT = 30  -- 120 / 4 = 30格
 
 -- ==================== 坐标转换函数 ====================
@@ -65,6 +67,10 @@ end
 function PlacementHelper.GridToWorld(gridX, gridZ, floorCenter)
     local worldX = floorCenter.X - IDLE_FLOOR_SIZE.X / 2 + gridX * GRID_UNIT_SIZE + GRID_UNIT_SIZE / 2
     local worldZ = floorCenter.Z - IDLE_FLOOR_SIZE.Z / 2 + gridZ * GRID_UNIT_SIZE + GRID_UNIT_SIZE / 2
+    -- 正确计算Y坐标：地板上表面 + 兵种脚底到地板的距离
+    -- floorCenter.Y - IDLE_FLOOR_SIZE.Y / 2 是地板下表面
+    -- floorCenter.Y + IDLE_FLOOR_SIZE.Y / 2 是地板上表面
+    -- 兵种应该站在地板上表面 + 偏移量
     local worldY = floorCenter.Y + IDLE_FLOOR_SIZE.Y / 2 + PLACEMENT_Y_OFFSET
 
     return Vector3.new(worldX, worldY, worldZ)

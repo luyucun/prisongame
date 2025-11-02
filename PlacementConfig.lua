@@ -64,7 +64,8 @@ PlacementConfig.PLACEMENT_INITIAL_SCALE = 0.5
 -- ==================== 位置计算配置 ====================
 
 -- 模型放置时的Y轴偏移 (相对于IdleFloor表面)
-PlacementConfig.PLACEMENT_Y_OFFSET = 2.5
+-- 标准Roblox人物腰部到脚底约3-3.5 studs,这里用3确保站立在地板上
+PlacementConfig.PLACEMENT_Y_OFFSET = 3
 
 -- ==================== 验证配置 ====================
 
