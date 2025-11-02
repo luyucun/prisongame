@@ -17,16 +17,16 @@ local PlacementConfig = {}
 -- IdleFloor的名称
 PlacementConfig.IDLE_FLOOR_NAME = "IdleFloor"
 
--- IdleFloor的标准大小 (X, Y, Z)
-PlacementConfig.IDLE_FLOOR_SIZE = Vector3.new(120, 1, 120)
+-- IdleFloor的标准大小 (X, Y, Z) - 实际尺寸
+PlacementConfig.IDLE_FLOOR_SIZE = Vector3.new(56, 1, 56)
 
 -- 单个格子的大小 (4 studs)
 -- 说明: 1格兵种占据4x4 studs，2格兵种(2x2格)占据8x8 studs，3格兵种(3x3格)占据12x12 studs
 PlacementConfig.GRID_UNIT_SIZE = 4
 
--- 网格数量 (120 / 4 = 30，所以是30x30个格子)
-PlacementConfig.GRID_COUNT_X = 30
-PlacementConfig.GRID_COUNT_Z = 30
+-- 网格数量 (56 / 4 = 14，所以是14x14个格子)
+PlacementConfig.GRID_COUNT_X = 14
+PlacementConfig.GRID_COUNT_Z = 14
 
 -- ==================== 放置限制配置 ====================
 
@@ -102,12 +102,22 @@ end
 @param gridX number - 网格X索引
 @param gridZ number - 网格Z索引
 @param floorCenter Vector3 - 地板中心坐标
+@param gridSize number - 兵种占地大小 (1, 4, 9)，默认为1
 @return Vector3 - 世界坐标
 ]]
-function PlacementConfig.GridToWorld(gridX, gridZ, floorCenter)
+function PlacementConfig.GridToWorld(gridX, gridZ, floorCenter, gridSize)
+    -- 处理默认参数
+    gridSize = gridSize or 1
+
+    -- 计算兵种的实际宽度（格子数）
+    local gridWidth = math.sqrt(gridSize)  -- 1格=1, 4格=2, 9格=3
+
+    -- 计算兵种中心的偏移量（不是格子中心，而是整个兵种的中心）
+    local halfSpan = (gridWidth * PlacementConfig.GRID_UNIT_SIZE) / 2
+
     -- 计算网格中心的世界坐标
-    local worldX = floorCenter.X - PlacementConfig.IDLE_FLOOR_SIZE.X / 2 + gridX * PlacementConfig.GRID_UNIT_SIZE + PlacementConfig.GRID_UNIT_SIZE / 2
-    local worldZ = floorCenter.Z - PlacementConfig.IDLE_FLOOR_SIZE.Z / 2 + gridZ * PlacementConfig.GRID_UNIT_SIZE + PlacementConfig.GRID_UNIT_SIZE / 2
+    local worldX = floorCenter.X - PlacementConfig.IDLE_FLOOR_SIZE.X / 2 + gridX * PlacementConfig.GRID_UNIT_SIZE + halfSpan
+    local worldZ = floorCenter.Z - PlacementConfig.IDLE_FLOOR_SIZE.Z / 2 + gridZ * PlacementConfig.GRID_UNIT_SIZE + halfSpan
     local worldY = floorCenter.Y + PlacementConfig.IDLE_FLOOR_SIZE.Y / 2 + PlacementConfig.PLACEMENT_Y_OFFSET
 
     return Vector3.new(worldX, worldY, worldZ)

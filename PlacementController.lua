@@ -478,8 +478,8 @@ function UpdatePreviewPosition(worldPos)
     -- 限制在边界内
     gridX, gridZ = PlacementHelper.ClampGridToBounds(gridX, gridZ, placementState.currentGridSize)
 
-    -- 转换回世界坐标
-    local snappedPos = PlacementHelper.GridToWorld(gridX, gridZ, floorCenter)
+    -- 转换回世界坐标（传入gridSize以正确计算中心偏移）
+    local snappedPos = PlacementHelper.GridToWorld(gridX, gridZ, floorCenter, placementState.currentGridSize)
 
     -- 更新模型位置
     PlacementHelper.SetModelPosition(placementState.previewModel, snappedPos)
@@ -656,7 +656,7 @@ function OnPlacementResponse(success, message, data)
 
                 -- 查找IdleFloor上新增的模型
                 local floorCenter = placementState.idleFloor.Position
-                local placedPos = PlacementHelper.GridToWorld(placementState.lastGridX, placementState.lastGridZ, floorCenter)
+                local placedPos = PlacementHelper.GridToWorld(placementState.lastGridX, placementState.lastGridZ, floorCenter, placementState.currentGridSize)
 
                 -- 在该位置附近查找模型
                 local nearbyModels = {}

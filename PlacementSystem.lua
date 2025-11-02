@@ -359,6 +359,13 @@ function PlacementSystem.ValidatePlacement(player, instanceId, position)
     local floorCenter = idleFloor.Position
     local gridX, gridZ = PlacementConfig.WorldToGrid(position, floorCenter)
 
+    if GameConfig.DEBUG_MODE then
+        print(string.format(
+            "%s 网格索引 - gridX:%d, gridZ:%d, GridSize:%d",
+            GameConfig.LOG_PREFIX, gridX, gridZ, unitInstance.GridSize
+        ))
+    end
+
     -- 6. 检查边界
     if not PlacementConfig.IsGridInBounds(gridX, gridZ, unitInstance.GridSize) then
         if GameConfig.DEBUG_MODE then
@@ -415,8 +422,8 @@ function PlacementSystem.PlaceUnit(player, instanceId, position)
     -- 转换为网格坐标
     local gridX, gridZ = PlacementConfig.WorldToGrid(position, floorCenter)
 
-    -- 计算精确的放置位置 (对齐到网格中心)
-    local finalPosition = PlacementConfig.GridToWorld(gridX, gridZ, floorCenter)
+    -- 计算精确的放置位置 (对齐到网格中心，传入gridSize以正确计算多格兵种的中心)
+    local finalPosition = PlacementConfig.GridToWorld(gridX, gridZ, floorCenter, unitInstance.GridSize)
 
     -- V1.3: 传递instanceId到CreateUnitModel
     -- V1.4: 传递level和gridSize到CreateUnitModel
@@ -572,8 +579,8 @@ function PlacementSystem.UpdateUnitPosition(player, instanceId, newPosition)
     -- 6. 释放旧位置的网格
     ReleaseGrid(player, placedData.GridX, placedData.GridZ, placedData.GridSize)
 
-    -- 7. 计算新的精确位置
-    local finalPosition = PlacementConfig.GridToWorld(newGridX, newGridZ, floorCenter)
+    -- 7. 计算新的精确位置（传入gridSize以正确计算多格兵种的中心）
+    local finalPosition = PlacementConfig.GridToWorld(newGridX, newGridZ, floorCenter, unitInstance.GridSize)
 
     -- 8. 更新模型位置
     if placedData.Model and placedData.Model.Parent then

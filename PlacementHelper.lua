@@ -23,11 +23,11 @@ local UserInputService = game:GetService("UserInputService")
 -- 常量配置
 -- 说明: 1格兵种占据4x4 studs，2格兵种(2x2格)占据8x8 studs，3格兵种(3x3格)占据12x12 studs
 local GRID_UNIT_SIZE = 4
-local IDLE_FLOOR_SIZE = Vector3.new(120, 1, 120)
+local IDLE_FLOOR_SIZE = Vector3.new(56, 1, 56)  -- IdleFloor实际大小
 -- 兵种脚底距离地板上表面的距离(studs)
 -- 标准Roblox人物腰部到脚底约3-3.5 studs,这里用3确保站立在地板上
 local PLACEMENT_Y_OFFSET = 3
-local GRID_COUNT = 30  -- 120 / 4 = 30格
+local GRID_COUNT = 14  -- 56 / 4 = 14格
 
 -- ==================== 坐标转换函数 ====================
 
@@ -41,16 +41,12 @@ function PlacementHelper.WorldToGrid(worldPos, floorCenter)
     local offsetX = worldPos.X - floorCenter.X
     local offsetZ = worldPos.Z - floorCenter.Z
 
-    -- V1.5.1修复: 计算网格索引前先限制在地板范围内
-    -- 地板范围: [-60, 60]
-    local halfSize = IDLE_FLOOR_SIZE.X / 2
-    offsetX = math.clamp(offsetX, -halfSize, halfSize - 0.01)  -- 减去0.01避免刚好在边界
-    offsetZ = math.clamp(offsetZ, -halfSize, halfSize - 0.01)
-
+    -- 计算网格索引
+    -- 地板范围: [-60, 60]，网格范围: [0, 29]
     local gridX = math.floor((offsetX + IDLE_FLOOR_SIZE.X / 2) / GRID_UNIT_SIZE)
     local gridZ = math.floor((offsetZ + IDLE_FLOOR_SIZE.Z / 2) / GRID_UNIT_SIZE)
 
-    -- V1.5.1修复: 再次确保索引在有效范围内 (0 到 GRID_COUNT-1)
+    -- 限制在有效网格范围内（0 到 GRID_COUNT-1）
     gridX = math.clamp(gridX, 0, GRID_COUNT - 1)
     gridZ = math.clamp(gridZ, 0, GRID_COUNT - 1)
 
@@ -62,11 +58,22 @@ end
 @param gridX number - 网格X索引
 @param gridZ number - 网格Z索引
 @param floorCenter Vector3 - 地板中心
+@param gridSize number - 兵种占地大小 (1, 4, 9)，默认为1
 @return Vector3 - 世界坐标
 ]]
-function PlacementHelper.GridToWorld(gridX, gridZ, floorCenter)
-    local worldX = floorCenter.X - IDLE_FLOOR_SIZE.X / 2 + gridX * GRID_UNIT_SIZE + GRID_UNIT_SIZE / 2
-    local worldZ = floorCenter.Z - IDLE_FLOOR_SIZE.Z / 2 + gridZ * GRID_UNIT_SIZE + GRID_UNIT_SIZE / 2
+function PlacementHelper.GridToWorld(gridX, gridZ, floorCenter, gridSize)
+    -- 处理默认参数
+    gridSize = gridSize or 1
+
+    -- 计算兵种的实际宽度（格子数）
+    local gridWidth = math.sqrt(gridSize)  -- 1格=1, 4格=2, 9格=3
+
+    -- 计算兵种中心的偏移量（不是格子中心，而是整个兵种的中心）
+    local halfSpan = (gridWidth * GRID_UNIT_SIZE) / 2
+
+    local worldX = floorCenter.X - IDLE_FLOOR_SIZE.X / 2 + gridX * GRID_UNIT_SIZE + halfSpan
+    local worldZ = floorCenter.Z - IDLE_FLOOR_SIZE.Z / 2 + gridZ * GRID_UNIT_SIZE + halfSpan
+
     -- 正确计算Y坐标：地板上表面 + 兵种脚底到地板的距离
     -- floorCenter.Y - IDLE_FLOOR_SIZE.Y / 2 是地板下表面
     -- floorCenter.Y + IDLE_FLOOR_SIZE.Y / 2 是地板上表面
@@ -90,8 +97,8 @@ function PlacementHelper.GetNearestGridPosition(worldPos, floorCenter, gridSize)
     -- 处理边界限制
     gridX, gridZ = PlacementHelper.ClampGridToBounds(gridX, gridZ, gridSize)
 
-    -- 转换回世界坐标
-    return PlacementHelper.GridToWorld(gridX, gridZ, floorCenter)
+    -- 转换回世界坐标（传入gridSize以正确计算中心偏移）
+    return PlacementHelper.GridToWorld(gridX, gridZ, floorCenter, gridSize)
 end
 
 --[[
