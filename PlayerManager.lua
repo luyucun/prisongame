@@ -143,6 +143,42 @@ local function GetHomeSpawnLocation(homeSlot)
 end
 
 --[[
+根据位置选择最近的可用基地
+用于Studio Play Here模式,确保分配的基地与玩家实际位置一致
+@param position Vector3 - 玩家当前位置
+@return number|nil - 最近的可用基地编号,如果没有可用基地则返回nil
+]]
+local function FindClosestAvailableHome(position)
+    local availableHomes = GetAvailableHomes()
+
+    if #availableHomes == 0 then
+        warn(GameConfig.LOG_PREFIX, "没有可用的基地!")
+        return nil
+    end
+
+    local closestHome = nil
+    local closestDistance = math.huge
+
+    -- 遍历所有可用基地,找到最近的
+    for _, homeSlot in ipairs(availableHomes) do
+        local spawnLocation = GetHomeSpawnLocation(homeSlot)
+        if spawnLocation then
+            local distance = (spawnLocation.Position - position).Magnitude
+            if distance < closestDistance then
+                closestDistance = distance
+                closestHome = homeSlot
+            end
+        end
+    end
+
+    if GameConfig.DEBUG_MODE and closestHome then
+        print(GameConfig.LOG_PREFIX, "根据位置选择最近基地:", closestHome, "距离:", math.floor(closestDistance))
+    end
+
+    return closestHome
+end
+
+--[[
 传送玩家到指定基地
 @param player Player - 玩家对象
 @param homeSlot number - 基地编号
@@ -251,14 +287,37 @@ function PlayerManager.OnPlayerAdded(player)
     -- 1. 初始化玩家数据
     DataManager.InitializePlayerData(player)
 
-    -- 2. 检查是否在Studio模式下
+    -- 2. 检查是否在Studio Play Here模式下
     local skipHomeAssignment = ShouldSkipHomeAssignment(player)
     if skipHomeAssignment and GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "检测到Studio模式，将分配基地并传送到正确位置:", player.Name)
+        print(GameConfig.LOG_PREFIX, "检测到Studio Play Here模式，将根据玩家位置选择基地:", player.Name)
     end
 
-    -- 3. 随机选择可用基地（无论是否Studio模式都需要分配）
-    local homeSlot = SelectRandomHome()
+    -- 3. 选择基地
+    local homeSlot = nil
+
+    if skipHomeAssignment then
+        -- Studio Play Here模式：根据玩家当前位置选择最近的基地
+        -- 需要等待角色加载完成
+        local character = player.Character or player.CharacterAdded:Wait()
+        local humanoidRootPart = character:WaitForChild("HumanoidRootPart", 10)
+
+        if humanoidRootPart then
+            -- 根据玩家当前位置找到最近的可用基地
+            homeSlot = FindClosestAvailableHome(humanoidRootPart.Position)
+            if GameConfig.DEBUG_MODE and homeSlot then
+                print(GameConfig.LOG_PREFIX, "Play Here模式 - 玩家位置:", humanoidRootPart.Position, "选择基地:", homeSlot)
+            end
+        else
+            warn(GameConfig.LOG_PREFIX, "Play Here模式下无法获取角色位置，回退到随机分配")
+        end
+    end
+
+    -- 如果没有通过位置选择到基地，则随机选择
+    if not homeSlot then
+        homeSlot = SelectRandomHome()
+    end
+
     if not homeSlot then
         warn(GameConfig.LOG_PREFIX, "无法为玩家分配基地,服务器已满!", player.Name)
         -- TODO: 后续可以考虑踢出玩家或显示等待界面
@@ -286,8 +345,20 @@ function PlayerManager.OnPlayerAdded(player)
     HomeSystem.InitializePlayerHome(player)
 
     -- 7. 处理角色传送 - 使用异步方式避免阻塞
+    -- 标记是否应跳过首次传送（用于Studio Play Here模式）
+    local shouldSkipFirstTeleport = skipHomeAssignment
+
     local function HandleCharacterSpawn(character)
         task.spawn(function()
+            -- 检查是否应跳过首次传送（Studio Play Here模式）
+            if shouldSkipFirstTeleport then
+                if GameConfig.DEBUG_MODE then
+                    print(GameConfig.LOG_PREFIX, "检测到Studio Play Here模式，跳过首次传送:", player.Name)
+                end
+                shouldSkipFirstTeleport = false  -- 只跳过第一次，后续重生正常传送
+                return
+            end
+
             -- 等待一小段时间确保角色完全加载
             task.wait(0.1)
 
