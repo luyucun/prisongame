@@ -530,9 +530,17 @@ function ProcessDragUpdate(raycastResult)
                        (targetLevel == dragState.draggedLevel) and
                        (dragState.draggedLevel < 3)  -- 最高等级3
 
+        -- V1.4.2: 检测模式切换（从换位模式切换到合成模式）
+        local modeChanged = dragState.isRelocating or (dragState.targetModel ~= hitModel)
+
         dragState.targetModel = hitModel
         dragState.canMerge = canMerge
         dragState.isRelocating = false  -- 不是换位模式
+
+        -- V1.4.2: 如果模式切换或目标改变，强制刷新Grid（清除缓存）
+        if modeChanged then
+            GridHelper.HideGrid()
+        end
 
         -- 显示Grid提示（在目标脚底）
         local targetPos = GetModelPosition(hitModel)
@@ -547,25 +555,59 @@ function ProcessDragUpdate(raycastResult)
         SetModelPosition(dragState.draggedModel, newPos)
 
     elseif raycastResult.Instance == dragState.idleFloor then
-        -- ==================== 换位模式（在IdleFloor上且没有击中其他兵种）====================
-        dragState.targetModel = nil
-        dragState.canMerge = false
-        dragState.isRelocating = true  -- 换位模式
-
-        local model = dragState.draggedModel
-        local floorCenter = dragState.idleFloor.Position
-
+        -- ==================== IdleFloor上的拖动逻辑（V1.5.1优化）====================
         -- 使用PlacementHelper进行网格吸附
         local snappedPos = PlacementHelper.GetNearestGridPosition(
             raycastResult.Position,
-            floorCenter,
+            dragState.idleFloor.Position,
             dragState.draggedGridSize
         )
 
-        -- 检测该位置是否有冲突（排除自己）
-        local isValid = IsPositionValidForRelocate(snappedPos)
+        -- 检测该位置是否有冲突并获取占用的模型
+        local isValid, occupyingModel = IsPositionValidForRelocate(snappedPos)
 
-        -- 显示Grid提示（在拖动模型脚底）
+        -- V1.5.1: 如果位置无效且有占用模型，检查是否可以合成
+        local canMerge = false
+        if not isValid and occupyingModel then
+            local targetUnitId = occupyingModel:GetAttribute("UnitId")
+            local targetLevel = occupyingModel:GetAttribute("Level") or 1
+
+            -- 检查合成条件
+            canMerge = (targetUnitId == dragState.draggedUnitId) and
+                      (targetLevel == dragState.draggedLevel) and
+                      (dragState.draggedLevel < 3)  -- 最高等级3
+
+            if canMerge then
+                -- 满足合成条件：切换到合成模式
+                dragState.targetModel = occupyingModel
+                dragState.canMerge = true
+                dragState.isRelocating = false  -- 不是换位模式，是合成模式
+                isValid = true  -- 标记为绿色
+            end
+        else
+            -- 位置有效（空位）或其他情况：使用换位模式
+            dragState.targetModel = nil
+            dragState.canMerge = false
+            dragState.isRelocating = true  -- 换位模式
+        end
+
+        -- V1.4.2: 检测模式切换，强制刷新Grid
+        local modeChanged = false
+        if canMerge and dragState.isRelocating == false then
+            -- 之前不是合成模式，现在是
+            modeChanged = (not dragState.canMerge or dragState.targetModel == nil)
+        elseif not canMerge and dragState.isRelocating == true then
+            -- 之前不是换位模式，现在是
+            modeChanged = (dragState.canMerge or dragState.targetModel ~= nil)
+        end
+
+        if modeChanged then
+            GridHelper.HideGrid()
+        end
+
+        local model = dragState.draggedModel
+
+        -- 显示Grid提示
         GridHelper.ShowGrid(dragState.draggedGridSize, snappedPos, isValid)
 
         -- V1.4.1: 设置拖动模型的描边颜色
@@ -618,7 +660,8 @@ function StopDragging()
         local currentPos = GetModelPosition(model)
         if currentPos then
             -- 检查该位置是否有效
-            if IsPositionValidForRelocate(currentPos) then
+            local isValid, _ = IsPositionValidForRelocate(currentPos)  -- V1.5.1: 接收第二个返回值
+            if isValid then
                 print("[DragSystem] 请求换位:", dragState.draggedInstanceId, "新位置:", currentPos)
 
                 -- 发送位置更新请求到服务端
@@ -738,13 +781,13 @@ function IsModelOnIdleFloor(model)
 end
 
 --[[
-检查换位时的位置是否有效（V1.4.1）
+检查换位时的位置是否有效（V1.5.1修改：支持返回占用模型）
 @param worldPos Vector3 - 世界坐标
-@return boolean - true表示有效，false表示有冲突
+@return boolean, Model|nil - 第一个返回值表示是否有效，第二个返回值是占用的模型（如果有冲突）
 ]]
 function IsPositionValidForRelocate(worldPos)
     if not dragState.idleFloor then
-        return false
+        return false, nil
     end
 
     local floorCenter = dragState.idleFloor.Position
@@ -772,14 +815,14 @@ function IsPositionValidForRelocate(worldPos)
                     local overlapZ = not (gridZ + currentGridWidth <= objGridZ or gridZ >= objGridZ + objGridWidth)
 
                     if overlapX and overlapZ then
-                        return false  -- 位置冲突
+                        return false, obj  -- 位置冲突，返回占用的模型
                     end
                 end
             end
         end
     end
 
-    return true  -- 位置有效
+    return true, nil  -- 位置有效
 end
 
 --[[
