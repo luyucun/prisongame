@@ -1,7 +1,7 @@
 --[[
 脚本名称: PlacementConfig
-脚本类型: ModuleScript (服务端配置)
-脚本位置: ServerScriptService/Config/PlacementConfig
+脚本类型: ModuleScript (配置模块)
+脚本位置: ReplicatedStorage/Config/PlacementConfig
 ]]
 
 --[[

@@ -27,10 +27,10 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
--- 引用配置
-local GameConfig = require(ServerScriptService.Config.GameConfig)
-local UnitConfig = require(ServerScriptService.Config.UnitConfig)
-local BattleConfig = require(ServerScriptService.Config.BattleConfig)
+-- 引用配置（从ReplicatedStorage获取共享配置）
+local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
+local UnitConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("UnitConfig"))
+local BattleConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("BattleConfig"))
 
 -- ==================== 私有变量 ====================
 
@@ -46,6 +46,7 @@ local updateConnection = nil
 -- HitboxService 和 UnitManager 引用
 local HitboxService = nil
 local UnitManager = nil
+local ProjectileSystem = nil  -- V1.5远程攻击支持
 
 -- ==================== 数据结构 ====================
 
@@ -369,6 +370,104 @@ function CombatSystem.OnDamageEvent(unitModel)
 end
 
 --[[
+远程单位动画"Damage"事件触发时调用(发射子弹)
+@param unitModel Model - 攻击者模型
+@param target Model - 目标模型
+@return boolean - 是否成功发射子弹
+]]
+function CombatSystem.OnRangedDamageEvent(unitModel, target)
+	local state = unitStates[unitModel]
+
+	if not state then
+		WarnLog("OnRangedDamageEvent失败: 兵种未初始化")
+		return false
+	end
+
+	if not state.IsAlive then
+		return false
+	end
+
+	-- 验证攻击阶段(必须是Attacking)
+	if state.AttackPhase ~= BattleConfig.AttackPhase.ATTACKING then
+		WarnLog(string.format("%s OnRangedDamageEvent被调用,但不在Attacking阶段(当前:%s)",
+			state.UnitId, state.AttackPhase))
+		return false
+	end
+
+	-- 检查目标是否还存活
+	if not target or not target.Parent or not CombatSystem.IsUnitAlive(target) then
+		DebugLog(string.format("%s 目标已死亡或不存在,取消发射子弹", state.UnitId))
+		-- 即使目标死亡，也进入Recovery阶段（不让攻击卡住）
+		state.AttackPhase = BattleConfig.AttackPhase.RECOVERY
+		state.RecoveryEndTime = tick() + state.AttackSpeed
+		return false
+	end
+
+	-- 修复4: 检查目标距离是否在射程内
+	-- 🔧 V1.5.2优化：使用攻击距离+容差作为有效射程，而非脱离阈值
+	-- 理由：只要在攻击状态就应该能发射，距离检查不应过于严格
+	local unitRoot = unitModel:FindFirstChild("HumanoidRootPart")
+	local targetRoot = target:FindFirstChild("HumanoidRootPart")
+	if unitRoot and targetRoot then
+		local distance = (targetRoot.Position - unitRoot.Position).Magnitude
+		-- 使用攻击距离 * 1.15 作为最大有效射程（稍微宽松一些）
+		local maxRange = state.AttackRange * 1.15
+
+		if distance > maxRange then
+			DebugLog(string.format("%s 目标距离%.1f超出最大有效射程%.1f，取消发射",
+				state.UnitId, distance, maxRange))
+			-- 进入Recovery阶段，让AI继续判断是否脱离
+			state.AttackPhase = BattleConfig.AttackPhase.RECOVERY
+			state.RecoveryEndTime = tick() + state.AttackSpeed
+			return false
+		end
+	end
+
+	-- 获取ProjectileSpeed
+	local projectileSpeed = UnitConfig.GetProjectileSpeed(state.UnitId)
+	if not projectileSpeed or projectileSpeed <= 0 then
+		WarnLog(string.format("%s ProjectileSpeed无效: %s, 无法发射子弹",
+			state.UnitId, tostring(projectileSpeed)))
+		-- 进入Recovery阶段
+		state.AttackPhase = BattleConfig.AttackPhase.RECOVERY
+		state.RecoveryEndTime = tick() + state.AttackSpeed
+		return false
+	end
+
+	-- 引用ProjectileSystem（延迟加载）
+	if not ProjectileSystem then
+		ProjectileSystem = require(ServerScriptService.Systems.ProjectileSystem)
+	end
+
+	-- ⭐⭐⭐ 发射子弹 ⭐⭐⭐
+	local projectile = ProjectileSystem.CreateProjectile(
+		unitModel,     -- 攻击者
+		target,        -- 目标
+		state.Attack,  -- 伤害值
+		projectileSpeed -- 子弹速度
+	)
+
+	if projectile then
+		DebugLog(string.format("%s 成功发射子弹, 目标:%s, 伤害:%d, 速度:%d",
+			state.UnitId,
+			CombatSystem.GetUnitState(target) and CombatSystem.GetUnitState(target).UnitId or "Unknown",
+			state.Attack,
+			projectileSpeed))
+	else
+		WarnLog(string.format("%s 发射子弹失败", state.UnitId))
+	end
+
+	-- 进入 Recovery 阶段
+	state.AttackPhase = BattleConfig.AttackPhase.RECOVERY
+	state.RecoveryEndTime = tick() + state.AttackSpeed
+
+	DebugLog(string.format("%s 远程攻击完成,进入Recovery(%.1f秒)",
+		state.UnitId, state.AttackSpeed))
+
+	return projectile ~= nil
+end
+
+--[[
 检查是否可以攻击
 @param unitModel Model - 兵种模型
 @return boolean - 是否可以攻击
@@ -507,14 +606,15 @@ function CombatSystem.KillUnit(unitModel, killer)
 	local UnitAI = require(ServerScriptService.Systems.UnitAI)
 	UnitAI.StopAI(unitModel)
 
-	-- 保存battleId用于后续事件触发
+	-- 保存battleId和unitId用于后续事件触发和日志
 	local battleId = state.BattleId
+	local unitId = state.UnitId
 
 	-- V1.5.1 Bug修复: 从UnitManager中注销单位(必须在清除unitStates之前)
 	-- 防止死亡单位仍留在索引表中被寻敌/碰撞判定访问
 	if UnitManager then
 		UnitManager.UnregisterUnit(unitModel)
-		DebugLog(string.format("%s 已从UnitManager注销", state.UnitId))
+		DebugLog(string.format("%s 已从UnitManager注销", unitId))
 	end
 
 	-- 立即从状态表中移除，避免其他系统访问死亡单位
@@ -525,11 +625,25 @@ function CombatSystem.KillUnit(unitModel, killer)
 		unitDeathEvent:Fire(unitModel, killer, battleId)
 	end
 
-	-- 播放死亡动画(暂时跳过)
-	-- TODO: 播放死亡动画
+	-- V1.5.2: 播放死亡动画
+	local deathAnimationId = UnitConfig.GetDeathAnimationId(unitId)
+	local deathAnimDuration = BattleConfig.DEATH_ANIMATION_DURATION
 
-	-- 延迟移除模型(让死亡动画有时间播放)
-	task.delay(0.5, function()
+	if deathAnimationId and deathAnimationId ~= "" then
+		local animTrack = UnitAI.PlayDeathAnimation(unitModel, deathAnimationId)
+		if animTrack then
+			-- 使用实际动画时长
+			deathAnimDuration = animTrack.Length
+			DebugLog(string.format("%s 播放死亡动画, 时长: %.2f秒", unitId, deathAnimDuration))
+		else
+			DebugLog(string.format("%s 死亡动画加载失败, 使用默认延迟", unitId))
+		end
+	else
+		DebugLog(string.format("%s 无死亡动画配置, 使用默认延迟", unitId))
+	end
+
+	-- 延迟移除模型(等待动画播放完成)
+	task.delay(deathAnimDuration, function()
 		if unitModel and unitModel.Parent then
 			unitModel:Destroy()
 		end

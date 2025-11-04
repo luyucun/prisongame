@@ -24,10 +24,11 @@ local UnitManager = {}
 
 -- 引用服务
 local ServerScriptService = game:GetService("ServerScriptService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 -- 引用配置
-local GameConfig = require(ServerScriptService.Config.GameConfig)
-local BattleConfig = require(ServerScriptService.Config.BattleConfig)
+local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
+local BattleConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("BattleConfig"))
 
 -- ==================== 私有变量 ====================
 

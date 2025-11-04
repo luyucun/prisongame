@@ -2,22 +2,23 @@
 脚本名称: UnitAI
 脚本类型: ModuleScript (服务端系统)
 脚本位置: ServerScriptService/Systems/UnitAI
-版本: V1.5.1 - 重构为动画事件驱动 + AI节流
+版本: V1.5.2 - 状态机重构版
 ]]
 
 --[[
-兵种AI系统
+兵种AI系统 - 重构版
 职责:
-1. 目标寻找与锁定
-2. 移动与寻路
-3. 攻击判定与执行
-4. AI状态机管理
+1. 清晰的状态机: SEEKING → MOVING → ATTACKING → RECOVERY → SEEKING
+2. 统一的距离策略: 所有距离判定通过UnitAIRangePolicy
+3. 状态驱动的更新逻辑
+4. 集中的动画管理和失效目标处理
 
-V1.5.1 重要改动:
-- 移除所有 Touched 事件相关代码
-- 攻击改为监听动画"Damage"事件
-- AI更新改为批量节流（0.2秒）
-- 寻敌改用 UnitManager 分组索引
+重构改进:
+- 状态机收敛为核心闭环
+- 距离策略模块化
+- 动画清理集中化
+- 目标验证下沉
+- 日志系统优化
 ]]
 
 local UnitAI = {}
@@ -29,9 +30,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 -- 引用配置
-local GameConfig = require(ServerScriptService.Config.GameConfig)
-local UnitConfig = require(ServerScriptService.Config.UnitConfig)
-local BattleConfig = require(ServerScriptService.Config.BattleConfig)
+local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
+local UnitConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("UnitConfig"))
+local BattleConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("BattleConfig"))
 
 -- 引用系统
 local CombatSystem = require(ServerScriptService.Systems.CombatSystem)
@@ -48,13 +49,142 @@ local updateConnection = nil
 -- 死亡事件连接
 local deathEventConnection = nil
 
--- V1.5.1 新增: AI节流相关
+-- AI节流相关
 local accumulatedTime = 0
 
 -- 是否已初始化
 local isInitialized = false
 
--- ==================== 数据结构 ====================
+-- ==================== 核心状态机定义 ====================
+
+--[[
+状态机规则表
+每个状态定义：
+- EnterConditions: 进入此状态的条件
+- Actions: 此状态中执行的操作
+- ExitConditions: 退出此状态的条件
+- NextStates: 可能转移到的下一状态
+]]
+local AIStateMachine = {
+	[BattleConfig.AIState.SEEKING] = {
+		Description = "寻找目标",
+		EnterConditions = "无目标 或 目标死亡/失效",
+		Actions = "调用FindNearestEnemy寻找敌人",
+		ExitConditions = "找到目标 → MOVING | 无目标 → IDLE",
+		NextStates = { BattleConfig.AIState.MOVING, BattleConfig.AIState.IDLE }
+	},
+
+	[BattleConfig.AIState.MOVING] = {
+		Description = "移动到目标",
+		EnterConditions = "已有目标且距离 > 进入攻击阈值",
+		Actions = "计算移动目标点, 调用MoveTo, 播放移动动画",
+		ExitConditions = "距离 <= 进入攻击阈值 → ATTACKING | 目标失效 → SEEKING",
+		NextStates = { BattleConfig.AIState.ATTACKING, BattleConfig.AIState.SEEKING }
+	},
+
+	[BattleConfig.AIState.ATTACKING] = {
+		Description = "攻击目标",
+		EnterConditions = "距离 <= 进入攻击阈值且可攻击",
+		Actions = "停止移动, 面向目标, 触发攻击动画, 调用BeginAttack",
+		ExitConditions = "距离 > 脱离攻击阈值 → MOVING | 目标失效 → SEEKING",
+		NextStates = { BattleConfig.AIState.MOVING, BattleConfig.AIState.SEEKING }
+	},
+
+	-- RECOVERY阶段由CombatSystem管理，AI无需关心
+	-- 单位在ATTACKING状态期间会自动经历 Attacking → Recovery → Idle 的攻击阶段
+}
+
+-- ==================== 距离策略模块 ====================
+
+local UnitAIRangePolicy = {}
+
+--[[
+获取停靠距离
+@param unitState - 兵种战斗状态
+@param targetState - 目标战斗状态（可选）
+@return number - 停靠距离
+]]
+function UnitAIRangePolicy.GetDockingDistance(unitState, targetState)
+	local isRanged = UnitConfig.IsRangedUnit(unitState.UnitId)
+
+	if isRanged then
+		-- 远程单位：停在攻击距离 * RANGED_DOCKING_RATIO 处
+		return unitState.AttackRange * BattleConfig.RANGED_DOCKING_RATIO
+	else
+		-- 近战单位：考虑模型物理尺寸，计算贴身距离
+		local attackerRoot = unitState.UnitInstance:FindFirstChild("HumanoidRootPart")
+		if not attackerRoot then
+			return unitState.AttackRange
+		end
+
+		local attackerDepth = attackerRoot.Size.Z
+		local targetDepth = 5  -- 默认值
+
+		if targetState and targetState.UnitInstance then
+			local targetRoot = targetState.UnitInstance:FindFirstChild("HumanoidRootPart")
+			if targetRoot then
+				targetDepth = targetRoot.Size.Z
+			end
+		end
+
+		-- 接触距离 = 两个半径相加
+		local contactDistance = (attackerDepth + targetDepth) * 0.5
+
+		-- 期望距离 = 接触距离 - 缓冲
+		local desiredDistance = math.max(contactDistance - BattleConfig.CONTACT_BUFFER, 0)
+
+		-- 综合考虑攻击距离和物理尺寸
+		local combatProfile = UnitConfig.GetCombatProfile(unitState.UnitId)
+		local contactOffset = (combatProfile and combatProfile.ContactOffset) or 0
+
+		return math.max(
+			math.min(unitState.AttackRange - BattleConfig.ATTACK_RANGE_TOLERANCE, desiredDistance),
+			BattleConfig.MIN_DOCKING_DISTANCE
+		) + contactOffset
+	end
+end
+
+--[[
+判断是否应该进入攻击状态
+@param distance - 当前距离
+@param unitState - 兵种战斗状态
+@return boolean - 是否应该进入攻击
+]]
+function UnitAIRangePolicy.ShouldEnterAttack(distance, unitState)
+	local isRanged = UnitConfig.IsRangedUnit(unitState.UnitId)
+
+	if isRanged then
+		-- 远程单位：距离 <= 攻击距离 * RANGED_ENTER_ATTACK_RATIO
+		local threshold = unitState.AttackRange * BattleConfig.RANGED_ENTER_ATTACK_RATIO
+		return distance <= threshold
+	else
+		-- 近战单位：距离 <= 攻击距离 + 容差
+		local threshold = unitState.AttackRange + BattleConfig.ATTACK_RANGE_TOLERANCE
+		return distance <= threshold
+	end
+end
+
+--[[
+判断是否应该退出攻击状态
+@param distance - 当前距离
+@param unitState - 兵种战斗状态
+@return boolean - 是否应该退出攻击
+]]
+function UnitAIRangePolicy.ShouldExitAttack(distance, unitState)
+	local isRanged = UnitConfig.IsRangedUnit(unitState.UnitId)
+
+	if isRanged then
+		-- 远程单位：距离 > 攻击距离 * RANGED_EXIT_ATTACK_RATIO
+		local threshold = unitState.AttackRange * BattleConfig.RANGED_EXIT_ATTACK_RATIO
+		return distance > threshold
+	else
+		-- 近战单位：距离 > 攻击距离 + 容差 + 移动停止容差
+		local threshold = unitState.AttackRange + BattleConfig.ATTACK_RANGE_TOLERANCE + BattleConfig.MOVE_STOP_TOLERANCE
+		return distance > threshold
+	end
+end
+
+-- ==================== AIData数据结构 ====================
 
 --[[
 AIData = {
@@ -63,18 +193,22 @@ AIData = {
     HumanoidRootPart = Part,     -- HumanoidRootPart
     IsActive = boolean,          -- AI是否激活
     LastUpdateTime = number,     -- 上次更新时间
-    PathfindingTimeout = number, -- 寻路超时时间
-    CurrentMoveAnimation = AnimationTrack|nil,  -- 当前播放的移动动画
-    CurrentAttackAnimation = AnimationTrack|nil, -- 当前播放的攻击动画
-    AnimationConnections = {},   -- 动画事件连接 (V1.5.1新增)
+
+    -- 动画管理 (V1.5.2扩展)
+    CurrentMoveAnimation = AnimationTrack|nil,
+    CurrentAttackAnimation = AnimationTrack|nil,
+    CurrentIdleAnimation = AnimationTrack|nil,  -- V1.5.2新增: 待机动画
+    AnimationConnections = {},   -- 动画事件连接
+
+    -- 方向缓存（防止零向量）
+    LastDesiredDirection = Vector3|nil,
 }
 ]]
 
--- ==================== 私有函数 ====================
+-- ==================== 私有工具函数 ====================
 
 --[[
 输出调试日志
-@param ... - 日志内容
 ]]
 local function DebugLog(...)
 	if BattleConfig.DEBUG_AI_LOGS then
@@ -84,164 +218,23 @@ end
 
 --[[
 输出警告日志
-@param ... - 日志内容
 ]]
 local function WarnLog(...)
 	warn(GameConfig.LOG_PREFIX, "[UnitAI]", ...)
 end
 
 --[[
-播放移动动画
-@param humanoid Humanoid - Humanoid对象
-@param unitId string - 兵种ID
-@return AnimationTrack|nil - 动画轨道
+状态变更日志（关键节点）
 ]]
-local function PlayMoveAnimation(humanoid, unitId)
-	-- 参数验证
-	if not humanoid or not unitId then
-		return nil
+local function LogStateChange(unitId, fromState, toState, reason)
+	if BattleConfig.DEBUG_AI_LOGS then
+		print(GameConfig.LOG_PREFIX, string.format("[UnitAI] %s: %s → %s (%s)",
+			unitId, fromState or "nil", toState, reason or ""))
 	end
-
-	-- 从配置表获取移动动画ID
-	local animationId = UnitConfig.GetMoveAnimationId(unitId)
-
-	-- 如果animationId为空或nil，则不播放自定义动画
-	if not animationId or animationId == "" or animationId == "0" then
-		DebugLog("没有配置移动动画ID，使用Humanoid默认移动")
-		return nil
-	end
-
-	-- 检查animationId是否为有效的数字格式
-	if not tonumber(animationId) then
-		WarnLog(string.format("无效的移动动画ID格式: %s (应为纯数字)", animationId))
-		return nil
-	end
-
-	-- 获取Animator
-	local animator = humanoid:FindFirstChild("Animator")
-
-	if not animator then
-		WarnLog("找不到Animator对象")
-		return nil
-	end
-
-	-- 创建Animation实例
-	local animation = Instance.new("Animation")
-	animation.AnimationId = "rbxassetid://" .. animationId
-
-	-- 使用pcall保护加载过程
-	local success, animationTrack = pcall(function()
-		return animator:LoadAnimation(animation)
-	end)
-
-	if not success or not animationTrack then
-		WarnLog(string.format("无法加载移动动画: %s", animationId))
-		animation:Destroy()
-		return nil
-	end
-
-	-- 设置动画循环播放
-	animationTrack.Looped = true
-
-	-- 播放动画
-	local playSuccess, playError = pcall(function()
-		animationTrack:Play()
-	end)
-
-	if not playSuccess then
-		WarnLog(string.format("无法播放移动动画: %s, 错误: %s", animationId, playError))
-		animation:Destroy()
-		return nil
-	end
-
-	DebugLog(string.format("播放移动动画: %s (循环)", animationId))
-
-	return animationTrack
-end
-
---[[
-播放攻击动画
-@param humanoid Humanoid - Humanoid对象
-@param animationId string - 动画ID
-@return AnimationTrack|nil - 动画轨道
-]]
-local function PlayAttackAnimation(humanoid, animationId)
-	-- 参数验证
-	if not humanoid then
-		return nil
-	end
-
-	-- 如果animationId为空或nil，则不播放自定义动画
-	if not animationId or animationId == "" or animationId == "0" then
-		DebugLog("没有配置攻击动画ID，使用默认动作")
-		return nil
-	end
-
-	-- 检查animationId是否为有效的数字格式
-	if not tonumber(animationId) then
-		WarnLog(string.format("无效的动画ID格式: %s (应为纯数字)", animationId))
-		return nil
-	end
-
-	-- 获取Animator
-	local animator = humanoid:FindFirstChild("Animator")
-
-	if not animator then
-		-- 如果找不到Animator，从Parent的所有子元素查找
-		animator = humanoid.Parent:FindFirstChildOfClass("Animator")
-	end
-
-	if not animator then
-		WarnLog("找不到Animator对象")
-		return nil
-	end
-
-	-- 创建Animation实例
-	local animation = Instance.new("Animation")
-	animation.AnimationId = "rbxassetid://" .. animationId
-
-	-- 使用pcall保护加载过程，防止错误导致AI更新失败
-	local success, animationTrack = pcall(function()
-		return animator:LoadAnimation(animation)
-	end)
-
-	if not success or not animationTrack then
-		WarnLog(string.format("无法加载动画: %s", animationId))
-		animation:Destroy()
-		return nil
-	end
-
-	-- V1.5.1修复: 攻击动画不应该循环播放
-	animationTrack.Looped = false
-
-	-- 播放动画
-	local playSuccess, playError = pcall(function()
-		animationTrack:Play()
-	end)
-
-	if not playSuccess then
-		WarnLog(string.format("无法播放动画: %s, 错误: %s", animationId, playError))
-		animation:Destroy()
-		return nil
-	end
-
-	DebugLog(string.format("播放攻击动画: %s (单次)", animationId))
-
-	-- 动画播放完毕后清理
-	task.delay(animationTrack.Length + 0.1, function()
-		if animation and animation.Parent then
-			animation:Destroy()
-		end
-	end)
-
-	return animationTrack
 end
 
 --[[
 计算两个模型之间的距离
-@param model1 Model - 模型1
-@param model2 Model - 模型2
-@return number - 距离
 ]]
 local function GetDistance(model1, model2)
 	local part1 = model1:FindFirstChild("HumanoidRootPart") or model1.PrimaryPart
@@ -255,68 +248,481 @@ local function GetDistance(model1, model2)
 end
 
 --[[
-计算停靠点（Docking Point）
-V1.5.1重构: 考虑模型物理尺寸,避免隔空挥拳
-单位不会直接移动到目标脚下,而是停留在双方模型几乎贴身的位置
-@param attackerRoot Part - 攻击方的HumanoidRootPart
-@param targetRoot Part - 目标的HumanoidRootPart
-@param attackRange number - 攻击距离
-@param tolerance number - 容差（额外的安全距离）
-@param combatProfile table - 战斗配置(包含ContactOffset)
-@return Vector3 - 停靠点位置
+播放移动动画
 ]]
-local function CalculateDockingPoint(attackerRoot, targetRoot, attackRange, tolerance, combatProfile)
-	local myPos = attackerRoot.Position
-	local targetPos = targetRoot.Position
-
-	-- 计算方向向量
-	local directionToTarget = (targetPos - myPos)
-	local distance = directionToTarget.Magnitude
-
-	-- 如果已经非常接近，返回当前位置
-	if distance < 0.1 then
-		return myPos
+local function PlayMoveAnimation(humanoid, unitId)
+	if not humanoid or not unitId then
+		return nil
 	end
 
-	-- 单位化方向向量
-	local normalizedDirection = directionToTarget.Unit
+	local animationId = UnitConfig.GetMoveAnimationId(unitId)
 
-	-- ==================== V1.5.1核心改动: 考虑模型物理尺寸 ====================
+	if not animationId or animationId == "" or animationId == "0" then
+		return nil
+	end
 
-	-- 获取双方模型的深度(Z轴尺寸)
-	local attackerDepth = attackerRoot.Size.Z
-	local targetDepth = targetRoot.Size.Z
+	if not tonumber(animationId) then
+		WarnLog(string.format("无效的移动动画ID格式: %s", animationId))
+		return nil
+	end
 
-	-- 计算接触距离(两个包围盒相贴时的中心距)
-	local contactDistance = (attackerDepth + targetDepth) * 0.5
+	local animator = humanoid:FindFirstChild("Animator")
+	if not animator then
+		return nil
+	end
 
-	-- 计算期望距离(接触距离 - 缓冲距离,避免完全重叠)
-	local desiredDistance = math.max(contactDistance - BattleConfig.CONTACT_BUFFER, 0)
+	local animation = Instance.new("Animation")
+	animation.AnimationId = "rbxassetid://" .. animationId
 
-	-- 综合考虑攻击距离和物理尺寸
-	-- 取两者中的较小值,确保既不超出攻击范围,也不隔空挥拳
-	local baseDockingDistance = math.max(
-		math.min(attackRange - tolerance, desiredDistance),
-		BattleConfig.MIN_DOCKING_DISTANCE
-	)
+	local success, animationTrack = pcall(function()
+		return animator:LoadAnimation(animation)
+	end)
 
-	-- 应用武器长度补偿(如果有)
-	local contactOffset = (combatProfile and combatProfile.ContactOffset) or 0
-	local dockingDistance = baseDockingDistance + contactOffset
+	if not success or not animationTrack then
+		animation:Destroy()
+		return nil
+	end
 
-	-- 计算停靠点(从目标位置往回退dockingDistance)
-	local dockingPoint = targetPos - normalizedDirection * dockingDistance
+	animationTrack.Looped = true
 
-	DebugLog(string.format(
-		"计算停靠点: 距离=%.2f, 攻击距离=%.2f, 攻击者深度=%.2f, 目标深度=%.2f, 接触距离=%.2f, 期望距离=%.2f, 武器补偿=%.2f, 最终停靠距离=%.2f",
-		distance, attackRange, attackerDepth, targetDepth, contactDistance, desiredDistance, contactOffset, dockingDistance
-	))
+	local playSuccess = pcall(function()
+		animationTrack:Play()
+	end)
 
-	return dockingPoint
+	if not playSuccess then
+		animation:Destroy()
+		return nil
+	end
+
+	-- V1.5.2修复：循环动画在停止时清理Animation对象，防止内存泄漏
+	animationTrack.Stopped:Connect(function()
+		if animation and animation.Parent then
+			animation:Destroy()
+		end
+	end)
+
+	return animationTrack
 end
 
 --[[
-更新所有AI (V1.5.1优化: 批量更新)
+播放攻击动画
+]]
+local function PlayAttackAnimation(humanoid, animationId)
+	if not humanoid then
+		return nil
+	end
+
+	if not animationId or animationId == "" or animationId == "0" then
+		return nil
+	end
+
+	if not tonumber(animationId) then
+		WarnLog(string.format("无效的动画ID格式: %s", animationId))
+		return nil
+	end
+
+	local animator = humanoid:FindFirstChild("Animator")
+	if not animator then
+		animator = humanoid.Parent:FindFirstChildOfClass("Animator")
+	end
+
+	if not animator then
+		return nil
+	end
+
+	local animation = Instance.new("Animation")
+	animation.AnimationId = "rbxassetid://" .. animationId
+
+	local success, animationTrack = pcall(function()
+		return animator:LoadAnimation(animation)
+	end)
+
+	if not success or not animationTrack then
+		animation:Destroy()
+		return nil
+	end
+
+	animationTrack.Looped = false
+
+	local playSuccess = pcall(function()
+		animationTrack:Play()
+	end)
+
+	if not playSuccess then
+		animation:Destroy()
+		return nil
+	end
+
+	task.delay(animationTrack.Length + 0.1, function()
+		if animation and animation.Parent then
+			animation:Destroy()
+		end
+	end)
+
+	return animationTrack
+end
+
+--[[
+播放死亡动画 (V1.5.2新增)
+@param humanoid Humanoid - Humanoid对象
+@param animationId string - 动画ID
+@return AnimationTrack|nil - 动画轨道，失败返回nil
+]]
+local function PlayDeathAnimation(humanoid, animationId)
+	if not humanoid then
+		return nil
+	end
+
+	if not animationId or animationId == "" or animationId == "0" then
+		return nil
+	end
+
+	if not tonumber(animationId) then
+		WarnLog(string.format("无效的死亡动画ID格式: %s", animationId))
+		return nil
+	end
+
+	local animator = humanoid:FindFirstChild("Animator")
+	if not animator then
+		animator = humanoid.Parent:FindFirstChildOfClass("Animator")
+	end
+
+	if not animator then
+		return nil
+	end
+
+	local animation = Instance.new("Animation")
+	animation.AnimationId = "rbxassetid://" .. animationId
+
+	local success, animationTrack = pcall(function()
+		return animator:LoadAnimation(animation)
+	end)
+
+	if not success or not animationTrack then
+		animation:Destroy()
+		return nil
+	end
+
+	animationTrack.Looped = false
+
+	local playSuccess = pcall(function()
+		animationTrack:Play()
+	end)
+
+	if not playSuccess then
+		animation:Destroy()
+		return nil
+	end
+
+	-- 死亡动画播放完成后自动清理
+	task.delay(animationTrack.Length + 0.1, function()
+		if animation and animation.Parent then
+			animation:Destroy()
+		end
+	end)
+
+	return animationTrack
+end
+
+--[[
+播放待机动画 (V1.5.2新增)
+@param humanoid Humanoid - Humanoid对象
+@param animationId string - 动画ID
+@return AnimationTrack|nil - 动画轨道，失败返回nil
+]]
+local function PlayIdleAnimation(humanoid, animationId)
+	if not humanoid then
+		return nil
+	end
+
+	if not animationId or animationId == "" or animationId == "0" then
+		return nil
+	end
+
+	if not tonumber(animationId) then
+		WarnLog(string.format("无效的待机动画ID格式: %s", animationId))
+		return nil
+	end
+
+	local animator = humanoid:FindFirstChild("Animator")
+	if not animator then
+		animator = humanoid.Parent:FindFirstChildOfClass("Animator")
+	end
+
+	if not animator then
+		return nil
+	end
+
+	local animation = Instance.new("Animation")
+	animation.AnimationId = "rbxassetid://" .. animationId
+
+	local success, animationTrack = pcall(function()
+		return animator:LoadAnimation(animation)
+	end)
+
+	if not success or not animationTrack then
+		animation:Destroy()
+		return nil
+	end
+
+	animationTrack.Looped = true  -- 待机动画循环播放
+
+	local playSuccess = pcall(function()
+		animationTrack:Play()
+	end)
+
+	if not playSuccess then
+		animation:Destroy()
+		return nil
+	end
+
+	-- V1.5.2修复：循环动画在停止时清理Animation对象，防止内存泄漏
+	animationTrack.Stopped:Connect(function()
+		if animation and animation.Parent then
+			animation:Destroy()
+		end
+	end)
+
+	return animationTrack
+end
+
+--[[
+重置动画状态（集中化清理）
+@param aiData - AI数据
+@param keepMove - 是否保留移动动画
+@param keepIdle - 是否保留待机动画 (V1.5.2新增)
+]]
+local function ResetAnimationState(aiData, keepMove, keepIdle)
+	-- 停止攻击动画
+	if aiData.CurrentAttackAnimation then
+		aiData.CurrentAttackAnimation:Stop()
+		aiData.CurrentAttackAnimation = nil
+	end
+
+	-- 停止移动动画（除非保留）
+	if not keepMove and aiData.CurrentMoveAnimation then
+		aiData.CurrentMoveAnimation:Stop()
+		aiData.CurrentMoveAnimation = nil
+	end
+
+	-- V1.5.2新增: 停止待机动画（除非保留）
+	if not keepIdle and aiData.CurrentIdleAnimation then
+		aiData.CurrentIdleAnimation:Stop()
+		aiData.CurrentIdleAnimation = nil
+	end
+
+	-- 断开所有动画事件连接
+	for _, connection in ipairs(aiData.AnimationConnections) do
+		if connection and connection.Connected then
+			connection:Disconnect()
+		end
+	end
+	aiData.AnimationConnections = {}
+end
+
+--[[
+确保单位停止移动
+@param unitModel - 兵种模型
+@param aiData - AI数据
+]]
+local function EnsureStopped(unitModel, aiData)
+	if not aiData or not aiData.Humanoid or not aiData.HumanoidRootPart then
+		return
+	end
+
+	-- 发送MoveTo到当前位置，确保停止
+	aiData.Humanoid:MoveTo(aiData.HumanoidRootPart.Position)
+
+	-- 停止移动动画
+	if aiData.CurrentMoveAnimation then
+		aiData.CurrentMoveAnimation:Stop()
+		aiData.CurrentMoveAnimation = nil
+	end
+end
+
+--[[
+面向目标（防止零向量）
+@param aiData - AI数据
+@param target - 目标模型
+@return boolean - 是否成功面向目标
+]]
+local function OrientTowardsTarget(aiData, target)
+	if not aiData or not aiData.HumanoidRootPart then
+		return false
+	end
+
+	local targetPart = target:FindFirstChild("HumanoidRootPart") or target.PrimaryPart
+	if not targetPart then
+		return false
+	end
+
+	local lookVector = (targetPart.Position - aiData.HumanoidRootPart.Position)
+	local lookDistance = lookVector.Magnitude
+
+	-- 只有当向量不为零时才更新朝向
+	if lookDistance > 0.01 then
+		lookVector = lookVector.Unit
+		aiData.HumanoidRootPart.CFrame = CFrame.new(
+			aiData.HumanoidRootPart.Position,
+			aiData.HumanoidRootPart.Position + lookVector
+		)
+		-- 缓存朝向
+		aiData.LastDesiredDirection = lookVector
+		return true
+	end
+
+	-- 距离太近，保持原朝向
+	return false
+end
+
+--[[
+验证并获取有效目标
+@param unitModel - 兵种模型
+@return Model|nil - 有效的目标，无效返回nil
+]]
+local function ValidateTarget(unitModel)
+	local target = CombatSystem.GetTarget(unitModel)
+
+	if not target or not target.Parent then
+		return nil
+	end
+
+	if not CombatSystem.IsUnitAlive(target) then
+		return nil
+	end
+
+	return target
+end
+
+-- ==================== 状态处理函数 ====================
+
+--[[
+处理SEEKING状态：寻找目标
+]]
+local function HandleSeeking(unitModel, aiData, state)
+	local target = UnitAI.FindNearestEnemy(unitModel)
+
+	if target then
+		CombatSystem.SetTarget(unitModel, target)
+		CombatSystem.SetAIState(unitModel, BattleConfig.AIState.MOVING)
+		LogStateChange(state.UnitId, "SEEKING", "MOVING", "找到目标")
+	else
+		CombatSystem.SetAIState(unitModel, BattleConfig.AIState.IDLE)
+	end
+end
+
+--[[
+处理MOVING状态：移动到目标
+]]
+local function HandleMoving(unitModel, aiData, state)
+	-- 验证目标
+	local target = ValidateTarget(unitModel)
+	if not target then
+		CombatSystem.SetTarget(unitModel, nil)
+		CombatSystem.SetAIState(unitModel, BattleConfig.AIState.SEEKING)
+		LogStateChange(state.UnitId, "MOVING", "SEEKING", "目标失效")
+		return
+	end
+
+	-- 检查距离
+	local distance = GetDistance(unitModel, target)
+
+	-- 🔧 V1.5.3关键修复：远程单位提前停止策略（增强版）
+	-- 当距离已经接近停靠距离时，停止移动，避免互相穿越
+	local isRanged = UnitConfig.IsRangedUnit(state.UnitId)
+	if isRanged then
+		local targetState = CombatSystem.GetUnitState(target)
+		local dockingDistance = UnitAIRangePolicy.GetDockingDistance(state, targetState)
+
+		-- 🔧 优化1: 增大提前停止的缓冲距离从+2改为+4 studs
+		-- 原因：给AI更多的反应时间，避免惯性导致穿越
+		-- 🔧 优化2: 如果已经在合适距离，也执行停止，防止边打边走
+		if distance <= dockingDistance + 4 then
+			DebugLog(string.format("%s (远程) 接近停靠距离(%.1f <= %.1f+4)，提前停止",
+				state.UnitId, distance, dockingDistance))
+			EnsureStopped(unitModel, aiData)
+
+			-- 🔧 优化3: 如果距离已经在进入攻击阈值内，直接切换到ATTACKING
+			if UnitAIRangePolicy.ShouldEnterAttack(distance, state) then
+				CombatSystem.SetAIState(unitModel, BattleConfig.AIState.ATTACKING)
+				LogStateChange(state.UnitId, "MOVING", "ATTACKING", string.format("提前停止后距离符合攻击条件(%.1f)", distance))
+				return  -- 直接返回，避免后续MoveTo覆盖停止状态
+			end
+		end
+	end
+
+	-- 判断是否应该进入攻击
+	if UnitAIRangePolicy.ShouldEnterAttack(distance, state) then
+		-- 停止移动
+		EnsureStopped(unitModel, aiData)
+
+		CombatSystem.SetAIState(unitModel, BattleConfig.AIState.ATTACKING)
+		LogStateChange(state.UnitId, "MOVING", "ATTACKING", string.format("距离%.1f <= 阈值", distance))
+	else
+		-- 继续移动到目标
+		UnitAI.MoveToTarget(unitModel, target, aiData, state)
+	end
+end
+
+--[[
+处理ATTACKING状态：攻击目标
+]]
+local function HandleAttacking(unitModel, aiData, state)
+	-- 验证目标
+	local target = ValidateTarget(unitModel)
+	if not target then
+		CombatSystem.SetTarget(unitModel, nil)
+		CombatSystem.SetAIState(unitModel, BattleConfig.AIState.SEEKING)
+		LogStateChange(state.UnitId, "ATTACKING", "SEEKING", "目标失效")
+		return
+	end
+
+	-- 检查距离
+	local distance = GetDistance(unitModel, target)
+
+	-- 判断是否应该退出攻击
+	if UnitAIRangePolicy.ShouldExitAttack(distance, state) then
+		-- 停止攻击动画和待机动画
+		if aiData.CurrentAttackAnimation then
+			aiData.CurrentAttackAnimation:Stop()
+			aiData.CurrentAttackAnimation = nil
+		end
+		if aiData.CurrentIdleAnimation then
+			aiData.CurrentIdleAnimation:Stop()
+			aiData.CurrentIdleAnimation = nil
+		end
+
+		CombatSystem.SetAIState(unitModel, BattleConfig.AIState.MOVING)
+		LogStateChange(state.UnitId, "ATTACKING", "MOVING", string.format("距离%.1f > 脱离阈值", distance))
+	else
+		-- 保持静止，面向目标
+		EnsureStopped(unitModel, aiData)
+		OrientTowardsTarget(aiData, target)
+
+		-- V1.5.2新增: 如果处于IDLE攻击阶段且没有播放idle动画，则播放
+		local attackPhase = CombatSystem.GetAttackPhase(unitModel)
+		if attackPhase == BattleConfig.AttackPhase.IDLE then
+			if not aiData.CurrentIdleAnimation or not aiData.CurrentIdleAnimation.IsPlaying then
+				local idleAnimId = UnitConfig.GetIdleAnimationId(state.UnitId)
+				if idleAnimId and idleAnimId ~= "" then
+					local idleAnimTrack = PlayIdleAnimation(aiData.Humanoid, idleAnimId)
+					if idleAnimTrack then
+						aiData.CurrentIdleAnimation = idleAnimTrack
+						DebugLog(string.format("%s 开始播放待机动画", state.UnitId))
+					end
+				end
+			end
+		end
+
+		-- 执行攻击
+		UnitAI.AttackTarget(unitModel, target, state, aiData)
+	end
+end
+
+-- ==================== AI更新 ====================
+
+--[[
+更新所有AI (批量节流)
 ]]
 local function UpdateAllAIs()
 	local currentTime = tick()
@@ -349,7 +755,6 @@ end
 
 --[[
 初始化AI系统
-@return boolean - 是否初始化成功
 ]]
 function UnitAI.Initialize()
 	if isInitialized then
@@ -359,7 +764,7 @@ function UnitAI.Initialize()
 
 	DebugLog("正在初始化AI系统...")
 
-	-- V1.5.1: 使用节流机制，累积时间达到阈值才批量更新
+	-- AI节流机制
 	updateConnection = RunService.Heartbeat:Connect(function(dt)
 		accumulatedTime = accumulatedTime + dt
 		if accumulatedTime >= BattleConfig.AI_BATCH_UPDATE_INTERVAL then
@@ -410,8 +815,6 @@ end
 
 --[[
 启动兵种AI
-@param unitModel Model - 兵种模型
-@return boolean - 是否启动成功
 ]]
 function UnitAI.StartAI(unitModel)
 	if not unitModel or not unitModel:IsA("Model") then
@@ -434,10 +837,11 @@ function UnitAI.StartAI(unitModel)
 		HumanoidRootPart = rootPart,
 		IsActive = true,
 		LastUpdateTime = 0,
-		PathfindingTimeout = 0,
 		CurrentMoveAnimation = nil,
 		CurrentAttackAnimation = nil,
-		AnimationConnections = {},  -- V1.5.1新增: 存储动画事件连接
+		CurrentIdleAnimation = nil,  -- V1.5.2新增: 待机动画
+		AnimationConnections = {},
+		LastDesiredDirection = nil,
 	}
 
 	activeAIs[unitModel] = aiData
@@ -451,7 +855,7 @@ function UnitAI.StartAI(unitModel)
 	local unitId = state and state.UnitId or "Unknown"
 	DebugLog(string.format("启动AI: %s", unitId))
 
-	-- 立刻主动寻找目标并开始移动，避免延迟
+	-- 立刻主动寻找目标并开始移动
 	task.defer(function()
 		if not aiData.IsActive then
 			return
@@ -462,9 +866,7 @@ function UnitAI.StartAI(unitModel)
 		if target then
 			CombatSystem.SetTarget(unitModel, target)
 			CombatSystem.SetAIState(unitModel, BattleConfig.AIState.MOVING)
-			-- 立刻播放移动动画
-			UnitAI.MoveToTarget(unitModel, target, aiData)
-			DebugLog(string.format("AI启动: %s 立刻开始移动到目标", unitId))
+			LogStateChange(unitId, "IDLE", "MOVING", "AI启动，发现目标")
 		else
 			CombatSystem.SetAIState(unitModel, BattleConfig.AIState.IDLE)
 		end
@@ -475,7 +877,6 @@ end
 
 --[[
 停止兵种AI
-@param unitModel Model - 兵种模型
 ]]
 function UnitAI.StopAI(unitModel)
 	local aiData = activeAIs[unitModel]
@@ -483,24 +884,8 @@ function UnitAI.StopAI(unitModel)
 	if aiData then
 		aiData.IsActive = false
 
-		-- 停止所有动画
-		if aiData.CurrentMoveAnimation then
-			aiData.CurrentMoveAnimation:Stop()
-			aiData.CurrentMoveAnimation = nil
-		end
-
-		if aiData.CurrentAttackAnimation then
-			aiData.CurrentAttackAnimation:Stop()
-			aiData.CurrentAttackAnimation = nil
-		end
-
-		-- V1.5.1: 断开所有动画事件连接
-		for _, connection in ipairs(aiData.AnimationConnections) do
-			if connection and connection.Connected then
-				connection:Disconnect()
-			end
-		end
-		aiData.AnimationConnections = {}
+		-- 重置所有动画状态（V1.5.2修复：明确传递第三个参数）
+		ResetAnimationState(aiData, false, false)  -- 不保留任何动画
 
 		-- 停止移动
 		if aiData.Humanoid and aiData.HumanoidRootPart then
@@ -514,9 +899,7 @@ function UnitAI.StopAI(unitModel)
 end
 
 --[[
-更新单个AI
-@param unitModel Model - 兵种模型
-@param aiData AIData - AI数据
+更新单个AI（核心状态机）
 ]]
 function UnitAI.UpdateAI(unitModel, aiData)
 	local state = CombatSystem.GetUnitState(unitModel)
@@ -526,241 +909,149 @@ function UnitAI.UpdateAI(unitModel, aiData)
 		return
 	end
 
-	-- 根据AI状态执行不同逻辑
+	-- 根据AI状态执行对应处理函数
 	local aiState = state.State
 
 	if aiState == BattleConfig.AIState.IDLE or aiState == BattleConfig.AIState.SEEKING then
-		-- 寻找目标
-		local target = UnitAI.FindNearestEnemy(unitModel)
-
-		if target then
-			CombatSystem.SetTarget(unitModel, target)
-			CombatSystem.SetAIState(unitModel, BattleConfig.AIState.MOVING)
-		else
-			CombatSystem.SetAIState(unitModel, BattleConfig.AIState.IDLE)
-		end
+		HandleSeeking(unitModel, aiData, state)
 
 	elseif aiState == BattleConfig.AIState.MOVING then
-		-- 移动到目标
-		local target = CombatSystem.GetTarget(unitModel)
-
-		if not target or not target.Parent or not CombatSystem.IsUnitAlive(target) then
-			-- 目标无效,重新寻找
-			CombatSystem.SetTarget(unitModel, nil)
-			CombatSystem.SetAIState(unitModel, BattleConfig.AIState.SEEKING)
-			return
-		end
-
-		-- 检查距离
-		local distance = GetDistance(unitModel, target)
-
-		-- V1.5.1优化: 增加攻击距离宽容值,防止边界摇摆
-		local effectiveAttackRange = state.AttackRange + BattleConfig.ATTACK_RANGE_TOLERANCE
-
-		if distance <= effectiveAttackRange then
-			-- 进入攻击范围,停止移动
-			aiData.Humanoid:MoveTo(aiData.HumanoidRootPart.Position)
-
-			-- 停止移动动画
-			if aiData.CurrentMoveAnimation then
-				aiData.CurrentMoveAnimation:Stop()
-				aiData.CurrentMoveAnimation = nil
-				DebugLog("停止移动动画，进入攻击状态")
-			end
-
-			CombatSystem.SetAIState(unitModel, BattleConfig.AIState.ATTACKING)
-		else
-			-- 继续移动到目标
-			UnitAI.MoveToTarget(unitModel, target, aiData)
-		end
+		HandleMoving(unitModel, aiData, state)
 
 	elseif aiState == BattleConfig.AIState.ATTACKING then
-		-- 攻击目标
-		local target = CombatSystem.GetTarget(unitModel)
-
-		if not target or not target.Parent or not CombatSystem.IsUnitAlive(target) then
-			-- 目标无效,重新寻找
-			CombatSystem.SetTarget(unitModel, nil)
-			CombatSystem.SetAIState(unitModel, BattleConfig.AIState.SEEKING)
-			return
-		end
-
-		-- 检查距离
-		local distance = GetDistance(unitModel, target)
-
-		-- V1.5.1优化: 增加更大的容差,防止目标推开时立刻追击
-		local exitAttackRangeThreshold = state.AttackRange + BattleConfig.MOVE_STOP_TOLERANCE + BattleConfig.ATTACK_RANGE_TOLERANCE
-
-		if distance > exitAttackRangeThreshold then
-			-- 超出攻击范围,停止攻击动画并继续移动
-			if aiData.CurrentAttackAnimation then
-				aiData.CurrentAttackAnimation:Stop()
-				aiData.CurrentAttackAnimation = nil
-				DebugLog("目标远离，停止攻击动画，重新移动")
-			end
-			CombatSystem.SetAIState(unitModel, BattleConfig.AIState.MOVING)
-		else
-			-- V1.5.1优化: 在攻击范围内，保持与目标的距离，避免被对方推开或互相挤在一起
-			-- 但不要在攻击时让单位后退，防止身体转向异常
-			local targetPart = target:FindFirstChild("HumanoidRootPart") or target.PrimaryPart
-			if targetPart and state then
-				local myPos = aiData.HumanoidRootPart.Position
-				local targetPos = targetPart.Position
-				local currentDistance = (targetPos - myPos).Magnitude
-
-				local combatProfile = UnitConfig.GetCombatProfile(state.UnitId)
-				local dockingPoint = CalculateDockingPoint(
-					aiData.HumanoidRootPart,
-					targetPart,
-					state.AttackRange,
-					BattleConfig.ATTACK_RANGE_TOLERANCE,
-					combatProfile
-				)
-
-				-- 计算停靠点的方向
-				local directionToDocking = (dockingPoint - myPos)
-				local distanceToDocking = directionToDocking.Magnitude
-
-				-- V1.5.1修复: 只有在停靠点在"前方"且距离足够时才移动
-				-- 如果停靠点在后方（表示已经太近了），就保持当前位置不动
-				if distanceToDocking > 0.5 then
-					-- 判断停靠点是否在前方（与朝向目标的方向夹角小于90度）
-					local directionToTarget = (targetPos - myPos).Unit
-					local directionToDockingUnit = directionToDocking.Unit
-					local dotProduct = directionToTarget:Dot(directionToDockingUnit)
-
-					if dotProduct > 0 then
-						-- 停靠点在前方，可以移动
-						aiData.Humanoid:MoveTo(dockingPoint)
-					else
-						-- 停靠点在后方（太近了），保持位置不动
-						aiData.Humanoid:MoveTo(myPos)
-						DebugLog(string.format("%s 距离过近(%.2f)，保持位置不后退", state.UnitId, currentDistance))
-					end
-				else
-					-- 已经在正确位置，停止移动
-					aiData.Humanoid:MoveTo(myPos)
-				end
-			end
-
-			-- 执行攻击
-			UnitAI.AttackTarget(unitModel, target, state, aiData)
-		end
+		HandleAttacking(unitModel, aiData, state)
 	end
 end
 
 --[[
-寻找最近的敌方单位 (V1.5.1优化: 使用UnitManager)
-@param unitModel Model - 兵种模型
-@return Model|nil - 最近的敌方单位
+寻找最近的敌方单位
 ]]
 function UnitAI.FindNearestEnemy(unitModel)
-	-- V1.5.1: 使用UnitManager的高效寻敌接口
 	local enemy, distance = UnitManager.GetClosestEnemy(unitModel, BattleConfig.TARGET_SEARCH_RANGE)
 	return enemy
 end
 
 --[[
-移动到目标
-@param unitModel Model - 兵种模型
-@param target Model - 目标模型
-@param aiData AIData - AI数据
+移动到目标（纯函数式计算，防止零向量和负向移动）
 ]]
-function UnitAI.MoveToTarget(unitModel, target, aiData)
+function UnitAI.MoveToTarget(unitModel, target, aiData, state)
 	local targetPart = target:FindFirstChild("HumanoidRootPart") or target.PrimaryPart
 
 	if not targetPart then
 		return
 	end
 
-	-- 获取兵种ID并播放移动动画（只在没有播放时才播放）
-	local state = CombatSystem.GetUnitState(unitModel)
-	if state and state.UnitId then
-		-- 检查是否已经有移动动画在播放
-		if not aiData.CurrentMoveAnimation or not aiData.CurrentMoveAnimation.IsPlaying then
-			local moveAnimTrack = PlayMoveAnimation(aiData.Humanoid, state.UnitId)
-			-- 保存当前播放的移动动画
-			if moveAnimTrack then
-				aiData.CurrentMoveAnimation = moveAnimTrack
-				DebugLog(string.format("启动移动动画并保存引用"))
-			end
+	-- 播放移动动画（只在没有播放时才播放）
+	if not aiData.CurrentMoveAnimation or not aiData.CurrentMoveAnimation.IsPlaying then
+		local moveAnimTrack = PlayMoveAnimation(aiData.Humanoid, state.UnitId)
+		if moveAnimTrack then
+			aiData.CurrentMoveAnimation = moveAnimTrack
 		end
 	end
 
-	-- V1.5.1优化: 计算停靠点,避免两个单位挤在一起
-	-- 停靠点考虑双方模型物理尺寸,让单位贴身战斗而非隔空挥拳
-	local combatProfile = UnitConfig.GetCombatProfile(state.UnitId)
-	local dockingPoint = CalculateDockingPoint(
-		aiData.HumanoidRootPart,
-		targetPart,
-		state.AttackRange,
-		BattleConfig.ATTACK_RANGE_TOLERANCE,
-		combatProfile
-	)
+	local myPos = aiData.HumanoidRootPart.Position
+	local targetPos = targetPart.Position
 
-	-- 调用MoveTo移动到停靠点,而不是目标的脚下
-	-- 这样两个单位会自然地停在各自的安全距离上(攻击范围内),形成对峙并进行攻击
-	aiData.Humanoid:MoveTo(dockingPoint)
+	-- ==================== 🔧 修复1: 防止零向量导致NaN ====================
+	local offset = targetPos - myPos
+	local currentDistance = offset.Magnitude
 
-	DebugLog(string.format("%s 追击中,目标距离=%.2f,攻击距离=%.2f,停靠点=%.2f,%.2f,%.2f",
-		state.UnitId, (targetPart.Position - aiData.HumanoidRootPart.Position).Magnitude, state.AttackRange, dockingPoint.X, dockingPoint.Y, dockingPoint.Z))
+	-- 如果距离过近（接近重合），停止移动，复用上次的朝向
+	if currentDistance < 0.1 then
+		DebugLog(string.format("%s 距离过近(%.3f)，停止移动避免零向量", state.UnitId, currentDistance))
+		EnsureStopped(unitModel, aiData)
+
+		-- 如果有缓存的朝向，保持朝向
+		if aiData.LastDesiredDirection then
+			aiData.HumanoidRootPart.CFrame = CFrame.new(
+				aiData.HumanoidRootPart.Position,
+				aiData.HumanoidRootPart.Position + aiData.LastDesiredDirection
+			)
+		end
+		return
+	end
+
+	-- 计算停靠距离
+	local targetState = CombatSystem.GetUnitState(target)
+	local dockingDistance = UnitAIRangePolicy.GetDockingDistance(state, targetState)
+
+	-- ==================== 🔧 修复2: 防止负向移动（目标在身后） ====================
+	-- 计算需要移动的距离：当前距离 - 停靠距离
+	local moveDistance = currentDistance - dockingDistance
+
+	-- 如果已经进入停靠范围（或更近），停止移动
+	-- 添加容差 0.5，避免频繁进出停靠范围
+	if moveDistance <= 0.5 then
+		DebugLog(string.format("%s 已到达停靠范围，当前距离=%.1f，停靠距离=%.1f",
+			state.UnitId, currentDistance, dockingDistance))
+		EnsureStopped(unitModel, aiData)
+		return
+	end
+
+	-- ==================== 🔧 修复3: 只在需要移动时才MoveTo ====================
+	-- 安全计算方向向量（已确保 currentDistance >= 0.1）
+	local direction = offset.Unit
+
+	-- 缓存方向向量
+	aiData.LastDesiredDirection = direction
+
+	-- 计算移动目标点：从目标位置往回退 dockingDistance
+	local moveTarget = targetPos - direction * dockingDistance
+
+	-- 检查移动阈值：只有移动距离足够大时才执行MoveTo
+	local distanceToMoveTarget = (moveTarget - myPos).Magnitude
+	if distanceToMoveTarget < 0.5 then
+		-- 移动距离太小，停止避免抖动
+		DebugLog(string.format("%s 移动距离过小(%.2f)，停止避免抖动", state.UnitId, distanceToMoveTarget))
+		EnsureStopped(unitModel, aiData)
+		return
+	end
+
+	-- 执行移动
+	aiData.Humanoid:MoveTo(moveTarget)
+
+	local unitType = UnitConfig.IsRangedUnit(state.UnitId) and "远程" or "近战"
+	DebugLog(string.format("%s (%s) 移动中，当前距离=%.1f，停靠距离=%.1f，需移动=%.1f",
+		state.UnitId, unitType, currentDistance, dockingDistance, moveDistance))
 end
 
 --[[
-攻击目标 (V1.5.1重构: 动画事件驱动)
-@param unitModel Model - 兵种模型
-@param target Model - 目标模型
-@param state table - 兵种战斗状态
-@param aiData AIData - AI数据
+攻击目标（动画事件驱动）
 ]]
 function UnitAI.AttackTarget(unitModel, target, state, aiData)
-	-- 检查攻击冷却 (由CombatSystem管理)
+	-- 检查攻击冷却
 	if not CombatSystem.CanAttack(unitModel) then
 		return
 	end
 
-	-- 确保移动动画已停止
+	-- V1.5.2修复：清理之前的攻击动画和事件（保留移动动画，停止idle动画）
+	-- ResetAnimationState会停止idle和attack，所以不需要单独停止idle
+	ResetAnimationState(aiData, true, false)
+
+	-- 停止移动动画（攻击时不移动）
 	if aiData.CurrentMoveAnimation then
 		aiData.CurrentMoveAnimation:Stop()
 		aiData.CurrentMoveAnimation = nil
-		DebugLog("攻击时停止移动动画")
 	end
-
-	-- V1.5.1修复: 停止并清理之前的攻击动画和事件连接
-	if aiData.CurrentAttackAnimation then
-		aiData.CurrentAttackAnimation:Stop()
-		aiData.CurrentAttackAnimation = nil
-	end
-
-	-- 清理所有旧的动画事件连接，防止累积
-	for _, connection in ipairs(aiData.AnimationConnections) do
-		if connection and connection.Connected then
-			connection:Disconnect()
-		end
-	end
-	aiData.AnimationConnections = {}
 
 	-- 面向目标
-	local targetPart = target:FindFirstChild("HumanoidRootPart") or target.PrimaryPart
-	if targetPart then
-		local lookVector = (targetPart.Position - aiData.HumanoidRootPart.Position).Unit
-		aiData.HumanoidRootPart.CFrame = CFrame.new(aiData.HumanoidRootPart.Position, aiData.HumanoidRootPart.Position + lookVector)
-	end
+	OrientTowardsTarget(aiData, target)
 
-	-- 开始攻击 (进入Attacking阶段)
+	-- 开始攻击（进入Attacking阶段）
 	local success = CombatSystem.BeginAttack(unitModel, target)
 	if not success then
 		return
 	end
 
-	-- ==================== V1.5.1核心改动: 监听动画"Damage"事件 ====================
-
-	-- 获取攻击动画ID
+	-- 获取配置
 	local animationId = UnitConfig.GetAttackAnimationId(state.UnitId)
 	local combatProfile = UnitConfig.GetCombatProfile(state.UnitId)
 
 	-- 用于确保Damage事件只触发一次
 	local damageEventFired = false
+
+	-- 判断是否为远程单位
+	local isRangedUnit = UnitConfig.IsRangedUnit(state.UnitId)
 
 	-- 播放攻击动画
 	if animationId and animationId ~= "" and combatProfile.UseAnimationEvent then
@@ -771,57 +1062,58 @@ function UnitAI.AttackTarget(unitModel, target, state, aiData)
 			local eventName = combatProfile.AnimationEventName or "Damage"
 
 			local connection = animTrack:GetMarkerReachedSignal(eventName):Connect(function()
-				-- V1.5.1修复: 确保Damage事件只触发一次
 				if damageEventFired then
-					DebugLog(string.format("%s Damage事件重复触发,已忽略", state.UnitId))
 					return
 				end
 				damageEventFired = true
 
-				-- 动画到达"Damage"关键帧,触发伤害判定
 				DebugLog(string.format("%s 动画事件[%s]触发", state.UnitId, eventName))
-				CombatSystem.OnDamageEvent(unitModel)
+
+				-- 远程/近战分支
+				if isRangedUnit then
+					CombatSystem.OnRangedDamageEvent(unitModel, target)
+				else
+					CombatSystem.OnDamageEvent(unitModel)
+				end
 			end)
 
-			-- 保存连接,用于清理
 			table.insert(aiData.AnimationConnections, connection)
-
-			-- 保存当前攻击动画
 			aiData.CurrentAttackAnimation = animTrack
 
-			-- V1.5.1修复: 动画播放完毕后自动清理连接
+			-- 动画停止时自动清理连接
 			animTrack.Stopped:Connect(function()
 				if connection and connection.Connected then
 					connection:Disconnect()
 				end
 			end)
-
-			DebugLog(string.format("%s 播放攻击动画,监听[%s]事件", state.UnitId, eventName))
 		else
-			-- 动画加载失败,使用回退机制
-			WarnLog(string.format("%s 动画加载失败,使用回退机制", state.UnitId))
+			-- 动画加载失败，使用回退机制
 			local fallbackDelay = state.AttackSpeed * BattleConfig.ANIMATION_FALLBACK_RATIO
 			task.delay(fallbackDelay, function()
-				-- V1.5.1 防御性编程: 检查单位是否还存活
 				if unitModel and unitModel.Parent and not damageEventFired then
-					-- 确保单位还在Attacking阶段
 					if CombatSystem.GetAttackPhase(unitModel) == BattleConfig.AttackPhase.ATTACKING then
 						damageEventFired = true
-						CombatSystem.OnDamageEvent(unitModel)
+						if isRangedUnit then
+							CombatSystem.OnRangedDamageEvent(unitModel, target)
+						else
+							CombatSystem.OnDamageEvent(unitModel)
+						end
 					end
 				end
 			end)
 		end
 	else
-		-- 没有配置动画或不使用动画事件,使用回退机制
-		DebugLog(string.format("%s 无攻击动画配置或不使用动画事件,使用回退机制", state.UnitId))
+		-- 没有配置动画，使用回退机制
 		local fallbackDelay = state.AttackSpeed * BattleConfig.ANIMATION_FALLBACK_RATIO
 		task.delay(fallbackDelay, function()
-			-- V1.5.1 防御性编程: 检查单位是否还存活
 			if unitModel and unitModel.Parent and not damageEventFired then
 				if CombatSystem.GetAttackPhase(unitModel) == BattleConfig.AttackPhase.ATTACKING then
 					damageEventFired = true
-					CombatSystem.OnDamageEvent(unitModel)
+					if isRangedUnit then
+						CombatSystem.OnRangedDamageEvent(unitModel, target)
+					else
+						CombatSystem.OnDamageEvent(unitModel)
+					end
 				end
 			end
 		end)
@@ -830,11 +1122,8 @@ end
 
 --[[
 当目标死亡时的回调
-@param deadUnit Model - 死亡的单位
-@param battleId number - 战斗ID
 ]]
 function UnitAI.OnTargetDeath(deadUnit, battleId)
-	-- 通知所有以该单位为目标的AI重新寻找目标
 	for unitModel, aiData in pairs(activeAIs) do
 		if not aiData.IsActive then
 			continue
@@ -846,11 +1135,10 @@ function UnitAI.OnTargetDeath(deadUnit, battleId)
 			local currentTarget = CombatSystem.GetTarget(unitModel)
 
 			if currentTarget == deadUnit then
-				-- 当前目标死亡,重新寻找
 				CombatSystem.SetTarget(unitModel, nil)
 				CombatSystem.SetAIState(unitModel, BattleConfig.AIState.SEEKING)
 
-				DebugLog(string.format("%s的目标死亡,重新寻找目标", state.UnitId))
+				LogStateChange(state.UnitId, state.State, "SEEKING", "目标死亡")
 			end
 		end
 	end
@@ -858,13 +1146,11 @@ end
 
 --[[
 清理战斗的所有AI
-@param battleId number - 战斗ID
 ]]
 function UnitAI.ClearBattleAIs(battleId)
 	for unitModel, aiData in pairs(activeAIs) do
 		local state = CombatSystem.GetUnitState(unitModel)
 
-		-- 如果state不存在或者battleId匹配，都需要清理
 		if not state or (state and state.BattleId == battleId) then
 			UnitAI.StopAI(unitModel)
 		end
@@ -875,7 +1161,6 @@ end
 
 --[[
 获取活跃AI数量
-@return number - 活跃AI数量
 ]]
 function UnitAI.GetActiveAICount()
 	local count = 0
@@ -887,6 +1172,25 @@ function UnitAI.GetActiveAICount()
 	end
 
 	return count
+end
+
+--[[
+播放死亡动画 (V1.5.2新增 - 供CombatSystem调用)
+@param unitModel Model - 兵种模型
+@param animationId string - 死亡动画ID
+@return AnimationTrack|nil - 动画轨道，失败返回nil
+]]
+function UnitAI.PlayDeathAnimation(unitModel, animationId)
+	if not unitModel or not unitModel:IsA("Model") then
+		return nil
+	end
+
+	local humanoid = unitModel:FindFirstChildOfClass("Humanoid")
+	if not humanoid then
+		return nil
+	end
+
+	return PlayDeathAnimation(humanoid, animationId)
 end
 
 return UnitAI

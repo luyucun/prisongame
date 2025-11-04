@@ -25,11 +25,12 @@ local GMCommandSystem = {}
 -- 引用服务
 local Players = game:GetService("Players")
 local ServerScriptService = game:GetService("ServerScriptService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 -- 引用模块
-local GameConfig = require(ServerScriptService.Config.GameConfig)
-local UnitConfig = require(ServerScriptService.Config.UnitConfig)
-local BattleConfig = require(ServerScriptService.Config.BattleConfig)
+local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
+local UnitConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("UnitConfig"))
+local BattleConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("BattleConfig"))
 local DataManager = require(ServerScriptService.Core.DataManager)
 local InventorySystem = require(ServerScriptService.Systems.InventorySystem)
 local CurrencySystem = require(ServerScriptService.Systems.CurrencySystem)

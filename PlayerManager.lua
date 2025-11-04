@@ -18,10 +18,11 @@ local PlayerManager = {}
 -- 引用服务
 local Players = game:GetService("Players")
 local ServerScriptService = game:GetService("ServerScriptService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 -- 引用模块
-local GameConfig = require(ServerScriptService.Config.GameConfig)
+local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
 local DataManager = require(ServerScriptService.Core.DataManager)
 
 -- 基地占用状态表 [homeSlot] = player 或 nil

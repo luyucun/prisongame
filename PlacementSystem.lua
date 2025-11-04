@@ -22,9 +22,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
 -- 引用模块
-local GameConfig = require(ServerScriptService.Config.GameConfig)
-local PlacementConfig = require(ServerScriptService.Config.PlacementConfig)
-local UnitConfig = require(ServerScriptService.Config.UnitConfig)
+local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
+local PlacementConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("PlacementConfig"))
+local UnitConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("UnitConfig"))
 local DataManager = require(ServerScriptService.Core.DataManager)
 local InventorySystem = require(ServerScriptService.Systems.InventorySystem)
 local PhysicsManager = require(ServerScriptService.Systems.PhysicsManager)
@@ -241,6 +241,120 @@ local function UpdateLevelDisplay(model, level)
 end
 
 --[[
+播放展示动画 (V1.5.2新增)
+@param model Model - 兵种模型
+@param unitId string - 兵种ID
+]]
+local function PlayShowAnimation(model, unitId)
+	if not model or not unitId then
+		if GameConfig.DEBUG_MODE then
+			warn(GameConfig.LOG_PREFIX, "PlayShowAnimation: 参数无效")
+		end
+		return
+	end
+
+	-- 获取展示动画ID
+	local showAnimId = UnitConfig.GetShowAnimationId(unitId)
+
+	-- 如果没有配置展示动画，直接返回
+	if not showAnimId or showAnimId == "" or showAnimId == "0" then
+		if GameConfig.DEBUG_MODE then
+			print(GameConfig.LOG_PREFIX, "PlayShowAnimation: 单位", unitId, "未配置展示动画")
+		end
+		return
+	end
+
+	-- 查找Humanoid
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if not humanoid then
+		if GameConfig.DEBUG_MODE then
+			warn(GameConfig.LOG_PREFIX, "PlayShowAnimation: 模型没有Humanoid:", model.Name)
+		end
+		return
+	end
+
+	-- 查找Animator
+	local animator = humanoid:FindFirstChild("Animator")
+	if not animator then
+		if GameConfig.DEBUG_MODE then
+			warn(GameConfig.LOG_PREFIX, "PlayShowAnimation: Humanoid没有Animator:", model.Name)
+		end
+		return
+	end
+
+	-- 创建动画实例
+	local animation = Instance.new("Animation")
+	animation.AnimationId = "rbxassetid://" .. showAnimId
+
+	-- 加载动画
+	local success, animTrack = pcall(function()
+		return animator:LoadAnimation(animation)
+	end)
+
+	if not success or not animTrack then
+		if GameConfig.DEBUG_MODE then
+			warn(GameConfig.LOG_PREFIX, "PlayShowAnimation: 动画加载失败:", unitId, showAnimId)
+		end
+		animation:Destroy()
+		return
+	end
+
+	-- 设置循环播放
+	animTrack.Looped = true
+
+	-- 播放动画
+	local playSuccess = pcall(function()
+		animTrack:Play()
+	end)
+
+	if not playSuccess then
+		if GameConfig.DEBUG_MODE then
+			warn(GameConfig.LOG_PREFIX, "PlayShowAnimation: 动画播放失败:", unitId)
+		end
+		animation:Destroy()
+		return
+	end
+
+	-- V1.5.2修复：循环动画在停止时清理Animation对象，防止内存泄漏
+	-- 当单位被回收时，animTrack:Stop()会触发此事件
+	animTrack.Stopped:Connect(function()
+		if animation and animation.Parent then
+			animation:Destroy()
+		end
+	end)
+
+	if GameConfig.DEBUG_MODE then
+		print(GameConfig.LOG_PREFIX, "PlayShowAnimation: 成功播放展示动画:", unitId, "AnimID:", showAnimId)
+	end
+end
+
+--[[
+递归搜索文件夹
+@param folder Instance - 要搜索的文件夹
+@param targetName string - 目标名称
+@return Model|nil - 找到的模型
+]]
+local function SearchFolderRecursive(folder, targetName)
+    -- 先在当前层级查找
+    local found = folder:FindFirstChild(targetName)
+    if found and found:IsA("Model") then
+        return found
+    end
+
+    -- 递归搜索所有子文件夹
+    for _, child in ipairs(folder:GetChildren()) do
+        if child:IsA("Folder") then
+            local result = SearchFolderRecursive(child, targetName)
+            if result then
+                return result
+            end
+        end
+    end
+
+    return nil
+end
+
+--[[
 创建兵种模型到世界
 @param unitId string
 @param position Vector3
@@ -259,17 +373,18 @@ local function CreateUnitModel(unitId, position, instanceId, level, gridSize)
         return nil
     end
 
-    -- 从ReplicatedStorage获取模型
-    local modelTemplate = ReplicatedStorage:FindFirstChild("Role")
-    if modelTemplate then
-        modelTemplate = modelTemplate:FindFirstChild("Basic")
-        if modelTemplate then
-            modelTemplate = modelTemplate:FindFirstChild(unitId)
-        end
+    -- V1.5.1修复: 递归搜索Role文件夹下的所有子文件夹
+    -- 支持任意文件夹结构，如 Role/Basic/Noob, Role/Rifle/AK-47 等
+    local roleFolder = ReplicatedStorage:FindFirstChild("Role")
+    if not roleFolder then
+        warn(GameConfig.LOG_PREFIX, "找不到Role文件夹")
+        return nil
     end
 
+    local modelTemplate = SearchFolderRecursive(roleFolder, unitId)
+
     if not modelTemplate then
-        warn(GameConfig.LOG_PREFIX, "找不到兵种模型:", unitConfig.ModelPath)
+        warn(GameConfig.LOG_PREFIX, "在Role文件夹下找不到模型:", unitId, "(配置路径:", unitConfig.ModelPath, ")")
         return nil
     end
 
@@ -458,6 +573,9 @@ function PlacementSystem.PlaceUnit(player, instanceId, position)
 
     -- 配置兵种物理（禁用与玩家的碰撞）
     PhysicsManager.ConfigureUnitPhysics(model)
+
+    -- V1.5.2新增: 播放show动画（展示动画）
+    PlayShowAnimation(model, unitInstance.UnitId)
 
     -- 通知InventorySystem刷新客户端背包显示
     InventorySystem.RefreshClientInventory(player)

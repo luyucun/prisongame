@@ -263,6 +263,32 @@ function PlacementHelper.GetModelPosition(model)
 end
 
 --[[
+递归搜索文件夹
+@param folder Instance - 要搜索的文件夹
+@param targetName string - 目标名称
+@return Model|nil - 找到的模型
+]]
+local function SearchFolderRecursive(folder, targetName)
+    -- 先在当前层级查找
+    local found = folder:FindFirstChild(targetName)
+    if found and found:IsA("Model") then
+        return found
+    end
+
+    -- 递归搜索所有子文件夹
+    for _, child in ipairs(folder:GetChildren()) do
+        if child:IsA("Folder") then
+            local result = SearchFolderRecursive(child, targetName)
+            if result then
+                return result
+            end
+        end
+    end
+
+    return nil
+end
+
+--[[
 获取兵种模型模板
 @param unitId string
 @return Model|nil
@@ -270,15 +296,19 @@ end
 function PlacementHelper.GetUnitModelTemplate(unitId)
     local roleFolder = ReplicatedStorage:FindFirstChild("Role")
     if not roleFolder then
+        warn("[PlacementHelper] 找不到Role文件夹")
         return nil
     end
 
-    local basicFolder = roleFolder:FindFirstChild("Basic")
-    if not basicFolder then
-        return nil
+    -- V1.5.1修复: 递归搜索Role文件夹下的所有子文件夹
+    -- 支持任意文件夹结构，如 Role/Basic/Noob, Role/Rifle/AK-47 等
+    local model = SearchFolderRecursive(roleFolder, unitId)
+
+    if not model then
+        warn(string.format("[PlacementHelper] 在Role文件夹下找不到模型: %s", unitId))
     end
 
-    return basicFolder:FindFirstChild(unitId)
+    return model
 end
 
 --[[

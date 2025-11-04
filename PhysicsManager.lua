@@ -22,7 +22,8 @@ local Workspace = game:GetService("Workspace")
 
 -- 引用模块
 local ServerScriptService = game:GetService("ServerScriptService")
-local GameConfig = require(ServerScriptService.Config.GameConfig)
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
 
 -- 跟踪已创建的碰撞组
 local groupsCreated = false

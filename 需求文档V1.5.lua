@@ -307,7 +307,7 @@ V1.5 战斗系统构建
 我在游戏中的Workspace下新建了一个文件夹，叫做：BattleTest，这个文件夹下有两个子文件夹叫Attack以及Defense。Attack下有5个Part，分别是Position1到Position5，在Defense下也有5个Part，分别是Position1到Position5。以上的两个文件夹是用来在测试战斗的时候攻击方的兵种生成位置以及防守方的兵种生成位置，每个Position都有坐标信息，生成时直接获取PositionX的坐标信息在对应坐标处生成兵种即可
 
 兵种的碰撞：
-兵种之间是需要有碰撞的吗，敌方兵种与我方兵种及我方兵种和我方兵种之间都需要有碰撞
+兵种之间是需要有碰撞的，敌方兵种与我方兵种及我方兵种和我方兵种之间都需要有碰撞
 
 需要创建一套简易的UI，用来生成对战的兵种，里面大概的信息有：
 1.进攻方/还是防守方的选择列表
@@ -322,6 +322,60 @@ V1.5 战斗系统构建
 
 注意我们的战斗逻辑：一个服务器有多个玩家，每个玩家都有自己的兵种，每个玩家都可以让自己的兵种去进行战斗。所以极限情况下多个玩家都在同时进行自己的战斗
 我们的服务器最多同时承载8个玩家
+
+补充一些当前字段的说明：
+ WeaponName 字段的作用
+
+  定义
+
+  WeaponName = string  -- 武器名称(模型中的Tool或Part名称)
+
+  具体用途
+
+  WeaponName用来定位兵种模型中的武器Part/Tool的名称，以便：
+
+  1. 获取子弹发射起点
+    - 远程单位发射子弹时，需要从武器位置而不是身体中心发射
+    - 查找模型中与WeaponName相同名称的Part
+    - 从该Part的位置发射子弹
+  2. 工作流程（在ProjectileSystem中）
+
+  关于枪口发射逻辑：
+
+  实现方式：
+
+  1. 模型结构：
+  Archer (Model)
+  ├── HumanoidRootPart
+  ├── Head
+  ├── Torso
+  └── Rifle (Model 或 Part)  <-- WeaponName = "Rifle"
+      ├── RifleBody (Part)
+      ├── RifleBarrel (Part)
+      └── MuzzlePoint (Part)  <-- 专门的发射点，位于枪口位置
+
+子弹配置方式
+
+  自定义模型（最灵活）
+
+  步骤1：在ReplicatedStorage中创建模型
+  ReplicatedStorage
+  └── Projectiles (Folder)
+      ├── Arrow (Model) - 箭矢模型
+      │   ├── ArrowHead (Part)
+      │   ├── ArrowShaft (Part)
+      │   └── ArrowFeathers (Part)
+      ├── Fireball (Model) - 火球模型
+      └── Stone (Part) - 简单石头
+
+ 步骤2：在UnitConfig中配置
+  ["Archer"] = {
+      UnitId = "Archer",
+      Type = UnitConfig.UnitType.RANGED,
+      WeaponName = "Bow",
+      ProjectileSpeed = 80,
+      ProjectileModelPath = "Projectiles/Arrow",  -- 指向模型路径
+      -- ...其他配置
 
 
 V1.5.1补充修改
@@ -345,3 +399,20 @@ V1.5.1补充修改
     AI 搜索频率不要过高（比如每 0.2–0.5 秒一次查找/更新目标）
     对场上单位做分组（按玩家/阵营）以减少不必要的遍历
     使用 Overlap 查询时，尽量用小频率/短时间窗来减少压力
+
+
+V1.5.2补充 
+补充关于兵种动作逻辑的一些说明
+
+我们的每个兵种有5个动作：
+show：在IdleFloor上摆放着的时候，需要循环不断播放的动作
+idle：在战斗中，两次普攻之间的动作，开始站定是idle动作，然后普攻播attack，然后恢复idle,下次攻击再attack，再恢复
+attack：普通攻击动作，每次普通攻击需要播放的动作，也就是我们的攻击动作
+run：移动时候的动作
+die：兵种死亡时播放的动作
+
+以上五个动作，每个兵种都需要单独进行配置
+
+如果没有配置，则使用角色默认动画或者无动画即可
+
+

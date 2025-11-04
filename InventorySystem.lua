@@ -20,8 +20,8 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 -- 引用模块
-local GameConfig = require(ServerScriptService.Config.GameConfig)
-local UnitConfig = require(ServerScriptService.Config.UnitConfig)
+local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
+local UnitConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("UnitConfig"))
 local DataManager = require(ServerScriptService.Core.DataManager)
 
 -- 远程事件(延迟获取)

@@ -1,7 +1,7 @@
 --[[
 脚本名称: UnitConfig
-脚本类型: ModuleScript (服务端配置)
-脚本位置: ServerScriptService/Config/UnitConfig
+脚本类型: ModuleScript (配置模块)
+脚本位置: ReplicatedStorage/Config/UnitConfig
 ]]
 
 --[[
@@ -46,9 +46,40 @@ UnitData = {
     BaseAttackRange = number,  -- 基础攻击距离(studs)
     BaseMoveSpeed = number,    -- 基础移动速度(studs/秒)
     ProjectileSpeed = number,  -- 弹道速度(studs/秒) 近战填0
+    -- V1.5.2新增: 完整动作系统
+    ShowAnimationId = string,  -- 展示动画ID (放置在IdleFloor上时循环播放)
+    IdleAnimationId = string,  -- 待机动画ID (战斗中两次攻击之间播放)
     MoveAnimationId = string,  -- 移动动画ID (如果为空则不播放)
     AttackAnimationId = string,-- 普通攻击动画ID
+    DeathAnimationId = string, -- 死亡动画ID (V1.5.2新增, 如果为空则不播放)
     WeaponName = string,       -- 武器名称(模型中的Tool或Part名称)
+    -- V1.5远程子弹配置
+    ProjectileModelPath = string,  -- 子弹模型路径(可选,相对于ReplicatedStorage)
+                                   -- 例如: "Projectiles/Arrow" 会从 ReplicatedStorage/Projectiles/Arrow Clone模型
+                                   -- 如果不填，则使用CombatProfile.ProjectileConfig配置生成
+}
+
+-- V1.5.1 CombatProfile结构
+CombatProfile = {
+    -- 近战碰撞配置
+    HitboxRadius = number,         -- 碰撞半径(studs)
+    HitboxAngle = number,          -- 扇形角度(度)
+    HitboxHeight = number,         -- 碰撞高度(studs)
+    HitboxMaxTargets = number,     -- 最大命中数
+    UseAnimationEvent = boolean,   -- 是否使用动画事件
+    AnimationEventName = string,   -- 动画事件名称
+    ContactOffset = number,        -- 武器长度补偿(studs)
+
+    -- V1.5远程子弹属性配置(当ProjectileModelPath为空时使用)
+    ProjectileConfig = {
+        Shape = string,            -- 形状: "Ball"(球体), "Block"(方块), "Cylinder"(圆柱)
+        Size = Vector3,            -- 大小
+        Color = Color3,            -- 颜色
+        Material = string,         -- 材质: "Neon", "Plastic", "Wood", "Slate"等
+        EnableTrail = boolean,     -- 是否启用拖尾特效(可选)
+        TrailColor = Color3,       -- 拖尾颜色(可选)
+        TrailLifetime = number,    -- 拖尾持续时间(可选,默认0.5秒)
+    }
 }
 ]]
 
@@ -73,8 +104,12 @@ UnitConfig.Units = {
 		BaseAttackRange = 5,    -- 近战攻击距离5 studs
 		BaseMoveSpeed = 16,     -- 移动速度16 studs/秒
 		ProjectileSpeed = 0,    -- 近战无弹道
-		MoveAnimationId = 180426354,   -- 移动动画ID (从角色Animate脚本的run中获取, 为空则不播放)
+		-- V1.5.2新增: 完整动作系统
+		ShowAnimationId = "101776339545224",   -- 展示动画ID (放置在IdleFloor上时循环播放, 暂时留空)
+		IdleAnimationId = "117596019027541",   -- 待机动画ID (战斗中两次攻击之间播放, 暂时留空)
+		MoveAnimationId = 138827448254225,   -- 移动动画ID (从角色Animate脚本的run中获取, 为空则不播放)
 		AttackAnimationId = 109394128574270, -- 攻击动画ID (如果为空则使用Humanoid默认动作, 格式: "12345678")
+		DeathAnimationId = "180436148",  -- 死亡动画ID (暂时留空)
 		WeaponName = "Sword",   -- 武器名称
 		-- V1.5.1新增战斗配置
 		CombatProfile = {
@@ -106,9 +141,51 @@ UnitConfig.Units = {
 		BaseAttackRange = 5,    -- 近战攻击距离5 studs
 		BaseMoveSpeed = 16,     -- 移动速度16 studs/秒
 		ProjectileSpeed = 0,    -- 近战无弹道
-		MoveAnimationId = "",   -- 移动动画ID (从角色Animate脚本的run中获取, 为空则不播放)
-		AttackAnimationId = "", -- 攻击动画ID (如果为空则使用Humanoid默认动作, 格式: "12345678")
+		-- V1.5.2新增: 完整动作系统
+		ShowAnimationId = "101776339545224",   -- 展示动画ID (放置在IdleFloor上时循环播放, 暂时留空)
+		IdleAnimationId = "117596019027541",   -- 待机动画ID (战斗中两次攻击之间播放, 暂时留空)
+		MoveAnimationId = "138827448254225",   -- 移动动画ID (暂时留空, 使用默认动画)
+		AttackAnimationId = "109394128574270", -- 攻击动画ID (暂时留空, 使用默认动画)
+		DeathAnimationId = "180436148",  -- 死亡动画ID (暂时留空)
 		WeaponName = "Sword",   -- 武器名称
+		-- V1.5.1新增战斗配置
+		CombatProfile = {
+			HitboxRadius = 5,
+			HitboxAngle = 90,
+			HitboxHeight = 8,
+			HitboxMaxTargets = 1,
+			UseAnimationEvent = true,
+			AnimationEventName = "Damage",
+			ContactOffset = 0,         -- 武器长度补偿(studs)
+		},
+	},
+
+	-- 兵种3: AK-47
+	["AK-47"] = {
+		UnitId = "AK-47",
+		Name = "AK-47",
+		ModelPath = "Role/Rifle/AK-47",
+		Type = UnitConfig.UnitType.RANGED,  -- 修正1: 改为大写RANGED
+		BaseLevel = 1,
+		Price = 200,
+		GridSize = 1,
+		Description = "测试基础远程单位",
+		-- V1.4新增属性
+		BaseHealth = 100,       -- 基础生命值
+		BaseAttack = 10,        -- 基础攻击力
+		BaseAttackSpeed = 1.2,    -- 基础攻击速度(1秒/次)
+		-- V1.5新增战斗属性
+		BaseAttackRange = 20,    -- 远程攻击距离20 studs
+		BaseMoveSpeed = 16,     -- 移动速度16 studs/秒
+		ProjectileSpeed = 100,    -- 修正2: 远程单位必须>0，子弹速度100 studs/秒
+		-- V1.5.2新增: 完整动作系统
+		ShowAnimationId = "101776339545224",   -- 展示动画ID (放置在IdleFloor上时循环播放, 暂时留空)
+		IdleAnimationId = "117596019027541",   -- 待机动画ID (战斗中两次攻击之间播放, 暂时留空)
+		MoveAnimationId = "100229633875328",   -- 移动动画ID (暂时留空, 使用默认动画)
+		AttackAnimationId = "101758639653079", -- 攻击动画ID (暂时留空, 使用默认动画)
+		DeathAnimationId = "180436148",  -- 死亡动画ID (暂时留空)
+		WeaponName = "Weapon",   -- 武器名称
+		ProjectileModelPath = "Bullet/BaseBullet",  -- 修正3: 改为字符串路径
 		-- V1.5.1新增战斗配置
 		CombatProfile = {
 			HitboxRadius = 5,
@@ -342,6 +419,45 @@ function UnitConfig.GetMoveAnimationId(unitId)
 end
 
 --[[
+获取死亡动画ID (V1.5.2新增)
+@param unitId string - 兵种ID
+@return string - 动画ID
+]]
+function UnitConfig.GetDeathAnimationId(unitId)
+	local unitData = UnitConfig.GetUnitById(unitId)
+	if not unitData or not unitData.DeathAnimationId then
+		return ""
+	end
+	return unitData.DeathAnimationId
+end
+
+--[[
+获取展示动画ID (V1.5.2新增)
+@param unitId string - 兵种ID
+@return string - 动画ID
+]]
+function UnitConfig.GetShowAnimationId(unitId)
+	local unitData = UnitConfig.GetUnitById(unitId)
+	if not unitData or not unitData.ShowAnimationId then
+		return ""
+	end
+	return unitData.ShowAnimationId
+end
+
+--[[
+获取待机动画ID (V1.5.2新增)
+@param unitId string - 兵种ID
+@return string - 动画ID
+]]
+function UnitConfig.GetIdleAnimationId(unitId)
+	local unitData = UnitConfig.GetUnitById(unitId)
+	if not unitData or not unitData.IdleAnimationId then
+		return ""
+	end
+	return unitData.IdleAnimationId
+end
+
+--[[
 获取武器名称
 @param unitId string - 兵种ID
 @return string - 武器名称
@@ -477,6 +593,49 @@ end
 function UnitConfig.GetAnimationEventName(unitId)
 	local profile = UnitConfig.GetCombatProfile(unitId)
 	return profile.AnimationEventName
+end
+
+--[[
+获取子弹模型路径(远程单位专用)
+@param unitId string - 兵种ID
+@return string|nil - 子弹模型路径，如果没有配置则返回nil
+]]
+function UnitConfig.GetProjectileModelPath(unitId)
+	local unitData = UnitConfig.GetUnitById(unitId)
+	if not unitData then
+		return nil
+	end
+	return unitData.ProjectileModelPath
+end
+
+--[[
+获取子弹配置(远程单位专用)
+@param unitId string - 兵种ID
+@return table - 子弹配置，如果没有配置则返回默认配置
+]]
+function UnitConfig.GetProjectileConfig(unitId)
+	local profile = UnitConfig.GetCombatProfile(unitId)
+
+	-- 默认子弹配置
+	local defaultConfig = {
+		Shape = "Ball",
+		Size = Vector3.new(0.5, 0.5, 0.5),
+		Color = Color3.fromRGB(255, 255, 0),  -- 黄色
+		Material = "Neon",
+		EnableTrail = false,
+		TrailColor = Color3.fromRGB(255, 255, 255),
+		TrailLifetime = 0.5,
+	}
+
+	-- 如果有配置ProjectileConfig，合并配置
+	if profile.ProjectileConfig then
+		-- 合并用户配置和默认配置
+		for key, value in pairs(profile.ProjectileConfig) do
+			defaultConfig[key] = value
+		end
+	end
+
+	return defaultConfig
 end
 
 return UnitConfig

@@ -18,9 +18,10 @@ print("==========================================")
 
 -- 引用服务
 local ServerScriptService = game:GetService("ServerScriptService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 -- 引用配置
-local GameConfig = require(ServerScriptService.Config.GameConfig)
+local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
 
 -- 引用核心模块
 local DataManager = require(ServerScriptService.Core.DataManager)

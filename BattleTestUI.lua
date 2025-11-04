@@ -22,6 +22,28 @@ local UserInputService = game:GetService("UserInputService")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
+-- 引用配置模块（从ReplicatedStorage获取，因为客户端无法访问ServerScriptService）
+local UnitConfig = nil
+local configSuccess, configError = pcall(function()
+    -- 尝试从ReplicatedStorage/Config获取（不等待，立即检查）
+    local configFolder = ReplicatedStorage:FindFirstChild("Config")
+    if configFolder then
+        local unitConfigModule = configFolder:FindFirstChild("UnitConfig")
+        if unitConfigModule then
+            UnitConfig = require(unitConfigModule)
+        end
+    end
+end)
+
+if not configSuccess or not UnitConfig then
+    warn("[BattleTestUI] ⚠️ 无法加载UnitConfig，将使用默认兵种列表")
+    if configError then
+        warn("[BattleTestUI] 错误:", configError)
+    end
+    warn("[BattleTestUI] 提示: 请确保已将Config文件夹从ServerScriptService移动到ReplicatedStorage")
+    warn("[BattleTestUI] 当前路径应该是: ReplicatedStorage > Config > UnitConfig")
+end
+
 -- ==================== 配置 ====================
 
 local TOGGLE_KEY = Enum.KeyCode.V  -- 按V键打开/关闭UI
@@ -340,6 +362,39 @@ end
 -- ==================== UI事件连接 ====================
 
 --[[
+动态更新兵种下拉选项
+]]
+local function UpdateUnitDropdownOptions()
+    if not unitDropdown then
+        return
+    end
+
+    local allUnitIds = {}
+
+    -- 从UnitConfig动态获取所有兵种ID
+    if UnitConfig and UnitConfig.GetAllUnitIds then
+        allUnitIds = UnitConfig.GetAllUnitIds()
+    end
+
+    -- 如果无法获取配置，使用默认兵种列表
+    if #allUnitIds == 0 then
+        WarnLog("⚠️ 无法从UnitConfig获取兵种，使用默认列表")
+        allUnitIds = {"Noob", "Rookie", "AK-47"}  -- 默认兵种列表
+    end
+
+    -- 更新下拉选项
+    local optionsStr = table.concat(allUnitIds, ",")
+    unitDropdown:SetAttribute("Options", optionsStr)
+
+    -- 设置默认显示第一个兵种
+    unitDropdown.Text = allUnitIds[1]
+    unitDropdown:SetAttribute("CurrentIndex", 1)
+    currentSelections.Unit = allUnitIds[1]
+
+    DebugLog(string.format("✅ 动态加载了 %d 个兵种: %s", #allUnitIds, optionsStr))
+end
+
+--[[
 连接UI组件事件
 ]]
 local function ConnectUIEvents()
@@ -463,6 +518,9 @@ local function Initialize()
 
         -- 连接UI事件
         ConnectUIEvents()
+
+        -- 动态更新兵种下拉列表
+        UpdateUnitDropdownOptions()
 
         DebugLog("✅ 战斗测试UI已加载")
         DebugLog("📍 路径: PlayerGui > BattleTestGui")

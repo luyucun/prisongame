@@ -16,7 +16,8 @@ local DataManager = {}
 
 -- 引用配置模块
 local ServerScriptService = game:GetService("ServerScriptService")
-local GameConfig = require(ServerScriptService.Config.GameConfig)
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
 
 -- 存储所有玩家的数据 [UserId] = PlayerData
 -- 注意: Roblox脚本是单线程执行,因此不存在真正的race condition问题
