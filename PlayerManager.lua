@@ -349,6 +349,9 @@ function PlayerManager.OnPlayerAdded(player)
     -- 标记是否应跳过首次传送（用于Studio Play Here模式）
     local shouldSkipFirstTeleport = skipHomeAssignment
 
+    -- 标记是否已经处理过初始角色（防止重复传送）
+    local hasProcessedInitialCharacter = false
+
     local function HandleCharacterSpawn(character)
         task.spawn(function()
             -- 检查是否应跳过首次传送（Studio Play Here模式）
@@ -357,6 +360,7 @@ function PlayerManager.OnPlayerAdded(player)
                     print(GameConfig.LOG_PREFIX, "检测到Studio Play Here模式，跳过首次传送:", player.Name)
                 end
                 shouldSkipFirstTeleport = false  -- 只跳过第一次，后续重生正常传送
+                hasProcessedInitialCharacter = true  -- 标记已处理初始角色
                 return
             end
 
@@ -374,12 +378,7 @@ function PlayerManager.OnPlayerAdded(player)
         end)
     end
 
-    -- 如果角色已存在,立即传送
-    if player.Character then
-        HandleCharacterSpawn(player.Character)
-    end
-
-    -- 连接玩家重生事件(包含首次角色加载)
+    -- 连接玩家重生事件（必须在检查Character之前连接，避免竞态条件）
     local characterAddedConnection = player.CharacterAdded:Connect(function(character)
         if GameConfig.DEBUG_MODE then
             print(GameConfig.LOG_PREFIX, "玩家角色加载/重生:", player.Name)
@@ -389,6 +388,18 @@ function PlayerManager.OnPlayerAdded(player)
 
     -- 保存连接以便后续清理
     playerCharacterConnections[player.UserId] = characterAddedConnection
+
+    -- 如果角色已存在，且CharacterAdded还未触发，则手动处理一次
+    -- 使用task.defer确保在CharacterAdded连接后执行，避免重复
+    if player.Character and not hasProcessedInitialCharacter then
+        task.defer(function()
+            -- 再次检查，防止CharacterAdded已经触发
+            if not hasProcessedInitialCharacter then
+                hasProcessedInitialCharacter = true
+                HandleCharacterSpawn(player.Character)
+            end
+        end)
+    end
 
     if GameConfig.DEBUG_MODE then
         print(GameConfig.LOG_PREFIX, "玩家", player.Name, "初始化完成,基地编号:", homeSlot)
