@@ -264,6 +264,12 @@ local function PlayShowAnimation(model, unitId)
 		return
 	end
 
+	-- V1.5.2调试：验证动画ID格式
+	if not tonumber(showAnimId) then
+		warn(GameConfig.LOG_PREFIX, "PlayShowAnimation: 动画ID格式无效:", unitId, "AnimID:", showAnimId, "类型:", type(showAnimId))
+		return
+	end
+
 	-- 查找Humanoid
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
 	if not humanoid then
@@ -276,25 +282,37 @@ local function PlayShowAnimation(model, unitId)
 	-- 查找Animator
 	local animator = humanoid:FindFirstChild("Animator")
 	if not animator then
-		if GameConfig.DEBUG_MODE then
-			warn(GameConfig.LOG_PREFIX, "PlayShowAnimation: Humanoid没有Animator:", model.Name)
+		warn(GameConfig.LOG_PREFIX, "PlayShowAnimation: Humanoid没有Animator:", model.Name, "- 尝试创建Animator")
+		-- 尝试创建Animator（Roblox会自动创建，但保险起见）
+		animator = humanoid:FindFirstChildOfClass("Animator")
+		if not animator then
+			warn(GameConfig.LOG_PREFIX, "PlayShowAnimation: 无法获取Animator，动画无法播放")
+			return
 		end
-		return
 	end
 
 	-- 创建动画实例
 	local animation = Instance.new("Animation")
 	animation.AnimationId = "rbxassetid://" .. showAnimId
 
+	if GameConfig.DEBUG_MODE then
+		print(GameConfig.LOG_PREFIX, "PlayShowAnimation: 准备加载动画 -", unitId, "完整AnimationId:", animation.AnimationId)
+	end
+
 	-- 加载动画
-	local success, animTrack = pcall(function()
+	local success, result = pcall(function()
 		return animator:LoadAnimation(animation)
 	end)
 
-	if not success or not animTrack then
-		if GameConfig.DEBUG_MODE then
-			warn(GameConfig.LOG_PREFIX, "PlayShowAnimation: 动画加载失败:", unitId, showAnimId)
-		end
+	if not success then
+		warn(GameConfig.LOG_PREFIX, "PlayShowAnimation: 动画加载失败:", unitId, "错误:", result)
+		animation:Destroy()
+		return
+	end
+
+	local animTrack = result
+	if not animTrack then
+		warn(GameConfig.LOG_PREFIX, "PlayShowAnimation: 动画轨道为空:", unitId)
 		animation:Destroy()
 		return
 	end
@@ -302,17 +320,29 @@ local function PlayShowAnimation(model, unitId)
 	-- 设置循环播放
 	animTrack.Looped = true
 
+	if GameConfig.DEBUG_MODE then
+		print(GameConfig.LOG_PREFIX, "PlayShowAnimation: 动画加载成功，准备播放 -", unitId, "动画长度:", animTrack.Length, "秒")
+	end
+
 	-- 播放动画
-	local playSuccess = pcall(function()
+	local playSuccess, playError = pcall(function()
 		animTrack:Play()
 	end)
 
 	if not playSuccess then
-		if GameConfig.DEBUG_MODE then
-			warn(GameConfig.LOG_PREFIX, "PlayShowAnimation: 动画播放失败:", unitId)
-		end
+		warn(GameConfig.LOG_PREFIX, "PlayShowAnimation: 动画播放失败:", unitId, "错误:", playError)
 		animation:Destroy()
 		return
+	end
+
+	-- 检查动画是否真的在播放
+	task.wait(0.1)  -- 等待一小段时间
+	if animTrack.IsPlaying then
+		if GameConfig.DEBUG_MODE then
+			print(GameConfig.LOG_PREFIX, "PlayShowAnimation: ✅ 动画确认正在播放:", unitId, "当前时间位置:", animTrack.TimePosition)
+		end
+	else
+		warn(GameConfig.LOG_PREFIX, "PlayShowAnimation: ⚠️ 动画未播放:", unitId, "IsPlaying=false")
 	end
 
 	-- V1.5.2修复：循环动画在停止时清理Animation对象，防止内存泄漏
@@ -411,12 +441,27 @@ local function CreateUnitModel(unitId, position, instanceId, level, gridSize)
         model.HumanoidRootPart.CFrame = CFrame.new(position)
     end
 
-    -- 放置后的模型设置：锚定所有部件
-    -- Bug修复：确保所有部件都正确锚定，防止下沉
+    -- V1.5.2修复：IdleFloor上的单位需要播放动画
+    -- 只锚定根部件防止移动/下沉，其他部件保持可动以支持动画
+    local rootPart = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
+
+    if rootPart then
+        -- 锚定根部件，防止模型移动和下沉
+        rootPart.Anchored = true
+        rootPart.CanCollide = true
+
+        if GameConfig.DEBUG_MODE then
+            print(GameConfig.LOG_PREFIX, "锚定根部件:", rootPart.Name, "模型:", model.Name)
+        end
+    else
+        warn(GameConfig.LOG_PREFIX, "CreateUnitModel: 找不到根部件，模型可能会下沉:", model.Name)
+    end
+
+    -- 其他部件不锚定，允许动画播放，但禁用碰撞避免干扰
     for _, descendant in ipairs(model:GetDescendants()) do
-        if descendant:IsA("BasePart") then
-            descendant.Anchored = true       -- 固定不动
-            descendant.CanCollide = true     -- 启用碰撞（与地板碰撞）
+        if descendant:IsA("BasePart") and descendant ~= rootPart then
+            descendant.Anchored = false      -- 不锚定，允许动画移动
+            descendant.CanCollide = false    -- 禁用碰撞，避免肢体碰撞干扰
         end
     end
 
