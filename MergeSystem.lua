@@ -99,8 +99,8 @@ local function PlayMergeEffect(position, gridSize)
 		print(string.format("%s 播放合成特效: %s 位置: %s", GameConfig.LOG_PREFIX, effectName, tostring(position)))
 	end
 
-	-- 4. 1秒后移除特效父节点
-	task.delay(1, function()
+	-- 4. 3秒后移除特效父节点
+	task.delay(3, function()
 		if effect and effect.Parent then
 			effect:Destroy()
 		end
