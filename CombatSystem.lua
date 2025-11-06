@@ -602,16 +602,10 @@ function CombatSystem.KillUnit(unitModel, killer)
 
 	DebugLog(string.format("%s [%s] 已死亡", state.UnitId, state.Team))
 
-	-- 先停止AI，避免死亡单位的AI继续运行
-	local UnitAI = require(ServerScriptService.Systems.UnitAI)
-	UnitAI.StopAI(unitModel)
-
-	-- 保存battleId和unitId用于后续事件触发和日志
-	local battleId = state.BattleId
+	-- 保存unitId用于后续日志
 	local unitId = state.UnitId
 
 	-- V1.5.1 Bug修复: 从UnitManager中注销单位(必须在清除unitStates之前)
-	-- 防止死亡单位仍留在索引表中被寻敌/碰撞判定访问
 	if UnitManager then
 		UnitManager.UnregisterUnit(unitModel)
 		DebugLog(string.format("%s 已从UnitManager注销", unitId))
@@ -622,30 +616,29 @@ function CombatSystem.KillUnit(unitModel, killer)
 
 	-- 触发死亡事件(通知攻击者)
 	if unitDeathEvent then
-		unitDeathEvent:Fire(unitModel, killer, battleId)
+		unitDeathEvent:Fire(unitModel, killer, state.BattleId)
 	end
 
-	-- V1.5.2: 播放死亡动画
+	-- V1.5.6 简化版死亡流程：固定2.9秒销毁
+	local UnitAI = require(ServerScriptService.Systems.UnitAI)
+
+	-- 步骤1: 获取死亡动画配置
 	local deathAnimationId = UnitConfig.GetDeathAnimationId(unitId)
-	local deathAnimDuration = BattleConfig.DEATH_ANIMATION_DURATION
 
-	if deathAnimationId and deathAnimationId ~= "" then
-		local animTrack = UnitAI.PlayDeathAnimation(unitModel, deathAnimationId)
-		if animTrack then
-			-- 使用实际动画时长
-			deathAnimDuration = animTrack.Length
-			DebugLog(string.format("%s 播放死亡动画, 时长: %.2f秒", unitId, deathAnimDuration))
-		else
-			DebugLog(string.format("%s 死亡动画加载失败, 使用默认延迟", unitId))
-		end
-	else
-		DebugLog(string.format("%s 无死亡动画配置, 使用默认延迟", unitId))
-	end
+	-- 步骤2: 开始死亡动画流程（打断所有动画、播放死亡动画、锁定终帧）
+	UnitAI.BeginDeathAnimation(unitModel, deathAnimationId, unitId)
 
-	-- 延迟移除模型(等待动画播放完成)
+	-- 步骤3: 停止AI（使用skipMoveTo=true避免MoveTo把尸体"扶正"）
+	UnitAI.StopAI(unitModel, true)
+
+	-- 步骤4: 固定2.9秒后销毁模型
+	local deathAnimDuration = 2.9
+	DebugLog(string.format("%s 将在 %.1f秒后销毁", unitId, deathAnimDuration))
+
 	task.delay(deathAnimDuration, function()
 		if unitModel and unitModel.Parent then
 			unitModel:Destroy()
+			DebugLog(string.format("%s 模型已销毁", unitId))
 		end
 	end)
 end

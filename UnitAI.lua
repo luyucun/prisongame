@@ -122,8 +122,8 @@ local function CreateAndPlayAnimation(humanoid, animationId, looped)
 			end
 		end)
 	else
-		-- 单次动画：播放完自动清理
-		task.delay(animationTrack.Length + 0.1, function()
+		-- 单次动画：延迟清理（服务器上无法获取Length，使用固定延迟）
+		task.delay(5, function()
 			if animation and animation.Parent then
 				animation:Destroy()
 			end
@@ -145,146 +145,113 @@ local function SafeStopAnimation(animationTrack)
 	end
 end
 
--- ==================== 显式动画状态机 ====================
+-- ==================== 统一动画状态机 ====================
 
 local AnimationState = {
-	NONE = "None",
-	MOVE = "Move",
-	IDLE = "Idle",
-	ATTACK = "Attack",
+	MOVE = "MOVE",
+	IDLE = "IDLE",
+	ATTACK = "ATTACK",
 }
 
 --[[
-动画控制器
+动画控制器 - 统一管理所有动画切换
 职责：
-1. 维护当前动画状态和Track引用
-2. 提供SetXXXAnimation接口，只能被内部调用
-3. 确保同一时刻只有一种动画在播放
-4. 攻击动画结束时自动切换到Idle
+1. 维护 Tracks 表存储所有动画轨道
+2. 确保状态切换时精确停止需要的轨道
+3. 攻击动画结束自动回到Idle
 ]]
 local AnimationController = {}
 
 --[[
-设置移动动画
+切换到移动状态
 @param unitModel - 兵种模型
 @param aiData - AI数据
-@param playing - 是否播放
+@param state - 单位状态
 ]]
-function AnimationController.SetMoveAnimation(unitModel, aiData, playing)
-	local state = CombatSystem.GetUnitState(unitModel)
-	if not state then return end
+function AnimationController.SwitchToMove(unitModel, aiData, state)
+	-- 如果已经在播放移动动画，跳过
+	if aiData.CurrentState == AnimationState.MOVE and
+	   aiData.Tracks.Move and
+	   aiData.Tracks.Move.IsPlaying then
+		return
+	end
 
-	if playing then
-		-- 停止其他动画
-		AnimationController.StopIdleAnimation(aiData)
-		-- 注意：不停止Attack，因为Attack优先级更高
+	-- 停止 Idle 和 Attack
+	if aiData.Tracks.Idle then
+		SafeStopAnimation(aiData.Tracks.Idle)
+		aiData.Tracks.Idle = nil
+	end
+	if aiData.Tracks.Attack then
+		SafeStopAnimation(aiData.Tracks.Attack)
+		aiData.Tracks.Attack = nil
+	end
 
-		-- 如果已经在播放移动动画，跳过
-		if aiData.CurrentAnimationState == AnimationState.MOVE and
-		   aiData.CurrentMoveAnimation and
-		   aiData.CurrentMoveAnimation.IsPlaying then
-			return
-		end
-
-		-- 播放移动动画
-		local animId = UnitConfig.GetMoveAnimationId(state.UnitId)
-		if animId and animId ~= "" then
-			local track = CreateAndPlayAnimation(aiData.Humanoid, animId, true)
-			if track then
-				aiData.CurrentMoveAnimation = track
-				aiData.CurrentAnimationState = AnimationState.MOVE
-				LogAnimationChange(state.UnitId, aiData.LastAnimationState, AnimationState.MOVE, "开始移动")
-				aiData.LastAnimationState = AnimationState.MOVE
-			end
+	-- 播放移动动画
+	local animId = UnitConfig.GetMoveAnimationId(state.UnitId)
+	if animId and animId ~= "" then
+		local track = CreateAndPlayAnimation(aiData.Humanoid, animId, true)
+		if track then
+			aiData.Tracks.Move = track
+			aiData.CurrentState = AnimationState.MOVE
+			LogAnimationChange(state.UnitId, aiData.LastState, AnimationState.MOVE, "开始移动")
+			aiData.LastState = AnimationState.MOVE
 		end
 	else
-		-- 停止移动动画
-		AnimationController.StopMoveAnimation(aiData)
+		aiData.CurrentState = AnimationState.MOVE
 	end
 end
 
 --[[
-停止移动动画
-@param aiData - AI数据
-]]
-function AnimationController.StopMoveAnimation(aiData)
-	if aiData.CurrentMoveAnimation then
-		SafeStopAnimation(aiData.CurrentMoveAnimation)
-		aiData.CurrentMoveAnimation = nil
-		if aiData.CurrentAnimationState == AnimationState.MOVE then
-			aiData.CurrentAnimationState = AnimationState.NONE
-		end
-	end
-end
-
---[[
-设置待机动画
+切换到待机状态
 @param unitModel - 兵种模型
 @param aiData - AI数据
-@param playing - 是否播放
+@param state - 单位状态
 ]]
-function AnimationController.SetIdleAnimation(unitModel, aiData, playing)
-	local state = CombatSystem.GetUnitState(unitModel)
-	if not state then return end
-
-	if playing then
-		-- 停止移动动画
-		AnimationController.StopMoveAnimation(aiData)
-		-- 注意：不停止Attack，因为Attack优先级更高
-
-		-- 如果已经在播放待机动画，跳过
-		if aiData.CurrentAnimationState == AnimationState.IDLE and
-		   aiData.CurrentIdleAnimation and
-		   aiData.CurrentIdleAnimation.IsPlaying then
+function AnimationController.SwitchToIdle(unitModel, aiData, state)
+	-- 严格检查1：如果已经在播放Idle动画，直接返回
+	if aiData.CurrentState == AnimationState.IDLE then
+		if aiData.Tracks.Idle and aiData.Tracks.Idle.IsPlaying then
+			-- 已经在播放Idle，无需重复切换
 			return
 		end
+	end
 
-		-- 播放待机动画
-		local animId = UnitConfig.GetIdleAnimationId(state.UnitId)
-		if animId and animId ~= "" then
-			local track = CreateAndPlayAnimation(aiData.Humanoid, animId, true)
-			if track then
-				aiData.CurrentIdleAnimation = track
-				aiData.CurrentAnimationState = AnimationState.IDLE
-				LogAnimationChange(state.UnitId, aiData.LastAnimationState, AnimationState.IDLE, "进入待机")
-				aiData.LastAnimationState = AnimationState.IDLE
-			end
+	-- 严格检查2：如果Attack正在播放，不要打断它
+	if aiData.Tracks.Attack and aiData.Tracks.Attack.IsPlaying then
+		-- Attack还在播放，不要打断，等它自然结束
+		return
+	end
+
+	-- 停止 Move（但不停止 Attack，上面已经检查过了）
+	if aiData.Tracks.Move then
+		SafeStopAnimation(aiData.Tracks.Move)
+		aiData.Tracks.Move = nil
+	end
+
+	-- 播放待机动画
+	local animId = UnitConfig.GetIdleAnimationId(state.UnitId)
+	if animId and animId ~= "" then
+		local track = CreateAndPlayAnimation(aiData.Humanoid, animId, true)
+		if track then
+			aiData.Tracks.Idle = track
+			aiData.CurrentState = AnimationState.IDLE
+			LogAnimationChange(state.UnitId, aiData.LastState, AnimationState.IDLE, "进入待机")
+			aiData.LastState = AnimationState.IDLE
 		end
 	else
-		-- 停止待机动画
-		AnimationController.StopIdleAnimation(aiData)
+		aiData.CurrentState = AnimationState.IDLE
 	end
 end
 
 --[[
-停止待机动画
-@param aiData - AI数据
-]]
-function AnimationController.StopIdleAnimation(aiData)
-	if aiData.CurrentIdleAnimation then
-		SafeStopAnimation(aiData.CurrentIdleAnimation)
-		aiData.CurrentIdleAnimation = nil
-		if aiData.CurrentAnimationState == AnimationState.IDLE then
-			aiData.CurrentAnimationState = AnimationState.NONE
-		end
-	end
-end
-
---[[
-播放攻击动画（单次）
+播放攻击动画
 @param unitModel - 兵种模型
 @param aiData - AI数据
+@param state - 单位状态
 @param target - 攻击目标
-@param onDamageCallback - 伤害事件回调
+@param onDamageCallback - 伤害回调
 ]]
-function AnimationController.PlayAttackAnimation(unitModel, aiData, target, onDamageCallback)
-	local state = CombatSystem.GetUnitState(unitModel)
-	if not state then return false end
-
-	-- 停止所有其他动画
-	AnimationController.StopMoveAnimation(aiData)
-	AnimationController.StopIdleAnimation(aiData)
-
+function AnimationController.PlayAttack(unitModel, aiData, state, target, onDamageCallback)
 	-- 清理之前的攻击动画连接
 	for _, connection in ipairs(aiData.AnimationConnections) do
 		if connection and connection.Connected then
@@ -298,57 +265,82 @@ function AnimationController.PlayAttackAnimation(unitModel, aiData, target, onDa
 	local combatProfile = UnitConfig.GetCombatProfile(state.UnitId)
 	local isRangedUnit = UnitConfig.IsRangedUnit(state.UnitId)
 
-	-- 用于确保Damage事件只触发一次
+	-- 全局防重复标志（基于单位模型）
 	local damageEventFired = false
+	local attackKey = tostring(unitModel) .. "_" .. tick()
 
-	-- 标记进入攻击动画状态
-	aiData.CurrentAnimationState = AnimationState.ATTACK
-	LogAnimationChange(state.UnitId, aiData.LastAnimationState, AnimationState.ATTACK, "开始攻击")
-	aiData.LastAnimationState = AnimationState.ATTACK
+	-- 保存旧轨道的引用，但先不停止
+	local prevMove = aiData.Tracks.Move
+	local prevIdle = aiData.Tracks.Idle
 
 	-- 播放攻击动画
 	if animationId and animationId ~= "" and combatProfile.UseAnimationEvent then
 		local animTrack = CreateAndPlayAnimation(aiData.Humanoid, animationId, false)
 
 		if animTrack then
-			aiData.CurrentAttackAnimation = animTrack
+			-- 攻击动画成功加载并播放后，再停止旧动画
+			aiData.Tracks.Attack = animTrack
+			aiData.CurrentState = AnimationState.ATTACK
+			LogAnimationChange(state.UnitId, aiData.LastState, AnimationState.ATTACK, "开始攻击")
+			aiData.LastState = AnimationState.ATTACK
+
+			-- 关键修复：此时再停止旧轨道，保证无缝切换
+			if prevMove then
+				SafeStopAnimation(prevMove)
+				aiData.Tracks.Move = nil
+			end
+			if prevIdle then
+				SafeStopAnimation(prevIdle)
+				aiData.Tracks.Idle = nil
+			end
 
 			-- 监听动画的 "Damage" 事件
 			local eventName = combatProfile.AnimationEventName or "Damage"
 
-			local connection = animTrack:GetMarkerReachedSignal(eventName):Connect(function()
-				if damageEventFired then return end
+			local damageConnection = animTrack:GetMarkerReachedSignal(eventName):Connect(function()
+				-- 双重检查防止重复触发
+				if damageEventFired then
+					DebugLog(string.format("%s Damage事件重复触发，忽略", state.UnitId))
+					return
+				end
 				damageEventFired = true
 
 				DebugLog(string.format("%s 动画事件[%s]触发", state.UnitId, eventName))
 
-				-- 调用伤害回调
+				-- 调用伤害回调（这会触发 OnDamageEvent，进入 Recovery）
 				if onDamageCallback then
 					onDamageCallback(unitModel, target, isRangedUnit)
 				end
 			end)
 
-			table.insert(aiData.AnimationConnections, connection)
+			table.insert(aiData.AnimationConnections, damageConnection)
 
-			-- 关键修复：攻击动画结束时自动切换到Idle
-			animTrack.Stopped:Connect(function()
-				-- 断开连接
-				if connection and connection.Connected then
-					connection:Disconnect()
+			-- 关键修复：攻击动画结束时立即切换到Idle，不等下一帧
+			local stoppedConnection = animTrack.Stopped:Connect(function()
+				-- 断开所有连接
+				for _, conn in ipairs(aiData.AnimationConnections) do
+					if conn and conn.Connected then
+						conn:Disconnect()
+					end
 				end
+				aiData.AnimationConnections = {}
 
 				-- 清空攻击动画引用
-				aiData.CurrentAttackAnimation = nil
+				aiData.Tracks.Attack = nil
 
-				-- 如果单位还活着且还在攻击状态，切换到Idle
+				DebugLog(string.format("%s 攻击动画已停止", state.UnitId))
+
+				-- 立即切换到Idle，不等下一帧
 				if aiData.IsActive and unitModel.Parent and CombatSystem.IsUnitAlive(unitModel) then
-					local currentAIState = CombatSystem.GetAIState(unitModel)
-					if currentAIState == BattleConfig.AIState.ATTACKING then
-						DebugLog(string.format("%s 攻击动画结束，切换到Idle", state.UnitId))
-						AnimationController.SetIdleAnimation(unitModel, aiData, true)
+					local latestState = CombatSystem.GetUnitState(unitModel)
+					if latestState then
+						DebugLog(string.format("%s 攻击结束，立即切换到Idle", state.UnitId))
+						AnimationController.SwitchToIdle(unitModel, aiData, latestState)
 					end
 				end
 			end)
+
+			table.insert(aiData.AnimationConnections, stoppedConnection)
 
 			return true
 		else
@@ -361,13 +353,16 @@ function AnimationController.PlayAttackAnimation(unitModel, aiData, target, onDa
 						if onDamageCallback then
 							onDamageCallback(unitModel, target, isRangedUnit)
 						end
-					end
-				end
 
-				-- 回退机制也要切换到Idle
-				if aiData.IsActive and unitModel.Parent then
-					task.wait(0.1)
-					AnimationController.SetIdleAnimation(unitModel, aiData, true)
+						-- 回退机制：触发伤害后立即切换到 Idle
+						if aiData.IsActive and unitModel.Parent and CombatSystem.IsUnitAlive(unitModel) then
+							local latestState = CombatSystem.GetUnitState(unitModel)
+							if latestState then
+								DebugLog(string.format("%s (回退)立即切换到Idle", state.UnitId))
+								AnimationController.SwitchToIdle(unitModel, aiData, latestState)
+							end
+						end
+					end
 				end
 			end)
 
@@ -383,20 +378,21 @@ function AnimationController.PlayAttackAnimation(unitModel, aiData, target, onDa
 					if onDamageCallback then
 						onDamageCallback(unitModel, target, isRangedUnit)
 					end
-				end
-			end
 
-			-- 回退机制也要切换到Idle
-			if aiData.IsActive and unitModel.Parent then
-				task.wait(0.1)
-				AnimationController.SetIdleAnimation(unitModel, aiData, true)
+					-- 回退机制：触发伤害后立即切换到 Idle
+					if aiData.IsActive and unitModel.Parent and CombatSystem.IsUnitAlive(unitModel) then
+						local latestState = CombatSystem.GetUnitState(unitModel)
+						if latestState then
+							DebugLog(string.format("%s (回退)立即切换到Idle", state.UnitId))
+							AnimationController.SwitchToIdle(unitModel, aiData, latestState)
+						end
+					end
+				end
 			end
 		end)
 
 		return true
 	end
-
-	return false
 end
 
 --[[
@@ -404,14 +400,11 @@ end
 @param aiData - AI数据
 ]]
 function AnimationController.StopAllAnimations(aiData)
-	AnimationController.StopMoveAnimation(aiData)
-	AnimationController.StopIdleAnimation(aiData)
-
-	-- 停止攻击动画
-	if aiData.CurrentAttackAnimation then
-		SafeStopAnimation(aiData.CurrentAttackAnimation)
-		aiData.CurrentAttackAnimation = nil
+	-- 停止所有轨道
+	for animName, track in pairs(aiData.Tracks) do
+		SafeStopAnimation(track)
 	end
+	aiData.Tracks = {}
 
 	-- 断开所有动画事件连接
 	for _, connection in ipairs(aiData.AnimationConnections) do
@@ -421,7 +414,7 @@ function AnimationController.StopAllAnimations(aiData)
 	end
 	aiData.AnimationConnections = {}
 
-	aiData.CurrentAnimationState = AnimationState.NONE
+	aiData.CurrentState = nil
 end
 
 -- ==================== 私有变量 ====================
@@ -442,13 +435,15 @@ AIData = {
     IsActive = boolean,
     LastUpdateTime = number,
 
-    -- 动画状态（V1.5.4重构）
-    CurrentAnimationState = string,      -- 当前动画状态
-    LastAnimationState = string,         -- 上次动画状态
-    CurrentMoveAnimation = AnimationTrack|nil,
-    CurrentIdleAnimation = AnimationTrack|nil,
-    CurrentAttackAnimation = AnimationTrack|nil,
-    AnimationConnections = {},
+    -- 动画状态（V1.5.5重构）
+    CurrentState = string,               -- 当前动画状态: "MOVE"/"IDLE"/"ATTACK"
+    LastState = string,                  -- 上次动画状态
+    Tracks = {                           -- 动画轨道表
+        Move = AnimationTrack|nil,
+        Idle = AnimationTrack|nil,
+        Attack = AnimationTrack|nil,
+    },
+    AnimationConnections = {},           -- 动画事件连接
 
     -- 其他
     LastDesiredDirection = Vector3|nil,
@@ -593,7 +588,7 @@ local function HandleSeeking(unitModel, aiData, state)
 	else
 		CombatSystem.SetAIState(unitModel, BattleConfig.AIState.IDLE)
 		-- 无目标时播放Idle
-		AnimationController.SetIdleAnimation(unitModel, aiData, true)
+		AnimationController.SwitchToIdle(unitModel, aiData, state)
 	end
 end
 
@@ -607,13 +602,13 @@ local function HandleMoving(unitModel, aiData, state)
 		CombatSystem.SetTarget(unitModel, nil)
 		CombatSystem.SetAIState(unitModel, BattleConfig.AIState.SEEKING)
 		LogStateChange(state.UnitId, "MOVING", "SEEKING", "目标失效")
-		-- 目标失效，停止移动动画
-		AnimationController.StopMoveAnimation(aiData)
+		-- 目标失效，切换到Idle
+		AnimationController.SwitchToIdle(unitModel, aiData, state)
 		return
 	end
 
 	-- 确保播放移动动画
-	AnimationController.SetMoveAnimation(unitModel, aiData, true)
+	AnimationController.SwitchToMove(unitModel, aiData, state)
 
 	-- 检查距离
 	local distance = GetDistance(unitModel, target)
@@ -632,9 +627,12 @@ local function HandleMoving(unitModel, aiData, state)
 			if UnitAIRangePolicy.ShouldEnterAttack(distance, state) then
 				CombatSystem.SetAIState(unitModel, BattleConfig.AIState.ATTACKING)
 				LogStateChange(state.UnitId, "MOVING", "ATTACKING", string.format("提前停止后距离符合攻击条件(%.1f)", distance))
-				-- 进入攻击状态，停止移动动画，播放Idle
-				AnimationController.SetMoveAnimation(unitModel, aiData, false)
-				AnimationController.SetIdleAnimation(unitModel, aiData, true)
+				-- 进入攻击状态，停止移动动画即可，不需要立即播放Idle
+				-- Idle会在攻击动画结束后自动播放
+				if aiData.Tracks.Move then
+					SafeStopAnimation(aiData.Tracks.Move)
+					aiData.Tracks.Move = nil
+				end
 				return
 			end
 		end
@@ -647,9 +645,12 @@ local function HandleMoving(unitModel, aiData, state)
 		CombatSystem.SetAIState(unitModel, BattleConfig.AIState.ATTACKING)
 		LogStateChange(state.UnitId, "MOVING", "ATTACKING", string.format("距离%.1f <= 阈值", distance))
 
-		-- 关键修复：进入攻击状态时，停止移动动画，播放Idle
-		AnimationController.SetMoveAnimation(unitModel, aiData, false)
-		AnimationController.SetIdleAnimation(unitModel, aiData, true)
+		-- 关键修复：进入攻击状态时，只停止移动动画，不要立即播放Idle
+		-- Idle会在攻击动画结束后自动播放
+		if aiData.Tracks.Move then
+			SafeStopAnimation(aiData.Tracks.Move)
+			aiData.Tracks.Move = nil
+		end
 	else
 		-- 继续移动到目标
 		UnitAI.MoveToTarget(unitModel, target, aiData, state)
@@ -659,9 +660,9 @@ end
 --[[
 处理ATTACKING状态：攻击目标（重构版）
 核心逻辑：
-1. 如果CurrentAttackAnimation为空 且 CanAttack()为true → 触发攻击
-2. 如果CurrentAttackAnimation不为空 → 正在播放攻击动画，等待结束
-3. 如果CurrentAttackAnimation为空 且 CanAttack()为false → 冷却中，维持Idle
+1. 如果Tracks.Attack为空 且 CanAttack()为true → 触发攻击
+2. 如果Tracks.Attack不为空 → 正在播放攻击动画，等待结束
+3. 如果Tracks.Attack为空 且 CanAttack()为false → 冷却中，维持Idle
 4. 如果距离脱离 → 切回MOVING
 ]]
 local function HandleAttacking(unitModel, aiData, state)
@@ -671,8 +672,8 @@ local function HandleAttacking(unitModel, aiData, state)
 		CombatSystem.SetTarget(unitModel, nil)
 		CombatSystem.SetAIState(unitModel, BattleConfig.AIState.SEEKING)
 		LogStateChange(state.UnitId, "ATTACKING", "SEEKING", "目标失效")
-		-- 停止所有动画
-		AnimationController.StopAllAnimations(aiData)
+		-- 切换到Idle
+		AnimationController.SwitchToIdle(unitModel, aiData, state)
 		return
 	end
 
@@ -684,9 +685,8 @@ local function HandleAttacking(unitModel, aiData, state)
 		CombatSystem.SetAIState(unitModel, BattleConfig.AIState.MOVING)
 		LogStateChange(state.UnitId, "ATTACKING", "MOVING", string.format("距离%.1f > 脱离阈值", distance))
 
-		-- 关键修复：脱离攻击状态，停止Idle，播放Move
-		AnimationController.SetIdleAnimation(unitModel, aiData, false)
-		AnimationController.SetMoveAnimation(unitModel, aiData, true)
+		-- 关键修复：脱离攻击状态，切换到Move
+		AnimationController.SwitchToMove(unitModel, aiData, state)
 		return
 	end
 
@@ -696,7 +696,7 @@ local function HandleAttacking(unitModel, aiData, state)
 
 	-- 核心修复：攻击逻辑
 	-- 情况1：正在播放攻击动画 → 什么都不做，等待动画结束回调
-	if aiData.CurrentAttackAnimation and aiData.CurrentAttackAnimation.IsPlaying then
+	if aiData.Tracks.Attack and aiData.Tracks.Attack.IsPlaying then
 		-- 攻击动画播放中，保持等待
 		return
 	end
@@ -704,8 +704,8 @@ local function HandleAttacking(unitModel, aiData, state)
 	-- 情况2：冷却中（CanAttack()为false） → 维持Idle动画
 	if not CombatSystem.CanAttack(unitModel) then
 		-- 确保Idle动画在播放
-		if aiData.CurrentAnimationState ~= AnimationState.IDLE then
-			AnimationController.SetIdleAnimation(unitModel, aiData, true)
+		if aiData.CurrentState ~= AnimationState.IDLE then
+			AnimationController.SwitchToIdle(unitModel, aiData, state)
 		end
 		return
 	end
@@ -815,12 +815,10 @@ function UnitAI.StartAI(unitModel)
 		IsActive = true,
 		LastUpdateTime = 0,
 
-		-- 动画状态（V1.5.4重构）
-		CurrentAnimationState = AnimationState.NONE,
-		LastAnimationState = AnimationState.NONE,
-		CurrentMoveAnimation = nil,
-		CurrentIdleAnimation = nil,
-		CurrentAttackAnimation = nil,
+		-- 动画状态（V1.5.5重构）
+		CurrentState = nil,
+		LastState = nil,
+		Tracks = {},
 		AnimationConnections = {},
 
 		LastDesiredDirection = nil,
@@ -848,18 +846,22 @@ function UnitAI.StartAI(unitModel)
 			CombatSystem.SetAIState(unitModel, BattleConfig.AIState.MOVING)
 			LogStateChange(unitId, "IDLE", "MOVING", "AI启动，发现目标")
 			-- AI启动时播放移动动画
-			AnimationController.SetMoveAnimation(unitModel, aiData, true)
+			if state then
+				AnimationController.SwitchToMove(unitModel, aiData, state)
+			end
 		else
 			CombatSystem.SetAIState(unitModel, BattleConfig.AIState.IDLE)
 			-- 无目标时播放Idle
-			AnimationController.SetIdleAnimation(unitModel, aiData, true)
+			if state then
+				AnimationController.SwitchToIdle(unitModel, aiData, state)
+			end
 		end
 	end)
 
 	return true
 end
 
-function UnitAI.StopAI(unitModel)
+function UnitAI.StopAI(unitModel, skipMoveTo)
 	local aiData = activeAIs[unitModel]
 
 	if aiData then
@@ -868,9 +870,11 @@ function UnitAI.StopAI(unitModel)
 		-- 停止所有动画
 		AnimationController.StopAllAnimations(aiData)
 
-		-- 停止移动
-		if aiData.Humanoid and aiData.HumanoidRootPart then
-			aiData.Humanoid:MoveTo(aiData.HumanoidRootPart.Position)
+		-- 停止移动（可选跳过，用于死亡流程避免把尸体"扶正"）
+		if not skipMoveTo then
+			if aiData.Humanoid and aiData.HumanoidRootPart then
+				aiData.Humanoid:MoveTo(aiData.HumanoidRootPart.Position)
+			end
 		end
 
 		activeAIs[unitModel] = nil
@@ -996,8 +1000,8 @@ function UnitAI.TriggerAttack(unitModel, target, state, aiData)
 	end
 
 	-- 播放攻击动画
-	-- 动画结束后会自动切换到Idle（在AnimationController.PlayAttackAnimation的回调中处理）
-	AnimationController.PlayAttackAnimation(unitModel, aiData, target, onDamageCallback)
+	-- 动画结束后会自动切换到Idle（在AnimationController.PlayAttack的回调中处理）
+	AnimationController.PlayAttack(unitModel, aiData, state, target, onDamageCallback)
 end
 
 function UnitAI.OnTargetDeath(deadUnit, battleId)
@@ -1018,9 +1022,9 @@ function UnitAI.OnTargetDeath(deadUnit, battleId)
 				LogStateChange(state.UnitId, state.State, "SEEKING", "目标死亡")
 
 				-- 目标死亡，停止攻击动画
-				if aiData.CurrentAttackAnimation then
-					SafeStopAnimation(aiData.CurrentAttackAnimation)
-					aiData.CurrentAttackAnimation = nil
+				if aiData.Tracks.Attack then
+					SafeStopAnimation(aiData.Tracks.Attack)
+					aiData.Tracks.Attack = nil
 				end
 			end
 		end
@@ -1052,7 +1056,7 @@ function UnitAI.GetActiveAICount()
 end
 
 --[[
-播放死亡动画（供CombatSystem调用）
+播放死亡动画（供CombatSystem调用）- 兼容旧版接口
 ]]
 function UnitAI.PlayDeathAnimation(unitModel, animationId)
 	if not unitModel or not unitModel:IsA("Model") then
@@ -1065,6 +1069,111 @@ function UnitAI.PlayDeathAnimation(unitModel, animationId)
 	end
 
 	return CreateAndPlayAnimation(humanoid, animationId, false)
+end
+
+--[[
+开始死亡动画流程（V1.5.6简化版）
+职责：
+1. 打断当前所有动画
+2. 禁用Animate脚本
+3. 播放死亡动画
+4. 动画结束后锁定终帧姿势
+5. 固定2.9秒后销毁
+
+@param unitModel - 兵种模型
+@param animationId - 死亡动画ID
+@param unitId - 单位ID（可选，用于日志显示）
+@return nil - 不再返回任何值
+]]
+function UnitAI.BeginDeathAnimation(unitModel, animationId, unitId)
+	if not unitModel or not unitModel:IsA("Model") then
+		WarnLog("BeginDeathAnimation失败: unitModel无效")
+		return
+	end
+
+	local humanoid = unitModel:FindFirstChildOfClass("Humanoid")
+	local rootPart = unitModel:FindFirstChild("HumanoidRootPart")
+
+	if not humanoid or not rootPart then
+		WarnLog("BeginDeathAnimation失败: 找不到Humanoid或HumanoidRootPart")
+		return
+	end
+
+	-- 获取单位名称用于日志
+	local unitName = unitId or unitModel.Name or "Unknown"
+
+	DebugLog(string.format("[%s] 开始死亡动画流程, 动画ID: %s", unitName, animationId or "nil"))
+
+	-- 步骤1: 打断当前所有动画
+	local animator = humanoid:FindFirstChild("Animator")
+	if not animator then
+		animator = unitModel:FindFirstChildOfClass("Animator")
+	end
+
+	if animator then
+		-- 停止所有正在播放的动画轨道
+		local playingTracks = animator:GetPlayingAnimationTracks()
+		for _, track in ipairs(playingTracks) do
+			pcall(function()
+				track:Stop(0)  -- 立即停止，无淡出
+			end)
+		end
+		DebugLog(string.format("[%s] 已打断 %d 个正在播放的动画", unitName, #playingTracks))
+	end
+
+	-- 步骤2: 禁用Animate脚本，防止默认动画覆盖死亡姿势
+	local animateScript = unitModel:FindFirstChild("Animate")
+	if animateScript and animateScript:IsA("LocalScript") then
+		animateScript.Enabled = false
+		DebugLog(string.format("[%s] 已禁用Animate脚本", unitName))
+	end
+
+	-- 步骤3: 设置AutoRotate=false，防止角色自动旋转
+	pcall(function()
+		humanoid.AutoRotate = false
+	end)
+
+	-- 步骤4: 播放死亡动画
+	if animationId and animationId ~= "" and animationId ~= "0" then
+		DebugLog(string.format("[%s] 正在加载死亡动画... (ID: %s)", unitName, animationId))
+		local animTrack = CreateAndPlayAnimation(humanoid, animationId, false)
+
+		if animTrack then
+			DebugLog(string.format("[%s] ✅ 死亡动画播放成功", unitName))
+
+			-- 延迟0.1秒设置Physics状态，让动画先播放
+			task.delay(0.1, function()
+				pcall(function()
+					if humanoid and humanoid.Parent then
+						humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+						DebugLog(string.format("[%s] 已设置Physics状态", unitName))
+					end
+				end)
+			end)
+
+			-- 在2.7秒时锁定动画终帧（留0.2秒缓冲）
+			task.delay(2.7, function()
+				pcall(function()
+					if animTrack and animTrack.IsPlaying then
+						animTrack:AdjustSpeed(0)  -- 速度设为0，冻结姿势
+						DebugLog(string.format("[%s] 死亡动画已锁定在终帧", unitName))
+					end
+				end)
+			end)
+		else
+			WarnLog(string.format("[%s] ❌ 死亡动画加载失败! 动画ID可能无效: %s", unitName, animationId))
+			-- 动画加载失败，直接设置Physics状态倒地
+			pcall(function()
+				humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+			end)
+		end
+	else
+		DebugLog(string.format("[%s] 无死亡动画配置，直接倒地", unitName))
+		-- 无动画配置时，直接设置为倒地状态
+		pcall(function()
+			humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+		end)
+	end
 end
 
 return UnitAI

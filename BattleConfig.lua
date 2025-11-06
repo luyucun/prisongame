@@ -117,8 +117,12 @@ BattleConfig.DEFAULT_MOVE_ANIMATION_SPEED = 1
 BattleConfig.DEFAULT_ATTACK_ANIMATION_SPEED = 1
 
 -- V1.5.2新增: 死亡动画配置
-BattleConfig.DEATH_ANIMATION_DURATION = 1.0  -- 死亡动画播放时长(秒)，用于延迟移除模型
+BattleConfig.DEATH_ANIMATION_DURATION = 3.0  -- 死亡动画播放时长(秒)，用于延迟移除模型（最小等待时间）
 BattleConfig.DEFAULT_DEATH_ANIMATION_SPEED = 1  -- 默认死亡动画速度
+
+-- V1.5.6新增: 死亡后保持终帧时间
+BattleConfig.DEATH_POST_HOLD = 0.5  -- 死亡动画播完后额外保持的时间(秒)，让玩家看清倒地姿势
+BattleConfig.MIN_DEATH_DISPLAY_TIME = 3.0  -- 死亡后最少显示时间(秒)，确保尸体至少停留3秒
 
 -- ==================== 战斗机制设置 ====================
 -- 近战武器触碰伤害触发延迟(秒) 防止连续触发
