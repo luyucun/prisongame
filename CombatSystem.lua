@@ -578,9 +578,14 @@ function CombatSystem.Heal(unitModel, amount)
 end
 
 --[[
-杀死兵种
+杀死兵种 - V1.5.7简化版
 @param unitModel Model - 兵种模型
 @param killer Model - 击杀者模型(可选)
+
+流程：
+1. 立即播放死亡动画（禁用系统干扰、冻结终帧）
+2. 停止AI（skipMoveTo=true避免MoveTo"扶正"尸体）
+3. 2.9秒后销毁模型
 ]]
 function CombatSystem.KillUnit(unitModel, killer)
 	local state = unitStates[unitModel]
@@ -604,6 +609,7 @@ function CombatSystem.KillUnit(unitModel, killer)
 
 	-- 保存unitId用于后续日志
 	local unitId = state.UnitId
+	local battleId = state.BattleId
 
 	-- V1.5.1 Bug修复: 从UnitManager中注销单位(必须在清除unitStates之前)
 	if UnitManager then
@@ -616,26 +622,22 @@ function CombatSystem.KillUnit(unitModel, killer)
 
 	-- 触发死亡事件(通知攻击者)
 	if unitDeathEvent then
-		unitDeathEvent:Fire(unitModel, killer, state.BattleId)
+		unitDeathEvent:Fire(unitModel, killer, battleId)
 	end
 
-	-- V1.5.6 简化版死亡流程：固定2.9秒销毁
+	-- ===== V1.5.7 简化版死亡流程 =====
+	-- 获取系统引用
 	local UnitAI = require(ServerScriptService.Systems.UnitAI)
-
-	-- 步骤1: 获取死亡动画配置
 	local deathAnimationId = UnitConfig.GetDeathAnimationId(unitId)
 
-	-- 步骤2: 开始死亡动画流程（打断所有动画、播放死亡动画、锁定终帧）
+	-- 步骤1: 开始死亡动画（立刻播放、禁用系统干扰、冻结终帧）
 	UnitAI.BeginDeathAnimation(unitModel, deathAnimationId, unitId)
 
-	-- 步骤3: 停止AI（使用skipMoveTo=true避免MoveTo把尸体"扶正"）
+	-- 步骤2: 停止AI（skipMoveTo=true 防止MoveTo把尸体"拉起"）
 	UnitAI.StopAI(unitModel, true)
 
-	-- 步骤4: 固定2.9秒后销毁模型
-	local deathAnimDuration = 2.9
-	DebugLog(string.format("%s 将在 %.1f秒后销毁", unitId, deathAnimDuration))
-
-	task.delay(deathAnimDuration, function()
+	-- 步骤3: 固定2.9秒后销毁模型
+	task.delay(2.9, function()
 		if unitModel and unitModel.Parent then
 			unitModel:Destroy()
 			DebugLog(string.format("%s 模型已销毁", unitId))
