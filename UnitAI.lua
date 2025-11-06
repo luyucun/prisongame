@@ -66,6 +66,36 @@ end
 -- ==================== 尸体冻结辅助函数 ====================
 
 --[[
+禁用模型中所有Animate脚本（递归查找）
+兼容：NPC的Script、玩家的LocalScript、任何子文件夹中的Animate
+
+@param unitModel - 兵种模型
+@param unitName - 单位名称（用于日志）
+]]
+local function DisableAllAnimateScripts(unitModel, unitName)
+	if not unitModel then
+		return
+	end
+
+	-- 方法1: 直接查找（支持递归搜索，true参数表示遍历后代）
+	local animateScript = unitModel:FindFirstChild("Animate", true)
+	if animateScript and animateScript:IsA("BaseScript") then
+		animateScript.Enabled = false
+		DebugLog(string.format("[%s] 已禁用Animate脚本(直接查找)", unitName))
+		return
+	end
+
+	-- 方法2: 遍历所有后代，查找所有名为Animate的脚本
+	-- 处理可能有多个Animate脚本的情况
+	for _, descendant in ipairs(unitModel:GetDescendants()) do
+		if descendant.Name == "Animate" and descendant:IsA("BaseScript") then
+			descendant.Enabled = false
+			DebugLog(string.format("[%s] 已禁用Animate脚本(遍历查找): %s", unitName, descendant:GetFullName()))
+		end
+	end
+end
+
+--[[
 冻结尸体：归零速度、锚定、禁用碰撞
 防止死亡动画播完后尸体被物理引擎"抛飞"
 
@@ -441,13 +471,20 @@ function AnimationController.PlayAttack(unitModel, aiData, state, target, onDama
 end
 
 --[[
-停止所有动画
+停止所有动画 - V1.5.10支持淡出时间参数
 @param aiData - AI数据
+@param fadeTime - 淡出时间（秒）。0表示瞬停，默认0.1秒淡出
 ]]
-function AnimationController.StopAllAnimations(aiData)
+function AnimationController.StopAllAnimations(aiData, fadeTime)
+	fadeTime = fadeTime or 0.1  -- 默认0.1秒淡出
+
 	-- 停止所有轨道
 	for animName, track in pairs(aiData.Tracks) do
-		SafeStopAnimation(track)
+		if track and track.IsPlaying then
+			pcall(function()
+				track:Stop(fadeTime)
+			end)
+		end
 	end
 	aiData.Tracks = {}
 
@@ -920,19 +957,46 @@ function UnitAI.StartAI(unitModel)
 	return true
 end
 
-function UnitAI.StopAI(unitModel, skipMoveTo)
+--[[
+停止AI系统 - V1.5.11支持递归禁用Animate
+@param unitModel - 兵种模型
+@param options - 可选参数表
+    skipMoveTo (bool): 是否跳过MoveTo（死亡时用true）
+    disableAnimate (bool): 是否禁用Animate脚本（死亡时用true）
+    stopFadeTime (number): 停止动画的淡出时间（死亡时用0表示瞬停）
+
+示例：
+- 正常停止: UnitAI.StopAI(unitModel)
+- 死亡停止: UnitAI.StopAI(unitModel, {skipMoveTo=true, disableAnimate=true, stopFadeTime=0})
+]]
+function UnitAI.StopAI(unitModel, options)
 	local aiData = activeAIs[unitModel]
 
 	if aiData then
 		aiData.IsActive = false
 
-		-- 停止所有动画
-		AnimationController.StopAllAnimations(aiData)
+		-- 处理options参数（支持向后兼容的布尔值）
+		local opts = {}
+		if type(options) == "boolean" then
+			-- 向后兼容：UnitAI.StopAI(unitModel, true) → skipMoveTo=true
+			opts.skipMoveTo = options
+		elseif type(options) == "table" then
+			opts = options
+		end
 
-		-- 停止移动 - 明确尊重 skipMoveTo 参数
-		-- skipMoveTo=true: 跳过MoveTo，避免把死亡尸体"拉起"
-		-- skipMoveTo=false/nil: 正常停止移动
-		if not skipMoveTo and aiData.Humanoid and aiData.HumanoidRootPart then
+		-- 步骤1: 禁用Animate脚本（如果需要）
+		-- 使用递归查找，兼容任何位置的Animate脚本
+		if opts.disableAnimate then
+			local unitId = aiData.UnitModel and aiData.UnitModel.Name or "Unknown"
+			DisableAllAnimateScripts(unitModel, unitId)
+		end
+
+		-- 步骤2: 停止所有动画（带可配置的淡出时间）
+		local fadeTime = opts.stopFadeTime or 0.1  -- 默认0.1秒淡出，死亡时为0
+		AnimationController.StopAllAnimations(aiData, fadeTime)
+
+		-- 步骤3: 停止移动 - 明确尊重 skipMoveTo 参数
+		if not opts.skipMoveTo and aiData.Humanoid and aiData.HumanoidRootPart then
 			aiData.Humanoid:MoveTo(aiData.HumanoidRootPart.Position)
 		end
 
@@ -1131,19 +1195,19 @@ function UnitAI.PlayDeathAnimation(unitModel, animationId)
 end
 
 --[[
-开始死亡动画流程 - V1.5.8完整版（使用FreezeCorpse）
+开始死亡动画流程 - V1.5.10无缝过渡版
 职责：
-1. 打断当前所有动画
-2. 禁用Animate脚本（防止系统默认动画覆盖死亡姿势）
-3. 设置AutoRotate=false
-4. 播放死亡动画（如果配置了）
-5. 动画结束时调用FreezeCorpse冻结尸体（锚定、归零速度、设置Dead状态）
-6. 无动画时直接冻结
+1. 缓存当前播放的动画轨道
+2. 立刻禁用Animate脚本（防止默认待机抢占）
+3. 创建死亡动画轨道并立刻播放（Priority=Action4，Fade=0）
+4. 等死亡轨道开始后再停止旧轨道（无缝覆盖）
+5. 动画结束时冻结尸体
 
-关键改动：
-- 使用 PlatformStand=true + Dead 状态替代 Physics
-- 在动画结束时立即调用 FreezeCorpse 而非延迟
-- 完全消除尸体被物理引擎"抛飞"的问题
+关键改动（V1.5.10）：
+- 缓存旧轨道，先播死亡动画再停旧轨道（无缝覆盖）
+- 立刻禁用Animate脚本防止默认待机
+- 设置死亡动画Priority=Action4，Fade=0确保立即生效
+- 无缝过渡：攻击/移动动作 → 死亡动作（无"傻站"）
 
 @param unitModel - 兵种模型
 @param animationId - 死亡动画ID
@@ -1167,54 +1231,91 @@ function UnitAI.BeginDeathAnimation(unitModel, animationId, unitId)
 
 	DebugLog(string.format("[%s] 开始死亡动画流程, 动画ID: %s", unitName, animationId or "nil"))
 
-	-- ============ 步骤1: 打断所有正在播放的动画 ============
+	-- ============ 步骤1: 缓存当前播放的动画轨道 ============
 	local animator = humanoid:FindFirstChild("Animator")
 	if not animator then
 		animator = unitModel:FindFirstChildOfClass("Animator")
 	end
 
+	local playingTracks = {}
 	if animator then
-		local playingTracks = animator:GetPlayingAnimationTracks()
-		for _, track in ipairs(playingTracks) do
-			pcall(function()
-				track:Stop(0)  -- 立即停止，无淡出
-			end)
-		end
-		DebugLog(string.format("[%s] 已打断 %d 个正在播放的动画", unitName, #playingTracks))
+		playingTracks = animator:GetPlayingAnimationTracks()
+		DebugLog(string.format("[%s] 缓存 %d 个正在播放的动画", unitName, #playingTracks))
 	end
 
-	-- ============ 步骤2: 禁用Animate脚本 ============
-	-- 这是关键！Animate脚本会自动播放默认动画，覆盖死亡姿势
-	local animateScript = unitModel:FindFirstChild("Animate")
-	if animateScript and animateScript:IsA("LocalScript") then
-		animateScript.Enabled = false
-		DebugLog(string.format("[%s] 已禁用Animate脚本", unitName))
-	end
+	-- ============ 步骤2: 立刻禁用Animate脚本 ============
+	-- 关键！禁用Animate防止Humanoid自动播放默认待机动作
+	-- 使用递归查找DisableAllAnimateScripts，兼容任何位置的Animate脚本（NPC的Script、玩家的LocalScript等）
+	DisableAllAnimateScripts(unitModel, unitName)
 
 	-- ============ 步骤3: 设置AutoRotate=false ============
 	pcall(function()
 		humanoid.AutoRotate = false
 	end)
 
-	-- ============ 步骤4: 播放死亡动画 ============
+	-- ============ 步骤4: 创建并立刻播放死亡动画 ============
 	if animationId and animationId ~= "" and animationId ~= "0" then
 		DebugLog(string.format("[%s] 正在加载死亡动画... (ID: %s)", unitName, animationId))
-		local animTrack = CreateAndPlayAnimation(humanoid, animationId, false)
 
-		if animTrack then
-			DebugLog(string.format("[%s] ✅ 死亡动画播放成功", unitName))
+		-- 手动创建动画轨道而非使用CreateAndPlayAnimation（避免0.1秒淡出延迟）
+		if animator then
+			local animation = Instance.new("Animation")
+			animation.AnimationId = "rbxassetid://" .. animationId
 
-			-- ============ 步骤5: 动画结束时冻结尸体 ============
-			-- 在动画停止时立即调用FreezeCorpse，完全冻结尸体
-			animTrack.Stopped:Connect(function()
-				if unitModel and unitModel.Parent then
-					-- 调用FreezeCorpse冻结尸体（归零速度、设置Dead状态、锚定）
-					FreezeCorpse(unitModel, humanoid, rootPart, unitName)
-				end
+			local success, animTrack = pcall(function()
+				return animator:LoadAnimation(animation)
 			end)
+
+			if success and animTrack then
+				-- 设置高优先级和零淡出，确保立即生效
+				animTrack.Priority = Enum.AnimationPriority.Action4
+				animTrack.Looped = false
+
+				-- 立刻播放死亡动画（Fade=0表示无淡出，瞬间生效）
+				pcall(function()
+					animTrack:Play(0)
+				end)
+
+				DebugLog(string.format("[%s] ✅ 死亡动画播放成功 (Priority=Action4, Fade=0)", unitName))
+
+				-- ============ 步骤5: 等死亡轨道开始后再停止旧轨道 ============
+				-- 这样实现无缝覆盖：旧动作 → 死亡动作（无中间状态）
+				task.delay(0.01, function()  -- 延迟一帧，确保死亡轨道已启动
+					if unitModel and unitModel.Parent then
+						-- 遍历缓存的旧轨道，逐个瞬停（Fade=0）
+						for _, track in ipairs(playingTracks) do
+							if track and track.IsPlaying then
+								pcall(function()
+									track:Stop(0)  -- 立即停止，无淡出
+								end)
+							end
+						end
+						DebugLog(string.format("[%s] 已无缝停止 %d 个旧动画轨道", unitName, #playingTracks))
+					end
+				end)
+
+				-- ============ 步骤6: 动画结束时冻结尸体 ============
+				animTrack.Stopped:Connect(function()
+					if unitModel and unitModel.Parent then
+						-- 调用FreezeCorpse冻结尸体（归零速度、设置Dead状态、锚定）
+						FreezeCorpse(unitModel, humanoid, rootPart, unitName)
+					end
+				end)
+
+				-- 延迟清理Animation对象
+				task.delay(5, function()
+					if animation and animation.Parent then
+						animation:Destroy()
+					end
+				end)
+			else
+				WarnLog(string.format("[%s] ❌ 死亡动画加载失败! 动画ID可能无效: %s", unitName, animationId))
+				animation:Destroy()
+				-- 动画加载失败，直接冻结尸体
+				FreezeCorpse(unitModel, humanoid, rootPart, unitName)
+			end
 		else
-			WarnLog(string.format("[%s] ❌ 死亡动画加载失败! 动画ID可能无效: %s", unitName, animationId))
-			-- 动画加载失败，直接冻结尸体
+			WarnLog(string.format("[%s] ❌ 找不到Animator", unitName))
 			FreezeCorpse(unitModel, humanoid, rootPart, unitName)
 		end
 	else

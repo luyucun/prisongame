@@ -578,14 +578,19 @@ function CombatSystem.Heal(unitModel, amount)
 end
 
 --[[
-杀死兵种 - V1.5.7简化版
+杀死兵种 - V1.5.10无缝死亡动画版
 @param unitModel Model - 兵种模型
 @param killer Model - 击杀者模型(可选)
 
-流程：
-1. 立即播放死亡动画（禁用系统干扰、冻结终帧）
-2. 停止AI（skipMoveTo=true避免MoveTo"扶正"尸体）
-3. 2.9秒后销毁模型
+流程（关键：先播死亡动画再停AI，确保无缝过渡）：
+1. 标记死亡状态
+2. 从系统中注销 → 触发死亡事件
+3. 播放死亡动画（立刻禁用Animate，高优先级Fade=0）
+4. 停止AI（瞬停Fade=0，禁用Animate，无MoveTo）
+5. 2.9秒后销毁
+
+无缝过渡效果：
+当前动作（攻击/移动/待机）→ 立刻播放死亡动画（无"傻站"间隙）
 ]]
 function CombatSystem.KillUnit(unitModel, killer)
 	local state = unitStates[unitModel]
@@ -625,16 +630,23 @@ function CombatSystem.KillUnit(unitModel, killer)
 		unitDeathEvent:Fire(unitModel, killer, battleId)
 	end
 
-	-- ===== V1.5.7 简化版死亡流程 =====
-	-- 获取系统引用
+	-- ===== V1.5.10 无缝死亡动画版本 =====
 	local UnitAI = require(ServerScriptService.Systems.UnitAI)
 	local deathAnimationId = UnitConfig.GetDeathAnimationId(unitId)
 
-	-- 步骤1: 开始死亡动画（立刻播放、禁用系统干扰、冻结终帧）
+	-- 关键步骤顺序：先播死亡动画再停AI
+	-- 这样死亡动画会立刻播放，避免被StopAI的动画清理杀死
+
+	-- 步骤1: 播放死亡动画（立刻禁用Animate，高优先级Fade=0确保立即生效）
 	UnitAI.BeginDeathAnimation(unitModel, deathAnimationId, unitId)
 
-	-- 步骤2: 停止AI（skipMoveTo=true 防止MoveTo把尸体"拉起"）
-	UnitAI.StopAI(unitModel, true)
+	-- 步骤2: 停止AI（参数：瞬停Fade=0，禁用Animate，无MoveTo）
+	-- 此时死亡动画已在播放，StopAI只会清理AI的轨道，不会干扰死亡动画
+	UnitAI.StopAI(unitModel, {
+		skipMoveTo = true,        -- 防止MoveTo把尸体"拉起"
+		disableAnimate = true,    -- 再次确认禁用Animate
+		stopFadeTime = 0          -- 瞬停AI轨道，无淡出延迟
+	})
 
 	-- 步骤3: 固定2.9秒后销毁模型
 	task.delay(2.9, function()
