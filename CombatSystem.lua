@@ -47,6 +47,7 @@ local updateConnection = nil
 local HitboxService = nil
 local UnitManager = nil
 local ProjectileSystem = nil  -- V1.5远程攻击支持
+local WeaponEffectSystem = nil  -- V1.5.4远程武器特效支持
 
 -- ==================== 数据结构 ====================
 
@@ -437,6 +438,18 @@ function CombatSystem.OnRangedDamageEvent(unitModel, target)
 	-- 引用ProjectileSystem（延迟加载）
 	if not ProjectileSystem then
 		ProjectileSystem = require(ServerScriptService.Systems.ProjectileSystem)
+	end
+
+	-- ⭐⭐⭐ V1.5.4 播放远程武器特效 ⭐⭐⭐
+	-- 在发射子弹前播放枪口特效（Beam、PointLight、ParticleEmitter）
+	if not WeaponEffectSystem then
+		WeaponEffectSystem = require(ServerScriptService.Systems.WeaponEffectSystem)
+	end
+
+	local weaponName = UnitConfig.GetWeaponName(state.UnitId)
+	if weaponName and weaponName ~= "" then
+		-- 播放武器特效（内部有容错处理，失败不影响战斗）
+		WeaponEffectSystem.PlayWeaponEffect(unitModel, weaponName)
 	end
 
 	-- ⭐⭐⭐ 发射子弹 ⭐⭐⭐

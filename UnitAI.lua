@@ -27,6 +27,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local PathfindingService = game:GetService("PathfindingService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local ContentProvider = game:GetService("ContentProvider")
 
 -- 引用配置
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
@@ -132,6 +133,87 @@ local function FreezeCorpse(unitModel, humanoid, rootPart, unitName)
 end
 
 -- ==================== 动画基础函数 ====================
+
+--[[
+预加载单个动画（不播放，仅加载到缓存）
+@param animator - Animator对象
+@param animationId - 动画ID
+@return AnimationTrack|nil - 返回已加载的Track（但未播放）
+]]
+local function PreloadAnimation(animator, animationId)
+	if not animator or not animationId or animationId == "" or animationId == "0" then
+		return nil
+	end
+
+	if not tonumber(animationId) then
+		return nil
+	end
+
+	local animation = Instance.new("Animation")
+	animation.AnimationId = "rbxassetid://" .. animationId
+
+	local success, animationTrack = pcall(function()
+		return animator:LoadAnimation(animation)
+	end)
+
+	animation:Destroy()
+
+	if success and animationTrack then
+		return animationTrack
+	end
+
+	return nil
+end
+
+--[[
+预加载所有战斗动画（在StartAI时调用）
+目的：在服务器端预缓存AnimationTrack，加速LoadAnimation调用
+注意：客户端动画渲染由AnimationPreloader.lua（客户端脚本）负责预加载
+
+@param unitModel - 兵种模型
+@param humanoid - Humanoid对象
+@param unitId - 兵种ID
+]]
+local function PreloadAllAnimations(unitModel, humanoid, unitId)
+	local animator = humanoid:FindFirstChild("Animator")
+	if not animator then
+		animator = humanoid.Parent and humanoid.Parent:FindFirstChildOfClass("Animator")
+	end
+	if not animator then
+		WarnLog(string.format("[%s] 预加载动画失败: 找不到Animator", unitId))
+		return
+	end
+
+	-- 获取所有动画ID
+	local idleAnimId = UnitConfig.GetIdleAnimationId(unitId)
+	local moveAnimId = UnitConfig.GetMoveAnimationId(unitId)
+	local attackAnimId = UnitConfig.GetAttackAnimationId(unitId)
+	local deathAnimId = UnitConfig.GetDeathAnimationId(unitId)
+
+	-- 服务器端预加载：使用Animator:LoadAnimation预缓存Track
+	-- 这样后续CreateAndPlayAnimation调用会更快
+	local animIds = {
+		{id = idleAnimId, name = "Idle"},
+		{id = moveAnimId, name = "Move"},
+		{id = attackAnimId, name = "Attack"},
+		{id = deathAnimId, name = "Death"},
+	}
+
+	for _, data in ipairs(animIds) do
+		if data.id and data.id ~= "" then
+			local track = PreloadAnimation(animator, data.id)
+			if track then
+				-- 立即停止，不播放，仅为了让Animator缓存这个Track
+				pcall(function()
+					track:Stop(0)
+				end)
+				DebugLog(string.format("[%s] 预缓存%s动画Track成功", unitId, data.name))
+			end
+		end
+	end
+
+	DebugLog(string.format("[%s] ✅服务器端动画预缓存完成", unitId))
+end
 
 --[[
 创建并播放动画
@@ -930,6 +1012,9 @@ function UnitAI.StartAI(unitModel)
 	local unitId = state and state.UnitId or "Unknown"
 	DebugLog(string.format("启动AI: %s", unitId))
 
+	-- ⭐⭐⭐ 预加载所有战斗动画,避免首次战斗时动画资源未缓存导致卡顿 ⭐⭐⭐
+	PreloadAllAnimations(unitModel, humanoid, unitId)
+
 	task.defer(function()
 		if not aiData.IsActive then
 			return
@@ -1271,28 +1356,24 @@ function UnitAI.BeginDeathAnimation(unitModel, animationId, unitId)
 				animTrack.Priority = Enum.AnimationPriority.Action4
 				animTrack.Looped = false
 
-				-- 立刻播放死亡动画（Fade=0表示无淡出，瞬间生效）
+				-- ============ 步骤4.1: 先停止所有旧轨道，给死亡动画让路 ============
+				-- 关键改进：在播放死亡动画之前就停止旧动画
+				for _, track in ipairs(playingTracks) do
+					if track and track.IsPlaying then
+						pcall(function()
+							track:Stop(0)  -- 立即停止，无淡出
+						end)
+					end
+				end
+				DebugLog(string.format("[%s] 已停止 %d 个旧动画轨道", unitName, #playingTracks))
+
+				-- ============ 步骤4.2: 立刻播放死亡动画 ============
+				-- 由于预加载机制，LoadAnimation应该立即返回可用Track
 				pcall(function()
-					animTrack:Play(0)
+					animTrack:Play(0)  -- Fade=0表示无淡出，瞬间生效
 				end)
 
 				DebugLog(string.format("[%s] ✅ 死亡动画播放成功 (Priority=Action4, Fade=0)", unitName))
-
-				-- ============ 步骤5: 等死亡轨道开始后再停止旧轨道 ============
-				-- 这样实现无缝覆盖：旧动作 → 死亡动作（无中间状态）
-				task.delay(0.01, function()  -- 延迟一帧，确保死亡轨道已启动
-					if unitModel and unitModel.Parent then
-						-- 遍历缓存的旧轨道，逐个瞬停（Fade=0）
-						for _, track in ipairs(playingTracks) do
-							if track and track.IsPlaying then
-								pcall(function()
-									track:Stop(0)  -- 立即停止，无淡出
-								end)
-							end
-						end
-						DebugLog(string.format("[%s] 已无缝停止 %d 个旧动画轨道", unitName, #playingTracks))
-					end
-				end)
 
 				-- ============ 步骤6: 动画结束时冻结尸体 ============
 				animTrack.Stopped:Connect(function()

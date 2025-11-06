@@ -243,4 +243,17 @@ BattleConfig.RANGE_ADVANTAGE_BUFFER = 2
 -- 劣势单位积极接近距离(studs) - 劣势单位开始积极接近的阈值
 BattleConfig.RANGE_DISADVANTAGE_APPROACH_DISTANCE = 5
 
+-- ==================== V1.5.4 武器特效配置 ====================
+-- Beam特效持续时间(秒)
+BattleConfig.WEAPON_EFFECT_BEAM_DURATION = 0.1
+
+-- PointLight特效持续时间(秒)
+BattleConfig.WEAPON_EFFECT_LIGHT_DURATION = 0.1
+
+-- ParticleEmitter特效持续时间(秒)
+BattleConfig.WEAPON_EFFECT_PARTICLE_DURATION = 0.5
+
+-- 是否显示武器特效调试日志
+BattleConfig.DEBUG_WEAPON_EFFECTS = false
+
 return BattleConfig

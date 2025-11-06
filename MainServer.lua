@@ -44,6 +44,8 @@ local BattleTestSystem = require(ServerScriptService.Systems.BattleTestSystem)
 -- V1.5.1新增 - 战斗基础服务
 local HitboxService = require(ServerScriptService.Systems.HitboxService)
 local UnitManager = require(ServerScriptService.Systems.UnitManager)
+-- V1.5.4新增 - 武器特效系统
+local WeaponEffectSystem = require(ServerScriptService.Systems.WeaponEffectSystem)
 
 -- ==================== 系统初始化顺序 ====================
 
@@ -221,6 +223,19 @@ local function InitializeServer()
         warn(GameConfig.LOG_PREFIX, "弹道系统初始化失败(返回false)")
     else
         print(GameConfig.LOG_PREFIX, "弹道系统初始化成功")
+    end
+
+    -- 7.2.5 初始化WeaponEffectSystem (V1.5.4新增)
+    print(GameConfig.LOG_PREFIX, "步骤7.2.5: 初始化武器特效系统...")
+    success, result = pcall(function()
+        return WeaponEffectSystem.Initialize()
+    end)
+    if not success then
+        warn(GameConfig.LOG_PREFIX, "武器特效系统初始化失败(异常):", result)
+    elseif result == false then
+        warn(GameConfig.LOG_PREFIX, "武器特效系统初始化失败(返回false)")
+    else
+        print(GameConfig.LOG_PREFIX, "武器特效系统初始化成功")
     end
 
     -- 7.3 初始化UnitAI
