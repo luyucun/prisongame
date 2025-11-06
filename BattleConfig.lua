@@ -45,8 +45,36 @@ BattleConfig.AI_BATCH_UPDATE_INTERVAL = 0.2
 -- 目标搜索范围(studs)
 BattleConfig.TARGET_SEARCH_RANGE = 200
 
+-- ==================== 寻路系统配置 V1.6 ====================
 -- 寻路超时时间(秒)
 BattleConfig.PATHFINDING_TIMEOUT = 5
+
+-- 路径重算冷却时间(秒) - 避免频繁重建路径
+BattleConfig.PATH_RECALC_COOLDOWN = 0.5
+
+-- 目标移动阈值(studs) - 目标移动超过此距离时重建路径
+BattleConfig.PATH_TARGET_MOVE_THRESHOLD = 6
+
+-- Waypoint到达阈值(studs) - 距离waypoint小于此值视为到达
+BattleConfig.WAYPOINT_REACH_THRESHOLD = 2
+
+-- 路径失败最大重试次数
+BattleConfig.PATH_MAX_RETRY_COUNT = 3
+
+-- 路径重试延迟(秒)
+BattleConfig.PATH_RETRY_DELAY = 1
+
+-- MoveToFinished超时时间(秒)
+BattleConfig.MOVE_TO_TIMEOUT = 3
+
+-- 是否显示路径调试可视化
+BattleConfig.DEBUG_SHOW_PATH = false
+
+-- 路径点可视化颜色
+BattleConfig.PATH_WAYPOINT_COLOR = Color3.fromRGB(0, 255, 255)  -- 青色
+
+-- 路径线可视化颜色
+BattleConfig.PATH_LINE_COLOR = Color3.fromRGB(255, 255, 0)  -- 黄色
 
 -- AI循环检测间隔(秒) 用于主循环
 BattleConfig.AI_LOOP_INTERVAL = 0.05

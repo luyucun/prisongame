@@ -57,6 +57,10 @@ UnitData = {
     ProjectileModelPath = string,  -- 子弹模型路径(可选,相对于ReplicatedStorage)
                                    -- 例如: "Projectiles/Arrow" 会从 ReplicatedStorage/Projectiles/Arrow Clone模型
                                    -- 如果不填，则使用CombatProfile.ProjectileConfig配置生成
+    -- V1.6寻路配置
+    PathfindingAgentRadius = number,  -- 寻路代理半径(studs) - 决定单位是否能穿过狭窄通道
+    PathfindingAgentHeight = number,  -- 寻路代理高度(studs) - 决定单位是否能穿过低矮空间
+    PathfindingAgentCanJump = boolean, -- 是否允许跳跃寻路
 }
 
 -- V1.5.1 CombatProfile结构
@@ -121,6 +125,10 @@ UnitConfig.Units = {
 			AnimationEventName = "Damage", -- 动画事件名称
 			ContactOffset = 0,         -- 武器长度补偿(studs) - 长武器正值,拳头0
 		},
+		-- V1.6新增寻路配置
+		PathfindingAgentRadius = 2,    -- 寻路代理半径2 studs
+		PathfindingAgentHeight = 5,    -- 寻路代理高度5 studs
+		PathfindingAgentCanJump = true, -- 允许跳跃
 	},
 
 	-- 兵种2: Rookie
@@ -158,6 +166,10 @@ UnitConfig.Units = {
 			AnimationEventName = "Damage",
 			ContactOffset = 0,         -- 武器长度补偿(studs)
 		},
+		-- V1.6新增寻路配置
+		PathfindingAgentRadius = 2,
+		PathfindingAgentHeight = 5,
+		PathfindingAgentCanJump = true,
 	},
 
 	-- 兵种3: AK-47
@@ -196,8 +208,12 @@ UnitConfig.Units = {
 			AnimationEventName = "Damage",
 			ContactOffset = 0,         -- 武器长度补偿(studs)
 		},
+		-- V1.6新增寻路配置
+		PathfindingAgentRadius = 2,
+		PathfindingAgentHeight = 5,
+		PathfindingAgentCanJump = true,
 	},
-	
+
 	-- 兵种4: Mafia
 	["Mafia"] = {
 		UnitId = "Mafia",
@@ -234,6 +250,10 @@ UnitConfig.Units = {
 			AnimationEventName = "Damage",
 			ContactOffset = 0,         -- 武器长度补偿(studs)
 		},
+		-- V1.6新增寻路配置
+		PathfindingAgentRadius = 2,
+		PathfindingAgentHeight = 5,
+		PathfindingAgentCanJump = true,
 	},
 
 	-- 后续可以继续添加更多兵种...
@@ -674,6 +694,50 @@ function UnitConfig.GetProjectileConfig(unitId)
 	end
 
 	return defaultConfig
+end
+
+-- ==================== V1.6新增: 寻路配置接口 ====================
+
+--[[
+获取寻路代理半径
+V1.6.3修复：没有配置时返回nil，让UnitAI使用自动计算的值
+@param unitId string - 兵种ID
+@return number|nil - 寻路代理半径，nil表示使用自动计算
+]]
+function UnitConfig.GetPathfindingAgentRadius(unitId)
+	local unitData = UnitConfig.GetUnitById(unitId)
+	if not unitData or unitData.PathfindingAgentRadius == nil then
+		return nil  -- 返回nil，让UnitAI自动计算
+	end
+	return unitData.PathfindingAgentRadius
+end
+
+--[[
+获取寻路代理高度
+V1.6.3修复：没有配置时返回nil，让UnitAI使用自动计算的值
+@param unitId string - 兵种ID
+@return number|nil - 寻路代理高度，nil表示使用自动计算
+]]
+function UnitConfig.GetPathfindingAgentHeight(unitId)
+	local unitData = UnitConfig.GetUnitById(unitId)
+	if not unitData or unitData.PathfindingAgentHeight == nil then
+		return nil  -- 返回nil，让UnitAI自动计算
+	end
+	return unitData.PathfindingAgentHeight
+end
+
+--[[
+获取是否允许跳跃寻路
+V1.6.3修复：没有配置时返回nil，让UnitAI使用自动判断
+@param unitId string - 兵种ID
+@return boolean|nil - 是否允许跳跃，nil表示使用Humanoid的Jump状态
+]]
+function UnitConfig.GetPathfindingAgentCanJump(unitId)
+	local unitData = UnitConfig.GetUnitById(unitId)
+	if not unitData or unitData.PathfindingAgentCanJump == nil then
+		return nil  -- 返回nil，让UnitAI自动判断
+	end
+	return unitData.PathfindingAgentCanJump
 end
 
 return UnitConfig

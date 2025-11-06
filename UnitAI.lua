@@ -1,12 +1,18 @@
 --[[
-脚本名称: UnitAI (显式动画状态机版)
+脚本名称: UnitAI (重构版 - 使用PathService)
 脚本类型: ModuleScript (服务端系统)
 脚本位置: ServerScriptService/Systems/UnitAI
-版本: V1.5.4 - 显式动画状态机重构
+版本: V2.0 - 寻路逻辑重构，职责分离
+
+重构要点：
+1. 移除所有PathfindingService直接操作
+2. 使用PathService统一管理路径
+3. UnitAI只负责AI状态机和动画控制
+4. 代码更清晰、更易维护
 ]]
 
 --[[
-兵种AI系统 - 显式动画状态机版
+兵种AI系统 - 重构版
 职责:
 1. 清晰的AI状态机: SEEKING → MOVING → ATTACKING
 2. 独立的动画控制器: 统一管理所有动画切换
@@ -18,16 +24,15 @@
 - 动画Track自动清理，攻击结束回调触发idle
 - HandleAttacking只负责判断是否可以攻击，不直接操作动画
 - 冷却期idle稳定播放，覆盖整个CD阶段
+- 路径管理完全委托给PathService
 ]]
 
 local UnitAI = {}
 
 -- 引用服务
 local ServerScriptService = game:GetService("ServerScriptService")
-local PathfindingService = game:GetService("PathfindingService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
-local ContentProvider = game:GetService("ContentProvider")
 
 -- 引用配置
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
@@ -37,6 +42,7 @@ local BattleConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChi
 -- 引用系统
 local CombatSystem = require(ServerScriptService.Systems.CombatSystem)
 local UnitManager = require(ServerScriptService.Systems.UnitManager)
+local PathService = require(ServerScriptService.Systems.PathService)  -- ⭐新增
 
 -- ==================== 调试日志 ====================
 
@@ -424,7 +430,6 @@ function AnimationController.PlayAttack(unitModel, aiData, state, target, onDama
 
 	-- 全局防重复标志（基于单位模型）
 	local damageEventFired = false
-	local attackKey = tostring(unitModel) .. "_" .. tick()
 
 	-- 保存旧轨道的引用，但先不停止
 	local prevMove = aiData.Tracks.Move
@@ -553,7 +558,7 @@ function AnimationController.PlayAttack(unitModel, aiData, state, target, onDama
 end
 
 --[[
-停止所有动画 - V1.5.10支持淡出时间参数
+停止所有动画
 @param aiData - AI数据
 @param fadeTime - 淡出时间（秒）。0表示瞬停，默认0.1秒淡出
 ]]
@@ -599,7 +604,7 @@ AIData = {
     IsActive = boolean,
     LastUpdateTime = number,
 
-    -- 动画状态（V1.5.5重构）
+    -- 动画状态
     CurrentState = string,               -- 当前动画状态: "MOVE"/"IDLE"/"ATTACK"
     LastState = string,                  -- 上次动画状态
     Tracks = {                           -- 动画轨道表
@@ -757,7 +762,7 @@ local function HandleSeeking(unitModel, aiData, state)
 end
 
 --[[
-处理MOVING状态：移动到目标
+处理MOVING状态：移动到目标（重构版 - 使用PathService）
 ]]
 local function HandleMoving(unitModel, aiData, state)
 	-- 验证目标
@@ -766,7 +771,8 @@ local function HandleMoving(unitModel, aiData, state)
 		CombatSystem.SetTarget(unitModel, nil)
 		CombatSystem.SetAIState(unitModel, BattleConfig.AIState.SEEKING)
 		LogStateChange(state.UnitId, "MOVING", "SEEKING", "目标失效")
-		-- 目标失效，切换到Idle
+		-- 目标失效，清理路径并切换到Idle
+		PathService.ClearPath(unitModel)  -- ⭐使用PathService
 		AnimationController.SwitchToIdle(unitModel, aiData, state)
 		return
 	end
@@ -787,6 +793,7 @@ local function HandleMoving(unitModel, aiData, state)
 			DebugLog(string.format("%s (远程) 接近停靠距离(%.1f <= %.1f+4)，提前停止",
 				state.UnitId, distance, dockingDistance))
 			EnsureStopped(unitModel, aiData)
+			PathService.ClearPath(unitModel)  -- ⭐使用PathService
 
 			if UnitAIRangePolicy.ShouldEnterAttack(distance, state) then
 				CombatSystem.SetAIState(unitModel, BattleConfig.AIState.ATTACKING)
@@ -808,39 +815,65 @@ local function HandleMoving(unitModel, aiData, state)
 	-- 判断是否应该进入攻击
 	if UnitAIRangePolicy.ShouldEnterAttack(distance, state) then
 		EnsureStopped(unitModel, aiData)
+		PathService.ClearPath(unitModel)  -- ⭐使用PathService
 
 		CombatSystem.SetAIState(unitModel, BattleConfig.AIState.ATTACKING)
 		LogStateChange(state.UnitId, "MOVING", "ATTACKING", string.format("距离%.1f <= 阈值", distance))
 
 		-- 关键修复：进入攻击状态时停止移动动画，并立刻播放Idle（冷却等待状态）
-		-- 这样可以消除"MOVING → ATTACKING"之间的空隙动画
 		if aiData.Tracks.Move then
 			SafeStopAnimation(aiData.Tracks.Move)
 			aiData.Tracks.Move = nil
 		end
 
 		-- 立刻播放Idle，准备攻击
-		-- 这样做的好处：
-		-- 1. 消除"傻站"现象（MOVING直接切到Idle，无空隙）
-		-- 2. CanAttack()返回false的第一帧也有正确的Idle动画
 		AnimationController.SwitchToIdle(unitModel, aiData, state)
 	else
-		-- 继续移动到目标
-		UnitAI.MoveToTarget(unitModel, target, aiData, state)
+		-- ⭐使用PathService寻路
+		local pathStatus = PathService.GetPathStatus(unitModel)
+
+		-- 如果路径失败，使用直线移动降级
+		if pathStatus == "Failed" then
+			DebugLog(string.format("%s 路径失败，使用直线移动", state.UnitId))
+			UnitAI.MoveToTarget(unitModel, target, aiData, state)
+			return
+		end
+
+		-- 请求路径（如果已有有效路径则复用）
+		local hasPath = PathService.RequestPath(unitModel, target, state.UnitId)
+
+		if hasPath then
+			-- 检查是否到达当前waypoint
+			if PathService.HasReachedWaypoint(unitModel) then
+				-- 推进到下一个waypoint
+				local hasMore = PathService.AdvancePath(unitModel)
+
+				if not hasMore then
+					-- 路径已走完
+					DebugLog(string.format("%s 路径已走完", state.UnitId))
+					PathService.ClearPath(unitModel)
+					return
+				end
+			end
+
+			-- 移动到下一个waypoint
+			local nextWaypoint = PathService.GetNextWaypoint(unitModel)
+			if nextWaypoint then
+				aiData.Humanoid:MoveTo(nextWaypoint)
+			else
+				-- 没有有效waypoint，使用直线移动
+				UnitAI.MoveToTarget(unitModel, target, aiData, state)
+			end
+		else
+			-- 路径请求失败，使用直线移动降级
+			DebugLog(string.format("%s 路径请求失败，使用直线移动", state.UnitId))
+			UnitAI.MoveToTarget(unitModel, target, aiData, state)
+		end
 	end
 end
 
 --[[
-处理ATTACKING状态：攻击目标（重构版）
-核心逻辑：
-1. 如果Tracks.Attack为空 且 CanAttack()为true → 触发攻击
-2. 如果Tracks.Attack不为空 → 正在播放攻击动画，等待结束
-3. 如果Tracks.Attack为空 且 CanAttack()为false → 冷却中，维持Idle
-4. 如果距离脱离 → 切回MOVING
-
-V1.5.9修复：
-- 移除对 CurrentState 的重复检查（因为可能为nil或已经是IDLE）
-- 直接检查Idle动画是否在播放，而非依赖CurrentState状态标记
+处理ATTACKING状态：攻击目标（重构版 - 使用PathService）
 ]]
 local function HandleAttacking(unitModel, aiData, state)
 	-- 验证目标
@@ -849,7 +882,8 @@ local function HandleAttacking(unitModel, aiData, state)
 		CombatSystem.SetTarget(unitModel, nil)
 		CombatSystem.SetAIState(unitModel, BattleConfig.AIState.SEEKING)
 		LogStateChange(state.UnitId, "ATTACKING", "SEEKING", "目标失效")
-		-- 切换到Idle
+		-- 切换到Idle并清理路径
+		PathService.ClearPath(unitModel)  -- ⭐使用PathService
 		AnimationController.SwitchToIdle(unitModel, aiData, state)
 		return
 	end
@@ -862,7 +896,8 @@ local function HandleAttacking(unitModel, aiData, state)
 		CombatSystem.SetAIState(unitModel, BattleConfig.AIState.MOVING)
 		LogStateChange(state.UnitId, "ATTACKING", "MOVING", string.format("距离%.1f > 脱离阈值", distance))
 
-		-- 关键修复：脱离攻击状态，切换到Move
+		-- 关键修复：脱离攻击状态，清理路径后切换到Move
+		PathService.ClearPath(unitModel)  -- ⭐使用PathService
 		AnimationController.SwitchToMove(unitModel, aiData, state)
 		return
 	end
@@ -993,7 +1028,7 @@ function UnitAI.StartAI(unitModel)
 		IsActive = true,
 		LastUpdateTime = 0,
 
-		-- 动画状态（V1.5.5重构）
+		-- 动画状态
 		CurrentState = nil,
 		LastState = nil,
 		Tracks = {},
@@ -1043,16 +1078,12 @@ function UnitAI.StartAI(unitModel)
 end
 
 --[[
-停止AI系统 - V1.5.11支持递归禁用Animate
+停止AI系统 - 重构版（使用PathService）
 @param unitModel - 兵种模型
 @param options - 可选参数表
     skipMoveTo (bool): 是否跳过MoveTo（死亡时用true）
     disableAnimate (bool): 是否禁用Animate脚本（死亡时用true）
     stopFadeTime (number): 停止动画的淡出时间（死亡时用0表示瞬停）
-
-示例：
-- 正常停止: UnitAI.StopAI(unitModel)
-- 死亡停止: UnitAI.StopAI(unitModel, {skipMoveTo=true, disableAnimate=true, stopFadeTime=0})
 ]]
 function UnitAI.StopAI(unitModel, options)
 	local aiData = activeAIs[unitModel]
@@ -1080,7 +1111,10 @@ function UnitAI.StopAI(unitModel, options)
 		local fadeTime = opts.stopFadeTime or 0.1  -- 默认0.1秒淡出，死亡时为0
 		AnimationController.StopAllAnimations(aiData, fadeTime)
 
-		-- 步骤3: 停止移动 - 明确尊重 skipMoveTo 参数
+		-- 步骤3: 清理路径数据
+		PathService.ClearPath(unitModel)  -- ⭐使用PathService
+
+		-- 步骤4: 停止移动 - 明确尊重 skipMoveTo 参数
 		if not opts.skipMoveTo and aiData.Humanoid and aiData.HumanoidRootPart then
 			aiData.Humanoid:MoveTo(aiData.HumanoidRootPart.Position)
 		end
@@ -1229,11 +1263,14 @@ function UnitAI.OnTargetDeath(deadUnit, battleId)
 
 				LogStateChange(state.UnitId, state.State, "SEEKING", "目标死亡")
 
-				-- 目标死亡，停止攻击动画
+				-- 目标死亡，停止攻击动画并清理路径
 				if aiData.Tracks.Attack then
 					SafeStopAnimation(aiData.Tracks.Attack)
 					aiData.Tracks.Attack = nil
 				end
+
+				-- 清理路径
+				PathService.ClearPath(unitModel)  -- ⭐使用PathService
 			end
 		end
 	end
@@ -1247,6 +1284,9 @@ function UnitAI.ClearBattleAIs(battleId)
 			UnitAI.StopAI(unitModel)
 		end
 	end
+
+	-- 清理指定战斗的路径
+	PathService.ClearBattlePaths(battleId, CombatSystem.GetUnitState)  -- ⭐使用PathService
 
 	DebugLog("已清理战斗", battleId, "的所有AI")
 end
@@ -1280,23 +1320,13 @@ function UnitAI.PlayDeathAnimation(unitModel, animationId)
 end
 
 --[[
-开始死亡动画流程 - V1.5.10无缝过渡版
+开始死亡动画流程 - 无缝过渡版
 职责：
 1. 缓存当前播放的动画轨道
 2. 立刻禁用Animate脚本（防止默认待机抢占）
 3. 创建死亡动画轨道并立刻播放（Priority=Action4，Fade=0）
 4. 等死亡轨道开始后再停止旧轨道（无缝覆盖）
 5. 动画结束时冻结尸体
-
-关键改动（V1.5.10）：
-- 缓存旧轨道，先播死亡动画再停旧轨道（无缝覆盖）
-- 立刻禁用Animate脚本防止默认待机
-- 设置死亡动画Priority=Action4，Fade=0确保立即生效
-- 无缝过渡：攻击/移动动作 → 死亡动作（无"傻站"）
-
-@param unitModel - 兵种模型
-@param animationId - 死亡动画ID
-@param unitId - 单位ID（可选，用于日志显示）
 ]]
 function UnitAI.BeginDeathAnimation(unitModel, animationId, unitId)
 	if not unitModel or not unitModel:IsA("Model") then
@@ -1329,8 +1359,6 @@ function UnitAI.BeginDeathAnimation(unitModel, animationId, unitId)
 	end
 
 	-- ============ 步骤2: 立刻禁用Animate脚本 ============
-	-- 关键！禁用Animate防止Humanoid自动播放默认待机动作
-	-- 使用递归查找DisableAllAnimateScripts，兼容任何位置的Animate脚本（NPC的Script、玩家的LocalScript等）
 	DisableAllAnimateScripts(unitModel, unitName)
 
 	-- ============ 步骤3: 设置AutoRotate=false ============
@@ -1342,7 +1370,7 @@ function UnitAI.BeginDeathAnimation(unitModel, animationId, unitId)
 	if animationId and animationId ~= "" and animationId ~= "0" then
 		DebugLog(string.format("[%s] 正在加载死亡动画... (ID: %s)", unitName, animationId))
 
-		-- 手动创建动画轨道而非使用CreateAndPlayAnimation（避免0.1秒淡出延迟）
+		-- 手动创建动画轨道
 		if animator then
 			local animation = Instance.new("Animation")
 			animation.AnimationId = "rbxassetid://" .. animationId
@@ -1356,29 +1384,26 @@ function UnitAI.BeginDeathAnimation(unitModel, animationId, unitId)
 				animTrack.Priority = Enum.AnimationPriority.Action4
 				animTrack.Looped = false
 
-				-- ============ 步骤4.1: 先停止所有旧轨道，给死亡动画让路 ============
-				-- 关键改进：在播放死亡动画之前就停止旧动画
+				-- 先停止所有旧轨道
 				for _, track in ipairs(playingTracks) do
 					if track and track.IsPlaying then
 						pcall(function()
-							track:Stop(0)  -- 立即停止，无淡出
+							track:Stop(0)
 						end)
 					end
 				end
 				DebugLog(string.format("[%s] 已停止 %d 个旧动画轨道", unitName, #playingTracks))
 
-				-- ============ 步骤4.2: 立刻播放死亡动画 ============
-				-- 由于预加载机制，LoadAnimation应该立即返回可用Track
+				-- 立刻播放死亡动画
 				pcall(function()
-					animTrack:Play(0)  -- Fade=0表示无淡出，瞬间生效
+					animTrack:Play(0)
 				end)
 
 				DebugLog(string.format("[%s] ✅ 死亡动画播放成功 (Priority=Action4, Fade=0)", unitName))
 
-				-- ============ 步骤6: 动画结束时冻结尸体 ============
+				-- 动画结束时冻结尸体
 				animTrack.Stopped:Connect(function()
 					if unitModel and unitModel.Parent then
-						-- 调用FreezeCorpse冻结尸体（归零速度、设置Dead状态、锚定）
 						FreezeCorpse(unitModel, humanoid, rootPart, unitName)
 					end
 				end)
