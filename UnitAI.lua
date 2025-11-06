@@ -246,7 +246,7 @@ end
 @param state - 单位状态
 ]]
 function AnimationController.SwitchToIdle(unitModel, aiData, state)
-	-- 严格检查1：如果已经在播放Idle动画，直接返回
+	-- 严格检查1：如果已经在播放Idle动画，直接返回（避免重复播放）
 	if aiData.CurrentState == AnimationState.IDLE then
 		if aiData.Tracks.Idle and aiData.Tracks.Idle.IsPlaying then
 			-- 已经在播放Idle，无需重复切换
@@ -269,14 +269,21 @@ function AnimationController.SwitchToIdle(unitModel, aiData, state)
 	-- 播放待机动画
 	local animId = UnitConfig.GetIdleAnimationId(state.UnitId)
 	if animId and animId ~= "" then
-		local track = CreateAndPlayAnimation(aiData.Humanoid, animId, true)
-		if track then
-			aiData.Tracks.Idle = track
+		-- 只有在Idle动画不存在或已停止时才重新播放
+		if not aiData.Tracks.Idle or not aiData.Tracks.Idle.IsPlaying then
+			local track = CreateAndPlayAnimation(aiData.Humanoid, animId, true)
+			if track then
+				aiData.Tracks.Idle = track
+				aiData.CurrentState = AnimationState.IDLE
+				LogAnimationChange(state.UnitId, aiData.LastState, AnimationState.IDLE, "进入待机")
+				aiData.LastState = AnimationState.IDLE
+			end
+		else
+			-- Idle动画已经在播放，只更新状态
 			aiData.CurrentState = AnimationState.IDLE
-			LogAnimationChange(state.UnitId, aiData.LastState, AnimationState.IDLE, "进入待机")
-			aiData.LastState = AnimationState.IDLE
 		end
 	else
+		-- 无配置，只更新状态
 		aiData.CurrentState = AnimationState.IDLE
 	end
 end
@@ -665,12 +672,15 @@ local function HandleMoving(unitModel, aiData, state)
 			if UnitAIRangePolicy.ShouldEnterAttack(distance, state) then
 				CombatSystem.SetAIState(unitModel, BattleConfig.AIState.ATTACKING)
 				LogStateChange(state.UnitId, "MOVING", "ATTACKING", string.format("提前停止后距离符合攻击条件(%.1f)", distance))
-				-- 进入攻击状态，停止移动动画即可，不需要立即播放Idle
-				-- Idle会在攻击动画结束后自动播放
+
+				-- 关键修复：停止移动动画并立刻播放Idle
 				if aiData.Tracks.Move then
 					SafeStopAnimation(aiData.Tracks.Move)
 					aiData.Tracks.Move = nil
 				end
+
+				-- 立刻播放Idle，准备攻击（消除空隙）
+				AnimationController.SwitchToIdle(unitModel, aiData, state)
 				return
 			end
 		end
@@ -683,12 +693,18 @@ local function HandleMoving(unitModel, aiData, state)
 		CombatSystem.SetAIState(unitModel, BattleConfig.AIState.ATTACKING)
 		LogStateChange(state.UnitId, "MOVING", "ATTACKING", string.format("距离%.1f <= 阈值", distance))
 
-		-- 关键修复：进入攻击状态时，只停止移动动画，不要立即播放Idle
-		-- Idle会在攻击动画结束后自动播放
+		-- 关键修复：进入攻击状态时停止移动动画，并立刻播放Idle（冷却等待状态）
+		-- 这样可以消除"MOVING → ATTACKING"之间的空隙动画
 		if aiData.Tracks.Move then
 			SafeStopAnimation(aiData.Tracks.Move)
 			aiData.Tracks.Move = nil
 		end
+
+		-- 立刻播放Idle，准备攻击
+		-- 这样做的好处：
+		-- 1. 消除"傻站"现象（MOVING直接切到Idle，无空隙）
+		-- 2. CanAttack()返回false的第一帧也有正确的Idle动画
+		AnimationController.SwitchToIdle(unitModel, aiData, state)
 	else
 		-- 继续移动到目标
 		UnitAI.MoveToTarget(unitModel, target, aiData, state)
@@ -702,6 +718,10 @@ end
 2. 如果Tracks.Attack不为空 → 正在播放攻击动画，等待结束
 3. 如果Tracks.Attack为空 且 CanAttack()为false → 冷却中，维持Idle
 4. 如果距离脱离 → 切回MOVING
+
+V1.5.9修复：
+- 移除对 CurrentState 的重复检查（因为可能为nil或已经是IDLE）
+- 直接检查Idle动画是否在播放，而非依赖CurrentState状态标记
 ]]
 local function HandleAttacking(unitModel, aiData, state)
 	-- 验证目标
@@ -742,7 +762,8 @@ local function HandleAttacking(unitModel, aiData, state)
 	-- 情况2：冷却中（CanAttack()为false） → 维持Idle动画
 	if not CombatSystem.CanAttack(unitModel) then
 		-- 确保Idle动画在播放
-		if aiData.CurrentState ~= AnimationState.IDLE then
+		-- 使用直接检查而非CurrentState，因为CurrentState可能未初始化
+		if not aiData.Tracks.Idle or not aiData.Tracks.Idle.IsPlaying then
 			AnimationController.SwitchToIdle(unitModel, aiData, state)
 		end
 		return
