@@ -448,4 +448,67 @@ function UnitManager.DebugPrintBattleStats(battleId)
 	print("==========================================")
 end
 
+-- ==================== V2.0新增: 战役系统支持 ====================
+
+--[[
+获取玩家基地的所有兵种（用于战役系统）
+@param player Player - 玩家实例
+@return table - 兵种Model实例列表
+]]
+function UnitManager.GetHomeUnits(player)
+	-- V2.0实现: 使用PlacementSystem获取玩家基地已放置的兵种
+	local PlacementSystem = require(ServerScriptService.Systems.PlacementSystem)
+
+	local homeUnits = PlacementSystem.GetPlacedUnitModels(player)
+
+	if BattleConfig.DEBUG_COMBAT_LOGS then
+		print(GameConfig.LOG_PREFIX, "[UnitManager] GetHomeUnits:", player.Name, "兵种数量:", #homeUnits)
+	end
+
+	return homeUnits
+end
+
+--[[
+保存单位的当前血量（用于血量继承）
+@param unitInstance Model - 兵种实例
+@param currentHP number - 当前血量
+]]
+function UnitManager.SaveUnitHP(unitInstance, currentHP)
+	if not unitInstance or not currentHP then
+		return
+	end
+
+	-- 保存到Attribute
+	unitInstance:SetAttribute("SavedHP", currentHP)
+
+	if BattleConfig.DEBUG_COMBAT_LOGS then
+		print(GameConfig.LOG_PREFIX, "[UnitManager] 保存单位血量:", unitInstance.Name, currentHP)
+	end
+end
+
+--[[
+恢复单位的血量（用于血量继承）
+@param unitInstance Model - 兵种实例
+@return number|nil - 保存的血量，如果没有则返回nil
+]]
+function UnitManager.RestoreUnitHP(unitInstance)
+	if not unitInstance then
+		return nil
+	end
+
+	local savedHP = unitInstance:GetAttribute("SavedHP")
+
+	if savedHP and unitInstance:FindFirstChild("Humanoid") then
+		unitInstance.Humanoid.Health = savedHP
+
+		if BattleConfig.DEBUG_COMBAT_LOGS then
+			print(GameConfig.LOG_PREFIX, "[UnitManager] 恢复单位血量:", unitInstance.Name, savedHP)
+		end
+
+		return savedHP
+	end
+
+	return nil
+end
+
 return UnitManager

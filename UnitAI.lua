@@ -594,6 +594,9 @@ local deathEventConnection = nil
 local accumulatedTime = 0
 local isInitialized = false
 
+-- V2.0新增：存储战役行军动画轨道 [unitModel] = AnimationTrack
+local marchAnimationTracks = {}
+
 -- ==================== AIData数据结构 ====================
 
 --[[
@@ -1429,6 +1432,146 @@ function UnitAI.BeginDeathAnimation(unitModel, animationId, unitId)
 		-- 无动画配置时，直接冻结尸体
 		FreezeCorpse(unitModel, humanoid, rootPart, unitName)
 	end
+end
+
+--[[
+===============================================
+V2.0 新增: 手动控制动画API (用于战役行军)
+===============================================
+]]
+
+--[[
+手动播放移动动画 (用于战役行军阶段)
+@param unitModel Model - 兵种模型
+]]
+function UnitAI.PlayMoveAnimation(unitModel)
+	if not unitModel or not unitModel:IsA("Model") then
+		return
+	end
+
+	local humanoid = unitModel:FindFirstChildOfClass("Humanoid")
+	if not humanoid then
+		return
+	end
+
+	-- 获取配置
+	local unitId = unitModel:GetAttribute("UnitId") or unitModel.Name
+	-- V2.0修复：使用UnitConfig辅助函数获取动画ID，兼容现有字段
+	local moveAnimId = UnitConfig.GetMoveAnimationId(unitId)
+	if not moveAnimId or moveAnimId == "" or moveAnimId == "0" then
+		return
+	end
+
+	if not tonumber(moveAnimId) then
+		return
+	end
+
+	-- 停止所有动画
+	local animator = humanoid:FindFirstChild("Animator")
+	if not animator then
+		animator = unitModel:FindFirstChildOfClass("Animator")
+	end
+	if not animator then
+		return
+	end
+
+	local tracks = animator:GetPlayingAnimationTracks()
+	for _, track in ipairs(tracks) do
+		pcall(function()
+			track:Stop(0.2)
+		end)
+	end
+
+	-- 创建并播放移动动画
+	local animation = Instance.new("Animation")
+	animation.AnimationId = "rbxassetid://" .. moveAnimId
+
+	local success, animTrack = pcall(function()
+		return animator:LoadAnimation(animation)
+	end)
+
+	if success and animTrack then
+		animTrack.Looped = true
+		pcall(function()
+			animTrack:Play()
+		end)
+		print("[UnitAI] 播放移动动画:", unitModel.Name)
+		-- V2.0修复：使用模块级表存储AnimationTrack，而不是Attribute（Attribute不支持Instance类型）
+		marchAnimationTracks[unitModel] = animTrack
+	end
+
+	animation:Destroy()
+end
+
+--[[
+停止移动动画并切换到Idle (用于战役行军到达后)
+@param unitModel Model - 兵种模型
+]]
+function UnitAI.StopMoveAnimation(unitModel)
+	if not unitModel or not unitModel:IsA("Model") then
+		return
+	end
+
+	local humanoid = unitModel:FindFirstChildOfClass("Humanoid")
+	if not humanoid then
+		return
+	end
+
+	-- V2.0修复：先清理存储的行军动画轨道
+	if marchAnimationTracks[unitModel] then
+		pcall(function()
+			marchAnimationTracks[unitModel]:Stop(0.2)
+		end)
+		marchAnimationTracks[unitModel] = nil
+	end
+
+	-- 停止所有动画
+	local animator = humanoid:FindFirstChild("Animator")
+	if not animator then
+		animator = unitModel:FindFirstChildOfClass("Animator")
+	end
+	if animator then
+		local tracks = animator:GetPlayingAnimationTracks()
+		for _, track in ipairs(tracks) do
+			pcall(function()
+				track:Stop(0.2)
+			end)
+		end
+	end
+
+	-- 获取配置
+	local unitId = unitModel:GetAttribute("UnitId") or unitModel.Name
+	-- V2.0修复：使用UnitConfig辅助函数获取动画ID，兼容现有字段
+	local idleAnimId = UnitConfig.GetIdleAnimationId(unitId)
+	if not idleAnimId or idleAnimId == "" or idleAnimId == "0" then
+		return
+	end
+
+	if not tonumber(idleAnimId) then
+		return
+	end
+
+	if not animator then
+		return
+	end
+
+	-- 播放Idle动画
+	local animation = Instance.new("Animation")
+	animation.AnimationId = "rbxassetid://" .. idleAnimId
+
+	local success, animTrack = pcall(function()
+		return animator:LoadAnimation(animation)
+	end)
+
+	if success and animTrack then
+		animTrack.Looped = true
+		pcall(function()
+			animTrack:Play()
+		end)
+		print("[UnitAI] 切换到Idle:", unitModel.Name)
+	end
+
+	animation:Destroy()
 end
 
 return UnitAI

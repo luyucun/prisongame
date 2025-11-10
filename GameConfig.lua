@@ -58,6 +58,21 @@ GameConfig.IDLE_FLOOR_NAME = "IdleFloor"
 -- 放置确认UI名称
 GameConfig.PUT_CONFIRM_GUI_NAME = "PutConfirm"
 
+-- ==================== 战役系统配置 (V2.0) ====================
+-- 战役关卡配置
+GameConfig.Campaign = {
+	MaxStages = 10,                      -- 最大关卡数
+	StageGenerateOffset = 169,           -- 关卡Z轴间距(studs)
+	MoveTimeout = 30,                    -- 移动超时(秒)
+	ArrivalThreshold = 2,                -- 到达阈值(studs)
+	RespawnEffectDuration = 0.3,         -- 重生特效时长(秒)
+	StageTemplateStyle = "Style01",      -- 模板风格
+	MarchWaitTime = 1,                   -- 到达关卡后等待时间(秒)
+	StageClearWaitTime = 2,              -- 关卡完成后等待时间(秒)
+	VictoryWaitTime = 3,                 -- 胜利后等待时间(秒)
+	DefeatWaitTime = 3                   -- 失败后等待时间(秒)
+}
+
 -- ==================== 调试配置 ====================
 -- 是否启用调试模式
 GameConfig.DEBUG_MODE = true

@@ -616,6 +616,21 @@ function PlacementSystem.PlaceUnit(player, instanceId, position)
         PlacedTime = os.time(),
     }
 
+    -- V2.0新增: 保存GridPos到模型（用于战役系统）
+    local GridPositionSystem = require(ServerScriptService.Systems.GridPositionSystem)
+    local gridPos = GridPositionSystem.SaveUnitGridPosition(model, idleFloor)
+
+    -- 同时保存到placedUnits表中
+    if gridPos then
+        placedUnits[userId][instanceId].GridPos = gridPos
+        if GameConfig.DEBUG_MODE then
+            print(GameConfig.LOG_PREFIX, "兵种放置成功，GridPos:", gridPos.X, gridPos.Y)
+        end
+    else
+        warn(GameConfig.LOG_PREFIX, "保存GridPos失败，使用默认值")
+        placedUnits[userId][instanceId].GridPos = {X = gridX, Y = gridZ}
+    end
+
     -- 配置兵种物理（禁用与玩家的碰撞）
     PhysicsManager.ConfigureUnitPhysics(model)
 
@@ -840,11 +855,44 @@ end
 -- ==================== 远程事件处理 ====================
 
 --[[
+检查玩家是否在战役中(V2.0新增)
+@param player Player
+@return boolean - 是否在战役中
+]]
+local function IsPlayerInCampaign(player)
+	-- 懒加载CampaignManager避免循环依赖
+	local success, CampaignManager = pcall(function()
+		return require(ServerScriptService.Systems.CampaignManager)
+	end)
+
+	if success and CampaignManager and CampaignManager.ActiveCampaigns then
+		local playerId = player.UserId
+		return CampaignManager.ActiveCampaigns[playerId] ~= nil
+	end
+
+	return false
+end
+
+--[[
 处理开始放置请求
 @param player Player
 @param instanceId string
 ]]
 local function OnStartPlacement(player, instanceId)
+	-- V2.0: 战役期间禁止基地操作
+	if IsPlayerInCampaign(player) then
+		if InitializeEvents() then
+			local responseEvent = PlacementEvents:FindFirstChild("PlacementResponse")
+			if responseEvent then
+				responseEvent:FireClient(player, false, "战役进行中，无法操作基地")
+			end
+		end
+		if GameConfig.DEBUG_MODE then
+			warn(GameConfig.LOG_PREFIX, "玩家", player.Name, "在战役中尝试放置兵种，已拒绝")
+		end
+		return
+	end
+
     -- 验证兵种实例
     local unitInstance = InventorySystem.GetUnitByInstanceId(player, instanceId)
     if not unitInstance then
@@ -880,6 +928,20 @@ end
 @param position Vector3
 ]]
 local function OnConfirmPlacement(player, instanceId, position)
+	-- V2.0: 战役期间禁止基地操作
+	if IsPlayerInCampaign(player) then
+		if InitializeEvents() then
+			local responseEvent = PlacementEvents:FindFirstChild("PlacementResponse")
+			if responseEvent then
+				responseEvent:FireClient(player, false, "战役进行中，无法操作基地")
+			end
+		end
+		if GameConfig.DEBUG_MODE then
+			warn(GameConfig.LOG_PREFIX, "玩家", player.Name, "在战役中尝试确认放置，已拒绝")
+		end
+		return
+	end
+
     local success, message = PlacementSystem.PlaceUnit(player, instanceId, position)
 
     -- 通知客户端结果
@@ -901,11 +963,25 @@ local function OnCancelPlacement(player, instanceId)
 end
 
 --[[
-处理回收兵种请求 (V1.3)
+处理回收兵种请求 (V1.3 / V2.0扩展：战役期间禁止)
 @param player Player
 @param instanceId string
 ]]
 local function OnRemoveUnit(player, instanceId)
+	-- V2.0: 战役期间禁止基地操作
+	if IsPlayerInCampaign(player) then
+		if InitializeEvents() then
+			local responseEvent = PlacementEvents:FindFirstChild("RemoveResponse")
+			if responseEvent then
+				responseEvent:FireClient(player, false, "战役进行中，无法操作基地", instanceId)
+			end
+		end
+		if GameConfig.DEBUG_MODE then
+			warn(GameConfig.LOG_PREFIX, "玩家", player.Name, "在战役中尝试回收兵种，已拒绝")
+		end
+		return
+	end
+
     if GameConfig.DEBUG_MODE then
         print(GameConfig.LOG_PREFIX, "处理回收请求:", player.Name, instanceId)
     end
@@ -923,12 +999,26 @@ local function OnRemoveUnit(player, instanceId)
 end
 
 --[[
-处理更新兵种位置请求 (V1.4.1)
+处理更新兵种位置请求 (V1.4.1 / V2.0扩展：战役期间禁止)
 @param player Player
 @param instanceId string
 @param newPosition Vector3
 ]]
 local function OnUpdatePosition(player, instanceId, newPosition)
+	-- V2.0: 战役期间禁止基地操作
+	if IsPlayerInCampaign(player) then
+		if InitializeEvents() then
+			local responseEvent = PlacementEvents:FindFirstChild("UpdateResponse")
+			if responseEvent then
+				responseEvent:FireClient(player, false, "战役进行中，无法操作基地", instanceId)
+			end
+		end
+		if GameConfig.DEBUG_MODE then
+			warn(GameConfig.LOG_PREFIX, "玩家", player.Name, "在战役中尝试移动兵种，已拒绝")
+		end
+		return
+	end
+
     if GameConfig.DEBUG_MODE then
         print(GameConfig.LOG_PREFIX, "处理位置更新请求:", player.Name, instanceId)
     end
@@ -993,6 +1083,26 @@ function PlacementSystem.Initialize()
     game.Players.PlayerRemoving:Connect(PlacementSystem.OnPlayerLeaving)
 
     return true
+end
+
+--[[
+获取玩家已放置的所有兵种模型（V2.0新增，用于战役系统）
+@param player Player
+@return table - 兵种Model实例列表
+]]
+function PlacementSystem.GetPlacedUnitModels(player)
+	local userId = player.UserId
+	local units = {}
+
+	if placedUnits[userId] then
+		for instanceId, placedData in pairs(placedUnits[userId]) do
+			if placedData.Model and placedData.Model.Parent then
+				table.insert(units, placedData.Model)
+			end
+		end
+	end
+
+	return units
 end
 
 return PlacementSystem

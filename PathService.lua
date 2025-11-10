@@ -167,7 +167,7 @@ end
 
 --[[
 获取模型的世界位置
-@param model - Model对象
+@param model - Model对象或Part对象
 @return Vector3|nil
 ]]
 local function GetModelPosition(model)
@@ -175,6 +175,12 @@ local function GetModelPosition(model)
 		return nil
 	end
 
+	-- V2.0修复：如果是 Part，直接返回位置
+	if model:IsA("BasePart") then
+		return model.Position
+	end
+
+	-- 如果是 Model，查找 HumanoidRootPart 或 PrimaryPart
 	local rootPart = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
 	if not rootPart then
 		return nil
@@ -1016,6 +1022,188 @@ end
 ]]
 function PathService.GetConfig()
 	return CONFIG
+end
+
+-- ==================== V2.0新增: 批量寻路（战役系统） ====================
+
+--[[
+批量移动兵种到指定位置（用于战役系统） - 重构版
+使用真正的PathfindingService进行寻路，支持避障
+@param moveTargets table - {[unitInstance] = targetCFrame, ...}
+@param onAllArrived function - 所有兵种到达后的回调
+]]
+function PathService.MoveUnitsToPositions(moveTargets, onAllArrived)
+	if not moveTargets or type(moveTargets) ~= "table" then
+		warn("[PathService] MoveUnitsToPositions: moveTargets无效")
+		return
+	end
+
+	local moveData = {}
+	local moveCount = 0
+
+	-- 1. 为每个单位创建虚拟目标Part并开始寻路
+	for unitInstance, targetCFrame in pairs(moveTargets) do
+		if unitInstance and unitInstance:FindFirstChild("Humanoid") and unitInstance:FindFirstChild("HumanoidRootPart") then
+			-- 创建虚拟目标Part
+			local targetPart = Instance.new("Part")
+			targetPart.Size = Vector3.new(1, 1, 1)
+			targetPart.CFrame = targetCFrame
+			targetPart.Anchored = true
+			targetPart.CanCollide = false
+			targetPart.Transparency = 1
+			targetPart.Name = "MarchTarget_" .. unitInstance.Name
+			targetPart.Parent = workspace
+
+			-- 初始化移动数据
+			moveData[unitInstance] = {
+				TargetPart = targetPart,
+				TargetCFrame = targetCFrame,
+				Arrived = false,
+				StartTime = tick(),
+				LastPathRequest = 0
+			}
+
+			-- 请求路径
+			local unitId = unitInstance:GetAttribute("UnitId") or unitInstance.Name
+			PathService.RequestPath(unitInstance, targetPart, unitId)
+
+			moveCount = moveCount + 1
+		end
+	end
+
+	if moveCount == 0 then
+		warn("[PathService] MoveUnitsToPositions: 没有有效的移动目标")
+		if onAllArrived then
+			onAllArrived({})
+		end
+		return
+	end
+
+	print("[PathService] 批量寻路开始，兵种数量:", moveCount)
+
+	-- 2. 持续更新单位移动
+	local checkConnection
+	checkConnection = RunService.Heartbeat:Connect(function()
+		local allArrived = true
+		local arrivedCount = 0
+
+		for unitInstance, data in pairs(moveData) do
+			if not data.Arrived then
+				-- 检查实例是否有效
+				if not unitInstance or not unitInstance.Parent or not unitInstance:FindFirstChild("HumanoidRootPart") then
+					data.Arrived = true
+					arrivedCount = arrivedCount + 1
+					-- 清理目标Part
+					if data.TargetPart and data.TargetPart.Parent then
+						data.TargetPart:Destroy()
+					end
+					continue
+				end
+
+				local rootPart = unitInstance.HumanoidRootPart
+				local humanoid = unitInstance.Humanoid
+				local distance = (rootPart.Position - data.TargetCFrame.Position).Magnitude
+
+				-- 到达检测
+				local arrivalThreshold = GameConfig.Campaign.ArrivalThreshold or 2
+				if distance < arrivalThreshold then
+					data.Arrived = true
+					arrivedCount = arrivedCount + 1
+
+					-- 停止移动
+					humanoid:MoveTo(rootPart.Position)
+
+					-- 清理路径
+					PathService.ClearPath(unitInstance)
+
+					-- 清理目标Part
+					if data.TargetPart and data.TargetPart.Parent then
+						data.TargetPart:Destroy()
+					end
+
+					DebugLog(string.format("兵种到达目标: %s", unitInstance.Name))
+				else
+					allArrived = false
+
+					-- 超时检测
+					if tick() - data.StartTime > GameConfig.Campaign.MoveTimeout then
+						warn("[PathService] 兵种寻路超时，强制传送:", unitInstance.Name)
+
+						-- 强制传送到目标位置
+						rootPart.CFrame = data.TargetCFrame
+
+						data.Arrived = true
+						arrivedCount = arrivedCount + 1
+
+						-- 清理
+						PathService.ClearPath(unitInstance)
+						if data.TargetPart and data.TargetPart.Parent then
+							data.TargetPart:Destroy()
+						end
+					else
+						-- 正常寻路逻辑
+						local pathStatus = PathService.GetPathStatus(unitInstance)
+
+						-- 如果需要重新寻路
+						if pathStatus == PathStatus.NEED_REPATH or pathStatus == PathStatus.IDLE or pathStatus == PathStatus.FAILED then
+							local now = tick()
+							if now - data.LastPathRequest >= CONFIG.PATH_RECALC_COOLDOWN then
+								local unitId = unitInstance:GetAttribute("UnitId") or unitInstance.Name
+								PathService.RequestPath(unitInstance, data.TargetPart, unitId)
+								data.LastPathRequest = now
+							end
+						end
+
+						-- 如果有有效路径，沿路径点移动
+						if pathStatus == PathStatus.SUCCESS then
+							local nextWaypoint = PathService.GetNextWaypoint(unitInstance)
+
+							if nextWaypoint then
+								-- 移动到当前路径点
+								humanoid:MoveTo(nextWaypoint)
+
+								-- 检查是否到达当前路径点
+								if PathService.HasReachedWaypoint(unitInstance) then
+									-- 推进到下一个路径点
+									if not PathService.AdvancePath(unitInstance) then
+										-- 路径走完，直接移动到目标
+										humanoid:MoveTo(data.TargetCFrame.Position)
+									end
+								end
+							else
+								-- 没有路径点，直接移动到目标
+								humanoid:MoveTo(data.TargetCFrame.Position)
+							end
+						elseif pathStatus == PathStatus.FAILED then
+							-- 寻路失败，直线移动
+							humanoid:MoveTo(data.TargetCFrame.Position)
+						end
+					end
+				end
+			else
+				arrivedCount = arrivedCount + 1
+			end
+		end
+
+		-- 所有兵种到达
+		if allArrived then
+			checkConnection:Disconnect()
+
+			print("[PathService] 批量寻路完成，到达数量:", arrivedCount, "/", moveCount)
+
+			-- 清理所有虚拟目标Part
+			for _, data in pairs(moveData) do
+				if data.TargetPart and data.TargetPart.Parent then
+					data.TargetPart:Destroy()
+				end
+			end
+
+			-- 触发回调
+			if onAllArrived then
+				onAllArrived(moveTargets)
+			end
+		end
+	end)
 end
 
 return PathService

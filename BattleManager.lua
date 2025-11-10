@@ -191,45 +191,57 @@ function BattleManager.Shutdown()
 end
 
 --[[
-创建战斗实例
-@param playerId number - 发起战斗的玩家UserId
-@param attackUnits table - 攻击方兵种列表
-@param defenseUnits table - 防守方兵种列表
+创建战斗实例(V2.0扩展：支持战役模式)
+@param playerId number|table - 玩家UserId 或 配置表{PlayerId, BattleType, AttackTeam, DefenseTeam, OnBattleEnd}
+@param attackUnits table - 攻击方兵种列表(可选,如果第一个参数是配置表则忽略)
+@param defenseUnits table - 防守方兵种列表(可选)
 @return number|nil - 战斗ID,失败返回nil
 ]]
 function BattleManager.CreateBattle(playerId, attackUnits, defenseUnits)
-    -- 检查是否超过最大战斗数（遍历计数，因为battles是字典）
-    local battleCount = 0
-    for _ in pairs(battles) do
-        battleCount = battleCount + 1
-    end
+	-- V2.0: 支持配置表方式调用(用于战役系统)
+	local config = nil
+	if type(playerId) == "table" then
+		config = playerId
+		playerId = config.PlayerId
+		attackUnits = config.AttackTeam or config.AttackUnits or {}
+		defenseUnits = config.DefenseTeam or config.DefenseUnits or {}
+	end
 
-    if battleCount >= BattleConfig.MAX_CONCURRENT_BATTLES then
-        WarnLog("达到最大并发战斗数限制")
-        return nil
-    end
+	-- 检查是否超过最大战斗数(遍历计数,因为battles是字典)
+	local battleCount = 0
+	for _ in pairs(battles) do
+		battleCount = battleCount + 1
+	end
 
-    -- 分配战斗ID
-    local battleId = nextBattleId
-    nextBattleId = nextBattleId + 1
+	if battleCount >= BattleConfig.MAX_CONCURRENT_BATTLES then
+		WarnLog("达到最大并发战斗数限制")
+		return nil
+	end
 
-    -- 创建战斗实例
-    local battle = {
-        BattleId = battleId,
-        PlayerId = playerId,
-        AttackUnits = attackUnits or {},
-        DefenseUnits = defenseUnits or {},
-        State = BattleConfig.BattleState.PREPARING,
-        StartTime = 0,
-        Winner = nil,
-    }
+	-- 分配战斗ID
+	local battleId = nextBattleId
+	nextBattleId = nextBattleId + 1
 
-    battles[battleId] = battle
+	-- 创建战斗实例
+	local battle = {
+		BattleId = battleId,
+		PlayerId = playerId,
+		AttackUnits = attackUnits or {},
+		DefenseUnits = defenseUnits or {},
+		State = BattleConfig.BattleState.PREPARING,
+		StartTime = 0,
+		Winner = nil,
+		-- V2.0新增字段
+		BattleType = config and config.BattleType or "Test",  -- "Test"或"Campaign"
+		OnBattleEnd = config and config.OnBattleEnd or nil,    -- 战斗结束回调
+	}
 
-    DebugLog(string.format("创建战斗实例: BattleId=%d, 攻击方%d单位, 防守方%d单位",
-        battleId, #battle.AttackUnits, #battle.DefenseUnits))
+	battles[battleId] = battle
 
-    return battleId
+	DebugLog(string.format("创建战斗实例: BattleId=%d, Type=%s, 攻击方%d单位, 防守方%d单位",
+		battleId, battle.BattleType, #battle.AttackUnits, #battle.DefenseUnits))
+
+	return battleId
 end
 
 --[[
@@ -288,102 +300,128 @@ function BattleManager.StartBattle(battleId)
 end
 
 --[[
-结束战斗
+结束战斗(V2.0扩展：触发OnBattleEnd回调)
 @param battleId number - 战斗ID
 @param winner string - 胜利方 ("Attack", "Defense", nil)
 @return boolean - 是否成功
 ]]
 function BattleManager.EndBattle(battleId, winner)
-    local battle = battles[battleId]
+	local battle = battles[battleId]
 
-    if not battle then
-        WarnLog("EndBattle失败: 战斗不存在")
-        return false
-    end
+	if not battle then
+		WarnLog("EndBattle失败: 战斗不存在")
+		return false
+	end
 
-    if battle.State == BattleConfig.BattleState.FINISHED then
-        return true  -- 已经结束了
-    end
+	if battle.State == BattleConfig.BattleState.FINISHED then
+		return true  -- 已经结束了
+	end
 
-    -- 更新战斗状态
-    battle.State = BattleConfig.BattleState.FINISHED
-    battle.Winner = winner
+	-- 更新战斗状态
+	battle.State = BattleConfig.BattleState.FINISHED
+	battle.Winner = winner
 
-    -- 停止所有AI
-    UnitAI.ClearBattleAIs(battleId)
+	-- 停止所有AI
+	UnitAI.ClearBattleAIs(battleId)
 
-    if winner then
-        DebugLog(string.format("战斗结束: BattleId=%d, 胜利方=%s", battleId, winner))
-    else
-        DebugLog(string.format("战斗结束: BattleId=%d, 平局", battleId))
-    end
+	if winner then
+		DebugLog(string.format("战斗结束: BattleId=%d, Type=%s, 胜利方=%s",
+			battleId, battle.BattleType or "Test", winner))
+	else
+		DebugLog(string.format("战斗结束: BattleId=%d, Type=%s, 平局",
+			battleId, battle.BattleType or "Test"))
+	end
 
-    -- 通知客户端战斗状态更新
-    if battleStateUpdateEvent then
-        local player = Players:GetPlayerByUserId(battle.PlayerId)
-        if player then
-            battleStateUpdateEvent:FireClient(player, battleId, BattleConfig.BattleState.FINISHED, winner)
-            DebugLog(string.format("已通知客户端战斗结束: BattleId=%d, 胜利方=%s", battleId, winner or "平局"))
-        end
-    end
+	-- V2.0: 触发OnBattleEnd回调(战役系统)
+	if battle.OnBattleEnd then
+		task.spawn(function()
+			local success, err = pcall(function()
+				battle.OnBattleEnd({
+					BattleId = battleId,
+					Winner = winner,
+					BattleType = battle.BattleType,
+				})
+			end)
+			if not success then
+				WarnLog("OnBattleEnd回调执行失败:", err)
+			end
+		end)
+	end
 
-    -- 延迟清理战场
-    task.delay(BattleConfig.CLEANUP_DELAY, function()
-        BattleManager.CleanupBattle(battleId)
-    end)
+	-- 通知客户端战斗状态更新
+	if battleStateUpdateEvent then
+		local player = Players:GetPlayerByUserId(battle.PlayerId)
+		if player then
+			battleStateUpdateEvent:FireClient(player, battleId, BattleConfig.BattleState.FINISHED, winner)
+			DebugLog(string.format("已通知客户端战斗结束: BattleId=%d, 胜利方=%s", battleId, winner or "平局"))
+		end
+	end
 
-    return true
+	-- 延迟清理战场
+	task.delay(BattleConfig.CLEANUP_DELAY, function()
+		BattleManager.CleanupBattle(battleId)
+	end)
+
+	return true
 end
 
 --[[
-清理战场
+清理战场(V2.0扩展：战役模式下不销毁攻击方单位)
 @param battleId number - 战斗ID
 ]]
 function BattleManager.CleanupBattle(battleId)
-    local battle = battles[battleId]
+	local battle = battles[battleId]
 
-    if not battle then
-        return
-    end
+	if not battle then
+		return
+	end
 
-    DebugLog(string.format("清理战场: BattleId=%d", battleId))
+	DebugLog(string.format("清理战场: BattleId=%d, Type=%s", battleId, battle.BattleType or "Test"))
 
-    -- 移除所有兵种模型
-    for _, unit in ipairs(battle.AttackUnits) do
-        if unit and unit.Parent then
-            unit:Destroy()
-        end
-    end
+	-- V2.0: 战役模式下不销毁攻击方单位(需要返回基地)
+	local isCampaign = battle.BattleType == "Campaign"
 
-    for _, unit in ipairs(battle.DefenseUnits) do
-        if unit and unit.Parent then
-            unit:Destroy()
-        end
-    end
+	-- 移除兵种模型(战役模式下跳过攻击方)
+	if not isCampaign then
+		for _, unit in ipairs(battle.AttackUnits) do
+			if unit and unit.Parent then
+				unit:Destroy()
+			end
+		end
+	else
+		DebugLog("战役模式：保留攻击方单位，跳过销毁")
+	end
 
-    -- V1.5.1 Bug修复: 清理HitboxService的命中记录,防止污染下一个战斗
-    for _, unit in ipairs(battle.AttackUnits) do
-        if unit then
-            HitboxService.ClearAttackerHitRecords(unit)
-        end
-    end
+	-- 防守方始终销毁
+	for _, unit in ipairs(battle.DefenseUnits) do
+		if unit and unit.Parent then
+			unit:Destroy()
+		end
+	end
 
-    for _, unit in ipairs(battle.DefenseUnits) do
-        if unit then
-            HitboxService.ClearAttackerHitRecords(unit)
-        end
-    end
+	-- V1.5.1 Bug修复: 清理HitboxService的命中记录,防止污染下一个战斗
+	for _, unit in ipairs(battle.AttackUnits) do
+		if unit then
+			HitboxService.ClearAttackerHitRecords(unit)
+		end
+	end
 
-    -- 清理战斗状态
-    CombatSystem.ClearBattleUnits(battleId)
+	for _, unit in ipairs(battle.DefenseUnits) do
+		if unit then
+			HitboxService.ClearAttackerHitRecords(unit)
+		end
+	end
 
-    -- V1.5.1: 清理UnitManager中的单位索引
-    UnitManager.ClearBattle(battleId)
+	-- 清理战斗状态
+	CombatSystem.ClearBattleUnits(battleId)
 
-    -- 移除战斗实例
-    battles[battleId] = nil
+	-- V1.5.1: 清理UnitManager中的单位索引
+	UnitManager.ClearBattle(battleId)
 
-    DebugLog(string.format("战场清理完成: BattleId=%d", battleId))
+	-- 移除战斗实例
+	battles[battleId] = nil
+
+	DebugLog(string.format("战场清理完成: BattleId=%d", battleId))
 end
 
 --[[

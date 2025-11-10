@@ -28,6 +28,12 @@ ReplicatedStorage
         ├──BattleStateUpdate（RemoteEvent） - 服务端通知客户端战斗状态更新
         ├──UnitDeath（BindableEvent） - 服务端内部兵种死亡通知
         └──ShowDamageNumber（RemoteEvent） 【V1.5.1新增】 - 服务端通知客户端显示伤害数字
+    └──CampaignEvents（Folder）/  【V2.0新增】
+        ├──RequestStartCampaign（RemoteEvent） - 客户端→服务器：请求开始战役
+        ├──RequestRetreat（RemoteEvent） - 客户端→服务器：请求撤退
+        ├──CampaignStateUpdate（RemoteEvent） - 服务器→客户端：战役状态更新(state, stageNum)
+        ├──StageProgress（RemoteEvent） - 服务器→客户端：关卡进度更新(stageNum, status)
+        └──LockHomeOperations（RemoteEvent） - 服务器→客户端：锁定/解锁基地操作(locked)
 
 
 

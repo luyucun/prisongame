@@ -46,6 +46,8 @@ local HitboxService = require(ServerScriptService.Systems.HitboxService)
 local UnitManager = require(ServerScriptService.Systems.UnitManager)
 -- V1.5.4新增 - 武器特效系统
 local WeaponEffectSystem = require(ServerScriptService.Systems.WeaponEffectSystem)
+-- V2.0新增 - 战役系统
+local CampaignManager = require(ServerScriptService.Systems.CampaignManager)
 
 -- ==================== 系统初始化顺序 ====================
 
@@ -275,6 +277,19 @@ local function InitializeServer()
         warn(GameConfig.LOG_PREFIX, "战斗测试系统初始化失败(返回false)")
     else
         print(GameConfig.LOG_PREFIX, "战斗测试系统初始化成功")
+    end
+
+    -- 8. 初始化战役系统 (V2.0新增)
+    print(GameConfig.LOG_PREFIX, "步骤8: 初始化战役系统...")
+    success, result = pcall(function()
+        return CampaignManager.Initialize()
+    end)
+    if not success then
+        warn(GameConfig.LOG_PREFIX, "战役系统初始化失败(异常):", result)
+    elseif result == false then
+        warn(GameConfig.LOG_PREFIX, "战役系统初始化失败(返回false)")
+    else
+        print(GameConfig.LOG_PREFIX, "战役系统初始化成功")
     end
 
     -- 检查是否有关键系统初始化失败

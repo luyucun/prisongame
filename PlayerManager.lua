@@ -458,6 +458,18 @@ function PlayerManager.GetAvailableHomeCount()
 end
 
 --[[
+获取玩家的HomeId
+@param player Player - 玩家对象
+@return number - HomeId (1~6), 如果未分配则返回nil
+]]
+function PlayerManager.GetPlayerHomeId(player)
+    if not player then
+        return nil
+    end
+    return DataManager.GetPlayerHomeSlot(player)
+end
+
+--[[
 初始化玩家管理器
 连接玩家加入和离开事件
 ]]
