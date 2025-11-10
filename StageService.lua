@@ -212,9 +212,10 @@ function StageService.LoadEnemyData(stageFolder, stageNum)
 		return {}
 	end
 
-	local idleFloorEnemy = stageFolder:FindFirstChild("IdleFloorEnemy")
+	-- V2.0修复：使用递归搜索，支持IdleFloorEnemy在子文件夹中（如Stage001/StageNodes/IdleFloorEnemy）
+	local idleFloorEnemy = stageFolder:FindFirstChild("IdleFloorEnemy", true)
 	if not idleFloorEnemy then
-		warn("[StageService] IdleFloorEnemy未找到:", stageName)
+		warn("[StageService] IdleFloorEnemy未找到（已递归搜索）:", stageName, "关卡路径:", stageFolder:GetFullName())
 		return {}
 	end
 
@@ -314,19 +315,18 @@ function StageService.LoadEnemyData(stageFolder, stageNum)
 				end
 			end
 
-			-- V2.0修复：敌人在战斗时不需要锚定，否则无法移动
-			-- 初始状态下全部解除锚定，允许敌人移动和播放动画
+			-- V2.0修复：提前生成敌人但关闭碰撞，避免阻挡我方行军
+			-- 初始状态：锚定+关闭碰撞（仅用于展示）
+			-- 在StartStageBattle时会恢复碰撞并启动AI
 			for _, descendant in ipairs(unitModel:GetDescendants()) do
 				if descendant:IsA("BasePart") then
-					descendant.Anchored = false
-					-- 只有HumanoidRootPart有碰撞
-					if descendant.Name == "HumanoidRootPart" then
-						descendant.CanCollide = true
-					else
-						descendant.CanCollide = false
-					end
+					descendant.Anchored = true  -- 锚定，防止掉落
+					descendant.CanCollide = false  -- 关闭碰撞，不阻挡行军
 				end
 			end
+
+			-- 标记为未激活状态（需要在战斗开始时激活）
+			unitModel:SetAttribute("IsActivated", false)
 
 			-- 添加到场景
 			unitModel.Parent = idleFloorEnemy

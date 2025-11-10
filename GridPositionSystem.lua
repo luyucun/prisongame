@@ -28,7 +28,7 @@ local GridPositionSystem = {}
 local GRID_SIZE = 4  -- 每格4x4 studs
 local GRID_ROWS = 14
 local GRID_COLUMNS = 14
-local Y_OFFSET = 0.5  -- 地板上方偏移
+local Y_OFFSET = 3  -- V2.0修复：地板上方偏移（从0.5改为3，确保兵种模型站在地板上而不是插入地板）
 
 --[[
     将世界坐标转换为格子坐标
@@ -42,24 +42,23 @@ function GridPositionSystem.WorldToGrid(idleFloor, worldCFrame)
         return {X = 0, Y = 0}
     end
 
-    -- 获取IdleFloor的中心坐标和实际尺寸
-    local floorCenter = idleFloor.CFrame.Position
+    -- V2.0修复：使用CFrame本地坐标变换，正确处理旋转的IdleFloor
+    local floorCFrame = idleFloor.CFrame
     local floorSize = idleFloor.Size
 
-    -- 计算相对位置
-    local relativePos = worldCFrame.Position - floorCenter
+    -- 将世界坐标转换到IdleFloor的本地坐标系
+    local localPos = floorCFrame:PointToObjectSpace(worldCFrame.Position)
 
     -- 根据实际尺寸动态计算格子大小和半宽
-    -- 支持任意尺寸的IdleFloor（如基地120x120或关卡56x56）
     local halfX = floorSize.X * 0.5
     local halfZ = floorSize.Z * 0.5
     local cellX = floorSize.X / GRID_COLUMNS
     local cellZ = floorSize.Z / GRID_ROWS
 
-    -- 转换到格子坐标（从中心开始，X轴向右为正，Z轴向前为正）
-    -- 公式：格子索引 = floor((相对位置 + 半宽) / 格子大小) + 1
-    local gridX = math.floor((relativePos.X + halfX) / cellX) + 1
-    local gridY = math.floor((relativePos.Z + halfZ) / cellZ) + 1
+    -- 在本地坐标系中计算格子索引
+    -- 本地坐标系：X轴向右，Z轴向前（负Z是前方）
+    local gridX = math.floor((localPos.X + halfX) / cellX) + 1
+    local gridY = math.floor((localPos.Z + halfZ) / cellZ) + 1
 
     -- 限制范围
     gridX = math.clamp(gridX, 1, GRID_COLUMNS)
@@ -84,25 +83,29 @@ function GridPositionSystem.GridToWorld(idleFloor, gridPos)
     local x = math.clamp(gridPos.X, 1, GRID_COLUMNS)
     local y = math.clamp(gridPos.Y, 1, GRID_ROWS)
 
-    -- 获取IdleFloor的中心坐标和实际尺寸
-    local floorCenter = idleFloor.CFrame.Position
+    -- V2.0修复：使用CFrame本地坐标变换，正确处理旋转的IdleFloor
+    local floorCFrame = idleFloor.CFrame
     local floorSize = idleFloor.Size
 
     -- 根据实际尺寸动态计算格子大小和半宽
-    -- 支持任意尺寸的IdleFloor（如基地120x120或关卡56x56）
     local halfX = floorSize.X * 0.5
     local halfZ = floorSize.Z * 0.5
     local cellX = floorSize.X / GRID_COLUMNS
     local cellZ = floorSize.Z / GRID_ROWS
 
-    -- 计算格子的世界坐标
-    -- 公式：世界坐标 = 中心 - 半宽 + (格子索引 - 0.5) * 格子大小
-    -- (格子索引 - 0.5) 是为了定位到格子中心
-    local worldX = floorCenter.X - halfX + (x - 0.5) * cellX
-    local worldZ = floorCenter.Z - halfZ + (y - 0.5) * cellZ
-    local worldY = floorCenter.Y + Y_OFFSET + floorSize.Y / 2
+    -- 在本地坐标系中计算格子中心的偏移
+    -- 公式：本地偏移 = -半宽 + (格子索引 - 0.5) * 格子大小
+    local offsetX = -halfX + (x - 0.5) * cellX
+    local offsetZ = -halfZ + (y - 0.5) * cellZ
+    local offsetY = floorSize.Y / 2 + Y_OFFSET  -- 地板表面之上
 
-    return CFrame.new(worldX, worldY, worldZ)
+    -- 创建本地坐标的CFrame
+    local localPos = Vector3.new(offsetX, offsetY, offsetZ)
+
+    -- 将本地坐标转换到世界坐标
+    local worldCFrame = floorCFrame * CFrame.new(localPos)
+
+    return worldCFrame
 end
 
 --[[

@@ -266,22 +266,120 @@ function BattleManager.StartBattle(battleId)
     battle.State = BattleConfig.BattleState.FIGHTING
     battle.StartTime = tick()
 
-    -- V1.5.1: 将所有单位注册到UnitManager
+    -- V2.0新增：二次校验，移除无效单位
+    local validAttackUnits = {}
+    local validDefenseUnits = {}
+
     for _, unit in ipairs(battle.AttackUnits) do
+        if unit and unit.Parent then
+            local humanoid = unit:FindFirstChild("Humanoid")
+            local rootPart = unit:FindFirstChild("HumanoidRootPart")
+            if humanoid and rootPart then
+                -- 检查是否锚定（战斗中不应该锚定）
+                if rootPart.Anchored then
+                    WarnLog(string.format("警告：攻击单位 %s 仍处于锚定状态，尝试解锚", unit.Name))
+                    rootPart.Anchored = false
+                end
+                table.insert(validAttackUnits, unit)
+            else
+                WarnLog(string.format("移除无效攻击单位：%s（缺少Humanoid或RootPart）", unit.Name))
+            end
+        else
+            WarnLog("移除无效攻击单位：实例无效或已销毁")
+        end
+    end
+
+    for _, unit in ipairs(battle.DefenseUnits) do
+        if unit and unit.Parent then
+            local humanoid = unit:FindFirstChild("Humanoid")
+            local rootPart = unit:FindFirstChild("HumanoidRootPart")
+            if humanoid and rootPart then
+                -- 检查是否锚定
+                if rootPart.Anchored then
+                    WarnLog(string.format("警告：防守单位 %s 仍处于锚定状态，尝试解锚", unit.Name))
+                    rootPart.Anchored = false
+                end
+                table.insert(validDefenseUnits, unit)
+            else
+                WarnLog(string.format("移除无效防守单位：%s（缺少Humanoid或RootPart）", unit.Name))
+            end
+        else
+            WarnLog("移除无效防守单位：实例无效或已销毁")
+        end
+    end
+
+    -- 检查是否还有有效单位
+    if #validAttackUnits == 0 or #validDefenseUnits == 0 then
+        WarnLog(string.format("StartBattle失败：有效单位不足（攻击%d，防守%d）",
+            #validAttackUnits, #validDefenseUnits))
+        battle.State = BattleConfig.BattleState.FINISHED
+        return false
+    end
+
+    -- 更新单位列表
+    battle.AttackUnits = validAttackUnits
+    battle.DefenseUnits = validDefenseUnits
+
+    -- V2.0新增：初始化CombatSystem状态并启动AI
+    -- 如果CombatSystem初始化失败，不启动AI
+    local finalAttackUnits = {}
+    local finalDefenseUnits = {}
+
+    -- 处理攻击方
+    for _, unit in ipairs(battle.AttackUnits) do
+        -- 1. 注册到UnitManager
         UnitManager.RegisterUnit(battleId, BattleConfig.Team.ATTACK, unit)
+
+        -- 2. 初始化CombatSystem状态
+        local unitId = unit:GetAttribute("UnitId") or unit.Name
+        local level = unit:GetAttribute("Level") or 1
+        local success = CombatSystem.InitializeUnit(unit, unitId, level, BattleConfig.Team.ATTACK, battleId)
+
+        if success then
+            -- 3. 启动AI
+            UnitAI.StartAI(unit)
+            table.insert(finalAttackUnits, unit)
+            DebugLog(string.format("✅ 攻击方单位初始化成功: %s (Lv.%d)", unitId, level))
+        else
+            WarnLog(string.format("❌ 攻击方单位初始化失败: %s", unit.Name))
+        end
     end
 
+    -- 处理防守方
     for _, unit in ipairs(battle.DefenseUnits) do
+        -- 1. 注册到UnitManager
         UnitManager.RegisterUnit(battleId, BattleConfig.Team.DEFENSE, unit)
+
+        -- 2. 初始化CombatSystem状态
+        local unitId = unit:GetAttribute("UnitId") or unit.Name
+        local level = unit:GetAttribute("Level") or 1
+        local success = CombatSystem.InitializeUnit(unit, unitId, level, BattleConfig.Team.DEFENSE, battleId)
+
+        if success then
+            -- 3. 启动AI
+            UnitAI.StartAI(unit)
+            table.insert(finalDefenseUnits, unit)
+            DebugLog(string.format("✅ 防守方单位初始化成功: %s (Lv.%d)", unitId, level))
+        else
+            WarnLog(string.format("❌ 防守方单位初始化失败: %s", unit.Name))
+        end
     end
 
-    -- 启动所有兵种的AI
-    for _, unit in ipairs(battle.AttackUnits) do
-        UnitAI.StartAI(unit)
-    end
+    -- 再次检查：如果有单位初始化失败，更新战斗列表
+    if #finalAttackUnits < #battle.AttackUnits or #finalDefenseUnits < #battle.DefenseUnits then
+        WarnLog(string.format("部分单位初始化失败 - 攻击方: %d/%d, 防守方: %d/%d",
+            #finalAttackUnits, #battle.AttackUnits,
+            #finalDefenseUnits, #battle.DefenseUnits))
 
-    for _, unit in ipairs(battle.DefenseUnits) do
-        UnitAI.StartAI(unit)
+        battle.AttackUnits = finalAttackUnits
+        battle.DefenseUnits = finalDefenseUnits
+
+        -- 如果任一方单位为0，无法开战
+        if #finalAttackUnits == 0 or #finalDefenseUnits == 0 then
+            WarnLog("初始化后有效单位不足，无法开战")
+            battle.State = BattleConfig.BattleState.FINISHED
+            return false
+        end
     end
 
     DebugLog(string.format("战斗开始: BattleId=%d, 攻击方%d个单位, 防守方%d个单位",

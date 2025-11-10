@@ -4,8 +4,8 @@
 =====================================================
 
 项目名称: Roblox 兵种塔防游戏
-当前版本: V1.5.5
-最后更新: 2025-01-XX
+当前版本: V2.0
+最后更新: 2025-01-10
 
 =====================================================
 一、架构设计原则
@@ -39,15 +39,20 @@ ServerScriptService/
 │   ├── PlacementSystem.lua      (放置系统)
 │   ├── MergeSystem.lua          (合成系统)
 │   ├── PhysicsManager.lua       (物理管理)
-│   ├── BattleManager.lua        (战斗管理)
+│   ├── BattleManager.lua        (战斗管理 V2.0增强)
 │   ├── CombatSystem.lua         (战斗系统)
-│   ├── UnitAI.lua               (兵种AI)
+│   ├── UnitAI.lua               (兵种AI V2.0增强)
 │   ├── ProjectileSystem.lua     (弹道系统)
 │   ├── HitboxService.lua        (碰撞判定)
 │   ├── UnitManager.lua          (单位索引)
 │   ├── WeaponEffectSystem.lua   (武器特效 V1.5.4)
 │   ├── BattleTestSystem.lua     (战斗测试)
-│   └── GMCommandSystem.lua      (GM命令)
+│   ├── GMCommandSystem.lua      (GM命令)
+│   ├── PathService.lua          (寻路服务 V2.0增强)
+│   ├── StageService.lua         (关卡服务 V2.0)
+│   ├── GridPositionSystem.lua   (网格坐标系统 V2.0)
+│   ├── CampaignManager.lua      (战役管理器 V2.0)
+│   └── CampaignUnitHelper.lua   (战役单位辅助 V2.0)
 
 StarterPlayer/StarterPlayerScripts/
 ├── UI/
@@ -473,8 +478,215 @@ ReplicatedStorage/
 8. 服务器端ContentProvider对客户端无效
 
 =====================================================
+十一、V2.0架构变动记录
+=====================================================
+
+【11.1 新增系统】
+
+1. CampaignManager (战役管理器)
+   职责：
+   - 管理玩家战役流程（准备→行军→战斗→清理）
+   - 状态机：IDLE → PREPARING → MARCHING → PREPARE_BATTLE → FIGHTING
+   - 兵种生命周期管理（保存位置、血量继承）
+   - 关卡进度追踪
+
+   核心API：
+   - StartCampaign(player)          启动战役
+   - MarchToStage(campaignData, n)  行军到关卡
+   - BeginBattlePrep(...)           准备战斗(V2.0新增)
+   - StartStageBattle(...)          开始战斗
+   - OnBattleEnd(...)               战斗结束处理
+
+2. CampaignUnitHelper (战役单位辅助)
+   职责：
+   - 统一管理单位激活/复位/属性重置
+   - 防御式编程，所有操作包裹pcall
+
+   核心API：
+   - ActivateUnit(unitModel)        激活单位
+   - DeactivateUnit(unitModel)      重新锚定
+   - PrepareForBattle(unitModel)    准备进入战斗
+   - ResetUnitAttributes(...)       复位属性
+   - RestoreSavedHP(...)            恢复生命值
+
+3. StageService (关卡服务)
+   职责：
+   - 动态生成关卡（StageMiddle/StageEnd）
+   - 关卡缓存管理
+   - 从EnemyConfig加载敌人数据
+
+   核心API：
+   - GetOrCreateStage(playerId, n)  获取或创建关卡
+   - GenerateStage(playerId, n)     生成新关卡
+   - LoadEnemyData(stage, n)        加载敌人配置
+   - CleanupStages(playerId)        清理关卡
+
+4. GridPositionSystem (网格坐标系统)
+   职责：
+   - 格子坐标 ↔ 世界坐标转换
+   - 维护基地和关卡的IdleFloor映射
+
+   核心API：
+   - GridToWorld(idleFloor, x, y)   格子→世界坐标
+   - WorldToGrid(idleFloor, pos)    世界→格子坐标
+   - IsValidGrid(idleFloor, x, y)   验证格子有效性
+
+【11.2 系统增强】
+
+1. PathService 增强
+   变动：
+   - MoveUnitsToPositions返回moveId
+   - 支持详细回调（arrivedList, timedOutList, failedList）
+   - 新增CancelGroupMove(moveId)取消机制
+
+   新API：
+   ```lua
+   local moveId = PathService.MoveUnitsToPositions(targets, {
+       onUnitArrived = function(unit, status) end,
+       onAllSettled = function(arrived, timeout, failed) end
+   })
+   PathService.CancelGroupMove(moveId)
+   ```
+
+   改进：
+   - 边到边处理单位到达
+   - 详细记录失败原因
+   - 支持中途取消
+   - 向后兼容旧版API
+
+2. UnitAI 增强
+   变动：
+   - 新增AI模式概念（MarchMode/CombatMode）
+   - UpdateAI检查模式，行军时不执行战斗AI
+   - 新增PrepareForCombat方法
+
+   新API：
+   ```lua
+   UnitAI.SetMode(unitModel, "MarchMode")
+   UnitAI.PrepareForCombat(unitModel)
+   ```
+
+   AIData新增字段：
+   - Mode: string  -- "MarchMode" / "CombatMode"
+
+   改进：
+   - 清晰分离行军和战斗逻辑
+   - 防止行军期间错误寻敌
+   - 战斗前统一清理状态
+
+3. BattleManager 增强
+   变动：
+   - StartBattle增加二次校验
+   - 自动修复锚定状态
+   - 过滤无效单位
+   - CreateBattle支持Campaign类型
+
+   新逻辑：
+   - 校验单位实例有效性
+   - 检查Humanoid和HumanoidRootPart
+   - 自动解锚定状态
+   - 更新有效单位列表
+
+   改进：
+   - 防止战斗雪崩（无效单位导致崩溃）
+   - 战役模式下不销毁攻击方单位
+   - 支持OnBattleEnd回调
+
+【11.3 数据结构变动】
+
+1. CampaignState (战役状态枚举)
+   新增状态：
+   - PREPARE_BATTLE  -- 准备战斗（激活单位）
+
+2. campaignData.Units 扩展
+   新增字段：
+   ```lua
+   Units[unitModel] = {
+       -- 原有字段...
+       IsActivated = false,         -- 是否已激活
+       LastKnownPosition = nil,     -- 最后已知位置
+       LastBattleId = nil,          -- 最后参与的战斗ID
+   }
+   ```
+
+3. campaignData 扩展
+   新增字段：
+   - CurrentMoveId: string  -- 当前移动任务ID（用于取消）
+
+【11.4 架构改进】
+
+1. 职责分离
+   - PathService：只负责寻路，不处理战斗准备
+   - CampaignUnitHelper：单一职责，单位状态管理
+   - CampaignManager：流程编排，不直接操作单位
+   - UnitAI：模式区分，行军和战斗分离
+
+2. 状态流优化
+   ```
+   旧流程：
+   MARCHING → (回调) → FIGHTING
+   问题：回调可能永不触发，缺少准备阶段
+
+   新流程：
+   MARCHING → (回调) → PREPARE_BATTLE → FIGHTING
+   改进：明确的准备阶段，统一激活和校验
+   ```
+
+3. 防御性编程
+   - 所有跨系统操作包裹pcall
+   - 二次校验单位状态
+   - 详细的错误日志
+   - failedList统一处理
+
+4. 向后兼容
+   - PathService保留旧版function参数
+   - UnitAI默认为COMBAT模式
+   - BattleManager支持旧版调用方式
+
+【11.5 核心问题修复】
+
+修复的问题：
+1. ✅ 兵种到达后无法开始战斗
+   - 原因：回调永不触发、缺少激活流程
+   - 解决：BeginBattlePrep统一准备流程
+
+2. ✅ PathService回调永不触发
+   - 原因：任一单位未到达则卡死
+   - 解决：返回详细列表，即使失败也触发
+
+3. ✅ 单位状态不一致
+   - 原因：锚定状态、AI模式混乱
+   - 解决：二次校验、自动修复
+
+4. ✅ 失败单位未处理
+   - 原因：failedList未使用
+   - 解决：标记为已死亡，不参与战斗
+
+【11.6 开发建议】
+
+V2.0新特性使用建议：
+1. 战役系统必须通过CampaignManager启动
+2. 不要直接调用StartStageBattle，使用BeginBattlePrep
+3. 单位激活统一使用CampaignUnitHelper
+4. PathService批量移动使用新的回调API
+5. 观察PREPARE_BATTLE阶段的日志，确认激活成功
+
+测试重点：
+1. 兵种是否正确到达关卡
+2. 到达后是否进入PREPARE_BATTLE状态
+3. 战斗是否正常开始
+4. 失败单位是否正确标记
+5. 多关卡连续战斗是否正常
+
+已知限制：
+1. 当前未实现断线重连（LastKnownPosition预留）
+2. PREPARE_BATTLE状态暂未同步到客户端
+3. CombatSystem状态同步可进一步优化
+
+=====================================================
 架构设计文档完成
-版本: V1.5.5
-总行数: 精简至 ~600 行
+版本: V2.0
+总行数: ~700 行
+最后更新: 2025-01-10
 =====================================================
 ]]

@@ -607,6 +607,9 @@ AIData = {
     IsActive = boolean,
     LastUpdateTime = number,
 
+    -- V2.0新增：模式切换
+    Mode = string,                       -- AI模式: "MarchMode"（行军）/"CombatMode"（战斗）
+
     -- 动画状态
     CurrentState = string,               -- 当前动画状态: "MOVE"/"IDLE"/"ATTACK"
     LastState = string,                  -- 上次动画状态
@@ -621,6 +624,13 @@ AIData = {
     LastDesiredDirection = Vector3|nil,
 }
 ]]
+
+-- ==================== AI模式枚举 ====================
+
+local AIMode = {
+	MARCH = "MarchMode",      -- 行军模式（战役行军）
+	COMBAT = "CombatMode",    -- 战斗模式（正常战斗）
+}
 
 -- ==================== 距离策略模块 ====================
 
@@ -1031,6 +1041,9 @@ function UnitAI.StartAI(unitModel)
 		IsActive = true,
 		LastUpdateTime = 0,
 
+		-- V2.0新增：默认为战斗模式
+		Mode = AIMode.COMBAT,
+
 		-- 动画状态
 		CurrentState = nil,
 		LastState = nil,
@@ -1045,6 +1058,13 @@ function UnitAI.StartAI(unitModel)
 	local state = CombatSystem.GetUnitState(unitModel)
 	if state then
 		humanoid.WalkSpeed = state.MoveSpeed
+	else
+		-- V2.0 Sanity Check: 如果CombatSystem没有状态，说明InitializeUnit未被调用
+		WarnLog("⚠️ StartAI: 单位没有CombatSystem状态! 请确保已调用CombatSystem.InitializeUnit")
+		WarnLog("   单位名称:", unitModel.Name)
+		WarnLog("   UnitId属性:", unitModel:GetAttribute("UnitId") or "nil")
+		WarnLog("   Level属性:", unitModel:GetAttribute("Level") or "nil")
+		return false
 	end
 
 	local unitId = state and state.UnitId or "Unknown"
@@ -1133,6 +1153,11 @@ function UnitAI.UpdateAI(unitModel, aiData)
 
 	if not state or not state.IsAlive then
 		UnitAI.StopAI(unitModel)
+		return
+	end
+
+	-- V2.0新增：检查AI模式，行军模式下不执行战斗AI
+	if aiData.Mode == AIMode.MARCH then
 		return
 	end
 
@@ -1572,6 +1597,76 @@ function UnitAI.StopMoveAnimation(unitModel)
 	end
 
 	animation:Destroy()
+end
+
+--[[
+===============================================
+V2.0 新增: AI模式切换API
+===============================================
+]]
+
+--[[
+设置AI模式
+@param unitModel Model - 兵种模型
+@param mode string - AI模式（"MarchMode"/"CombatMode"）
+@return boolean - 是否成功
+]]
+function UnitAI.SetMode(unitModel, mode)
+	local aiData = activeAIs[unitModel]
+	if not aiData then
+		WarnLog("SetMode失败：AI未启动")
+		return false
+	end
+
+	if mode ~= AIMode.MARCH and mode ~= AIMode.COMBAT then
+		WarnLog("SetMode失败：无效的模式:", mode)
+		return false
+	end
+
+	aiData.Mode = mode
+	DebugLog(string.format("AI模式切换: %s → %s", unitModel.Name, mode))
+	return true
+end
+
+--[[
+准备单位进入战斗
+清理PathService状态、重置目标、将AIState切回SEEKING
+@param unitModel Model - 兵种模型
+@return boolean - 是否成功
+]]
+function UnitAI.PrepareForCombat(unitModel)
+	local aiData = activeAIs[unitModel]
+	if not aiData then
+		WarnLog("PrepareForCombat失败：AI未启动")
+		return false
+	end
+
+	local unitId = unitModel and unitModel.Name or "Unknown"
+	DebugLog(string.format("准备单位进入战斗: %s", unitId))
+
+	-- 1. 切换到战斗模式
+	aiData.Mode = AIMode.COMBAT
+
+	-- 2. 清理PathService状态
+	PathService.ClearPath(unitModel)
+
+	-- 3. 重置目标和AI状态
+	local state = CombatSystem.GetUnitState(unitModel)
+	if state then
+		CombatSystem.SetTarget(unitModel, nil)
+		CombatSystem.SetAIState(unitModel, BattleConfig.AIState.SEEKING)
+	end
+
+	-- 4. 清空LastDesiredDirection
+	aiData.LastDesiredDirection = nil
+
+	-- 5. 切换到Idle动画
+	if state then
+		AnimationController.SwitchToIdle(unitModel, aiData, state)
+	end
+
+	DebugLog(string.format("✅单位准备完成: %s", unitId))
+	return true
 end
 
 return UnitAI

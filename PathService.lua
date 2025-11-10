@@ -1026,20 +1026,48 @@ end
 
 -- ==================== V2.0新增: 批量寻路（战役系统） ====================
 
+-- 存储活跃的批量移动任务
+local activeMoves = {}  -- [moveId] = {connection, moveData}
+local nextMoveId = 1
+
 --[[
 批量移动兵种到指定位置（用于战役系统） - 重构版
 使用真正的PathfindingService进行寻路，支持避障
 @param moveTargets table - {[unitInstance] = targetCFrame, ...}
-@param onAllArrived function - 所有兵种到达后的回调
+@param callbacks table - 回调函数表 {
+    onUnitArrived = function(unitInstance, status),  -- 单位到达时回调
+    onAllSettled = function(arrivedList, timedOutList, failedList),  -- 所有单位完成时回调
+}
+@return string - 移动任务ID，可用于取消
 ]]
-function PathService.MoveUnitsToPositions(moveTargets, onAllArrived)
+function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 	if not moveTargets or type(moveTargets) ~= "table" then
 		warn("[PathService] MoveUnitsToPositions: moveTargets无效")
-		return
+		return nil
 	end
+
+	-- 兼容旧版API：callbacks可以是function（相当于onAllSettled）
+	local onUnitArrived = nil
+	local onAllSettled = nil
+
+	if type(callbacks) == "function" then
+		onAllSettled = callbacks  -- 向后兼容
+	elseif type(callbacks) == "table" then
+		onUnitArrived = callbacks.onUnitArrived
+		onAllSettled = callbacks.onAllSettled
+	end
+
+	-- 生成移动任务ID
+	local moveId = "Move_" .. tostring(nextMoveId)
+	nextMoveId = nextMoveId + 1
 
 	local moveData = {}
 	local moveCount = 0
+
+	-- 结果列表
+	local arrivedList = {}
+	local timedOutList = {}
+	local failedList = {}
 
 	-- 1. 为每个单位创建虚拟目标Part并开始寻路
 	for unitInstance, targetCFrame in pairs(moveTargets) do
@@ -1059,6 +1087,7 @@ function PathService.MoveUnitsToPositions(moveTargets, onAllArrived)
 				TargetPart = targetPart,
 				TargetCFrame = targetCFrame,
 				Arrived = false,
+				ForceTeleported = false,
 				StartTime = tick(),
 				LastPathRequest = 0
 			}
@@ -1073,13 +1102,13 @@ function PathService.MoveUnitsToPositions(moveTargets, onAllArrived)
 
 	if moveCount == 0 then
 		warn("[PathService] MoveUnitsToPositions: 没有有效的移动目标")
-		if onAllArrived then
-			onAllArrived({})
+		if onAllSettled then
+			onAllSettled({}, {}, {})
 		end
-		return
+		return nil
 	end
 
-	print("[PathService] 批量寻路开始，兵种数量:", moveCount)
+	print("[PathService] 批量寻路开始，兵种数量:", moveCount, "MoveId:", moveId)
 
 	-- 2. 持续更新单位移动
 	local checkConnection
@@ -1097,16 +1126,23 @@ function PathService.MoveUnitsToPositions(moveTargets, onAllArrived)
 					if data.TargetPart and data.TargetPart.Parent then
 						data.TargetPart:Destroy()
 					end
+					-- 记录到failedList（实例无效）
+					table.insert(failedList, unitInstance)
+					warn("[PathService] 兵种实例无效:", unitInstance and unitInstance.Name or "nil")
 					continue
 				end
 
 				local rootPart = unitInstance.HumanoidRootPart
 				local humanoid = unitInstance.Humanoid
-				local distance = (rootPart.Position - data.TargetCFrame.Position).Magnitude
 
-				-- 到达检测
-				local arrivalThreshold = GameConfig.Campaign.ArrivalThreshold or 2
-				if distance < arrivalThreshold then
+				-- V2.0修复：使用XZ平面距离，忽略Y轴差异
+				local currentPos = rootPart.Position
+				local targetPos = data.TargetCFrame.Position
+				local distanceXZ = math.sqrt((currentPos.X - targetPos.X)^2 + (currentPos.Z - targetPos.Z)^2)
+
+				-- 到达检测（仅检查XZ平面）
+				local arrivalThreshold = GameConfig.Campaign.ArrivalThreshold or 8
+				if distanceXZ < arrivalThreshold then
 					data.Arrived = true
 					arrivedCount = arrivedCount + 1
 
@@ -1121,7 +1157,17 @@ function PathService.MoveUnitsToPositions(moveTargets, onAllArrived)
 						data.TargetPart:Destroy()
 					end
 
+					-- 记录到arrivedList
+					table.insert(arrivedList, unitInstance)
+
 					DebugLog(string.format("兵种到达目标: %s", unitInstance.Name))
+
+					-- 触发单位到达回调
+					if onUnitArrived then
+						pcall(function()
+							onUnitArrived(unitInstance, "Arrived")
+						end)
+					end
 				else
 					allArrived = false
 
@@ -1133,12 +1179,23 @@ function PathService.MoveUnitsToPositions(moveTargets, onAllArrived)
 						rootPart.CFrame = data.TargetCFrame
 
 						data.Arrived = true
+						data.ForceTeleported = true
 						arrivedCount = arrivedCount + 1
 
 						-- 清理
 						PathService.ClearPath(unitInstance)
 						if data.TargetPart and data.TargetPart.Parent then
 							data.TargetPart:Destroy()
+						end
+
+						-- 记录到timedOutList
+						table.insert(timedOutList, unitInstance)
+
+						-- 触发单位到达回调（标记为超时）
+						if onUnitArrived then
+							pcall(function()
+								onUnitArrived(unitInstance, "TimedOut")
+							end)
 						end
 					else
 						-- 正常寻路逻辑
@@ -1188,6 +1245,7 @@ function PathService.MoveUnitsToPositions(moveTargets, onAllArrived)
 		-- 所有兵种到达
 		if allArrived then
 			checkConnection:Disconnect()
+			activeMoves[moveId] = nil
 
 			print("[PathService] 批量寻路完成，到达数量:", arrivedCount, "/", moveCount)
 
@@ -1198,12 +1256,51 @@ function PathService.MoveUnitsToPositions(moveTargets, onAllArrived)
 				end
 			end
 
-			-- 触发回调
-			if onAllArrived then
-				onAllArrived(moveTargets)
+			-- 触发onAllSettled回调
+			if onAllSettled then
+				pcall(function()
+					onAllSettled(arrivedList, timedOutList, failedList)
+				end)
 			end
 		end
 	end)
+
+	-- 存储连接和数据，以便取消
+	activeMoves[moveId] = {
+		connection = checkConnection,
+		moveData = moveData
+	}
+
+	return moveId
+end
+
+--[[
+取消批量移动任务
+@param moveId string - 移动任务ID
+]]
+function PathService.CancelGroupMove(moveId)
+	local moveTask = activeMoves[moveId]
+	if not moveTask then
+		return false
+	end
+
+	-- 断开连接
+	if moveTask.connection then
+		moveTask.connection:Disconnect()
+	end
+
+	-- 清理所有单位的路径和目标Part
+	for unitInstance, data in pairs(moveTask.moveData) do
+		PathService.ClearPath(unitInstance)
+		if data.TargetPart and data.TargetPart.Parent then
+			data.TargetPart:Destroy()
+		end
+	end
+
+	activeMoves[moveId] = nil
+
+	DebugLog("取消批量移动任务:", moveId)
+	return true
 end
 
 return PathService
