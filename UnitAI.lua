@@ -873,14 +873,38 @@ local function HandleMoving(unitModel, aiData, state)
 			local nextWaypoint = PathService.GetNextWaypoint(unitModel)
 			if nextWaypoint then
 				aiData.Humanoid:MoveTo(nextWaypoint)
+				-- V2.0.4新增：记录成功发送MoveTo的时间
+				aiData.LastPathCommandTime = tick()
 			else
-				-- 没有有效waypoint，使用直线移动
-				UnitAI.MoveToTarget(unitModel, target, aiData, state)
+				-- V2.0.4新增：没有有效waypoint的快速降级
+				-- 这种情况不应该频繁出现，但一旦出现说明路径数据有问题
+				DebugLog(string.format("⚠️ %s 路径点无效，直接尝试目标", state.UnitId))
+
+				-- 尝试直线移动到目标
+				pcall(function()
+					aiData.Humanoid:MoveTo(target.HumanoidRootPart.Position)
+					aiData.LastPathCommandTime = tick()
+				end)
 			end
 		else
 			-- 路径请求失败，使用直线移动降级
 			DebugLog(string.format("%s 路径请求失败，使用直线移动", state.UnitId))
 			UnitAI.MoveToTarget(unitModel, target, aiData, state)
+			-- V2.0.4新增：更新LastPathCommandTime
+			aiData.LastPathCommandTime = tick()
+		end
+
+		-- V2.0.4新增：安全容错 - 若距离上次成功MoveTo超过0.3s，强制重新下达命令
+		local now = tick()
+		if now - aiData.LastPathCommandTime > 0.3 then
+			local targetPos = target and target:FindFirstChild("HumanoidRootPart") and target.HumanoidRootPart.Position
+			if targetPos then
+				pcall(function()
+					aiData.Humanoid:MoveTo(targetPos)
+					aiData.LastPathCommandTime = now
+					DebugLog(string.format("🔄 %s 安全容错：强制重新下达MoveTo命令", state.UnitId))
+				end)
+			end
 		end
 	end
 end
@@ -1051,6 +1075,9 @@ function UnitAI.StartAI(unitModel)
 		AnimationConnections = {},
 
 		LastDesiredDirection = nil,
+
+		-- V2.0.4新增：路径命令安全容错
+		LastPathCommandTime = 0,  -- 上次成功发送MoveTo命令的时间
 	}
 
 	activeAIs[unitModel] = aiData
@@ -1429,10 +1456,16 @@ function UnitAI.BeginDeathAnimation(unitModel, animationId, unitId)
 
 				DebugLog(string.format("[%s] ✅ 死亡动画播放成功 (Priority=Action4, Fade=0)", unitName))
 
-				-- 动画结束时冻结尸体
+				-- 动画结束时冻结尸体（V2.0.1修复：战役单位跳过冻结）
 				animTrack.Stopped:Connect(function()
 					if unitModel and unitModel.Parent then
-						FreezeCorpse(unitModel, humanoid, rootPart, unitName)
+						-- V2.0.1修复：检查是否是战役单位，如果是则跳过尸体冻结
+						local isCampaignUnit = unitModel:GetAttribute("CampaignKeepInstance")
+						if not isCampaignUnit then
+							FreezeCorpse(unitModel, humanoid, rootPart, unitName)
+						else
+							DebugLog(string.format("[%s] 战役单位，跳过尸体冻结", unitName))
+						end
 					end
 				end)
 
@@ -1445,17 +1478,33 @@ function UnitAI.BeginDeathAnimation(unitModel, animationId, unitId)
 			else
 				WarnLog(string.format("[%s] ❌ 死亡动画加载失败! 动画ID可能无效: %s", unitName, animationId))
 				animation:Destroy()
-				-- 动画加载失败，直接冻结尸体
-				FreezeCorpse(unitModel, humanoid, rootPart, unitName)
+				-- 动画加载失败，直接冻结尸体（V2.0.1修复：战役单位跳过冻结）
+				local isCampaignUnit = unitModel:GetAttribute("CampaignKeepInstance")
+				if not isCampaignUnit then
+					FreezeCorpse(unitModel, humanoid, rootPart, unitName)
+				else
+					DebugLog(string.format("[%s] 战役单位，跳过尸体冻结", unitName))
+				end
 			end
 		else
 			WarnLog(string.format("[%s] ❌ 找不到Animator", unitName))
-			FreezeCorpse(unitModel, humanoid, rootPart, unitName)
+			-- V2.0.1修复：战役单位跳过冻结
+			local isCampaignUnit = unitModel:GetAttribute("CampaignKeepInstance")
+			if not isCampaignUnit then
+				FreezeCorpse(unitModel, humanoid, rootPart, unitName)
+			else
+				DebugLog(string.format("[%s] 战役单位，跳过尸体冻结", unitName))
+			end
 		end
 	else
 		DebugLog(string.format("[%s] 无死亡动画配置，直接冻结尸体", unitName))
-		-- 无动画配置时，直接冻结尸体
-		FreezeCorpse(unitModel, humanoid, rootPart, unitName)
+		-- 无动画配置时，直接冻结尸体（V2.0.1修复：战役单位跳过冻结）
+		local isCampaignUnit = unitModel:GetAttribute("CampaignKeepInstance")
+		if not isCampaignUnit then
+			FreezeCorpse(unitModel, humanoid, rootPart, unitName)
+		else
+			DebugLog(string.format("[%s] 战役单位，跳过尸体冻结", unitName))
+		end
 	end
 end
 

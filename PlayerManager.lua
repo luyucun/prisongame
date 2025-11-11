@@ -343,7 +343,22 @@ function PlayerManager.OnPlayerAdded(player)
 
     -- 6. 初始化玩家基地(HomeSystem)
     local HomeSystem = require(ServerScriptService.Systems.HomeSystem)
-    HomeSystem.InitializePlayerHome(player)
+    HomeSystem.InitializePlayerHome(homeSlot, player)  -- V2.0.1修复：传入正确的参数 (homeId, player)
+
+    -- 6.5 V2.0.1新增：生成Stage001（如果不存在）
+    -- 注意：必须在HomeSystem初始化后执行，确保Stage文件夹存在
+    task.spawn(function()
+        -- 短暂延迟，确保HomeSystem初始化完成
+        task.wait(0.1)
+
+        local StageService = require(ServerScriptService.Systems.StageService)
+        local stage001 = StageService.GetOrCreateStage(player.UserId, 1)
+        if stage001 then
+            print(GameConfig.LOG_PREFIX, "Stage001已准备完成:", player.Name, "HomeSlot:", homeSlot)
+        else
+            warn(GameConfig.LOG_PREFIX, "Stage001生成失败:", player.Name, "HomeSlot:", homeSlot)
+        end
+    end)
 
     -- 7. 处理角色传送 - 使用异步方式避免阻塞
     -- 标记是否应跳过首次传送（用于Studio Play Here模式）
@@ -431,7 +446,9 @@ function PlayerManager.OnPlayerRemoving(player)
 
     -- 4. 清除基地系统数据
     local HomeSystem = require(ServerScriptService.Systems.HomeSystem)
-    HomeSystem.ClearPlayerHome(player)
+    if homeSlot and homeSlot > 0 then
+        HomeSystem.CleanupPlayerHome(homeSlot, player)  -- V2.0.1修复：调用正确的方法并传入homeId
+    end
 
     -- 5. 清除玩家数据
     DataManager.ClearPlayerData(player)

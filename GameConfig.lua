@@ -70,7 +70,17 @@ GameConfig.Campaign = {
 	MarchWaitTime = 1,                   -- 到达关卡后等待时间(秒)
 	StageClearWaitTime = 2,              -- 关卡完成后等待时间(秒)
 	VictoryWaitTime = 3,                 -- 胜利后等待时间(秒)
-	DefeatWaitTime = 3                   -- 失败后等待时间(秒)
+	DefeatWaitTime = 3,                  -- 失败后等待时间(秒)
+
+	-- V2.0.1新增：Stage001初始坐标配置（Base的Position）
+	Stage001Positions = {
+		[1] = Vector3.new(0, 0.5, -185.999),
+		[2] = Vector3.new(-120, 0.5, -184),
+		[3] = Vector3.new(-240, 0.5, -184),
+		[4] = Vector3.new(-360, 0.5, -184),
+		[5] = Vector3.new(-480, 0.5, -184),
+		[6] = Vector3.new(-600, 0.5, -184),
+	}
 }
 
 -- ==================== 调试配置 ====================

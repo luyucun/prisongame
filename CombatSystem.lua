@@ -661,11 +661,22 @@ function CombatSystem.KillUnit(unitModel, killer)
 		stopFadeTime = 0          -- 瞬停AI轨道，无淡出延迟
 	})
 
-	-- 步骤3: 固定2.9秒后销毁模型
+	-- 步骤3: 固定2.9秒后销毁或隐藏模型
+	-- V2.0.1修复：战役单位死亡时保留实例用于重生
 	task.delay(2.9, function()
 		if unitModel and unitModel.Parent then
-			unitModel:Destroy()
-			DebugLog(string.format("%s 模型已销毁", unitId))
+			-- 检查是否是战役单位
+			local isCampaignUnit = unitModel:GetAttribute("CampaignKeepInstance")
+
+			if isCampaignUnit then
+				-- 战役单位：隐藏但不销毁，用于后续重生
+				unitModel.Parent = nil
+				DebugLog(string.format("%s 战役单位已隐藏（保留实例用于重生）", unitId))
+			else
+				-- 非战役单位：直接销毁
+				unitModel:Destroy()
+				DebugLog(string.format("%s 模型已销毁", unitId))
+			end
 		end
 	end)
 end

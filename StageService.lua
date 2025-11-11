@@ -27,9 +27,35 @@ local StageService = {}
 -- 缓存: [playerId] = {[stageNum] = stageFolderRef}
 StageService.StageCache = {}
 
--- 配置
+-- 配置（V2.0修复：从GameConfig读取，支持策划动态配置）
 local STAGE_OFFSET_Z = 169  -- 关卡Z轴间距
-local TEMPLATE_STYLE = "Style01"  -- 默认模板风格
+
+-- 获取模板风格（支持配置）
+local function GetTemplateStyle()
+	local GameConfig = require(ReplicatedStorage.Config.GameConfig)
+	return GameConfig.Campaign.StageTemplateStyle or "Style01"  -- 默认Style01
+end
+
+--[[
+    递归查找关卡组件（支持嵌套文件夹结构）
+    @param stageFolder Folder - 关卡文件夹
+    @param partName string - 组件名称（如"Base", "IdleFloor"）
+    @return Instance - 找到的组件，未找到返回nil
+]]
+local function FindStagePart(stageFolder, partName)
+    if not stageFolder then
+        return nil
+    end
+
+    -- 先尝试直接查找（性能优化）
+    local part = stageFolder:FindFirstChild(partName)
+    if part then
+        return part
+    end
+
+    -- 递归查找
+    return stageFolder:FindFirstChild(partName, true)
+end
 
 --[[
     获取或创建关卡
@@ -62,25 +88,52 @@ function StageService.GetOrCreateStage(playerId, stageNum)
         end
     end
 
-    -- Stage001固定存在，不需要生成
+    -- V2.0.1修改：Stage001也动态生成
     if stageNum == 1 then
         local homeId = StageService.GetPlayerHomeId(playerId)
-        if homeId then
-            local stage001 = Workspace.Home:FindFirstChild("PlayerHome" .. homeId):FindFirstChild("Stage"):FindFirstChild("Stage001")
-            if stage001 then
-                -- 初始化缓存
-                if not StageService.StageCache[playerId] then
-                    StageService.StageCache[playerId] = {}
-                end
-                StageService.StageCache[playerId][1] = stage001
-                return stage001
-            end
+        if not homeId then
+            warn("[StageService] 玩家未分配基地，playerId:", playerId)
+            return nil
         end
-        warn("[StageService] Stage001未找到，playerId:", playerId)
-        return nil
+
+        -- 1. 检查场景中是否已存在Stage001（兼容旧场景）
+        local stageContainer = Workspace.Home:FindFirstChild("PlayerHome" .. homeId)
+        if not stageContainer then
+            warn("[StageService] PlayerHome未找到，homeId:", homeId)
+            return nil
+        end
+
+        local stageFolder = stageContainer:FindFirstChild("Stage")
+        if not stageFolder then
+            warn("[StageService] Stage文件夹未找到，homeId:", homeId)
+            return nil
+        end
+
+        local existing = stageFolder:FindFirstChild("Stage001")
+        if existing then
+            print("[StageService] Stage001已存在（场景预制），homeId:", homeId)
+            -- 缓存并返回
+            if not StageService.StageCache[playerId] then
+                StageService.StageCache[playerId] = {}
+            end
+            StageService.StageCache[playerId][1] = existing
+            return existing
+        end
+
+        -- 2. 场景中不存在，动态生成Stage001
+        print("[StageService] 动态生成Stage001，homeId:", homeId)
+        local stage001 = StageService.GenerateStage001(homeId)
+        if stage001 then
+            -- 缓存
+            if not StageService.StageCache[playerId] then
+                StageService.StageCache[playerId] = {}
+            end
+            StageService.StageCache[playerId][1] = stage001
+        end
+        return stage001
     end
 
-    -- 生成新关卡
+    -- Stage002及以后：生成新关卡
     local stageFolder = StageService.GenerateStage(playerId, stageNum)
 
     -- 缓存
@@ -95,7 +148,98 @@ function StageService.GetOrCreateStage(playerId, stageNum)
 end
 
 --[[
-    生成关卡
+    生成Stage001（V2.0.1新增）
+    @param homeId number - 基地ID (1-6)
+    @return Folder - 生成的Stage001文件夹
+]]
+function StageService.GenerateStage001(homeId)
+    local success, result = pcall(function()
+        -- 1. 获取目标坐标
+        local GameConfig = require(ReplicatedStorage.Config.GameConfig)
+        local targetPosition = GameConfig.Campaign.Stage001Positions[homeId]
+
+        if not targetPosition then
+            warn("[StageService] Stage001坐标配置未找到，homeId:", homeId)
+            return nil
+        end
+
+        -- 2. 获取模板（Stage001使用StageMiddle模板）
+        local stageTemplateRoot = ReplicatedStorage:FindFirstChild("StageTemplate")
+        if not stageTemplateRoot then
+            warn("[StageService] StageTemplate文件夹不存在")
+            return nil
+        end
+
+        local templateStyle = GetTemplateStyle()
+        local templatePath = stageTemplateRoot:FindFirstChild(templateStyle)
+        if not templatePath then
+            warn("[StageService] 模板风格未找到:", templateStyle)
+            return nil
+        end
+
+        local template = templatePath:FindFirstChild("StageMiddle")
+        if not template then
+            warn("[StageService] StageMiddle模板未找到")
+            return nil
+        end
+
+        -- 3. 克隆模板
+        local newStage = template:Clone()
+
+        -- 4. 找到模板中的Base
+        local templateBase = FindStagePart(newStage, "Base")
+        if not templateBase then
+            warn("[StageService] 模板中Base未找到（已递归搜索）")
+            newStage:Destroy()
+            return nil
+        end
+
+        -- 5. 计算偏移量并移动整个关卡
+        -- V2.0.1修复：正确的坐标变换逻辑
+        -- 原理：让Base的Position移动到targetPosition，保持旋转不变
+        local originalBaseCFrame = templateBase.CFrame
+        local targetBaseCFrame = CFrame.new(targetPosition) * (originalBaseCFrame - originalBaseCFrame.Position)
+
+        -- 计算整体偏移变换
+        local offsetTransform = targetBaseCFrame * originalBaseCFrame:Inverse()
+
+        for _, child in ipairs(newStage:GetDescendants()) do
+            if child:IsA("BasePart") then
+                child.CFrame = offsetTransform * child.CFrame
+            end
+        end
+
+        -- 6. 命名
+        newStage.Name = "Stage001"
+
+        -- 7. 放入场景
+        local stageContainer = Workspace.Home:FindFirstChild("PlayerHome" .. homeId):FindFirstChild("Stage")
+        if not stageContainer then
+            warn("[StageService] Stage容器未找到，homeId:", homeId)
+            newStage:Destroy()
+            return nil
+        end
+
+        newStage.Parent = stageContainer
+
+        print("[StageService] Stage001生成成功，homeId:", homeId, "位置:", targetPosition)
+
+        -- 8. 加载敌人数据
+        StageService.LoadEnemyData(newStage, 1)
+
+        return newStage
+    end)
+
+    if success then
+        return result
+    else
+        warn("[StageService] 生成Stage001失败:", result)
+        return nil
+    end
+end
+
+--[[
+    生成关卡（Stage002及以后）
     @param playerId number - 玩家ID
     @param stageNum number - 关卡编号
     @return Folder - 生成的关卡文件夹
@@ -122,15 +266,23 @@ function StageService.GenerateStage(playerId, stageNum)
         end
 
         -- 获取模板
-        local templatePath = ReplicatedStorage.StageTemplate:FindFirstChild(TEMPLATE_STYLE)
+        local stageTemplateRoot = ReplicatedStorage:FindFirstChild("StageTemplate")
+        if not stageTemplateRoot then
+            warn("[StageService] StageTemplate文件夹不存在，请在ReplicatedStorage中创建")
+            return nil
+        end
+
+        -- V2.0修复：从配置读取模板风格，支持策划动态配置
+        local templateStyle = GetTemplateStyle()
+        local templatePath = stageTemplateRoot:FindFirstChild(templateStyle)
         if not templatePath then
-            warn("[StageService] 模板风格未找到:", TEMPLATE_STYLE)
+            warn("[StageService] 模板风格未找到:", templateStyle, "请检查ReplicatedStorage/StageTemplate路径")
             return nil
         end
 
         local template = templatePath:FindFirstChild(templateName)
         if not template then
-            warn("[StageService] 模板未找到:", templateName)
+            warn("[StageService] 模板未找到:", templateName, "路径:", templatePath:GetFullName())
             return nil
         end
 
@@ -141,21 +293,23 @@ function StageService.GenerateStage(playerId, stageNum)
             return nil
         end
 
-        local previousBase = previousStage:FindFirstChild("Base")
+        -- V2.0修复：使用递归查找，支持Base在子文件夹中（如StageNodes/Base）
+        local previousBase = FindStagePart(previousStage, "Base")
         if not previousBase then
-            warn("[StageService] 前一关Base未找到")
+            warn("[StageService] 前一关Base未找到（已递归搜索），关卡:", previousStage:GetFullName())
             return nil
         end
 
-        -- 计算新关卡位置（Z轴偏移）
-        local newBaseCFrame = previousBase.CFrame * CFrame.new(0, 0, STAGE_OFFSET_Z)
+        -- V2.0修复：计算新关卡位置（沿世界Z轴负方向偏移-169，不受Base旋转影响）
+        local newBaseCFrame = CFrame.new(previousBase.Position - Vector3.new(0, 0, STAGE_OFFSET_Z)) * (previousBase.CFrame - previousBase.Position)
 
         -- 克隆模板
         local newStage = template:Clone()
-        local newBase = newStage:FindFirstChild("Base")
 
+        -- V2.0修复：使用递归查找，支持Base在子文件夹中（如StageNodes/Base）
+        local newBase = FindStagePart(newStage, "Base")
         if not newBase then
-            warn("[StageService] 模板中Base未找到")
+            warn("[StageService] 模板中Base未找到（已递归搜索），模板:", templateName)
             newStage:Destroy()
             return nil
         end
@@ -348,7 +502,7 @@ function StageService.LoadEnemyData(stageFolder, stageNum)
 end
 
 --[[
-    清理玩家的所有动态关卡（保留Stage001）
+    清理玩家的所有动态关卡（V2.0.1修改：清理所有关卡包括Stage001）
     @param playerId number - 玩家ID
 ]]
 function StageService.CleanupStages(playerId)
@@ -360,15 +514,15 @@ function StageService.CleanupStages(playerId)
 
         print("[StageService] 开始清理关卡，playerId:", playerId)
 
-        -- 遍历并销毁Stage002及以后的关卡
+        -- V2.0.1修改：遍历并销毁所有关卡（包括Stage001）
         for stageNum, stageFolder in pairs(cache) do
-            if stageNum > 1 and stageFolder and stageFolder.Parent then
+            if stageFolder and stageFolder.Parent then
                 print("[StageService] 清理关卡:", stageFolder.Name)
                 stageFolder:Destroy()
             end
         end
 
-        -- 完全清除该玩家的缓存（包括Stage001）
+        -- 完全清除该玩家的缓存
         StageService.StageCache[playerId] = nil
 
         print("[StageService] 关卡清理完成")

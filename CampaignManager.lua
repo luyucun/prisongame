@@ -36,6 +36,7 @@ local BattleManager = require(ServerScriptService.Systems.BattleManager)
 local CurrencySystem = require(ServerScriptService.Systems.CurrencySystem)
 local UnitAI = require(ServerScriptService.Systems.UnitAI)  -- V2.0新增：用于控制行军动画
 local CampaignUnitHelper = require(ServerScriptService.Systems.CampaignUnitHelper)  -- V2.0新增：单位激活/复位
+local DoorControlService = require(ServerScriptService.Systems.DoorControlService)  -- V2.0.1新增：门控制
 
 -- 远程事件
 local CampaignEvents = nil
@@ -119,6 +120,7 @@ end
 获取玩家基地的IdleFloor
 @param homeId number - 基地ID
 @return Part|nil - IdleFloor
+关键修复：优先查找直接子节点IdleFloor，避免误返回Stage目录下的IdleFloor
 ]]
 local function GetHomeIdleFloor(homeId)
 	local homeFolder = Workspace.Home:FindFirstChild("PlayerHome" .. homeId)
@@ -126,8 +128,30 @@ local function GetHomeIdleFloor(homeId)
 		return nil
 	end
 
-	-- V2.0修复：使用递归搜索，支持IdleFloor在子文件夹中
-	return homeFolder:FindFirstChild("IdleFloor", true)
+	-- V2.0.2修复：先在直接子节点中查找IdleFloor（不递归）
+	-- 这样可以获取基地根目录下的IdleFloor，而不是Stage文件夹中的
+	local homeIdleFloor = homeFolder:FindFirstChild("IdleFloor", false)
+	if homeIdleFloor then
+		return homeIdleFloor
+	end
+
+	-- 回退方案：如果直接子节点中没有IdleFloor，才进行递归搜索
+	-- 但此时要跳过所有Stage*文件夹，防止误返回关卡内的IdleFloor
+	for _, child in ipairs(homeFolder:GetChildren()) do
+		-- 跳过Stage文件夹
+		if child:IsA("Folder") and child.Name:match("^Stage") then
+			continue
+		end
+
+		-- 在非Stage子文件夹中递归搜索IdleFloor
+		local found = child:FindFirstChild("IdleFloor", true)
+		if found then
+			return found
+		end
+	end
+
+	-- 最后的回退：直接返回nil，不再盲目递归
+	return nil
 end
 
 --[[
@@ -226,6 +250,9 @@ function CampaignManager.StartCampaign(player)
 		return false
 	end
 
+	-- V2.0.2修复验证：打印获取到的IdleFloor路径
+	print("[CampaignManager] ✅ 获取基地IdleFloor成功 - 路径:", homeIdleFloor:GetFullName())
+
 	for _, unitModel in ipairs(placedUnits) do
 		-- 获取GridPos（兼容历史数据）
 		local gridPos = GridPositionSystem.LoadUnitGridPosition(unitModel, homeIdleFloor)
@@ -241,6 +268,9 @@ function CampaignManager.StartCampaign(player)
 
 			-- V2.0修复：设置UnitId属性（确保CombatSystem能正确识别）
 			unitModel:SetAttribute("UnitId", unitId)
+
+			-- V2.0.1新增：标记为战役单位，死亡时保留实例用于重生
+			unitModel:SetAttribute("CampaignKeepInstance", true)
 
 			-- V2.0修复：解除所有部件的锚定，允许兵种移动
 			SetUnitAnchored(unitModel, false)
@@ -265,6 +295,12 @@ function CampaignManager.StartCampaign(player)
 			print("[CampaignManager] 注册兵种:", unitId, "GridPos:", gridPos.X, gridPos.Y)
 		end
 	end
+
+	-- V2.0.1新增：打开基地大门（兵种有效后再开门）
+	pcall(function()
+		DoorControlService.OpenDoor(homeId)
+		print("[CampaignManager] ✅ 基地大门已打开: PlayerHome" .. homeId)
+	end)
 
 	-- 锁定基地操作
 	LockHomeOperations(player, true)
@@ -665,13 +701,20 @@ function CampaignManager.OnVictory(campaignData)
 		end
 	end
 
-	-- 计算奖励
+	-- 计算奖励（V2.0修复：使用配置的模板风格，而非硬编码Style01）
 	local totalReward = 0
-	for i = 1, campaignData.TotalStages do
-		local reward = StageConfig.Style01.Rewards[i]
-		if reward then
-			totalReward = totalReward + (reward.Coins or 0)
+	local templateStyle = GameConfig.Campaign.StageTemplateStyle or "Style01"
+	local styleRewards = StageConfig[templateStyle] and StageConfig[templateStyle].Rewards
+
+	if styleRewards then
+		for i = 1, campaignData.TotalStages do
+			local reward = styleRewards[i]
+			if reward then
+				totalReward = totalReward + (reward.Coins or 0)
+			end
 		end
+	else
+		warn("[CampaignManager] 未找到风格奖励配置:", templateStyle)
 	end
 
 	-- 发放奖励 (V2.0修复：使用AddCoins而不是AddCurrency)
@@ -719,6 +762,12 @@ function CampaignManager.OnCampaignEnd(campaignData, isVictory)
 
 	print("[CampaignManager] 战役结束，开始清理...")
 
+	-- V2.0.1新增：关闭基地大门（确保门总是被关闭）
+	pcall(function()
+		DoorControlService.CloseDoor(campaignData.HomeId)
+		print("[CampaignManager] ✅ 基地大门已关闭: PlayerHome" .. campaignData.HomeId)
+	end)
+
 	-- 重生兵种
 	CampaignManager.RespawnUnits(campaignData)
 
@@ -745,6 +794,62 @@ function CampaignManager.OnCampaignEnd(campaignData, isVictory)
 end
 
 --[[
+恢复单位的动画和Humanoid状态（V2.0.1新增）
+用于战役重生后清理死亡状态，恢复正常基地状态
+@param unitModel Model - 单位模型
+@param unitId string - 单位ID（用于日志）
+]]
+local function RestoreUnitAnimationState(unitModel, unitId)
+	if not unitModel then
+		return
+	end
+
+	local humanoid = unitModel:FindFirstChildOfClass("Humanoid")
+	if not humanoid then
+		warn("[CampaignManager] RestoreUnitAnimationState失败：找不到Humanoid", unitId)
+		return
+	end
+
+	-- 1. 恢复Humanoid状态
+	pcall(function()
+		humanoid.PlatformStand = false
+		humanoid.AutoRotate = true
+		humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+	end)
+
+	-- 2. 重新启用所有Animate脚本
+	for _, descendant in ipairs(unitModel:GetDescendants()) do
+		if descendant:IsA("Script") or descendant:IsA("LocalScript") then
+			if descendant.Name == "Animate" then
+				descendant.Disabled = false
+				print("[CampaignManager] 重新启用Animate脚本:", unitId)
+			end
+		end
+	end
+
+	-- 3. 清理残留的死亡动画Track
+	local animator = humanoid:FindFirstChild("Animator")
+	if not animator then
+		animator = unitModel:FindFirstChildOfClass("Animator")
+	end
+
+	if animator then
+		local playingTracks = animator:GetPlayingAnimationTracks()
+		for _, track in ipairs(playingTracks) do
+			pcall(function()
+				track:Stop(0)
+			end)
+		end
+		print("[CampaignManager] 清理", #playingTracks, "个残留动画轨道:", unitId)
+	end
+
+	-- 4. 短暂延迟后，Animate脚本会自动播放show/idle动画
+	-- 无需手动启动，Animate脚本会根据Humanoid状态自动处理
+
+	print("[CampaignManager] 动画状态已恢复:", unitId)
+end
+
+--[[
 重生兵种到基地
 @param campaignData table - 战役数据
 ]]
@@ -755,9 +860,28 @@ function CampaignManager.RespawnUnits(campaignData)
 		return
 	end
 
+	-- V2.0.2修复验证：打印获取到的IdleFloor路径
+	print("[CampaignManager] ✅ RespawnUnits获取基地IdleFloor成功 - 路径:", homeIdleFloor:GetFullName())
+
+	-- V2.0.1修复：支持重生死亡隐藏的单位
 	for unitInstance, unitData in pairs(campaignData.Units) do
-		if unitInstance and unitInstance.Parent then
-			-- 计算原位置
+		if unitInstance then
+			-- V2.0.3修复：如果单位被隐藏（Parent = nil），重新挂回基地根节点（PlayerHome）
+			-- 而不是直接挂到IdleFloor Part下，防止：
+			-- 1. 模型坐标依赖于当前IdleFloor Part的位置/旋转
+			-- 2. StageService清理关卡时连带销毁或移动模型
+			if not unitInstance.Parent then
+				local homeFolder = homeIdleFloor.Parent
+				if homeFolder then
+					unitInstance.Parent = homeFolder
+					print("[CampaignManager] 重新挂载死亡单位:", unitData.UnitId, "到基地根节点:", homeFolder.Name)
+				else
+					warn("[CampaignManager] 找不到基地根节点（IdleFloor.Parent）")
+					unitInstance.Parent = homeIdleFloor  -- 回退方案
+				end
+			end
+
+			-- 计算原位置（使用基地IdleFloor进行坐标换算）
 			local targetCFrame = GridPositionSystem.GridToWorld(
 				homeIdleFloor,
 				unitData.GridPos
@@ -786,6 +910,17 @@ function CampaignManager.RespawnUnits(campaignData)
 
 			-- 播放特效
 			PlayRespawnEffect(unitInstance, unitData.GridSize)
+
+			-- V2.0.1新增：恢复动画和Humanoid状态（必须在播放特效后）
+			RestoreUnitAnimationState(unitInstance, unitData.UnitId)
+
+			-- V2.0.1新增：延迟清除战役标记，确保死亡动画轨道回调不会冻结尸体
+			task.delay(1, function()
+				if unitInstance then
+					unitInstance:SetAttribute("CampaignKeepInstance", false)
+					print("[CampaignManager] 延迟清除战役标记:", unitData.UnitId)
+				end
+			end)
 
 			print("[CampaignManager] 重生兵种:", unitData.UnitId, "位置:", unitData.GridPos.X, unitData.GridPos.Y)
 		end

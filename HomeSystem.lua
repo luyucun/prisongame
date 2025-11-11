@@ -21,6 +21,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 -- 引用模块
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
 local DataManager = require(ServerScriptService.Core.DataManager)
+local DoorControlService = require(ServerScriptService.Systems.DoorControlService)  -- V2.0.1新增
 
 -- 存储每个玩家的基地信息 [UserId] = HomeData
 local playerHomes = {}
@@ -63,47 +64,47 @@ end
 -- ==================== 公共接口 ====================
 
 --[[
-初始化玩家基地
+初始化玩家基地 (V2.0.1修改：增加homeId参数，支持门状态初始化)
+@param homeId number - 基地编号 (1~6)
 @param player Player - 玩家对象
 @return boolean - 是否初始化成功
 ]]
-function HomeSystem.InitializePlayerHome(player)
-    if not player then
-        warn(GameConfig.LOG_PREFIX, "HomeSystem.InitializePlayerHome: player为空")
+function HomeSystem.InitializePlayerHome(homeId, player)
+    if not homeId or not player then
+        warn(GameConfig.LOG_PREFIX, "HomeSystem.InitializePlayerHome: 参数无效")
         return false
     end
 
-    -- 获取玩家的基地编号
-    local homeSlot = DataManager.GetPlayerHomeSlot(player)
-    if not homeSlot or homeSlot == 0 then
-        warn(GameConfig.LOG_PREFIX, "HomeSystem.InitializePlayerHome: 玩家未分配基地", player.Name)
+    -- 验证基地编号范围
+    if homeId < GameConfig.MIN_HOME_SLOT or homeId > GameConfig.MAX_HOME_SLOT then
+        warn(GameConfig.LOG_PREFIX, "HomeSystem.InitializePlayerHome: 基地编号超出范围", homeId)
         return false
     end
 
     -- 获取基地文件夹
-    local homeFolder = GetHomeFolder(homeSlot)
+    local homeFolder = GetHomeFolder(homeId)
     if not homeFolder then
-        warn(GameConfig.LOG_PREFIX, "HomeSystem.InitializePlayerHome: 获取基地文件夹失败", homeSlot)
+        warn(GameConfig.LOG_PREFIX, "HomeSystem.InitializePlayerHome: 获取基地文件夹失败", homeId)
         return false
     end
 
     -- 获取出生点
     local spawnLocation = homeFolder:FindFirstChild(GameConfig.SPAWN_LOCATION_NAME)
     if not spawnLocation then
-        warn(GameConfig.LOG_PREFIX, "HomeSystem.InitializePlayerHome: 找不到出生点", homeSlot)
+        warn(GameConfig.LOG_PREFIX, "HomeSystem.InitializePlayerHome: 找不到出生点", homeId)
         return false
     end
 
     -- 验证出生点的有效性
     if not spawnLocation:IsA("BasePart") then
-        warn(GameConfig.LOG_PREFIX, "HomeSystem.InitializePlayerHome: SpawnLocation不是有效的BasePart", homeSlot)
+        warn(GameConfig.LOG_PREFIX, "HomeSystem.InitializePlayerHome: SpawnLocation不是有效的BasePart", homeId)
         return false
     end
 
     -- 创建基地数据
     local homeData = {
         Player = player,
-        HomeSlot = homeSlot,
+        HomeSlot = homeId,
         HomeFolder = homeFolder,
         SpawnLocation = spawnLocation,
         Units = {},  -- 后续版本用于存储兵种
@@ -111,8 +112,16 @@ function HomeSystem.InitializePlayerHome(player)
 
     playerHomes[player.UserId] = homeData
 
+    -- V2.0.1新增：初始化基地门状态（确保门关闭）
+    pcall(function()
+        DoorControlService.SetDoorState(homeId, "Closed")
+        if GameConfig.DEBUG_MODE then
+            print(GameConfig.LOG_PREFIX, "初始化基地门状态: PlayerHome" .. homeId .. " -> Closed")
+        end
+    end)
+
     if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "初始化玩家基地:", player.Name, "基地编号:", homeSlot)
+        print(GameConfig.LOG_PREFIX, "初始化玩家基地:", player.Name, "基地编号:", homeId)
     end
 
     return true
@@ -132,7 +141,34 @@ function HomeSystem.GetPlayerHome(player)
 end
 
 --[[
-清除玩家基地数据
+清理玩家基地数据 (V2.0.1新增：支持基地门关闭)
+@param homeId number - 基地编号 (1~6)
+@param player Player - 玩家对象
+]]
+function HomeSystem.CleanupPlayerHome(homeId, player)
+    if not homeId or not player then
+        warn(GameConfig.LOG_PREFIX, "HomeSystem.CleanupPlayerHome: 参数无效")
+        return
+    end
+
+    -- V2.0.1新增：关闭基地门
+    pcall(function()
+        DoorControlService.CloseDoor(homeId)
+        if GameConfig.DEBUG_MODE then
+            print(GameConfig.LOG_PREFIX, "清理时关闭基地门: PlayerHome" .. homeId)
+        end
+    end)
+
+    -- 调用原有清理逻辑
+    HomeSystem.ClearPlayerHome(player)
+
+    if GameConfig.DEBUG_MODE then
+        print(GameConfig.LOG_PREFIX, "清理玩家基地完成:", player.Name, "基地编号:", homeId)
+    end
+end
+
+--[[
+清除玩家基地数据 (V2.0.1保留：向下兼容)
 @param player Player - 玩家对象
 ]]
 function HomeSystem.ClearPlayerHome(player)

@@ -37,7 +37,8 @@ local BattleConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChi
 
 local CONFIG = {
 	-- 路径请求冷却（秒）
-	PATH_RECALC_COOLDOWN = 0.5,
+	-- V2.0.4优化：从0.5降低到0.2，加速被挤停单位的重新寻路
+	PATH_RECALC_COOLDOWN = 0.2,
 
 	-- 目标移动阈值（studs）
 	TARGET_MOVE_THRESHOLD = 8,
@@ -61,7 +62,8 @@ local CONFIG = {
 	MIN_AGENT_RADIUS = 0.5,
 
 	-- 近邻点采样半径（studs）
-	NEIGHBOR_SAMPLE_RADIUS = 6,
+	-- V2.0.4优化：增大到10，让PathfindingService给出的路径更远离士兵
+	NEIGHBOR_SAMPLE_RADIUS = 10,
 
 	-- 近邻点采样数量
 	NEIGHBOR_SAMPLE_COUNT = 8,
@@ -73,9 +75,17 @@ local CONFIG = {
 	WAYPOINT_SPACING = 4,
 
 	-- 体型参数自动计算
-	AUTO_RADIUS_MULTIPLIER = 0.35,  -- max(X,Z) * 0.35
+	-- V2.0.4优化：AUTO_RADIUS_MULTIPLIER从0.35降低到0.25，减少被挤阻概率
+	AUTO_RADIUS_MULTIPLIER = 0.25,  -- max(X,Z) * 0.25
 	AUTO_RADIUS_OFFSET = 0.2,       -- + 0.2 容差
 	AUTO_HEIGHT_OFFSET = 1,         -- Y + 1 容差
+
+	-- V2.0性能优化配置
+	BATCH_UPDATE_INTERVAL = 0.15,   -- 批量更新间隔（秒），降低Heartbeat频率
+	-- V2.0.4优化：从3提高到6，让同批次被阻挡的兵种更快拿到新路径
+	MAX_COMPUTE_PER_FRAME = 6,      -- 每帧最多执行的ComputeAsync数量（限流）
+	BATCH_START_DELAY = 0.25,       -- 批量启动延迟（秒）
+	BATCH_START_SIZE = 8,           -- 每批启动的单位数量
 
 	-- 调试选项
 	DEBUG_SHOW_PATH = false,        -- 是否显示路径可视化
@@ -1030,9 +1040,172 @@ end
 local activeMoves = {}  -- [moveId] = {connection, moveData}
 local nextMoveId = 1
 
+-- ==================== V2.0性能优化: 路径计算限流队列 ====================
+
+-- 路径计算队列
+local computeQueue = {}  -- {{unitInstance, targetPart, unitId, callback}, ...}
+local computingCount = 0  -- 当前正在计算的数量
+local lastComputeCheckTime = 0
+
+-- 性能统计数据
+local performanceStats = {
+	TotalPathRequests = 0,       -- 总路径请求数
+	TotalComputeAsync = 0,       -- 总ComputeAsync调用数
+	QueuedRequests = 0,          -- 当前队列中的请求数
+	ActiveMoveTasks = 0,         -- 当前活跃的移动任务数
+	TotalUnitsMoving = 0,        -- 当前正在移动的单位数
+	LastResetTime = tick(),      -- 上次重置时间
+}
+
 --[[
-批量移动兵种到指定位置（用于战役系统） - 重构版
-使用真正的PathfindingService进行寻路，支持避障
+获取性能统计数据
+@return table - 统计数据
+]]
+function PathService.GetPerformanceStats()
+	performanceStats.QueuedRequests = #computeQueue
+	performanceStats.ActiveMoveTasks = 0
+	performanceStats.TotalUnitsMoving = 0
+
+	for moveId, moveTask in pairs(activeMoves) do
+		performanceStats.ActiveMoveTasks = performanceStats.ActiveMoveTasks + 1
+		if moveTask.moveData then
+			for _, data in pairs(moveTask.moveData) do
+				if not data.Arrived then
+					performanceStats.TotalUnitsMoving = performanceStats.TotalUnitsMoving + 1
+				end
+			end
+		end
+	end
+
+	return performanceStats
+end
+
+--[[
+重置性能统计
+]]
+function PathService.ResetPerformanceStats()
+	performanceStats.TotalPathRequests = 0
+	performanceStats.TotalComputeAsync = 0
+	performanceStats.LastResetTime = tick()
+	print("[PathService] 性能统计已重置")
+end
+
+--[[
+打印性能统计
+]]
+function PathService.PrintPerformanceStats()
+	local stats = PathService.GetPerformanceStats()
+	local elapsed = tick() - stats.LastResetTime
+	print("==================== PathService 性能统计 ====================")
+	print(string.format("运行时间: %.1f 秒", elapsed))
+	print(string.format("总路径请求数: %d", stats.TotalPathRequests))
+	print(string.format("总ComputeAsync调用: %d", stats.TotalComputeAsync))
+	print(string.format("当前队列长度: %d", stats.QueuedRequests))
+	print(string.format("活跃移动任务: %d", stats.ActiveMoveTasks))
+	print(string.format("正在移动单位数: %d", stats.TotalUnitsMoving))
+	if elapsed > 0 then
+		print(string.format("平均请求速率: %.2f 请求/秒", stats.TotalPathRequests / elapsed))
+		print(string.format("平均计算速率: %.2f 计算/秒", stats.TotalComputeAsync / elapsed))
+	end
+	print("=============================================================")
+end
+
+--[[
+将路径计算请求加入队列
+@param unitInstance - 单位实例
+@param targetPart - 目标Part
+@param unitId - 单位ID
+@param callback - 完成回调 function(success, pathState)
+]]
+local function QueuePathCompute(unitInstance, targetPart, unitId, callback)
+	table.insert(computeQueue, {
+		unitInstance = unitInstance,
+		targetPart = targetPart,
+		unitId = unitId,
+		callback = callback,
+		queueTime = tick()
+	})
+
+	performanceStats.TotalPathRequests = performanceStats.TotalPathRequests + 1
+end
+
+--[[
+处理路径计算队列（每帧最多处理MAX_COMPUTE_PER_FRAME个）
+修复：添加 pcall 保护，确保 computingCount 始终正确递减
+]]
+local function ProcessComputeQueue()
+	local now = tick()
+
+	-- 节流：每CONFIG.BATCH_UPDATE_INTERVAL秒检查一次
+	if now - lastComputeCheckTime < CONFIG.BATCH_UPDATE_INTERVAL then
+		return
+	end
+	lastComputeCheckTime = now
+
+	-- 处理队列中的请求
+	while #computeQueue > 0 and computingCount < CONFIG.MAX_COMPUTE_PER_FRAME do
+		local request = table.remove(computeQueue, 1)
+
+		-- V2.0修复：跳过无效请求（单位或目标已被删除）
+		if not request.unitInstance or not request.unitInstance.Parent then
+			DebugLog(string.format("⚠️ 跳过无效请求: 单位已被删除"))
+			continue
+		end
+
+		if not request.targetPart or not request.targetPart.Parent then
+			DebugLog(string.format("⚠️ 跳过无效请求: 目标Part已被删除 (%s)", request.unitId or "Unknown"))
+			-- 仍然需要调用回调通知失败
+			if request.callback then
+				pcall(function()
+					request.callback(false, nil)
+				end)
+			end
+			continue
+		end
+
+		computingCount = computingCount + 1
+		performanceStats.TotalComputeAsync = performanceStats.TotalComputeAsync + 1
+
+		-- 异步执行路径计算（带异常保护）
+		task.spawn(function()
+			local success = false
+			local pathState = nil
+
+			-- 关键修复：使用 pcall 保护，确保异常不会导致 computingCount 泄漏
+			local pcallSuccess, pcallError = pcall(function()
+				success = PathService.RequestPath(request.unitInstance, request.targetPart, request.unitId)
+				pathState = GetPathState(request.unitInstance)
+			end)
+
+			if not pcallSuccess then
+				warn(string.format("[PathService] 路径计算异常: %s, 错误: %s",
+					request.unitId or "Unknown", tostring(pcallError)))
+			end
+
+			-- 关键：无论成功或失败，都必须减少 computingCount
+			computingCount = computingCount - 1
+
+			-- 触发回调（回调本身也用 pcall 保护）
+			if request.callback then
+				pcall(function()
+					request.callback(success, pathState)
+				end)
+			end
+		end)
+	end
+end
+
+-- 启动队列处理器
+RunService.Heartbeat:Connect(ProcessComputeQueue)
+
+--[[
+批量移动兵种到指定位置（用于战役系统） - V2.0性能优化版
+核心改进：
+1. 事件驱动移动（MoveToFinished）而非Heartbeat逐帧遍历
+2. 路径计算限流（队列机制）
+3. 分批启动（避免瞬时大量ComputeAsync）
+4. 降低更新频率（0.15秒而非60FPS）
+
 @param moveTargets table - {[unitInstance] = targetCFrame, ...}
 @param callbacks table - 回调函数表 {
     onUnitArrived = function(unitInstance, status),  -- 单位到达时回调
@@ -1062,6 +1235,7 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 	nextMoveId = nextMoveId + 1
 
 	local moveData = {}
+	local unitsList = {}  -- 用于分批启动
 	local moveCount = 0
 
 	-- 结果列表
@@ -1069,7 +1243,7 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 	local timedOutList = {}
 	local failedList = {}
 
-	-- 1. 为每个单位创建虚拟目标Part并开始寻路
+	-- 1. 准备所有单位数据
 	for unitInstance, targetCFrame in pairs(moveTargets) do
 		if unitInstance and unitInstance:FindFirstChild("Humanoid") and unitInstance:FindFirstChild("HumanoidRootPart") then
 			-- 创建虚拟目标Part
@@ -1089,13 +1263,17 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 				Arrived = false,
 				ForceTeleported = false,
 				StartTime = tick(),
-				LastPathRequest = 0
+				LastPathRequest = 0,
+				MoveToConnection = nil,  -- MoveToFinished连接
+				PathRequested = false,   -- 是否已请求路径
+
+				-- V2.0.4新增：持续MoveTo推进
+				LastMoveCommand = 0,     -- 上次发送MoveTo命令的时间
+				CurrentWaypoint = nil,   -- 当前目标路径点
+				HeartbeatConn = nil,     -- Heartbeat连接，用于持续推进
 			}
 
-			-- 请求路径
-			local unitId = unitInstance:GetAttribute("UnitId") or unitInstance.Name
-			PathService.RequestPath(unitInstance, targetPart, unitId)
-
+			table.insert(unitsList, unitInstance)
 			moveCount = moveCount + 1
 		end
 	end
@@ -1108,134 +1286,339 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 		return nil
 	end
 
-	print("[PathService] 批量寻路开始，兵种数量:", moveCount, "MoveId:", moveId)
+	print(string.format("[PathService] 批量寻路开始，兵种数量: %d, MoveId: %s", moveCount, moveId))
 
-	-- 2. 持续更新单位移动
+	-- ==================== 核心逻辑：事件驱动移动 ====================
+
+	--[[
+	为单位启动移动（事件驱动）
+	修复：
+	1. 检查 reached 标志，避免盲目推进路径点
+	2. 路径失效时重置 PathRequested 并重新入队
+	]]
+	local function StartUnitMovement(unitInstance)
+		local data = moveData[unitInstance]
+		-- V2.0修复：同时检查Arrived和Cancelled
+		if not data or data.Arrived or data.Cancelled then
+			return
+		end
+
+		local humanoid = unitInstance:FindFirstChild("Humanoid")
+		local rootPart = unitInstance:FindFirstChild("HumanoidRootPart")
+		if not humanoid or not rootPart then
+			data.Arrived = true
+			table.insert(failedList, unitInstance)
+			return
+		end
+
+		local unitId = unitInstance:GetAttribute("UnitId") or unitInstance.Name
+
+		-- 关键修复2：检查 reached 标志的 MoveToFinished 回调
+		data.MoveToConnection = humanoid.MoveToFinished:Connect(function(reached)
+			-- V2.0修复：同时检查Arrived和Cancelled
+			if data.Arrived or data.Cancelled then
+				return
+			end
+
+			-- 检查是否到达最终目标
+			local currentPos = rootPart.Position
+			local targetPos = data.TargetCFrame.Position
+			local distanceXZ = math.sqrt((currentPos.X - targetPos.X)^2 + (currentPos.Z - targetPos.Z)^2)
+			local arrivalThreshold = GameConfig.Campaign.ArrivalThreshold or 8
+
+			if distanceXZ < arrivalThreshold then
+				-- 到达目标
+				data.Arrived = true
+
+				-- 断开连接
+				if data.MoveToConnection then
+					data.MoveToConnection:Disconnect()
+					data.MoveToConnection = nil
+				end
+
+				-- V2.0.4新增：断开Heartbeat连接
+				if data.HeartbeatConn then
+					data.HeartbeatConn:Disconnect()
+					data.HeartbeatConn = nil
+				end
+
+				-- 清理
+				PathService.ClearPath(unitInstance)
+				if data.TargetPart and data.TargetPart.Parent then
+					data.TargetPart:Destroy()
+				end
+
+				table.insert(arrivedList, unitInstance)
+				DebugLog(string.format("✅ 兵种到达: %s", unitInstance.Name))
+
+				-- 触发回调
+				if onUnitArrived then
+					pcall(function()
+						onUnitArrived(unitInstance, "Arrived")
+					end)
+				end
+			elseif not reached then
+				-- 关键修复2：reached=false 表示被碰撞/打断，不要盲目推进路径点
+				DebugLog(string.format("⚠️ %s 移动被打断 (reached=false)，保持当前路径点", unitId))
+
+				local pathStatus = PathService.GetPathStatus(unitInstance)
+
+				if pathStatus == PathStatus.SUCCESS then
+					-- 路径有效，重新尝试移动到当前路径点（不推进索引）
+					local currentWaypoint = PathService.GetNextWaypoint(unitInstance)
+					if currentWaypoint then
+						humanoid:MoveTo(currentWaypoint)
+						DebugLog(string.format("🔄 %s 重试当前路径点", unitId))
+					else
+						-- 路径点无效，直线移动到目标
+						humanoid:MoveTo(data.TargetCFrame.Position)
+					end
+				else
+					-- 路径失效，需要重新寻路
+					DebugLog(string.format("🔄 %s 路径失效，重新寻路", unitId))
+
+					-- 🔑 关键修复：重试寻路时必须遵守"先 true，回调结束再 false"的约定
+					-- 防止同一单位被重复入队
+					if not data.PathRequested then
+						data.PathRequested = true
+
+						-- 重新加入限流队列
+						QueuePathCompute(unitInstance, data.TargetPart, unitId, function(success, pathState)
+							-- 🔑 关键：回调结束时无论成功失败都要重置
+							data.PathRequested = false
+
+							-- V2.0修复：检查任务是否已被取消
+							if data.Arrived or data.Cancelled then
+								DebugLog(string.format("⛔ %s 任务已取消，忽略重试回调", unitId))
+								return
+							end
+
+							if success and pathState and pathState.Status == PathStatus.SUCCESS then
+								local nextWaypoint = PathService.GetNextWaypoint(unitInstance)
+								if nextWaypoint then
+									humanoid:MoveTo(nextWaypoint)
+									DebugLog(string.format("🚀 %s 重新寻路成功", unitId))
+								else
+									humanoid:MoveTo(data.TargetCFrame.Position)
+								end
+							else
+								-- 寻路失败，直线移动
+								humanoid:MoveTo(data.TargetCFrame.Position)
+								DebugLog(string.format("⚠️ %s 重新寻路失败，直线移动", unitId))
+							end
+						end)
+					else
+						-- 已经在排队中，直接直线移动到目标
+						humanoid:MoveTo(data.TargetCFrame.Position)
+						DebugLog(string.format("⏳ %s 正在寻路中，临时直线移动", unitId))
+					end
+				end
+			else
+				-- 关键修复2：reached=true，正常到达当前路径点，推进到下一个
+				local pathStatus = PathService.GetPathStatus(unitInstance)
+				if pathStatus == PathStatus.SUCCESS then
+					-- 推进到下一个路径点
+					if not PathService.AdvancePath(unitInstance) then
+						-- 路径走完，直接移动到最终目标
+						humanoid:MoveTo(data.TargetCFrame.Position)
+						DebugLog(string.format("📍 %s 路径走完，直线移动到目标", unitId))
+					else
+						local nextWaypoint = PathService.GetNextWaypoint(unitInstance)
+						if nextWaypoint then
+							humanoid:MoveTo(nextWaypoint)
+						else
+							humanoid:MoveTo(data.TargetCFrame.Position)
+						end
+					end
+				else
+					-- 路径失败，直线移动
+					humanoid:MoveTo(data.TargetCFrame.Position)
+				end
+			end
+		end)
+
+		-- V2.0.4新增：注册持续MoveTo推进的Heartbeat连接
+		-- 这样即使MoveToFinished被挤停（reached=false），也能在Heartbeat中持续重试
+		local lastContinuousMove = 0
+		data.HeartbeatConn = RunService.Heartbeat:Connect(function()
+			-- V2.0.4：检查任务是否已完成或取消
+			if data.Arrived or data.Cancelled or not unitInstance or not unitInstance.Parent then
+				if data.HeartbeatConn then
+					data.HeartbeatConn:Disconnect()
+					data.HeartbeatConn = nil
+				end
+				return
+			end
+
+			local now = tick()
+			-- 每0.1s尝试一次持续推进
+			if now - lastContinuousMove < 0.1 then
+				return
+			end
+			lastContinuousMove = now
+
+			-- 获取当前路径点或目标位置
+			local targetPos = nil
+			local pathStatus = PathService.GetPathStatus(unitInstance)
+
+			if pathStatus == PathStatus.SUCCESS then
+				-- 路径有效，获取当前路径点
+				local currentWaypoint = PathService.GetNextWaypoint(unitInstance)
+				if currentWaypoint then
+					targetPos = currentWaypoint
+					data.CurrentWaypoint = currentWaypoint
+				else
+					targetPos = data.TargetCFrame.Position
+				end
+			else
+				-- 路径无效或无路径，直线移动到目标
+				targetPos = data.TargetCFrame.Position
+			end
+
+			-- 检查是否还需要移动（距离阈值）
+			if targetPos then
+				local currentPos = rootPart.Position
+				local distance = (currentPos - targetPos).Magnitude
+
+				-- 只有在距离超过阈值时才发送MoveTo
+				if distance > CONFIG.WAYPOINT_REACH_THRESHOLD then
+					-- 更新LastMoveCommand时间
+					data.LastMoveCommand = now
+
+					-- 发送持续的MoveTo命令
+					pcall(function()
+						humanoid:MoveTo(targetPos)
+					end)
+
+					DebugLog(string.format("📍 %s 持续推进: 距离=%.1f studs", unitId, distance))
+				end
+			end
+		end)
+
+		-- 请求路径（加入限流队列）
+		if not data.PathRequested then
+			data.PathRequested = true
+			QueuePathCompute(unitInstance, data.TargetPart, unitId, function(success, pathState)
+				-- 🔑 关键：回调结束时无论成功失败都要重置
+				data.PathRequested = false
+
+				-- V2.0修复：检查任务是否已被取消
+				if data.Arrived or data.Cancelled then
+					DebugLog(string.format("⛔ %s 任务已取消，忽略回调", unitId))
+					return
+				end
+
+				if success and pathState and pathState.Status == PathStatus.SUCCESS then
+					-- 路径计算成功，开始移动
+					local nextWaypoint = PathService.GetNextWaypoint(unitInstance)
+					if nextWaypoint then
+						humanoid:MoveTo(nextWaypoint)
+						DebugLog(string.format("🚀 %s 开始移动", unitId))
+					else
+						humanoid:MoveTo(data.TargetCFrame.Position)
+					end
+				else
+					-- 路径计算失败，直线移动
+					humanoid:MoveTo(data.TargetCFrame.Position)
+					DebugLog(string.format("⚠️ %s 寻路失败，直线移动", unitId))
+				end
+			end)
+		end
+	end
+
+	-- 2. 分批启动单位（避免瞬时大量ComputeAsync）
+	local startedCount = 0
+	local batchSize = CONFIG.BATCH_START_SIZE
+	local batchDelay = CONFIG.BATCH_START_DELAY
+
+	task.spawn(function()
+		while startedCount < #unitsList do
+			local batchEnd = math.min(startedCount + batchSize, #unitsList)
+			for i = startedCount + 1, batchEnd do
+				StartUnitMovement(unitsList[i])
+			end
+			startedCount = batchEnd
+
+			if startedCount < #unitsList then
+				DebugLog(string.format("🔄 批量启动进度: %d/%d", startedCount, #unitsList))
+				task.wait(batchDelay)
+			end
+		end
+	end)
+
+	-- 3. 定期检查超时和完成状态（降低频率）
+	local lastCheckTime = tick()
 	local checkConnection
 	checkConnection = RunService.Heartbeat:Connect(function()
+		local now = tick()
+
+		-- 节流：每CONFIG.BATCH_UPDATE_INTERVAL秒检查一次
+		if now - lastCheckTime < CONFIG.BATCH_UPDATE_INTERVAL then
+			return
+		end
+		lastCheckTime = now
+
 		local allArrived = true
 		local arrivedCount = 0
 
 		for unitInstance, data in pairs(moveData) do
 			if not data.Arrived then
-				-- 检查实例是否有效
+				-- 检查实例有效性
 				if not unitInstance or not unitInstance.Parent or not unitInstance:FindFirstChild("HumanoidRootPart") then
 					data.Arrived = true
-					arrivedCount = arrivedCount + 1
-					-- 清理目标Part
+					if data.MoveToConnection then
+						data.MoveToConnection:Disconnect()
+						data.MoveToConnection = nil
+					end
+					-- V2.0.4新增：断开Heartbeat连接
+					if data.HeartbeatConn then
+						data.HeartbeatConn:Disconnect()
+						data.HeartbeatConn = nil
+					end
 					if data.TargetPart and data.TargetPart.Parent then
 						data.TargetPart:Destroy()
 					end
-					-- 记录到failedList（实例无效）
 					table.insert(failedList, unitInstance)
-					warn("[PathService] 兵种实例无效:", unitInstance and unitInstance.Name or "nil")
+					arrivedCount = arrivedCount + 1
 					continue
 				end
 
-				local rootPart = unitInstance.HumanoidRootPart
-				local humanoid = unitInstance.Humanoid
+				-- 超时检测
+				if now - data.StartTime > GameConfig.Campaign.MoveTimeout then
+					warn(string.format("[PathService] ⏱️ 兵种寻路超时，强制传送: %s", unitInstance.Name))
 
-				-- V2.0修复：使用XZ平面距离，忽略Y轴差异
-				local currentPos = rootPart.Position
-				local targetPos = data.TargetCFrame.Position
-				local distanceXZ = math.sqrt((currentPos.X - targetPos.X)^2 + (currentPos.Z - targetPos.Z)^2)
+					local rootPart = unitInstance.HumanoidRootPart
+					rootPart.CFrame = data.TargetCFrame
 
-				-- 到达检测（仅检查XZ平面）
-				local arrivalThreshold = GameConfig.Campaign.ArrivalThreshold or 8
-				if distanceXZ < arrivalThreshold then
 					data.Arrived = true
+					data.ForceTeleported = true
 					arrivedCount = arrivedCount + 1
 
-					-- 停止移动
-					humanoid:MoveTo(rootPart.Position)
-
-					-- 清理路径
+					-- 清理
+					if data.MoveToConnection then
+						data.MoveToConnection:Disconnect()
+						data.MoveToConnection = nil
+					end
+					-- V2.0.4新增：断开Heartbeat连接
+					if data.HeartbeatConn then
+						data.HeartbeatConn:Disconnect()
+						data.HeartbeatConn = nil
+					end
 					PathService.ClearPath(unitInstance)
-
-					-- 清理目标Part
 					if data.TargetPart and data.TargetPart.Parent then
 						data.TargetPart:Destroy()
 					end
 
-					-- 记录到arrivedList
-					table.insert(arrivedList, unitInstance)
+					table.insert(timedOutList, unitInstance)
 
-					DebugLog(string.format("兵种到达目标: %s", unitInstance.Name))
-
-					-- 触发单位到达回调
+					-- 触发回调
 					if onUnitArrived then
 						pcall(function()
-							onUnitArrived(unitInstance, "Arrived")
+							onUnitArrived(unitInstance, "TimedOut")
 						end)
 					end
 				else
 					allArrived = false
-
-					-- 超时检测
-					if tick() - data.StartTime > GameConfig.Campaign.MoveTimeout then
-						warn("[PathService] 兵种寻路超时，强制传送:", unitInstance.Name)
-
-						-- 强制传送到目标位置
-						rootPart.CFrame = data.TargetCFrame
-
-						data.Arrived = true
-						data.ForceTeleported = true
-						arrivedCount = arrivedCount + 1
-
-						-- 清理
-						PathService.ClearPath(unitInstance)
-						if data.TargetPart and data.TargetPart.Parent then
-							data.TargetPart:Destroy()
-						end
-
-						-- 记录到timedOutList
-						table.insert(timedOutList, unitInstance)
-
-						-- 触发单位到达回调（标记为超时）
-						if onUnitArrived then
-							pcall(function()
-								onUnitArrived(unitInstance, "TimedOut")
-							end)
-						end
-					else
-						-- 正常寻路逻辑
-						local pathStatus = PathService.GetPathStatus(unitInstance)
-
-						-- 如果需要重新寻路
-						if pathStatus == PathStatus.NEED_REPATH or pathStatus == PathStatus.IDLE or pathStatus == PathStatus.FAILED then
-							local now = tick()
-							if now - data.LastPathRequest >= CONFIG.PATH_RECALC_COOLDOWN then
-								local unitId = unitInstance:GetAttribute("UnitId") or unitInstance.Name
-								PathService.RequestPath(unitInstance, data.TargetPart, unitId)
-								data.LastPathRequest = now
-							end
-						end
-
-						-- 如果有有效路径，沿路径点移动
-						if pathStatus == PathStatus.SUCCESS then
-							local nextWaypoint = PathService.GetNextWaypoint(unitInstance)
-
-							if nextWaypoint then
-								-- 移动到当前路径点
-								humanoid:MoveTo(nextWaypoint)
-
-								-- 检查是否到达当前路径点
-								if PathService.HasReachedWaypoint(unitInstance) then
-									-- 推进到下一个路径点
-									if not PathService.AdvancePath(unitInstance) then
-										-- 路径走完，直接移动到目标
-										humanoid:MoveTo(data.TargetCFrame.Position)
-									end
-								end
-							else
-								-- 没有路径点，直接移动到目标
-								humanoid:MoveTo(data.TargetCFrame.Position)
-							end
-						elseif pathStatus == PathStatus.FAILED then
-							-- 寻路失败，直线移动
-							humanoid:MoveTo(data.TargetCFrame.Position)
-						end
-					end
 				end
 			else
 				arrivedCount = arrivedCount + 1
@@ -1247,10 +1630,14 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 			checkConnection:Disconnect()
 			activeMoves[moveId] = nil
 
-			print("[PathService] 批量寻路完成，到达数量:", arrivedCount, "/", moveCount)
+			print(string.format("[PathService] ✅ 批量寻路完成，到达: %d/%d", arrivedCount, moveCount))
 
-			-- 清理所有虚拟目标Part
-			for _, data in pairs(moveData) do
+			-- 清理所有连接和资源
+			for unitInstance, data in pairs(moveData) do
+				if data.MoveToConnection then
+					data.MoveToConnection:Disconnect()
+					data.MoveToConnection = nil
+				end
 				if data.TargetPart and data.TargetPart.Parent then
 					data.TargetPart:Destroy()
 				end
@@ -1277,6 +1664,7 @@ end
 --[[
 取消批量移动任务
 @param moveId string - 移动任务ID
+V2.0修复：清空computeQueue中的请求，防止已取消的单位继续寻路
 ]]
 function PathService.CancelGroupMove(moveId)
 	local moveTask = activeMoves[moveId]
@@ -1284,22 +1672,67 @@ function PathService.CancelGroupMove(moveId)
 		return false
 	end
 
-	-- 断开连接
+	-- 断开Heartbeat连接
 	if moveTask.connection then
 		moveTask.connection:Disconnect()
 	end
 
-	-- 清理所有单位的路径和目标Part
+	-- V2.0修复：从computeQueue中移除此任务相关的路径请求
+	local cancelledCount = 0
+	for i = #computeQueue, 1, -1 do
+		local request = computeQueue[i]
+		local data = moveTask.moveData[request.unitInstance]
+		if data then
+			-- 找到了此任务相关的请求，移除它
+			table.remove(computeQueue, i)
+			cancelledCount = cancelledCount + 1
+		end
+	end
+
+	if cancelledCount > 0 then
+		DebugLog(string.format("从队列中移除 %d 个未处理的路径请求", cancelledCount))
+	end
+
+	-- 清理所有单位的路径、事件连接和目标Part
 	for unitInstance, data in pairs(moveTask.moveData) do
+		-- V2.0修复：标记为已取消，防止回调继续推进
+		data.Arrived = true  -- 标记为已完成（取消也算完成）
+		data.Cancelled = true  -- 标记为已取消
+
+		-- 断开MoveToFinished事件连接
+		if data.MoveToConnection then
+			data.MoveToConnection:Disconnect()
+			data.MoveToConnection = nil
+		end
+
+		-- V2.0.4新增：断开Heartbeat连接
+		if data.HeartbeatConn then
+			data.HeartbeatConn:Disconnect()
+			data.HeartbeatConn = nil
+		end
+
+		-- 清理路径
 		PathService.ClearPath(unitInstance)
+
+		-- 删除目标Part
 		if data.TargetPart and data.TargetPart.Parent then
 			data.TargetPart:Destroy()
+			data.TargetPart = nil  -- 防止重复Destroy
+		end
+
+		-- 停止移动
+		local humanoid = unitInstance and unitInstance:FindFirstChild("Humanoid")
+		if humanoid then
+			local rootPart = unitInstance:FindFirstChild("HumanoidRootPart")
+			if rootPart then
+				humanoid:MoveTo(rootPart.Position)
+			end
 		end
 	end
 
 	activeMoves[moveId] = nil
 
-	DebugLog("取消批量移动任务:", moveId)
+	DebugLog("取消批量移动任务:", moveId, "清理队列请求:", cancelledCount)
 	return true
 end
 

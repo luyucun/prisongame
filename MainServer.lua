@@ -48,6 +48,8 @@ local UnitManager = require(ServerScriptService.Systems.UnitManager)
 local WeaponEffectSystem = require(ServerScriptService.Systems.WeaponEffectSystem)
 -- V2.0新增 - 战役系统
 local CampaignManager = require(ServerScriptService.Systems.CampaignManager)
+-- V2.0.1新增 - 门控系统
+local DoorControlService = require(ServerScriptService.Systems.DoorControlService)
 
 -- ==================== 系统初始化顺序 ====================
 
@@ -85,6 +87,20 @@ local function InitializeServer()
         initializationFailed = true
     else
         print(GameConfig.LOG_PREFIX, "基地系统初始化成功")
+    end
+
+    -- 1.1 初始化门控系统 (V2.0.1新增)
+    print(GameConfig.LOG_PREFIX, "步骤1.1: 初始化门控系统...")
+    success, result = pcall(function()
+        return DoorControlService.Initialize()
+    end)
+    if not success then
+        warn(GameConfig.LOG_PREFIX, "门控系统初始化失败(异常):", result)
+        -- 门控不是关键系统，失败不阻止游戏运行
+    elseif result == false then
+        warn(GameConfig.LOG_PREFIX, "门控系统初始化失败(返回false)")
+    else
+        print(GameConfig.LOG_PREFIX, "门控系统初始化成功")
     end
 
     -- 2. 初始化货币系统(连接远程事件)
@@ -386,3 +402,51 @@ if GameConfig.DEBUG_MODE then
     print("  _G.DebugGetPlayerData(playerName) - 查看玩家数据")
     print("  _G.DebugGetHomeOccupancy() - 查看基地占用状态")
 end
+
+-- ==================== 玩家事件处理 (V2.0.1新增) ====================
+
+local Players = game:GetService("Players")
+
+-- 玩家加入时初始化基地
+Players.PlayerAdded:Connect(function(player)
+	print(GameConfig.LOG_PREFIX, "玩家加入:", player.Name)
+
+	-- 等待PlayerManager分配基地
+	task.wait(1)
+
+	-- 获取玩家基地ID
+	local homeId = PlayerManager.GetPlayerHomeId(player)
+	if homeId and homeId > 0 then
+		-- 初始化玩家基地（确保门关闭）
+		pcall(function()
+			HomeSystem.InitializePlayerHome(homeId, player)
+		end)
+	end
+end)
+
+-- 玩家离开时清理
+Players.PlayerRemoving:Connect(function(player)
+	print(GameConfig.LOG_PREFIX, "玩家离开:", player.Name)
+
+	local playerId = player.UserId
+	local homeId = PlayerManager.GetPlayerHomeId(player)
+
+	-- 1. 如果玩家在战役中，强制结束战役并关门
+	local campaignData = CampaignManager.ActiveCampaigns[playerId]
+	if campaignData then
+		print(GameConfig.LOG_PREFIX, "玩家在战役中离开，强制结束战役")
+		pcall(function()
+			CampaignManager.OnCampaignEnd(campaignData, false)
+		end)
+	end
+
+	-- 2. 清理基地（关闭门）
+	if homeId then
+		pcall(function()
+			HomeSystem.CleanupPlayerHome(homeId, player)
+		end)
+	end
+end)
+
+print(GameConfig.LOG_PREFIX, "玩家事件处理已注册")
+
