@@ -83,6 +83,16 @@ GameConfig.Campaign = {
 	}
 }
 
+-- ==================== 门控系统配置 (V2.0.1) ====================
+GameConfig.Door = {
+	TweenDuration = 1,                       -- 动画时长(秒)
+	LeftOpenAngle = 90,                      -- 左门打开角度(度)
+	RightOpenAngle = -90,                    -- 右门打开角度(度)
+	ClosedAngle = 0,                         -- 关闭角度(度)
+	EasingStyle = Enum.EasingStyle.Quad,     -- 缓动样式
+	EasingDirection = Enum.EasingDirection.InOut  -- 缓动方向
+}
+
 -- ==================== 调试配置 ====================
 -- 是否启用调试模式
 GameConfig.DEBUG_MODE = true
