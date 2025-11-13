@@ -58,6 +58,55 @@ local function FindStagePart(stageFolder, partName)
 end
 
 --[[
+    查找关卡的空气墙（V2.0.3新增）
+    @param stageFolder Folder - 关卡文件夹
+    @return Part|nil - AirWall Part，未找到返回nil
+]]
+local function FindAirWall(stageFolder)
+    if not stageFolder then
+        warn("[StageService] FindAirWall: stageFolder为nil")
+        return nil
+    end
+
+    local airWall = FindStagePart(stageFolder, "AirWall")
+
+    if not airWall then
+        warn("[StageService] 未找到AirWall，关卡:", stageFolder.Name, "请检查模板配置")
+    end
+
+    return airWall
+end
+
+--[[
+    设置空气墙状态（V2.0.3新增）
+    @param stageFolder Folder - 关卡文件夹
+    @param isOpen boolean - true=开启（玩家可通过，CanCollide=false），false=关闭（阻挡玩家，CanCollide=true）
+    @return boolean - 是否设置成功
+]]
+function StageService.SetAirWallState(stageFolder, isOpen)
+    local airWall = FindAirWall(stageFolder)
+
+    if not airWall then
+        -- 空气墙缺失，返回false但不中断流程
+        return false
+    end
+
+    -- 设置碰撞属性（isOpen=true时，CanCollide=false，允许通过）
+    airWall.CanCollide = not isOpen
+
+    -- 可选：调试时可以修改透明度
+    -- 开启时更透明（0.8），关闭时更可见（0.3）
+    if airWall:IsA("BasePart") then
+        airWall.Transparency = isOpen and 0.9 or 0.5
+    end
+
+    print(string.format("[StageService] 空气墙状态更新: %s, 开启=%s, CanCollide=%s",
+        stageFolder.Name, tostring(isOpen), tostring(airWall.CanCollide)))
+
+    return true
+end
+
+--[[
     获取或创建关卡
     @param playerId number - 玩家ID
     @param stageNum number - 关卡编号
@@ -79,10 +128,14 @@ function StageService.GetOrCreateStage(playerId, stageNum)
                         warn("[StageService] Stage001缓存失效，HomeId已变化")
                         StageService.StageCache[playerId][stageNum] = nil
                     else
+                        -- V2.0.3：刷新缓存关卡的空气墙状态为关闭
+                        StageService.SetAirWallState(cached, false)
                         return cached
                     end
                 end
             else
+                -- V2.0.3：刷新缓存关卡的空气墙状态为关闭
+                StageService.SetAirWallState(cached, false)
                 return cached
             end
         end
@@ -112,6 +165,8 @@ function StageService.GetOrCreateStage(playerId, stageNum)
         local existing = stageFolder:FindFirstChild("Stage001")
         if existing then
             print("[StageService] Stage001已存在（场景预制），homeId:", homeId)
+            -- V2.0.3：场景预制的Stage001也需要设置空气墙状态
+            StageService.SetAirWallState(existing, false)
             -- 缓存并返回
             if not StageService.StageCache[playerId] then
                 StageService.StageCache[playerId] = {}
@@ -227,6 +282,9 @@ function StageService.GenerateStage001(homeId)
         -- 8. 加载敌人数据
         StageService.LoadEnemyData(newStage, 1)
 
+        -- V2.0.3：生成后默认锁定空气墙
+        StageService.SetAirWallState(newStage, false)
+
         return newStage
     end)
 
@@ -339,6 +397,9 @@ function StageService.GenerateStage(playerId, stageNum)
 
         -- 加载敌人数据
         StageService.LoadEnemyData(newStage, stageNum)
+
+        -- V2.0.3：生成后默认锁定空气墙
+        StageService.SetAirWallState(newStage, false)
 
         return newStage
     end)
@@ -543,6 +604,40 @@ function StageService.GetPlayerHomeId(playerId)
     -- 临时实现：遍历查找
     local PlayerManager = require(game.ServerScriptService.Core.PlayerManager)
     return PlayerManager.GetPlayerHomeId(game.Players:GetPlayerByUserId(playerId))
+end
+
+--[[
+    解锁关卡的空气墙（V2.0.3新增）
+    便捷接口：获取关卡并解锁空气墙
+    @param playerId number - 玩家ID
+    @param stageNum number - 关卡编号
+    @return boolean - 是否成功解锁
+]]
+function StageService.UnlockStage(playerId, stageNum)
+    local stageFolder = StageService.GetOrCreateStage(playerId, stageNum)
+    if not stageFolder then
+        warn("[StageService] UnlockStage失败：关卡未找到，stageNum:", stageNum)
+        return false
+    end
+
+    return StageService.SetAirWallState(stageFolder, true)
+end
+
+--[[
+    锁定关卡的空气墙（V2.0.3新增）
+    便捷接口：获取关卡并锁定空气墙
+    @param playerId number - 玩家ID
+    @param stageNum number - 关卡编号
+    @return boolean - 是否成功锁定
+]]
+function StageService.LockStage(playerId, stageNum)
+    local stageFolder = StageService.GetOrCreateStage(playerId, stageNum)
+    if not stageFolder then
+        warn("[StageService] LockStage失败：关卡未找到，stageNum:", stageNum)
+        return false
+    end
+
+    return StageService.SetAirWallState(stageFolder, false)
 end
 
 -- 导出

@@ -421,6 +421,18 @@ function CampaignManager.MarchToStage(campaignData, stageNum)
 		return CampaignManager.OnCampaignEnd(campaignData, false)
 	end
 
+	-- V2.0.3：解锁当前关的空气墙（允许玩家进入）
+	StageService.SetAirWallState(stageFolder, true)
+
+	-- V2.0.3：确保下一关的空气墙保持锁定（如果已生成）
+	local nextStageNum = stageNum + 1
+	if nextStageNum <= campaignData.TotalStages then
+		local nextStageFolder = StageService.GetOrCreateStage(campaignData.PlayerId, nextStageNum)
+		if nextStageFolder then
+			StageService.SetAirWallState(nextStageFolder, false)
+		end
+	end
+
 	-- V2.0修复：使用递归搜索，支持IdleFloor在子文件夹中（如Stage001/StageNodes/IdleFloor）
 	local targetIdleFloor = stageFolder:FindFirstChild("IdleFloor", true)
 	if not targetIdleFloor then
@@ -703,15 +715,26 @@ function CampaignManager.OnStageClear(campaignData, stageNum)
 		return CampaignManager.OnVictory(campaignData)
 	end
 
-	-- 提前生成下下关
+	-- 前往下一关
 	local nextStage = stageNum + 1
+
+	-- V2.0.3：立刻解锁下一关的空气墙
+	local nextStageFolder = StageService.GetOrCreateStage(campaignData.PlayerId, nextStage)
+	if nextStageFolder then
+		StageService.SetAirWallState(nextStageFolder, true)
+	end
+
+	-- 提前生成下下关（并保持其空气墙锁定）
 	if nextStage + 1 <= campaignData.TotalStages then
 		task.spawn(function()
-			StageService.GetOrCreateStage(campaignData.PlayerId, nextStage + 1)
+			local nextNextStageFolder = StageService.GetOrCreateStage(campaignData.PlayerId, nextStage + 1)
+			if nextNextStageFolder then
+				-- V2.0.3：确保新预加载的下下关空气墙保持锁定
+				StageService.SetAirWallState(nextNextStageFolder, false)
+			end
 		end)
 	end
 
-	-- 前往下一关
 	campaignData.CurrentStage = nextStage
 	task.wait(2)  -- 等待2秒
 	CampaignManager.MarchToStage(campaignData, nextStage)
@@ -799,6 +822,16 @@ function CampaignManager.OnCampaignEnd(campaignData, isVictory)
 	-- 重生兵种
 	CampaignManager.RespawnUnits(campaignData)
 
+	-- V2.0.3修复：战役彻底结束后，清除所有单位的CampaignKeepInstance标记
+	-- 这样下次战役开始前，单位恢复正常状态
+	for unitInstance, unitData in pairs(campaignData.Units) do
+		if unitInstance and unitInstance.Parent then
+			pcall(function()
+				unitInstance:SetAttribute("CampaignKeepInstance", false)
+			end)
+		end
+	end
+
 	-- 清理关卡
 	StageService.CleanupStages(campaignData.PlayerId)
 
@@ -885,17 +918,35 @@ function CampaignManager.RespawnUnits(campaignData)
 	-- V2.0.1修复：支持重生死亡隐藏的单位
 	for unitInstance, unitData in pairs(campaignData.Units) do
 		if unitInstance then
+			-- V2.0.3修复：检查单位是否已被销毁（避免Parent locked错误）
+			-- 如果实例已经被Destroy()，跳过该单位
+			if not unitInstance:IsDescendantOf(game) and unitInstance.Parent == nil then
+				-- 检查是否真的被销毁了（Parent locked状态）
+				local success = pcall(function()
+					local _ = unitInstance.Name  -- 尝试访问属性
+				end)
+				if not success then
+					warn("[CampaignManager] 单位已被销毁，跳过重生:", unitData.UnitId)
+					continue
+				end
+			end
+
 			-- V2.0.3修复：如果单位被隐藏（Parent = nil），重新挂回基地根节点（PlayerHome）
-			-- 而不是直接挂到IdleFloor Part下，防止：
-			-- 1. 模型坐标依赖于当前IdleFloor Part的位置/旋转
-			-- 2. StageService清理关卡时连带销毁或移动模型
+			-- 使用pcall包裹，防止Parent locked错误
 			if not unitInstance.Parent then
 				local homeFolder = homeIdleFloor.Parent
-				if homeFolder then
-					unitInstance.Parent = homeFolder
-				else
-					warn("[CampaignManager] 找不到基地根节点（IdleFloor.Parent）")
-					unitInstance.Parent = homeIdleFloor  -- 回退方案
+				local success, err = pcall(function()
+					if homeFolder then
+						unitInstance.Parent = homeFolder
+					else
+						warn("[CampaignManager] 找不到基地根节点（IdleFloor.Parent）")
+						unitInstance.Parent = homeIdleFloor  -- 回退方案
+					end
+				end)
+
+				if not success then
+					warn("[CampaignManager] 设置Parent失败（单位可能已被销毁）:", unitData.UnitId, err)
+					continue
 				end
 			end
 
@@ -932,12 +983,9 @@ function CampaignManager.RespawnUnits(campaignData)
 			-- V2.0.1新增：恢复动画和Humanoid状态（必须在播放特效后）
 			RestoreUnitAnimationState(unitInstance, unitData.UnitId)
 
-			-- V2.0.1新增：延迟清除战役标记，确保死亡动画轨道回调不会冻结尸体
-			task.delay(1, function()
-				if unitInstance then
-					unitInstance:SetAttribute("CampaignKeepInstance", false)
-				end
-			end)
+			-- V2.0.3修复：不要在这里清除CampaignKeepInstance
+			-- 保持该标记直到战役彻底结束（在OnCampaignEnd中统一清除）
+			-- 这样多关卡战斗中单位死亡后不会被Destroy()
 		end
 	end
 end
