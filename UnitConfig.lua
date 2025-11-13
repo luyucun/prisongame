@@ -38,6 +38,8 @@ UnitData = {
     Price = number,            -- 购买价格(金币)
     GridSize = number,         -- 占地面积(格子数:1或4)
     Description = string,      -- 描述
+    -- V2.0.2新增UI配置
+    Icon = string,             -- 兵种图标资源ID (格式: "rbxassetid://数字" 或留空使用默认图标)
     -- V1.4新增属性
     BaseHealth = number,       -- 基础生命值
     BaseAttack = number,       -- 基础攻击力
@@ -100,6 +102,8 @@ UnitConfig.Units = {
 		Price = 100,
 		GridSize = 1,
 		Description = "最基础的近战单位,适合新手使用",
+		-- V2.0.2新增UI配置
+		Icon = "rbxassetid://98616255072587",  -- 兵种图标(暂时使用默认值,后续替换为实际图标ID)
 		-- V1.4新增属性
 		BaseHealth = 100,       -- 基础生命值
 		BaseAttack = 10,        -- 基础攻击力
@@ -141,6 +145,8 @@ UnitConfig.Units = {
 		Price = 200,
 		GridSize = 1,
 		Description = "进阶的近战单位,比Noob更强力",
+		-- V2.0.2新增UI配置
+		Icon = "rbxassetid://80710637196540",  -- 兵种图标(暂时使用默认值,后续替换为实际图标ID)
 		-- V1.4新增属性
 		BaseHealth = 100,       -- 基础生命值
 		BaseAttack = 10,        -- 基础攻击力
@@ -182,6 +188,9 @@ UnitConfig.Units = {
 		Price = 200,
 		GridSize = 1,
 		Description = "测试基础远程单位",
+		-- V2.0.2新增UI配置
+		Icon = "rbxassetid://96684518109328",  -- 兵种图标(暂时使用默认值,后续替换为实际图标ID)
+		-- V1.4新增属性
 		-- V1.4新增属性
 		BaseHealth = 100,       -- 基础生命值
 		BaseAttack = 10,        -- 基础攻击力
@@ -224,6 +233,9 @@ UnitConfig.Units = {
 		Price = 200,
 		GridSize = 1,
 		Description = "测试基础远程单位",
+		-- V2.0.2新增UI配置
+		Icon = "rbxassetid://80744151898936",  -- 兵种图标(暂时使用默认值,后续替换为实际图标ID)
+		-- V1.4新增属性
 		-- V1.4新增属性
 		BaseHealth = 100,       -- 基础生命值
 		BaseAttack = 10,        -- 基础攻击力
@@ -694,6 +706,21 @@ function UnitConfig.GetProjectileConfig(unitId)
 	end
 
 	return defaultConfig
+end
+
+-- ==================== V2.0.2新增: UI配置接口 ====================
+
+--[[
+获取兵种图标资源ID
+@param unitId string - 兵种ID
+@return string - 图标资源ID (格式: "rbxassetid://数字")
+]]
+function UnitConfig.GetIcon(unitId)
+	local unitData = UnitConfig.GetUnitById(unitId)
+	if not unitData or not unitData.Icon or unitData.Icon == "" then
+		return "rbxassetid://0"  -- 返回默认图标
+	end
+	return unitData.Icon
 end
 
 -- ==================== V1.6新增: 寻路配置接口 ====================

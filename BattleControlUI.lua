@@ -35,50 +35,49 @@ local PlacementController = nil
 local DragSystem = nil
 local RemovalController = nil
 
--- 延迟获取其他控制器（V2.0修复：添加安全检查）
+-- 延迟获取其他控制器（V2.0.2修复：使用_G全局对象而非require）
 task.spawn(function()
-	local success, err = pcall(function()
+	-- 等待控制器初始化
+	task.wait(2)
+
+	-- 从全局对象获取PlacementController
+	if _G.PlacementController then
+		PlacementController = _G.PlacementController
+	else
+		warn("[BattleControlUI] PlacementController未找到")
+	end
+
+	-- 从全局对象获取RemovalController
+	if _G.RemovalController then
+		RemovalController = _G.RemovalController
+	else
+		warn("[BattleControlUI] RemovalController未找到")
+	end
+
+	-- DragSystem需要require（它是ModuleScript）
+	local success, result = pcall(function()
 		local playerScripts = player:WaitForChild("PlayerScripts", 10)
-		if not playerScripts then
-			warn("[BattleControlUI] PlayerScripts未找到")
-			return
+		if playerScripts then
+			local controllers = playerScripts:WaitForChild("Controllers", 10)
+			if controllers then
+				local dragModule = controllers:WaitForChild("DragSystem", 10)
+				if dragModule and dragModule:IsA("ModuleScript") then
+					return require(dragModule)
+				end
+			end
 		end
+		return nil
+	end)
 
-		local controllers = playerScripts:WaitForChild("Controllers", 10)
-		if not controllers then
-			warn("[BattleControlUI] Controllers文件夹未找到")
-			return
-		end
-
-		-- 安全加载PlacementController
-		local placementModule = controllers:WaitForChild("PlacementController", 10)
-		if placementModule and placementModule:IsA("ModuleScript") then
-			PlacementController = require(placementModule)
-		else
-			warn("[BattleControlUI] PlacementController加载失败")
-		end
-
-		-- 安全加载DragSystem
-		local dragModule = controllers:WaitForChild("DragSystem", 10)
-		if dragModule and dragModule:IsA("ModuleScript") then
-			DragSystem = require(dragModule)
+	if success and result then
+		DragSystem = result
+	else
+		-- 尝试从全局对象获取
+		if _G.DragSystem then
+			DragSystem = _G.DragSystem
 		else
 			warn("[BattleControlUI] DragSystem加载失败")
 		end
-
-		-- 安全加载RemovalController
-		local removalModule = controllers:WaitForChild("RemovalController", 10)
-		if removalModule and removalModule:IsA("ModuleScript") then
-			RemovalController = require(removalModule)
-		else
-			warn("[BattleControlUI] RemovalController加载失败")
-		end
-
-		print("[BattleControlUI] 控制器加载完成")
-	end)
-
-	if not success then
-		warn("[BattleControlUI] 控制器加载错误:", err)
 	end
 end)
 
@@ -106,8 +105,6 @@ local function LockHomeOperations(locked)
 	if RemovalController and RemovalController.SetEnabled then
 		RemovalController.SetEnabled(not locked)
 	end
-
-	print("[BattleControlUI] 基地操作", locked and "已锁定" or "已解锁")
 end
 
 --[[
@@ -118,9 +115,6 @@ local function ShowStatusText(text)
 	if statusTextLabel then
 		statusTextLabel.Text = text
 		statusTextLabel.Visible = true
-	else
-		-- 如果没有StatusText UI，在控制台输出
-		print("[战役状态]", text)
 	end
 end
 
@@ -155,8 +149,6 @@ end
 Play按钮点击事件
 ]]
 playButton.MouseButton1Click:Connect(function()
-	print("[BattleControlUI] 请求开始战役")
-
 	-- 触发服务器事件
 	local requestStart = CampaignEvents:FindFirstChild("RequestStartCampaign")
 	if requestStart then
@@ -170,8 +162,6 @@ end)
 Retreat按钮点击事件
 ]]
 retreatButton.MouseButton1Click:Connect(function()
-	print("[BattleControlUI] 请求撤退")
-
 	-- 触发服务器事件
 	local requestRetreat = CampaignEvents:FindFirstChild("RequestRetreat")
 	if requestRetreat then
@@ -191,8 +181,6 @@ end)
 local stateUpdateEvent = CampaignEvents:FindFirstChild("CampaignStateUpdate")
 if stateUpdateEvent then
 	stateUpdateEvent.OnClientEvent:Connect(function(state, stageNum)
-		print("[BattleControlUI] 战役状态更新:", state, "关卡:", stageNum)
-
 		if state == "Preparing" then
 			-- 准备阶段
 			playButton.Visible = false
@@ -251,8 +239,6 @@ end
 local progressEvent = CampaignEvents:FindFirstChild("StageProgress")
 if progressEvent then
 	progressEvent.OnClientEvent:Connect(function(stageNum, status)
-		print("[BattleControlUI] 关卡进度:", stageNum, status)
-
 		if status == "Clear" then
 			ShowStatusText("✅ 第 " .. stageNum .. " 关完成！")
 		end
@@ -271,8 +257,6 @@ if lockEvent then
 end
 
 -- ==================== 初始化 ====================
-
-print("[BattleControlUI] 初始化完成")
 
 -- 确保初始状态正确
 playButton.Visible = true

@@ -37,11 +37,12 @@ local BattleConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChi
 
 local CONFIG = {
 	-- 路径请求冷却（秒）
-	-- V2.0.4优化：从0.5降低到0.2，加速被挤停单位的重新寻路
-	PATH_RECALC_COOLDOWN = 0.2,
+	-- V2.1.2修正：从0.5降低到0.3，平衡性能与响应性
+	PATH_RECALC_COOLDOWN = 0.3,
 
 	-- 目标移动阈值（studs）
-	TARGET_MOVE_THRESHOLD = 8,
+	-- V2.1.2修正：从30降低到15，避免"找不到人"
+	TARGET_MOVE_THRESHOLD = 15,
 
 	-- Waypoint到达阈值（studs）
 	WAYPOINT_REACH_THRESHOLD = 4,
@@ -50,10 +51,12 @@ local CONFIG = {
 	MAX_RETRY_COUNT = 3,
 
 	-- 连续阻挡次数上限
-	MAX_BLOCKED_COUNT = 3,
+	-- V2.1.3修复：从3增加到10，避免大规模行军时过早放弃寻路
+	MAX_BLOCKED_COUNT = 10,
 
 	-- 阻挡时间窗口（秒）
-	BLOCKED_TIME_WINDOW = 2,
+	-- V2.1.3修复：从2增加到5，给拥挤的单位更多时间疏散
+	BLOCKED_TIME_WINDOW = 5,
 
 	-- 降级策略：减小AgentRadius的比例
 	RADIUS_REDUCTION_RATIO = 0.85,
@@ -62,7 +65,6 @@ local CONFIG = {
 	MIN_AGENT_RADIUS = 0.5,
 
 	-- 近邻点采样半径（studs）
-	-- V2.0.4优化：增大到10，让PathfindingService给出的路径更远离士兵
 	NEIGHBOR_SAMPLE_RADIUS = 10,
 
 	-- 近邻点采样数量
@@ -75,17 +77,21 @@ local CONFIG = {
 	WAYPOINT_SPACING = 4,
 
 	-- 体型参数自动计算
-	-- V2.0.4优化：AUTO_RADIUS_MULTIPLIER从0.35降低到0.25，减少被挤阻概率
 	AUTO_RADIUS_MULTIPLIER = 0.25,  -- max(X,Z) * 0.25
 	AUTO_RADIUS_OFFSET = 0.2,       -- + 0.2 容差
 	AUTO_HEIGHT_OFFSET = 1,         -- Y + 1 容差
 
-	-- V2.0性能优化配置
-	BATCH_UPDATE_INTERVAL = 0.15,   -- 批量更新间隔（秒），降低Heartbeat频率
-	-- V2.0.4优化：从3提高到6，让同批次被阻挡的兵种更快拿到新路径
-	MAX_COMPUTE_PER_FRAME = 6,      -- 每帧最多执行的ComputeAsync数量（限流）
+	-- V2.1.2性能优化配置（修正吞吐量）
+	BATCH_UPDATE_INTERVAL = 0.15,   -- 批量更新间隔（秒），保持0.15
+	-- V2.1.2修正：提高到5，接近V2.0水平
+	-- 每0.15秒处理5个 ≈ 每秒33条路径，足够应对大多数战斗
+	MAX_COMPUTE_PER_FRAME = 5,      -- 每帧最多执行的ComputeAsync数量（限流）
+
+	-- V2.1.3修正：分批行军机制
 	BATCH_START_DELAY = 0.25,       -- 批量启动延迟（秒）
-	BATCH_START_SIZE = 8,           -- 每批启动的单位数量
+	BATCH_START_SIZE = 6,           -- V2.1.3修正：从8降低到6，每批启动的单位数量
+	MARCH_BATCH_LIMIT = 8,          -- V2.1.3新增：同时行军的最大单位数（超过则排队等待）
+	MARCH_TIMEOUT = 30,             -- V2.1.3新增：单位行军超时时间（秒）
 
 	-- 调试选项
 	DEBUG_SHOW_PATH = false,        -- 是否显示路径可视化
@@ -141,6 +147,9 @@ PathState = {
 
 local pathStates = {}  -- [unitModel] = PathState
 local agentParamsCache = {}  -- [unitId] = {Radius, Height, CanJump, CacheTime}
+
+-- V2.0.5前置声明：避免调用nil值
+local QueuePathCompute  -- 前置声明，稍后定义
 
 -- ==================== 日志函数 ====================
 
@@ -717,12 +726,19 @@ local function BuildPath(unitModel, targetModel, unitId)
 			end
 			pathState.LastBlockedTime = now
 
-			-- 连续阻挡次数过多，放弃寻路
+			-- 连续阻挡次数过多，放弃当前路径
 			if pathState.BlockedCount >= CONFIG.MAX_BLOCKED_COUNT then
-				DebugLog(string.format("%s 路径连续阻挡%d次，放弃寻路", unitId, pathState.BlockedCount))
-				pathState.Status = PathStatus.FAILED
-				pathState.LastRequestTime = now + 5  -- 5秒冷却
+				DebugLog(string.format("%s 路径连续阻挡%d次，清理并准备重新寻路", unitId, pathState.BlockedCount))
+
+				-- V2.1.3修复：不要标记为FAILED，而是清理路径数据并立即允许重新请求
+				-- 这样单位可以重新排队寻路，而不是永久卡死
 				ClearPathData(unitModel)
+				pathState.Status = PathStatus.NEED_REPATH
+				pathState.BlockedCount = 0  -- 重置阻挡计数
+				pathState.LastBlockedTime = nil
+				pathState.LastRequestTime = 0  -- 允许立即重建
+
+				DebugLog(string.format("%s 路径已重置，可重新寻路", unitId))
 				return
 			end
 
@@ -794,6 +810,44 @@ local function BuildPath(unitModel, targetModel, unitId)
 end
 
 -- ==================== 公共接口 ====================
+
+--[[
+请求路径（异步版本，用于战斗AI）- V2.0.5性能优化
+走限流队列，避免频繁ComputeAsync
+@param unitModel - 兵种模型
+@param targetModel - 目标模型
+@param unitId - 单位ID
+@param callback - 回调函数 function(success:boolean, pathState:table|nil)
+@return boolean - 是否成功入队
+]]
+function PathService.RequestPathAsync(unitModel, targetModel, unitId, callback)
+	if not unitModel or not targetModel then
+		if callback then
+			pcall(function() callback(false, nil) end)
+		end
+		return false
+	end
+
+	-- 目标Part（支持传Model或Part，ComputeQueue传Part更稳）
+	local targetPart = targetModel:FindFirstChild("HumanoidRootPart") or targetModel.PrimaryPart
+	if not targetPart then
+		if callback then
+			pcall(function() callback(false, nil) end)
+		end
+		return false
+	end
+
+	-- 入队限流（复用现有队列）
+	QueuePathCompute(unitModel, targetPart, unitId or tostring(unitModel), function(success, pathState)
+		if callback then
+			pcall(function()
+				callback(success, pathState)
+			end)
+		end
+	end)
+
+	return true
+end
 
 --[[
 请求路径（主接口）
@@ -1042,10 +1096,29 @@ local nextMoveId = 1
 
 -- ==================== V2.0性能优化: 路径计算限流队列 ====================
 
--- 路径计算队列
-local computeQueue = {}  -- {{unitInstance, targetPart, unitId, callback}, ...}
+-- V2.1优化：路径计算优先队列（按优先级排序）
+local computeQueue = {}  -- {{unitInstance, targetPart, unitId, callback, priority, queueTime}, ...}
 local computingCount = 0  -- 当前正在计算的数量
 local lastComputeCheckTime = 0
+
+-- V2.1新增：优先级计算函数
+local function CalculatePathPriority(unitInstance, targetPart)
+	-- 计算距离，距离越近优先级越高（数值越小）
+	local rootPart = unitInstance and unitInstance:FindFirstChild("HumanoidRootPart")
+	if not rootPart or not targetPart then
+		return 3  -- 低优先级
+	end
+
+	local distance = (rootPart.Position - targetPart.Position).Magnitude
+
+	if distance < 20 then
+		return 1  -- 高优先级（即将接敌）
+	elseif distance < 50 then
+		return 2  -- 中优先级
+	else
+		return 3  -- 低优先级（远距离）
+	end
+end
 
 -- 性能统计数据
 local performanceStats = {
@@ -1055,6 +1128,11 @@ local performanceStats = {
 	ActiveMoveTasks = 0,         -- 当前活跃的移动任务数
 	TotalUnitsMoving = 0,        -- 当前正在移动的单位数
 	LastResetTime = tick(),      -- 上次重置时间
+
+	-- V2.0.5新增：战斗寻路性能统计
+	BattlePathComputes = 0,      -- 战斗寻路ComputeAsync调用数
+	CampaignPathComputes = 0,    -- 战役寻路ComputeAsync调用数
+	AverageComputeTime = 0,      -- 平均ComputeAsync耗时（秒）
 }
 
 --[[
@@ -1086,8 +1164,10 @@ end
 function PathService.ResetPerformanceStats()
 	performanceStats.TotalPathRequests = 0
 	performanceStats.TotalComputeAsync = 0
+	performanceStats.BattlePathComputes = 0       -- V2.0.5新增
+	performanceStats.CampaignPathComputes = 0     -- V2.0.5新增
+	performanceStats.AverageComputeTime = 0       -- V2.0.5新增
 	performanceStats.LastResetTime = tick()
-	print("[PathService] 性能统计已重置")
 end
 
 --[[
@@ -1111,20 +1191,63 @@ function PathService.PrintPerformanceStats()
 end
 
 --[[
-将路径计算请求加入队列
+将路径计算请求加入队列（V2.1优化：支持优先队列）
 @param unitInstance - 单位实例
 @param targetPart - 目标Part
 @param unitId - 单位ID
 @param callback - 完成回调 function(success, pathState)
+@param pathType - 路径类型："Battle"或"Campaign"（可选，默认"Battle"）
+@param priority - 优先级（可选，如不提供则自动计算）
 ]]
-local function QueuePathCompute(unitInstance, targetPart, unitId, callback)
+QueuePathCompute = function(unitInstance, targetPart, unitId, callback, pathType, priority)
+	-- 如果没有指定优先级，自动计算
+	priority = priority or CalculatePathPriority(unitInstance, targetPart)
+
+	-- V2.1优化：检查是否已经在队列中，避免重复排队
+	for i, request in ipairs(computeQueue) do
+		if request.unitInstance == unitInstance then
+			-- V2.1.3修正：更新所有请求信息，避免使用旧数据
+			-- 销毁旧的targetPart引用（如果是临时创建的）
+			if request.targetPart and request.targetPart:IsA("Part") and request.targetPart.Name == "TempTarget" then
+				pcall(function() request.targetPart:Destroy() end)
+			end
+
+			-- 更新所有字段，保证使用最新的请求数据
+			request.targetPart = targetPart
+			request.callback = callback
+			request.pathType = pathType or "Battle"
+			request.priority = priority
+			request.queueTime = tick()
+
+			-- 重新排序
+			table.sort(computeQueue, function(a, b)
+				if a.priority == b.priority then
+					return a.queueTime < b.queueTime  -- 同优先级按时间排序
+				end
+				return a.priority < b.priority  -- 优先级越小越优先
+			end)
+			return
+		end
+	end
+
+	-- 新增请求
 	table.insert(computeQueue, {
 		unitInstance = unitInstance,
 		targetPart = targetPart,
 		unitId = unitId,
 		callback = callback,
-		queueTime = tick()
+		queueTime = tick(),
+		pathType = pathType or "Battle",  -- V2.0.5新增：标记路径类型
+		priority = priority,              -- V2.1新增：优先级
 	})
+
+	-- V2.1优化：按优先级排序
+	table.sort(computeQueue, function(a, b)
+		if a.priority == b.priority then
+			return a.queueTime < b.queueTime  -- 同优先级按时间排序
+		end
+		return a.priority < b.priority  -- 优先级越小越优先
+	end)
 
 	performanceStats.TotalPathRequests = performanceStats.TotalPathRequests + 1
 end
@@ -1165,6 +1288,13 @@ local function ProcessComputeQueue()
 
 		computingCount = computingCount + 1
 		performanceStats.TotalComputeAsync = performanceStats.TotalComputeAsync + 1
+
+		-- V2.0.5修复：根据pathType分类统计
+		if request.pathType == "Campaign" then
+			performanceStats.CampaignPathComputes = performanceStats.CampaignPathComputes + 1
+		else
+			performanceStats.BattlePathComputes = performanceStats.BattlePathComputes + 1
+		end
 
 		-- 异步执行路径计算（带异常保护）
 		task.spawn(function()
@@ -1243,6 +1373,10 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 	local timedOutList = {}
 	local failedList = {}
 
+	-- V2.1.3新增：内部分批调度
+	local pendingQueue = {}  -- 等待启动的单位队列
+	local marchingCount = 0  -- 当前正在行军的单位数量
+
 	-- 1. 准备所有单位数据
 	for unitInstance, targetCFrame in pairs(moveTargets) do
 		if unitInstance and unitInstance:FindFirstChild("Humanoid") and unitInstance:FindFirstChild("HumanoidRootPart") then
@@ -1262,7 +1396,7 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 				TargetCFrame = targetCFrame,
 				Arrived = false,
 				ForceTeleported = false,
-				StartTime = tick(),
+				StartTime = 0,  -- V2.1.3修正：实际启动时才设置StartTime
 				LastPathRequest = 0,
 				MoveToConnection = nil,  -- MoveToFinished连接
 				PathRequested = false,   -- 是否已请求路径
@@ -1286,17 +1420,79 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 		return nil
 	end
 
-	print(string.format("[PathService] 批量寻路开始，兵种数量: %d, MoveId: %s", moveCount, moveId))
+	DebugLog(string.format("[PathService] 批量寻路开始，兵种数量: %d, MoveId: %s, 批次限制: %d",
+		moveCount, moveId, CONFIG.MARCH_BATCH_LIMIT))
 
 	-- ==================== 核心逻辑：事件驱动移动 ====================
+
+	-- V2.1.3新增：前向声明
+	local TryStartNextBatch  -- 前置声明，稍后定义
+	local StartUnitMovement  -- 前置声明，稍后定义
+
+	--[[
+	V2.1.3新增：停止单位移动并播放Idle动画
+	]]
+	local function StopUnitMovement(unitInstance, reason)
+		local data = moveData[unitInstance]
+		if not data then return end
+
+		local humanoid = unitInstance:FindFirstChild("Humanoid")
+		local rootPart = unitInstance:FindFirstChild("HumanoidRootPart")
+
+		-- 停止移动
+		if humanoid and rootPart then
+			humanoid:MoveTo(rootPart.Position)
+		end
+
+		-- 断开事件连接
+		if data.MoveToConnection then
+			data.MoveToConnection:Disconnect()
+			data.MoveToConnection = nil
+		end
+		if data.HeartbeatConn then
+			data.HeartbeatConn:Disconnect()
+			data.HeartbeatConn = nil
+		end
+
+		-- 清理路径
+		PathService.ClearPath(unitInstance)
+
+		-- 播放Idle动画（如果有UnitAI或AnimationController）
+		local animator = humanoid and humanoid:FindFirstChild("Animator")
+		if animator then
+			-- 停止所有正在播放的动画
+			local tracks = animator:GetPlayingAnimationTracks()
+			for _, track in ipairs(tracks) do
+				track:Stop()
+			end
+		end
+
+		DebugLog(string.format("⏹️ 单位已停止: %s (%s)", unitInstance.Name, reason or "未知原因"))
+	end
+
+	--[[
+	V2.1.3新增：尝试从队列启动下一批单位
+	]]
+	TryStartNextBatch = function()
+		while marchingCount < CONFIG.MARCH_BATCH_LIMIT and #pendingQueue > 0 do
+			local unitInstance = table.remove(pendingQueue, 1)
+			if unitInstance and unitInstance.Parent then
+				StartUnitMovement(unitInstance)
+				marchingCount = marchingCount + 1
+				DebugLog(string.format("🚀 从队列启动单位: %s (当前行军数: %d/%d)",
+					unitInstance.Name, marchingCount, CONFIG.MARCH_BATCH_LIMIT))
+			end
+		end
+	end
 
 	--[[
 	为单位启动移动（事件驱动）
 	修复：
 	1. 检查 reached 标志，避免盲目推进路径点
 	2. 路径失效时重置 PathRequested 并重新入队
+	V2.1.3修正：启动时才设置StartTime
 	]]
-	local function StartUnitMovement(unitInstance)
+	StartUnitMovement = function(unitInstance)
 		local data = moveData[unitInstance]
 		-- V2.0修复：同时检查Arrived和Cancelled
 		if not data or data.Arrived or data.Cancelled then
@@ -1311,6 +1507,9 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 			return
 		end
 
+		-- V2.1.3新增：实际启动时才设置StartTime
+		data.StartTime = tick()
+
 		local unitId = unitInstance:GetAttribute("UnitId") or unitInstance.Name
 
 		-- 关键修复2：检查 reached 标志的 MoveToFinished 回调
@@ -1320,14 +1519,14 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 				return
 			end
 
-			-- 检查是否到达最终目标
+			-- V2.1.3修复：无论 reached 是 true 还是 false，都先检查是否已接近最终目标
 			local currentPos = rootPart.Position
 			local targetPos = data.TargetCFrame.Position
 			local distanceXZ = math.sqrt((currentPos.X - targetPos.X)^2 + (currentPos.Z - targetPos.Z)^2)
 			local arrivalThreshold = GameConfig.Campaign.ArrivalThreshold or 8
 
 			if distanceXZ < arrivalThreshold then
-				-- 到达目标
+				-- 到达目标（无论 reached 是 true 还是 false）
 				data.Arrived = true
 
 				-- 断开连接
@@ -1349,7 +1548,7 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 				end
 
 				table.insert(arrivedList, unitInstance)
-				DebugLog(string.format("✅ 兵种到达: %s", unitInstance.Name))
+				DebugLog(string.format("✅ 兵种到达: %s (距离=%.1f studs, reached=%s)", unitInstance.Name, distanceXZ, tostring(reached)))
 
 				-- 触发回调
 				if onUnitArrived then
@@ -1357,7 +1556,16 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 						onUnitArrived(unitInstance, "Arrived")
 					end)
 				end
-			elseif not reached then
+
+				-- V2.1.3新增：减少行军计数，尝试启动下一批
+				marchingCount = marchingCount - 1
+				TryStartNextBatch()
+
+				return  -- 已到达，不再继续处理
+			end
+
+			-- 未到达目标，根据 reached 处理
+			if not reached then
 				-- 关键修复2：reached=false 表示被碰撞/打断，不要盲目推进路径点
 				DebugLog(string.format("⚠️ %s 移动被打断 (reached=false)，保持当前路径点", unitId))
 
@@ -1382,7 +1590,7 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 					if not data.PathRequested then
 						data.PathRequested = true
 
-						-- 重新加入限流队列
+						-- 重新加入限流队列（V2.0.5：标记为战役路径）
 						QueuePathCompute(unitInstance, data.TargetPart, unitId, function(success, pathState)
 							-- 🔑 关键：回调结束时无论成功失败都要重置
 							data.PathRequested = false
@@ -1406,7 +1614,7 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 								humanoid:MoveTo(data.TargetCFrame.Position)
 								DebugLog(string.format("⚠️ %s 重新寻路失败，直线移动", unitId))
 							end
-						end)
+						end, "Campaign")  -- V2.0.5：标记为战役路径
 					else
 						-- 已经在排队中，直接直线移动到目标
 						humanoid:MoveTo(data.TargetCFrame.Position)
@@ -1457,6 +1665,49 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 			end
 			lastContinuousMove = now
 
+			-- V2.1.3修复：先检查是否已接近最终目标
+			local currentPos = rootPart.Position
+			local finalTargetPos = data.TargetCFrame.Position
+			local distanceXZToFinal = math.sqrt((currentPos.X - finalTargetPos.X)^2 + (currentPos.Z - finalTargetPos.Z)^2)
+			local arrivalThreshold = GameConfig.Campaign.ArrivalThreshold or 8
+
+			if distanceXZToFinal < arrivalThreshold then
+				-- 已经接近最终目标，标记为到达
+				data.Arrived = true
+
+				-- 断开连接
+				if data.MoveToConnection then
+					data.MoveToConnection:Disconnect()
+					data.MoveToConnection = nil
+				end
+				if data.HeartbeatConn then
+					data.HeartbeatConn:Disconnect()
+					data.HeartbeatConn = nil
+				end
+
+				-- 清理
+				PathService.ClearPath(unitInstance)
+				if data.TargetPart and data.TargetPart.Parent then
+					data.TargetPart:Destroy()
+				end
+
+				table.insert(arrivedList, unitInstance)
+				DebugLog(string.format("✅ 兵种到达 (Heartbeat检测): %s (距离=%.1f studs)", unitInstance.Name, distanceXZToFinal))
+
+				-- 触发回调
+				if onUnitArrived then
+					pcall(function()
+						onUnitArrived(unitInstance, "Arrived")
+					end)
+				end
+
+				-- V2.1.3新增：减少行军计数，尝试启动下一批
+				marchingCount = marchingCount - 1
+				TryStartNextBatch()
+
+				return
+			end
+
 			-- 获取当前路径点或目标位置
 			local targetPos = nil
 			local pathStatus = PathService.GetPathStatus(unitInstance)
@@ -1477,7 +1728,6 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 
 			-- 检查是否还需要移动（距离阈值）
 			if targetPos then
-				local currentPos = rootPart.Position
 				local distance = (currentPos - targetPos).Magnitude
 
 				-- 只有在距离超过阈值时才发送MoveTo
@@ -1522,29 +1772,27 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 					humanoid:MoveTo(data.TargetCFrame.Position)
 					DebugLog(string.format("⚠️ %s 寻路失败，直线移动", unitId))
 				end
-			end)
+			end, "Campaign")  -- V2.0.5：标记为战役路径
 		end
 	end
 
-	-- 2. 分批启动单位（避免瞬时大量ComputeAsync）
-	local startedCount = 0
+	-- 2. V2.1.3修正：分批启动单位，遵守并发限制（不再使用时间延迟）
+	for i = 1, #unitsList do
+		if marchingCount < CONFIG.MARCH_BATCH_LIMIT then
+			StartUnitMovement(unitsList[i])
+			marchingCount = marchingCount + 1
+		else
+			table.insert(pendingQueue, unitsList[i])
+		end
+	end
+
+	DebugLog(string.format("📊 批量寻路启动完成 - 立即启动: %d, 队列等待: %d",
+		marchingCount, #pendingQueue))
+
+	-- 保留旧的变量以兼容后续代码引用（实际不再使用task.spawn延迟启动）
+	local startedCount = #unitsList  -- 所有单位都已分配（启动或排队）
 	local batchSize = CONFIG.BATCH_START_SIZE
 	local batchDelay = CONFIG.BATCH_START_DELAY
-
-	task.spawn(function()
-		while startedCount < #unitsList do
-			local batchEnd = math.min(startedCount + batchSize, #unitsList)
-			for i = startedCount + 1, batchEnd do
-				StartUnitMovement(unitsList[i])
-			end
-			startedCount = batchEnd
-
-			if startedCount < #unitsList then
-				DebugLog(string.format("🔄 批量启动进度: %d/%d", startedCount, #unitsList))
-				task.wait(batchDelay)
-			end
-		end
-	end)
 
 	-- 3. 定期检查超时和完成状态（降低频率）
 	local lastCheckTime = tick()
@@ -1565,6 +1813,9 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 			if not data.Arrived then
 				-- 检查实例有效性
 				if not unitInstance or not unitInstance.Parent or not unitInstance:FindFirstChild("HumanoidRootPart") then
+					-- V2.1.3新增：停止单位移动
+					StopUnitMovement(unitInstance, "实例失效")
+
 					data.Arrived = true
 					if data.MoveToConnection then
 						data.MoveToConnection:Disconnect()
@@ -1580,12 +1831,20 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 					end
 					table.insert(failedList, unitInstance)
 					arrivedCount = arrivedCount + 1
+
+					-- V2.1.3新增：减少行军计数，尝试启动下一批
+					marchingCount = marchingCount - 1
+					TryStartNextBatch()
+
 					continue
 				end
 
 				-- 超时检测
 				if now - data.StartTime > GameConfig.Campaign.MoveTimeout then
 					warn(string.format("[PathService] ⏱️ 兵种寻路超时，强制传送: %s", unitInstance.Name))
+
+					-- V2.1.3新增：停止单位移动（在传送前）
+					StopUnitMovement(unitInstance, "超时")
 
 					local rootPart = unitInstance.HumanoidRootPart
 					rootPart.CFrame = data.TargetCFrame
@@ -1617,6 +1876,10 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 							onUnitArrived(unitInstance, "TimedOut")
 						end)
 					end
+
+					-- V2.1.3新增：减少行军计数，尝试启动下一批
+					marchingCount = marchingCount - 1
+					TryStartNextBatch()
 				else
 					allArrived = false
 				end
@@ -1630,7 +1893,7 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 			checkConnection:Disconnect()
 			activeMoves[moveId] = nil
 
-			print(string.format("[PathService] ✅ 批量寻路完成，到达: %d/%d", arrivedCount, moveCount))
+			DebugLog(string.format("[PathService] ✅ 批量寻路完成，到达: %d/%d", arrivedCount, moveCount))
 
 			-- 清理所有连接和资源
 			for unitInstance, data in pairs(moveData) do
@@ -1734,6 +1997,15 @@ function PathService.CancelGroupMove(moveId)
 
 	DebugLog("取消批量移动任务:", moveId, "清理队列请求:", cancelledCount)
 	return true
+end
+
+--[[
+获取路径状态（公共接口）
+@param unitModel - 兵种模型
+@return PathState|nil
+]]
+function PathService.GetPathState(unitModel)
+	return pathStates[unitModel]
 end
 
 return PathService

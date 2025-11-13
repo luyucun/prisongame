@@ -610,6 +610,10 @@ AIData = {
     -- V2.0新增：模式切换
     Mode = string,                       -- AI模式: "MarchMode"（行军）/"CombatMode"（战斗）
 
+    -- V2.0.5性能优化：事件驱动寻路
+    PathRequested = boolean,             -- 是否已在队列中请求路径（战斗）
+    MoveConnection = RBXScriptConnection, -- 当前的 MoveToFinished 连接
+
     -- 动画状态
     CurrentState = string,               -- 当前动画状态: "MOVE"/"IDLE"/"ATTACK"
     LastState = string,                  -- 上次动画状态
@@ -755,6 +759,52 @@ local function ValidateTarget(unitModel)
 	return target
 end
 
+--[[
+直线可达检测（V2.1.1修正：始终进行射线检测）
+修正问题：不能仅凭距离判断，必须检测障碍物
+@param unitModel Model - 攻击方单位
+@param targetModel Model - 目标单位
+@return boolean - 是否直线可达
+]]
+local function HasLineOfSight(unitModel, targetModel)
+	local root = unitModel:FindFirstChild("HumanoidRootPart")
+	local targetRoot = targetModel:FindFirstChild("HumanoidRootPart") or targetModel.PrimaryPart
+	if not root or not targetRoot then
+		return false
+	end
+
+	local direction = targetRoot.Position - root.Position
+	local distance = direction.Magnitude
+
+	-- 极短距离直接判定可达（避免精度问题）
+	if distance < 2 then
+		return true
+	end
+
+	-- V2.1.1修正：无论距离远近，都执行射线检测
+	-- 这样可以正确处理"距离近但有墙"的情况
+	local rayParams = RaycastParams.new()
+	rayParams.FilterType = Enum.RaycastFilterType.Exclude
+	rayParams.FilterDescendantsInstances = { unitModel }  -- 忽略自身
+	rayParams.IgnoreWater = true
+
+	local result = workspace:Raycast(root.Position, direction, rayParams)
+	if not result then
+		-- 没有任何命中，视为可直走
+		return true
+	end
+
+	-- 命中的对象若明显是"动态单位"，可以忽略（示例：命中对象的父包含Humanoid）
+	local hitParent = result.Instance and result.Instance.Parent
+	if hitParent and hitParent:FindFirstChildOfClass("Humanoid") then
+		-- 命中的是其他单位，视为"拥挤阻挡"，直走可能也有用，这里返回true试图直线逼近
+		return true
+	end
+
+	-- 命中静态障碍，视为不可直走
+	return false
+end
+
 -- ==================== 状态处理函数（重构版） ====================
 
 --[[
@@ -775,7 +825,11 @@ local function HandleSeeking(unitModel, aiData, state)
 end
 
 --[[
-处理MOVING状态：移动到目标（重构版 - 使用PathService）
+处理MOVING状态：移动到目标（V2.1.2修正 - 恢复MoveToFinished事件）
+核心修正：
+1. 恢复MoveToFinished事件注册（V2.1.1错误删除）
+2. 简化移动逻辑，优先直线移动
+3. 被阻挡时正确触发重新寻路
 ]]
 local function HandleMoving(unitModel, aiData, state)
 	-- 验证目标
@@ -785,8 +839,10 @@ local function HandleMoving(unitModel, aiData, state)
 		CombatSystem.SetAIState(unitModel, BattleConfig.AIState.SEEKING)
 		LogStateChange(state.UnitId, "MOVING", "SEEKING", "目标失效")
 		-- 目标失效，清理路径并切换到Idle
-		PathService.ClearPath(unitModel)  -- ⭐使用PathService
+		PathService.ClearPath(unitModel)
 		AnimationController.SwitchToIdle(unitModel, aiData, state)
+		-- V2.1.3修正：不断开MoveConnection，保持事件连接
+		aiData.PathRequested = false
 		return
 	end
 
@@ -806,20 +862,22 @@ local function HandleMoving(unitModel, aiData, state)
 			DebugLog(string.format("%s (远程) 接近停靠距离(%.1f <= %.1f+4)，提前停止",
 				state.UnitId, distance, dockingDistance))
 			EnsureStopped(unitModel, aiData)
-			PathService.ClearPath(unitModel)  -- ⭐使用PathService
+			PathService.ClearPath(unitModel)
 
 			if UnitAIRangePolicy.ShouldEnterAttack(distance, state) then
 				CombatSystem.SetAIState(unitModel, BattleConfig.AIState.ATTACKING)
 				LogStateChange(state.UnitId, "MOVING", "ATTACKING", string.format("提前停止后距离符合攻击条件(%.1f)", distance))
 
-				-- 关键修复：停止移动动画并立刻播放Idle
+				-- 停止移动动画并立刻播放Idle
 				if aiData.Tracks.Move then
 					SafeStopAnimation(aiData.Tracks.Move)
 					aiData.Tracks.Move = nil
 				end
 
-				-- 立刻播放Idle，准备攻击（消除空隙）
+				-- 立刻播放Idle，准备攻击
 				AnimationController.SwitchToIdle(unitModel, aiData, state)
+				-- V2.1.3修正：不断开MoveConnection，保持事件连接
+				aiData.PathRequested = false
 				return
 			end
 		end
@@ -828,12 +886,12 @@ local function HandleMoving(unitModel, aiData, state)
 	-- 判断是否应该进入攻击
 	if UnitAIRangePolicy.ShouldEnterAttack(distance, state) then
 		EnsureStopped(unitModel, aiData)
-		PathService.ClearPath(unitModel)  -- ⭐使用PathService
+		PathService.ClearPath(unitModel)
 
 		CombatSystem.SetAIState(unitModel, BattleConfig.AIState.ATTACKING)
 		LogStateChange(state.UnitId, "MOVING", "ATTACKING", string.format("距离%.1f <= 阈值", distance))
 
-		-- 关键修复：进入攻击状态时停止移动动画，并立刻播放Idle（冷却等待状态）
+		-- 停止移动动画，并立刻播放Idle
 		if aiData.Tracks.Move then
 			SafeStopAnimation(aiData.Tracks.Move)
 			aiData.Tracks.Move = nil
@@ -841,70 +899,82 @@ local function HandleMoving(unitModel, aiData, state)
 
 		-- 立刻播放Idle，准备攻击
 		AnimationController.SwitchToIdle(unitModel, aiData, state)
-	else
-		-- ⭐使用PathService寻路
-		local pathStatus = PathService.GetPathStatus(unitModel)
+		-- V2.1.3修正：不断开MoveConnection，保持事件连接
+		aiData.PathRequested = false
+		return
+	end
 
-		-- 如果路径失败，使用直线移动降级
-		if pathStatus == "Failed" then
-			DebugLog(string.format("%s 路径失败，使用直线移动", state.UnitId))
-			UnitAI.MoveToTarget(unitModel, target, aiData, state)
-			return
+	-- ==================== V2.1.2核心修正：MoveToFinished事件驱动已在StartAI中注册 ====================
+	-- V2.1.3优化：MoveConnection现在在StartAI中注册，只在StopAI中断开，避免因状态切换导致延迟
+
+	-- 检查是否有可用路径
+	local pathState = PathService.GetPathState(unitModel)
+	local hasValidPath = pathState and pathState.Status == "Success" and pathState.Waypoints and #pathState.Waypoints > 0
+
+	-- 策略1：如果有路径，使用路径移动
+	if hasValidPath then
+		if PathService.HasReachedWaypoint(unitModel) then
+			local hasMore = PathService.AdvancePath(unitModel)
+			if not hasMore then
+				-- 路径走完，清理
+				PathService.ClearPath(unitModel)
+				hasValidPath = false
+			end
 		end
 
-		-- 请求路径（如果已有有效路径则复用）
-		local hasPath = PathService.RequestPath(unitModel, target, state.UnitId)
-
-		if hasPath then
-			-- 检查是否到达当前waypoint
-			if PathService.HasReachedWaypoint(unitModel) then
-				-- 推进到下一个waypoint
-				local hasMore = PathService.AdvancePath(unitModel)
-
-				if not hasMore then
-					-- 路径已走完
-					DebugLog(string.format("%s 路径已走完", state.UnitId))
-					PathService.ClearPath(unitModel)
-					return
-				end
-			end
-
-			-- 移动到下一个waypoint
+		if hasValidPath then
 			local nextWaypoint = PathService.GetNextWaypoint(unitModel)
 			if nextWaypoint then
 				aiData.Humanoid:MoveTo(nextWaypoint)
-				-- V2.0.4新增：记录成功发送MoveTo的时间
-				aiData.LastPathCommandTime = tick()
-			else
-				-- V2.0.4新增：没有有效waypoint的快速降级
-				-- 这种情况不应该频繁出现，但一旦出现说明路径数据有问题
-				DebugLog(string.format("⚠️ %s 路径点无效，直接尝试目标", state.UnitId))
-
-				-- 尝试直线移动到目标
-				pcall(function()
-					aiData.Humanoid:MoveTo(target.HumanoidRootPart.Position)
-					aiData.LastPathCommandTime = tick()
-				end)
+				return
 			end
-		else
-			-- 路径请求失败，使用直线移动降级
-			DebugLog(string.format("%s 路径请求失败，使用直线移动", state.UnitId))
-			UnitAI.MoveToTarget(unitModel, target, aiData, state)
-			-- V2.0.4新增：更新LastPathCommandTime
-			aiData.LastPathCommandTime = tick()
+		end
+	end
+
+	-- 策略2：优先直线移动（简单场景，无寻路开销）
+	if HasLineOfSight(unitModel, target) then
+		-- 直线可达，直接移动
+		local targetPos = target:FindFirstChild("HumanoidRootPart") or target.PrimaryPart
+		if targetPos then
+			aiData.Humanoid:MoveTo(targetPos.Position)
 		end
 
-		-- V2.0.4新增：安全容错 - 若距离上次成功MoveTo超过0.3s，强制重新下达命令
-		local now = tick()
-		if now - aiData.LastPathCommandTime > 0.3 then
-			local targetPos = target and target:FindFirstChild("HumanoidRootPart") and target.HumanoidRootPart.Position
-			if targetPos then
-				pcall(function()
-					aiData.Humanoid:MoveTo(targetPos)
-					aiData.LastPathCommandTime = now
-					DebugLog(string.format("🔄 %s 安全容错：强制重新下达MoveTo命令", state.UnitId))
-				end)
+		-- 清理旧路径
+		if pathState then
+			PathService.ClearPath(unitModel)
+		end
+
+		return
+	end
+
+	-- 策略3：直线不可达，且无路径时，异步请求寻路（仅首次）
+	if not aiData.PathRequested then
+		aiData.PathRequested = true
+		DebugLog(string.format("%s 直线阻挡，异步请求寻路", state.UnitId))
+
+		PathService.RequestPathAsync(unitModel, target, state.UnitId, function(success, newPathState)
+			aiData.PathRequested = false
+			if not aiData.IsActive or not CombatSystem.IsUnitAlive(unitModel) then
+				return
 			end
+
+			if success and newPathState and newPathState.Waypoints and #newPathState.Waypoints > 0 then
+				DebugLog(string.format("%s 寻路成功，路径点数: %d", state.UnitId, #newPathState.Waypoints))
+			else
+				DebugLog(string.format("%s 寻路失败，继续直线移动", state.UnitId))
+			end
+		end)
+
+		-- 等待寻路期间，先尝试直线靠近
+		local targetPos = target:FindFirstChild("HumanoidRootPart") or target.PrimaryPart
+		if targetPos then
+			aiData.Humanoid:MoveTo(targetPos.Position)
+		end
+	else
+		-- 已经在排队中，继续直线移动
+		local targetPos = target:FindFirstChild("HumanoidRootPart") or target.PrimaryPart
+		if targetPos then
+			aiData.Humanoid:MoveTo(targetPos.Position)
 		end
 	end
 end
@@ -966,6 +1036,14 @@ end
 
 -- ==================== AI更新 ====================
 
+-- V2.1性能优化：不同AI状态使用不同更新间隔
+local AI_UPDATE_INTERVALS = {
+	[BattleConfig.AIState.SEEKING] = 0.5,    -- 寻找目标每0.5秒一次
+	[BattleConfig.AIState.MOVING] = 0.2,     -- 移动状态每0.2秒一次
+	[BattleConfig.AIState.ATTACKING] = 0.1,  -- 攻击状态保持原频率
+	[BattleConfig.AIState.IDLE] = 0.5,       -- 待机状态每0.5秒一次
+}
+
 local function UpdateAllAIs()
 	local currentTime = tick()
 
@@ -976,6 +1054,17 @@ local function UpdateAllAIs()
 
 		if not aiData.IsActive then
 			continue
+		end
+
+		-- V2.1优化：状态节流
+		local state = CombatSystem.GetUnitState(unitModel)
+		if state then
+			local updateInterval = AI_UPDATE_INTERVALS[state.State] or 0.2
+
+			-- 检查是否达到更新间隔
+			if currentTime - (aiData.LastUpdateTime or 0) < updateInterval then
+				continue
+			end
 		end
 
 		local success, err = pcall(function()
@@ -1068,6 +1157,10 @@ function UnitAI.StartAI(unitModel)
 		-- V2.0新增：默认为战斗模式
 		Mode = AIMode.COMBAT,
 
+		-- V2.0.5性能优化：事件驱动寻路
+		PathRequested = false,     -- 是否已在队列中请求路径（战斗）
+		MoveConnection = nil,      -- 当前的 MoveToFinished 连接
+
 		-- 动画状态
 		CurrentState = nil,
 		LastState = nil,
@@ -1099,6 +1192,82 @@ function UnitAI.StartAI(unitModel)
 
 	-- ⭐⭐⭐ 预加载所有战斗动画,避免首次战斗时动画资源未缓存导致卡顿 ⭐⭐⭐
 	PreloadAllAnimations(unitModel, humanoid, unitId)
+
+	-- V2.1.3优化：在StartAI时就注册MoveToFinished事件，只在StopAI时断开
+	-- 这样避免因状态切换导致的连接断开，配合节流机制不会有延迟
+	aiData.MoveConnection = humanoid.MoveToFinished:Connect(function(reached)
+		-- 事件触发时检查单位状态
+		if not aiData.IsActive or not CombatSystem.IsUnitAlive(unitModel) then
+			return
+		end
+
+		local currentState = CombatSystem.GetUnitState(unitModel)
+		if not currentState or currentState.State ~= BattleConfig.AIState.MOVING then
+			-- 不在MOVING状态，忽略此事件
+			return
+		end
+
+		local currentTarget = ValidateTarget(unitModel)
+		if not currentTarget then
+			return
+		end
+
+		-- 检查是否到达攻击范围
+		local currentDistance = GetDistance(unitModel, currentTarget)
+		if UnitAIRangePolicy.ShouldEnterAttack(currentDistance, currentState) then
+			-- 已到达攻击范围，无需继续移动
+			return
+		end
+
+		-- V2.1.2修正：正确处理MoveToFinished
+		if reached then
+			-- reached = true：成功到达MoveTo目标点
+			-- 如果有路径，推进到下一个waypoint
+			local pathState = PathService.GetPathState(unitModel)
+			if pathState and pathState.Status == "Success" then
+				if PathService.AdvancePath(unitModel) then
+					local nextWaypoint = PathService.GetNextWaypoint(unitModel)
+					if nextWaypoint then
+						aiData.Humanoid:MoveTo(nextWaypoint)
+					else
+						-- 路径走完，直线移动到目标
+						local targetPos = currentTarget:FindFirstChild("HumanoidRootPart") or currentTarget.PrimaryPart
+						if targetPos then
+							aiData.Humanoid:MoveTo(targetPos.Position)
+						end
+					end
+				else
+					-- 路径走完，直线移动到目标
+					local targetPos = currentTarget:FindFirstChild("HumanoidRootPart") or currentTarget.PrimaryPart
+					if targetPos then
+						aiData.Humanoid:MoveTo(targetPos.Position)
+					end
+				end
+			end
+		else
+			-- reached = false：MoveTo被打断或无法到达（被阻挡/拥挤）
+			-- 这是关键：被阻挡时异步请求寻路
+			if not aiData.PathRequested then
+				aiData.PathRequested = true
+				DebugLog(string.format("%s MoveTo被阻挡，异步请求寻路", currentState.UnitId))
+
+				PathService.RequestPathAsync(unitModel, currentTarget, currentState.UnitId, function(success, pathState)
+					-- 寻路回调
+					aiData.PathRequested = false
+					if not aiData.IsActive or not CombatSystem.IsUnitAlive(unitModel) then
+						return
+					end
+
+					if success and pathState and pathState.Waypoints and #pathState.Waypoints > 0 then
+						DebugLog(string.format("%s 重新寻路成功，路径点数: %d", currentState.UnitId, #pathState.Waypoints))
+						-- 下一次Update会使用这个路径
+					else
+						DebugLog(string.format("%s 重新寻路失败，继续直线移动", currentState.UnitId))
+					end
+				end)
+			end
+		end
+	end)
 
 	task.defer(function()
 		if not aiData.IsActive then
@@ -1148,6 +1317,12 @@ function UnitAI.StopAI(unitModel, options)
 			opts.skipMoveTo = options
 		elseif type(options) == "table" then
 			opts = options
+		end
+
+		-- V2.0.5性能优化：断开MoveToFinished连接
+		if aiData.MoveConnection then
+			aiData.MoveConnection:Disconnect()
+			aiData.MoveConnection = nil
 		end
 
 		-- 步骤1: 禁用Animate脚本（如果需要）
@@ -1569,7 +1744,6 @@ function UnitAI.PlayMoveAnimation(unitModel)
 		pcall(function()
 			animTrack:Play()
 		end)
-		print("[UnitAI] 播放移动动画:", unitModel.Name)
 		-- V2.0修复：使用模块级表存储AnimationTrack，而不是Attribute（Attribute不支持Instance类型）
 		marchAnimationTracks[unitModel] = animTrack
 	end
@@ -1642,7 +1816,6 @@ function UnitAI.StopMoveAnimation(unitModel)
 		pcall(function()
 			animTrack:Play()
 		end)
-		print("[UnitAI] 切换到Idle:", unitModel.Name)
 	end
 
 	animation:Destroy()

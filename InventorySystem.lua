@@ -224,9 +224,10 @@ function InventorySystem.AddUnit(player, unitId)
     -- 添加到背包
     table.insert(units, instance)
 
-    -- 通知客户端更新
-    local count = InventorySystem.GetUnitCountByUnitId(player, unitId)
-    NotifyClientUnitUpdate(player, unitId, count)
+    -- ✅ V2.0.2修复：调用完整刷新而不是单个兵种更新
+    -- 原因：UnitUpdated只发送总数（包含已放置的），客户端无法更新Instances列表
+    -- 改用InventoryRefresh确保客户端获得完整的实例信息
+    NotifyClientInventoryRefresh(player)
 
     if GameConfig.DEBUG_MODE then
         print(string.format(
@@ -260,9 +261,10 @@ function InventorySystem.RemoveUnit(player, instanceId)
             local unitId = instance.UnitId
             table.remove(units, i)
 
-            -- 通知客户端更新
-            local count = InventorySystem.GetUnitCountByUnitId(player, unitId)
-            NotifyClientUnitUpdate(player, unitId, count)
+            -- ✅ V2.0.2修复：调用完整刷新而不是单个兵种更新
+            -- 原因：UnitUpdated只发送总数（包含已放置的），客户端无法更新Instances列表
+            -- 改用InventoryRefresh确保客户端获得完整的实例信息
+            NotifyClientInventoryRefresh(player)
 
             if GameConfig.DEBUG_MODE then
                 print(string.format(

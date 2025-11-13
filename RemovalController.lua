@@ -49,8 +49,6 @@ local removalState = {
 初始化回收控制器
 ]]
 function RemovalController.Initialize()
-    print("[RemovalController] 正在初始化...")
-
     -- 获取PlayerGui
     playerGui = player:WaitForChild("PlayerGui", 10)
     if not playerGui then
@@ -107,7 +105,6 @@ function RemovalController.Initialize()
     -- 连接输入事件（点击检测）
     ConnectInputEvents()
 
-    print("[RemovalController] 初始化完成")
     return true
 end
 
@@ -123,7 +120,6 @@ function ConnectUIButtons()
         removeButton.MouseButton1Click:Connect(function()
             RemovalController.EnterRemovalMode()
         end)
-        print("[RemovalController] 已连接Remove按钮")
     else
         warn("[RemovalController] 找不到Remove按钮!")
     end
@@ -134,7 +130,6 @@ function ConnectUIButtons()
         exitButton.MouseButton1Click:Connect(function()
             RemovalController.ExitRemovalMode()
         end)
-        print("[RemovalController] 已连接Exit按钮")
     else
         warn("[RemovalController] 找不到Exit按钮!")
     end
@@ -150,16 +145,24 @@ function RemovalController.EnterRemovalMode()
         return
     end
 
-    print("[RemovalController] 进入回收模式")
     removalState.isRemovalMode = true
 
     -- 更新UI显示
     UpdateUIForRemovalMode(true)
 
-    -- 确保背包显示（Bug修复：不是toggle而是确保打开）
-    local backpackGui = playerGui:FindFirstChild("BackpackGui")
-    if backpackGui and not backpackGui.Enabled then
-        backpackGui.Enabled = true
+    -- V2.0.2修复：调用BackpackDisplay接口而非直接修改Enabled
+    if _G.BackpackDisplay and _G.BackpackDisplay.ShowBackpack then
+        _G.BackpackDisplay.ShowBackpack()
+    else
+        -- 兜底方案：直接控制BackpackFrame.Visible
+        local backpackGui = playerGui:FindFirstChild("BackpackGui")
+        if backpackGui then
+            backpackGui.Enabled = true
+            local backpackFrame = backpackGui:FindFirstChild("BackpackFrame")
+            if backpackFrame then
+                backpackFrame.Visible = true
+            end
+        end
     end
 end
 
@@ -171,7 +174,6 @@ function RemovalController.ExitRemovalMode()
         return
     end
 
-    print("[RemovalController] 退出回收模式")
     removalState.isRemovalMode = false
 
     -- 清除高光
@@ -180,10 +182,18 @@ function RemovalController.ExitRemovalMode()
     -- 更新UI显示
     UpdateUIForRemovalMode(false)
 
-    -- 确保背包隐藏（Bug修复：不是toggle而是确保关闭）
-    local backpackGui = playerGui:FindFirstChild("BackpackGui")
-    if backpackGui and backpackGui.Enabled then
-        backpackGui.Enabled = false
+    -- V2.0.2修复：调用BackpackDisplay接口而非直接修改Enabled
+    if _G.BackpackDisplay and _G.BackpackDisplay.HideBackpack then
+        _G.BackpackDisplay.HideBackpack()
+    else
+        -- 兜底方案：直接控制BackpackFrame.Visible
+        local backpackGui = playerGui:FindFirstChild("BackpackGui")
+        if backpackGui then
+            local backpackFrame = backpackGui:FindFirstChild("BackpackFrame")
+            if backpackFrame then
+                backpackFrame.Visible = false
+            end
+        end
     end
 end
 
@@ -318,7 +328,6 @@ end
 function OnClickInRemovalMode(touchPosition)
     local targetModel = GetTargetModel(touchPosition)
     if not targetModel then
-        print("[RemovalController] 未点击到任何模型")
         return
     end
 
@@ -328,8 +337,6 @@ function OnClickInRemovalMode(touchPosition)
         warn("[RemovalController] 模型没有InstanceId属性:", targetModel.Name)
         return
     end
-
-    print("[RemovalController] 请求回收兵种:", instanceId)
 
     -- 发送回收请求到服务端
     if placementEvents then
@@ -461,8 +468,6 @@ end
 ]]
 function OnRemoveResponse(success, message, instanceId)
     if success then
-        print("[RemovalController] 回收成功:", instanceId)
-
         -- 清除高光
         ClearHighlight()
 
@@ -471,7 +476,6 @@ function OnRemoveResponse(success, message, instanceId)
 
         -- 检查场中是否还有兵种
         if removalState.placedUnitCount == 0 then
-            print("[RemovalController] 场中无兵种，自动退出回收模式")
             RemovalController.ExitRemovalMode()
         end
     else
