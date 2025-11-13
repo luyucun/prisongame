@@ -54,12 +54,29 @@ local function SetUnitAnchored(unitModel, anchored)
 	end
 
 	local success, err = pcall(function()
+		-- V2.0修复：保留下半身部件的碰撞，防止解锚后"插入地面"
+		-- 原因：只保留HRP碰撞时，解锚瞬间脚部失去支撑，整个模型会沉到HRP碰到地面为止
+		-- 解决：保留腿部和脚部的碰撞，让兵种正常站在地面上
+		local lowerBodyParts = {
+			"LeftFoot", "RightFoot",           -- 脚部（R15）
+			"LeftLowerLeg", "RightLowerLeg",   -- 小腿（R15）
+			"LowerTorso",                       -- 下半身躯干（R15）
+			"Left Leg", "Right Leg",            -- 腿部（R6）
+		}
+
+		-- 创建快速查找表
+		local lowerBodySet = {}
+		for _, name in ipairs(lowerBodyParts) do
+			lowerBodySet[name] = true
+		end
+
 		-- 遍历所有 BasePart 设置锚定和碰撞
 		for _, descendant in ipairs(unitModel:GetDescendants()) do
 			if descendant:IsA("BasePart") then
 				descendant.Anchored = anchored
-				-- HumanoidRootPart始终保持碰撞
-				if descendant.Name == "HumanoidRootPart" then
+
+				-- HumanoidRootPart 和下半身部件保持碰撞
+				if descendant.Name == "HumanoidRootPart" or lowerBodySet[descendant.Name] then
 					descendant.CanCollide = true
 				else
 					descendant.CanCollide = false
@@ -105,20 +122,32 @@ function CampaignUnitHelper.ActivateUnit(unitModel)
 
 	-- 检查是否已激活
 	if unitModel:GetAttribute("IsActivated") then
-		DebugLog("单位", unitModel.Name, "已激活，跳过")
 		return true
 	end
 
-	DebugLog("正在激活单位:", unitModel.Name)
-
 	local success, err = pcall(function()
+		-- V2.0修复：保留下半身部件的碰撞，防止解锚后"插入地面"
+		local lowerBodyParts = {
+			"LeftFoot", "RightFoot",           -- 脚部（R15）
+			"LeftLowerLeg", "RightLowerLeg",   -- 小腿（R15）
+			"LowerTorso",                       -- 下半身躯干（R15）
+			"Left Leg", "Right Leg",            -- 腿部（R6）
+		}
+
+		-- 创建快速查找表
+		local lowerBodySet = {}
+		for _, name in ipairs(lowerBodyParts) do
+			lowerBodySet[name] = true
+		end
+
 		-- 解除所有BasePart的锚定，恢复碰撞
 		local partCount = 0
 		for _, part in ipairs(unitModel:GetDescendants()) do
 			if part:IsA("BasePart") then
 				part.Anchored = false  -- 解除锚定，允许物理引擎控制
-				-- 只有HumanoidRootPart需要碰撞
-				if part.Name == "HumanoidRootPart" then
+
+				-- HumanoidRootPart 和下半身部件保持碰撞
+				if part.Name == "HumanoidRootPart" or lowerBodySet[part.Name] then
 					part.CanCollide = true
 				else
 					part.CanCollide = false
@@ -138,8 +167,6 @@ function CampaignUnitHelper.ActivateUnit(unitModel)
 
 		-- 标记为已激活
 		unitModel:SetAttribute("IsActivated", true)
-
-		DebugLog("✅激活完成:", unitModel.Name, "共处理", partCount, "个Part")
 	end)
 
 	if not success then
@@ -166,7 +193,6 @@ function CampaignUnitHelper.ResetUnitAttributes(unitModel, maxHP)
 		local humanoid = unitModel:FindFirstChild("Humanoid")
 		if humanoid and maxHP then
 			humanoid.Health = maxHP
-			DebugLog("重置生命值:", unitModel.Name, "HP:", maxHP)
 		end
 	end)
 
@@ -195,7 +221,6 @@ function CampaignUnitHelper.RestoreSavedHP(unitModel, savedHP)
 		if humanoid and savedHP then
 			-- 确保不超过最大生命值
 			humanoid.Health = math.min(savedHP, humanoid.MaxHealth)
-			DebugLog("恢复生命值:", unitModel.Name, "HP:", humanoid.Health)
 		end
 	end)
 
@@ -218,8 +243,6 @@ function CampaignUnitHelper.PrepareForBattle(unitModel)
 		return false
 	end
 
-	DebugLog("准备单位进入战斗:", unitModel.Name)
-
 	local success, err = pcall(function()
 		-- 1. 停止旧的AI（如有）
 		UnitAI.StopAI(unitModel)
@@ -236,8 +259,6 @@ function CampaignUnitHelper.PrepareForBattle(unitModel)
 			humanoid.PlatformStand = false
 			humanoid:ChangeState(Enum.HumanoidStateType.Running)
 		end
-
-		DebugLog("✅单位准备完成:", unitModel.Name)
 	end)
 
 	if not success then
@@ -259,16 +280,12 @@ function CampaignUnitHelper.DeactivateUnit(unitModel)
 		return false
 	end
 
-	DebugLog("重新锚定单位:", unitModel.Name)
-
 	local success, err = pcall(function()
 		-- 重新锚定所有部件
 		SetUnitAnchored(unitModel, true)
 
 		-- 清除激活标记
 		unitModel:SetAttribute("IsActivated", false)
-
-		DebugLog("✅单位已锚定:", unitModel.Name)
 	end)
 
 	if not success then
@@ -293,7 +310,6 @@ function CampaignUnitHelper.ActivateUnits(units)
 		end
 	end
 
-	DebugLog("批量激活完成:", #activated, "/", #units)
 	return activated
 end
 
@@ -311,7 +327,6 @@ function CampaignUnitHelper.PrepareUnitsForBattle(units)
 		end
 	end
 
-	DebugLog("批量准备完成:", #prepared, "/", #units)
 	return prepared
 end
 

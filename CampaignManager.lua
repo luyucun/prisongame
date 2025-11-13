@@ -57,7 +57,69 @@ local CampaignState = {
 -- 活跃战役数据: [playerId] = CampaignData
 CampaignManager.ActiveCampaigns = {}
 
+-- V2.3性能优化：Campaign路径缓存
+-- 缓存基地到关卡的路径，避免N个单位重复ComputeAsync相同路径
+-- pathCache[homeId][stageNum] = {waypoints = {Vector3}, expiryTime = number}
+local pathCache = {}
+
+-- V2.3配置：路径缓存时间（秒）
+local PATH_CACHE_EXPIRY = 300  -- 5分钟过期（关卡地形变化时自动失效）
+
 -- ==================== 私有函数 ====================
+
+--[[
+V2.3新增：获取缓存的路径
+@param homeId number - 基地ID
+@param stageNum number - 关卡编号
+@return {Vector3}|nil - 缓存的路径点列表，如果不存在或已过期则返回nil
+]]
+local function GetCachedPath(homeId, stageNum)
+	if not pathCache[homeId] then
+		return nil
+	end
+
+	local cacheEntry = pathCache[homeId][stageNum]
+	if not cacheEntry then
+		return nil
+	end
+
+	-- 检查是否过期
+	local now = tick()
+	if now > cacheEntry.expiryTime then
+		-- 已过期，清除缓存
+		pathCache[homeId][stageNum] = nil
+		return nil
+	end
+
+	return cacheEntry.waypoints
+end
+
+--[[
+V2.3新增：存储路径到缓存
+@param homeId number - 基地ID
+@param stageNum number - 关卡编号
+@param waypoints {Vector3} - 路径点列表
+]]
+local function CachePath(homeId, stageNum, waypoints)
+	if not pathCache[homeId] then
+		pathCache[homeId] = {}
+	end
+
+	pathCache[homeId][stageNum] = {
+		waypoints = waypoints,
+		expiryTime = tick() + PATH_CACHE_EXPIRY
+	}
+end
+
+--[[
+V2.3新增：清除指定基地的所有路径缓存
+@param homeId number - 基地ID
+]]
+local function ClearPathCache(homeId)
+	if pathCache[homeId] then
+		pathCache[homeId] = nil
+	end
+end
 
 --[[
 设置兵种的锚定状态（内部使用）
@@ -69,13 +131,30 @@ local function SetUnitAnchored(unitModel, anchored)
 		return
 	end
 
+	-- V2.0修复：保留下半身部件的碰撞，防止解锚后"插入地面"
+	-- 原因：只保留HRP碰撞时，解锚瞬间脚部失去支撑，整个模型会沉到HRP碰到地面为止
+	-- 解决：保留腿部和脚部的碰撞，让兵种正常站在地面上
+	local lowerBodyParts = {
+		"LeftFoot", "RightFoot",           -- 脚部（R15）
+		"LeftLowerLeg", "RightLowerLeg",   -- 小腿（R15）
+		"LowerTorso",                       -- 下半身躯干（R15）
+		"Left Leg", "Right Leg",            -- 腿部（R6）
+	}
+
+	-- 创建快速查找表
+	local lowerBodySet = {}
+	for _, name in ipairs(lowerBodyParts) do
+		lowerBodySet[name] = true
+	end
+
 	-- 遍历所有 BasePart 设置锚定和碰撞
 	for _, descendant in ipairs(unitModel:GetDescendants()) do
 		if descendant:IsA("BasePart") then
 			descendant.Anchored = anchored
-			-- V2.0修复：战役中也需要让HumanoidRootPart保持碰撞，否则无法正常移动
-			if descendant.Name == "HumanoidRootPart" then
-				descendant.CanCollide = true  -- 根部件始终有碰撞
+
+			-- HumanoidRootPart 和下半身部件保持碰撞
+			if descendant.Name == "HumanoidRootPart" or lowerBodySet[descendant.Name] then
+				descendant.CanCollide = true
 			else
 				descendant.CanCollide = false  -- 其他部件关闭碰撞，避免卡住
 			end
@@ -95,8 +174,6 @@ local function SetUnitAnchored(unitModel, anchored)
 			humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
 		end
 	end
-
-	print("[CampaignManager] SetUnitAnchored:", unitModel.Name, "Anchored=", anchored)
 end
 
 --[[
@@ -250,9 +327,6 @@ function CampaignManager.StartCampaign(player)
 		return false
 	end
 
-	-- V2.0.2修复验证：打印获取到的IdleFloor路径
-	print("[CampaignManager] ✅ 获取基地IdleFloor成功 - 路径:", homeIdleFloor:GetFullName())
-
 	for _, unitModel in ipairs(placedUnits) do
 		-- 获取GridPos（兼容历史数据）
 		local gridPos = GridPositionSystem.LoadUnitGridPosition(unitModel, homeIdleFloor)
@@ -291,15 +365,12 @@ function CampaignManager.StartCampaign(player)
 				LastKnownPosition = nil,     -- 最后已知位置（用于断线恢复）
 				LastBattleId = nil,          -- 最后参与的战斗ID
 			}
-
-			print("[CampaignManager] 注册兵种:", unitId, "GridPos:", gridPos.X, gridPos.Y)
 		end
 	end
 
 	-- V2.0.1新增：打开基地大门（兵种有效后再开门）
 	pcall(function()
 		DoorControlService.OpenDoor(homeId)
-		print("[CampaignManager] ✅ 基地大门已打开: PlayerHome" .. homeId)
 	end)
 
 	-- 锁定基地操作
@@ -335,8 +406,6 @@ end
 function CampaignManager.MarchToStage(campaignData, stageNum)
 	campaignData.State = CampaignState.MARCHING
 
-	print("[CampaignManager] 行军到关卡:", stageNum)
-
 	-- 通知客户端
 	if InitializeEvents() then
 		local stateUpdate = CampaignEvents:FindFirstChild("CampaignStateUpdate")
@@ -359,11 +428,12 @@ function CampaignManager.MarchToStage(campaignData, stageNum)
 		return CampaignManager.OnCampaignEnd(campaignData, false)
 	end
 
-	-- V2.0修复：提前生成敌人（在行军开始前），让玩家立即看到目标
-	-- 但敌人处于锚定+无碰撞状态，不会阻挡行军
-	print("[CampaignManager] 提前生成关卡敌人（锚定状态）:", stageNum)
-	local enemies = StageService.LoadEnemyData(stageFolder, stageNum)
-	print("[CampaignManager] 敌人生成完成，数量:", #enemies)
+	-- V2.3.1性能优化回退：移除路径缓存机制
+	-- 原因：共享路径导致以下问题：
+	-- 1. 所有单位挤向同一waypoint，部分兵被堵在原地
+	-- 2. Stage间切换时路径起点错误，兵往基地方向走
+	-- 现有的限流机制（20次/帧+队列分配）足以支撑100单位per-unit寻路
+	local cachedWaypoints = nil  -- 不再使用缓存
 
 	-- 批量计算目标位置
 	local moveTargets = {}
@@ -389,39 +459,23 @@ function CampaignManager.MarchToStage(campaignData, stageNum)
 							track:Stop(0.1)
 						end)
 					end
-					print("[CampaignManager] 停止了", #tracks, "个动画，准备播放移动动画:", unitData.UnitId)
 				end
 			end
 
 			-- V2.0修复：开始行军时播放移动动画
 			UnitAI.PlayMoveAnimation(unitInstance)
-
-			-- V2.0调试：输出兵种当前位置和目标位置
-			if unitInstance:FindFirstChild("HumanoidRootPart") then
-				local currentPos = unitInstance.HumanoidRootPart.Position
-				print(string.format("[CampaignManager] 兵种 %s: 当前位置(%.1f, %.1f, %.1f) → 目标位置(%.1f, %.1f, %.1f)",
-					unitData.UnitId,
-					currentPos.X, currentPos.Y, currentPos.Z,
-					targetCFrame.Position.X, targetCFrame.Position.Y, targetCFrame.Position.Z))
-			end
 		end
 	end
 
-	print("[CampaignManager] 开始批量寻路，目标数量:", moveCount)
-
 	-- 调用PathService批量寻路（使用新的回调API）
+	-- V2.3.1：移除缓存路径传入，让每个单位使用真实起点寻路
 	local moveId = PathService.MoveUnitsToPositions(moveTargets, {
 		onUnitArrived = function(unitInstance, status)
 			-- 单位到达时的回调（可选，这里暂时不处理）
-			print("[CampaignManager] 单位到达:", unitInstance.Name, "状态:", status)
 		end,
 
 		onAllSettled = function(arrivedList, timedOutList, failedList)
 			-- 所有单位完成移动后的回调
-			print("[CampaignManager] 所有兵种到达关卡:", stageNum)
-			print(string.format("  - 正常到达: %d", #arrivedList))
-			print(string.format("  - 超时传送: %d", #timedOutList))
-			print(string.format("  - 失败: %d", #failedList))
 
 			-- V2.0修复：到达后停止移动动画，切换到Idle
 			for _, unitInstance in ipairs(arrivedList) do
@@ -440,7 +494,7 @@ function CampaignManager.MarchToStage(campaignData, stageNum)
 			task.wait(0.1)  -- 给客户端缓冲
 			CampaignManager.BeginBattlePrep(campaignData, stageNum, arrivedList, timedOutList, failedList)
 		end
-	})
+	})  -- V2.3.1：移除第三个参数cachedWaypoints
 
 	-- 存储moveId以便后续可以取消
 	if moveId then
@@ -459,8 +513,6 @@ end
 ]]
 function CampaignManager.BeginBattlePrep(campaignData, stageNum, arrivedList, timedOutList, failedList)
 	campaignData.State = CampaignState.PREPARE_BATTLE
-
-	print("[CampaignManager] 开始准备战斗，关卡:", stageNum)
 
 	-- 通知客户端进入准备阶段
 	if InitializeEvents() then
@@ -488,9 +540,6 @@ function CampaignManager.BeginBattlePrep(campaignData, stageNum, arrivedList, ti
 		table.insert(allArrivedUnits, unit)
 	end
 
-	print(string.format("[CampaignManager] 到达统计 - 正常:%d, 超时:%d, 失败:%d",
-		#arrivedList, #timedOutList, #failedList))
-
 	-- 记录到达的单位，更新 campaignData
 	for _, unitInstance in ipairs(allArrivedUnits) do
 		local unitData = campaignData.Units[unitInstance]
@@ -503,7 +552,6 @@ function CampaignManager.BeginBattlePrep(campaignData, stageNum, arrivedList, ti
 	end
 
 	-- 准备友军：激活单位并准备进入战斗
-	print("[CampaignManager] 准备友军...")
 	local preparedAllies = {}
 
 	for _, unitInstance in ipairs(allArrivedUnits) do
@@ -520,17 +568,13 @@ function CampaignManager.BeginBattlePrep(campaignData, stageNum, arrivedList, ti
 
 			if activated and prepared then
 				table.insert(preparedAllies, unitInstance)
-				print(string.format("  ✅ 友军准备完成: %s", unitData.UnitId))
 			else
 				warn(string.format("  ❌ 友军准备失败: %s", unitData.UnitId))
 			end
 		end
 	end
 
-	print(string.format("[CampaignManager] 友军准备完成: %d / %d", #preparedAllies, #allArrivedUnits))
-
 	-- 获取并激活敌军
-	print("[CampaignManager] 准备敌军...")
 	local stageFolder = StageService.GetOrCreateStage(campaignData.PlayerId, stageNum)
 	if not stageFolder then
 		warn("[CampaignManager] 关卡未找到，战斗准备失败")
@@ -550,7 +594,6 @@ function CampaignManager.BeginBattlePrep(campaignData, stageNum, arrivedList, ti
 				end
 			end
 		end
-		print(string.format("[CampaignManager] 敌军激活完成: %d", #preparedEnemies))
 	else
 		warn("[CampaignManager] IdleFloorEnemy未找到")
 	end
@@ -560,8 +603,6 @@ function CampaignManager.BeginBattlePrep(campaignData, stageNum, arrivedList, ti
 		warn(string.format("[CampaignManager] 无法开战：友军%d，敌军%d", #preparedAllies, #preparedEnemies))
 		return CampaignManager.OnDefeat(campaignData)
 	end
-
-	print("[CampaignManager] ✅ 战斗准备完成，开始战斗")
 
 	-- 进入战斗阶段
 	task.wait(0.2)  -- 给激活操作一点缓冲时间
@@ -578,8 +619,6 @@ end
 function CampaignManager.StartStageBattle(campaignData, stageNum, preparedAllies, preparedEnemies)
 	campaignData.State = CampaignState.FIGHTING
 
-	print("[CampaignManager] 开始关卡战斗:", stageNum)
-
 	-- 通知客户端
 	if InitializeEvents() then
 		local stateUpdate = CampaignEvents:FindFirstChild("CampaignStateUpdate")
@@ -587,8 +626,6 @@ function CampaignManager.StartStageBattle(campaignData, stageNum, preparedAllies
 			stateUpdate:FireClient(campaignData.Player, CampaignState.FIGHTING, stageNum)
 		end
 	end
-
-	print(string.format("[CampaignManager] 友军数量: %d, 敌军数量: %d", #preparedAllies, #preparedEnemies))
 
 	-- V2.0重构：直接使用已准备好的列表，无需再次激活
 	-- 创建战斗实例
@@ -623,8 +660,6 @@ end
 @param result table - 战斗结果
 ]]
 function CampaignManager.OnBattleEnd(campaignData, stageNum, result)
-	print("[CampaignManager] 关卡", stageNum, "战斗结束，胜者:", result.Winner)
-
 	-- 保存兵种HP
 	for unitInstance, unitData in pairs(campaignData.Units) do
 		if unitInstance and unitInstance.Parent and unitInstance:FindFirstChild("Humanoid") then
@@ -654,8 +689,6 @@ end
 ]]
 function CampaignManager.OnStageClear(campaignData, stageNum)
 	campaignData.State = CampaignState.STAGE_CLEAR
-
-	print("[CampaignManager] 关卡", stageNum, "完成!")
 
 	-- 通知客户端
 	if InitializeEvents() then
@@ -720,9 +753,6 @@ function CampaignManager.OnVictory(campaignData)
 	-- 发放奖励 (V2.0修复：使用AddCoins而不是AddCurrency)
 	if totalReward > 0 then
 		CurrencySystem.AddCoins(campaignData.Player, totalReward, "战役胜利奖励")
-		print("[CampaignManager] 发放奖励:", totalReward, "金币")
-	else
-		print("[CampaignManager] 无奖励发放")
 	end
 
 	-- 结束战役
@@ -736,8 +766,6 @@ end
 ]]
 function CampaignManager.OnDefeat(campaignData)
 	campaignData.State = CampaignState.DEFEAT
-
-	print("[CampaignManager] 战役失败:", campaignData.Player.Name)
 
 	-- 通知客户端
 	if InitializeEvents() then
@@ -760,13 +788,13 @@ end
 function CampaignManager.OnCampaignEnd(campaignData, isVictory)
 	campaignData.State = CampaignState.CLEANUP
 
-	print("[CampaignManager] 战役结束，开始清理...")
-
 	-- V2.0.1新增：关闭基地大门（确保门总是被关闭）
 	pcall(function()
 		DoorControlService.CloseDoor(campaignData.HomeId)
-		print("[CampaignManager] ✅ 基地大门已关闭: PlayerHome" .. campaignData.HomeId)
 	end)
+
+	-- V2.3性能优化：清理路径缓存
+	ClearPathCache(campaignData.HomeId)
 
 	-- 重生兵种
 	CampaignManager.RespawnUnits(campaignData)
@@ -789,8 +817,6 @@ function CampaignManager.OnCampaignEnd(campaignData, isVictory)
 	end
 
 	campaignData.State = CampaignState.IDLE
-
-	print("[CampaignManager] 战役清理完成")
 end
 
 --[[
@@ -822,7 +848,6 @@ local function RestoreUnitAnimationState(unitModel, unitId)
 		if descendant:IsA("Script") or descendant:IsA("LocalScript") then
 			if descendant.Name == "Animate" then
 				descendant.Disabled = false
-				print("[CampaignManager] 重新启用Animate脚本:", unitId)
 			end
 		end
 	end
@@ -840,13 +865,10 @@ local function RestoreUnitAnimationState(unitModel, unitId)
 				track:Stop(0)
 			end)
 		end
-		print("[CampaignManager] 清理", #playingTracks, "个残留动画轨道:", unitId)
 	end
 
 	-- 4. 短暂延迟后，Animate脚本会自动播放show/idle动画
 	-- 无需手动启动，Animate脚本会根据Humanoid状态自动处理
-
-	print("[CampaignManager] 动画状态已恢复:", unitId)
 end
 
 --[[
@@ -860,9 +882,6 @@ function CampaignManager.RespawnUnits(campaignData)
 		return
 	end
 
-	-- V2.0.2修复验证：打印获取到的IdleFloor路径
-	print("[CampaignManager] ✅ RespawnUnits获取基地IdleFloor成功 - 路径:", homeIdleFloor:GetFullName())
-
 	-- V2.0.1修复：支持重生死亡隐藏的单位
 	for unitInstance, unitData in pairs(campaignData.Units) do
 		if unitInstance then
@@ -874,7 +893,6 @@ function CampaignManager.RespawnUnits(campaignData)
 				local homeFolder = homeIdleFloor.Parent
 				if homeFolder then
 					unitInstance.Parent = homeFolder
-					print("[CampaignManager] 重新挂载死亡单位:", unitData.UnitId, "到基地根节点:", homeFolder.Name)
 				else
 					warn("[CampaignManager] 找不到基地根节点（IdleFloor.Parent）")
 					unitInstance.Parent = homeIdleFloor  -- 回退方案
@@ -918,15 +936,10 @@ function CampaignManager.RespawnUnits(campaignData)
 			task.delay(1, function()
 				if unitInstance then
 					unitInstance:SetAttribute("CampaignKeepInstance", false)
-					print("[CampaignManager] 延迟清除战役标记:", unitData.UnitId)
 				end
 			end)
-
-			print("[CampaignManager] 重生兵种:", unitData.UnitId, "位置:", unitData.GridPos.X, unitData.GridPos.Y)
 		end
 	end
-
-	print("[CampaignManager] 兵种重生完成")
 end
 
 --[[
@@ -941,7 +954,6 @@ function CampaignManager.RequestRetreat(player)
 		return
 	end
 
-	print("[CampaignManager] 玩家撤退:", player.Name)
 	CampaignManager.OnDefeat(campaignData)
 end
 
@@ -949,8 +961,6 @@ end
 初始化CampaignManager
 ]]
 function CampaignManager.Initialize()
-	print("[CampaignManager] 初始化...")
-
 	-- 初始化远程事件
 	if not InitializeEvents() then
 		warn("[CampaignManager] CampaignEvents未找到，战役系统将不可用!")
@@ -990,12 +1000,10 @@ function CampaignManager.Initialize()
 		local campaignData = CampaignManager.ActiveCampaigns[playerId]
 
 		if campaignData then
-			print("[CampaignManager] 玩家离开，清理战役:", player.Name)
 			CampaignManager.OnCampaignEnd(campaignData, false)
 		end
 	end)
 
-	print("[CampaignManager] 初始化完成")
 	return true
 end
 

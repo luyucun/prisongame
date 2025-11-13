@@ -52,8 +52,9 @@ BattleConfig.PATHFINDING_TIMEOUT = 5
 -- 路径重算冷却时间(秒) - 避免频繁重建路径
 BattleConfig.PATH_RECALC_COOLDOWN = 0.5
 
--- 目标移动阈值(studs) - 目标移动超过此距离时重建路径
-BattleConfig.PATH_TARGET_MOVE_THRESHOLD = 6
+-- V2.3性能优化：大幅提高目标移动阈值，减少频繁重算
+-- 从6提高到35，与PathService的TARGET_MOVE_THRESHOLD对齐
+BattleConfig.PATH_TARGET_MOVE_THRESHOLD = 35
 
 -- Waypoint到达阈值(studs) - 距离waypoint小于此值视为到达
 BattleConfig.WAYPOINT_REACH_THRESHOLD = 2

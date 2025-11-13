@@ -36,13 +36,13 @@ local BattleConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChi
 -- ==================== 配置常量 ====================
 
 local CONFIG = {
-	-- 路径请求冷却（秒）
-	-- V2.1.2修正：从0.5降低到0.3，平衡性能与响应性
-	PATH_RECALC_COOLDOWN = 0.3,
+	-- 路径请求冷却（秒）- V2.2优化：分档冷却
+	PATH_RECALC_COOLDOWN_MARCH = 0.3,   -- 行军模式：保持响应性
+	PATH_RECALC_COOLDOWN_BATTLE = 0.6,  -- 战斗模式：减少重算频率
+	PATH_RECALC_COOLDOWN = 0.3,         -- 默认值（向后兼容）
 
-	-- 目标移动阈值（studs）
-	-- V2.1.2修正：从30降低到15，避免"找不到人"
-	TARGET_MOVE_THRESHOLD = 15,
+	-- 目标移动阈值（studs）- V2.2优化：提高阈值避免频繁重算
+	TARGET_MOVE_THRESHOLD = 35,  -- 从15提高到35，减少重算
 
 	-- Waypoint到达阈值（studs）
 	WAYPOINT_REACH_THRESHOLD = 4,
@@ -51,11 +51,9 @@ local CONFIG = {
 	MAX_RETRY_COUNT = 3,
 
 	-- 连续阻挡次数上限
-	-- V2.1.3修复：从3增加到10，避免大规模行军时过早放弃寻路
 	MAX_BLOCKED_COUNT = 10,
 
 	-- 阻挡时间窗口（秒）
-	-- V2.1.3修复：从2增加到5，给拥挤的单位更多时间疏散
 	BLOCKED_TIME_WINDOW = 5,
 
 	-- 降级策略：减小AgentRadius的比例
@@ -81,17 +79,17 @@ local CONFIG = {
 	AUTO_RADIUS_OFFSET = 0.2,       -- + 0.2 容差
 	AUTO_HEIGHT_OFFSET = 1,         -- Y + 1 容差
 
-	-- V2.1.2性能优化配置（修正吞吐量）
-	BATCH_UPDATE_INTERVAL = 0.15,   -- 批量更新间隔（秒），保持0.15
-	-- V2.1.2修正：提高到5，接近V2.0水平
-	-- 每0.15秒处理5个 ≈ 每秒33条路径，足够应对大多数战斗
-	MAX_COMPUTE_PER_FRAME = 5,      -- 每帧最多执行的ComputeAsync数量（限流）
+	-- V2.2性能优化：大幅提升吞吐量
+	BATCH_UPDATE_INTERVAL = 0.06,   -- 从0.15降低到0.06，提升处理频率
+	MAX_COMPUTE_PER_FRAME = 20,     -- 从5提升到20，支持100单位场景
+	-- 动态调整：实际值为 min(MAX_COMPUTE_PER_FRAME, queueLength)
 
-	-- V2.1.3修正：分批行军机制
+	-- V2.2优化：动态并发限制（不再硬编码）
 	BATCH_START_DELAY = 0.25,       -- 批量启动延迟（秒）
-	BATCH_START_SIZE = 6,           -- V2.1.3修正：从8降低到6，每批启动的单位数量
-	MARCH_BATCH_LIMIT = 8,          -- V2.1.3新增：同时行军的最大单位数（超过则排队等待）
-	MARCH_TIMEOUT = 30,             -- V2.1.3新增：单位行军超时时间（秒）
+	BATCH_START_SIZE = 6,           -- 每批启动的单位数量
+	MARCH_BATCH_LIMIT_MIN = 20,     -- 最小并发数
+	MARCH_BATCH_LIMIT_RATIO = 0.5,  -- 动态比例：max(20, ceil(totalUnits * 0.5))
+	MARCH_TIMEOUT = 30,             -- 单位行军超时时间（秒）
 
 	-- 调试选项
 	DEBUG_SHOW_PATH = false,        -- 是否显示路径可视化
@@ -1094,30 +1092,49 @@ end
 local activeMoves = {}  -- [moveId] = {connection, moveData}
 local nextMoveId = 1
 
--- ==================== V2.0性能优化: 路径计算限流队列 ====================
+-- ==================== V2.2性能优化: 拆分队列与三段式优先级 ====================
 
--- V2.1优化：路径计算优先队列（按优先级排序）
-local computeQueue = {}  -- {{unitInstance, targetPart, unitId, callback, priority, queueTime}, ...}
+-- V2.2新增：分离Campaign和Battle队列，防止相互干扰
+-- 每个队列内部使用三段式优先级（high/medium/low），替代O(n²logn)的table.sort
+local campaignQueue = {
+	high = {},    -- 高优先级（距离<20studs）
+	medium = {},  -- 中优先级（20-50studs）
+	low = {}      -- 低优先级（>50studs）
+}
+local battleQueue = {
+	high = {},
+	medium = {},
+	low = {}
+}
+
 local computingCount = 0  -- 当前正在计算的数量
 local lastComputeCheckTime = 0
 
--- V2.1新增：优先级计算函数
+-- V2.2新增：优先级计算函数（基于距离）- 返回字符串"high"/"medium"/"low"
 local function CalculatePathPriority(unitInstance, targetPart)
-	-- 计算距离，距离越近优先级越高（数值越小）
 	local rootPart = unitInstance and unitInstance:FindFirstChild("HumanoidRootPart")
 	if not rootPart or not targetPart then
-		return 3  -- 低优先级
+		return "low"
 	end
 
 	local distance = (rootPart.Position - targetPart.Position).Magnitude
 
 	if distance < 20 then
-		return 1  -- 高优先级（即将接敌）
+		return "high"  -- 即将接敌
 	elseif distance < 50 then
-		return 2  -- 中优先级
+		return "medium"
 	else
-		return 3  -- 低优先级（远距离）
+		return "low"
 	end
+end
+
+-- V2.2新增：获取总队列长度（用于动态调整MAX_COMPUTE_PER_FRAME）
+local function GetTotalQueueLength()
+	local total = 0
+	for _, queue in ipairs({campaignQueue, battleQueue}) do
+		total = total + #queue.high + #queue.medium + #queue.low
+	end
+	return total
 end
 
 -- 性能统计数据
@@ -1140,7 +1157,7 @@ local performanceStats = {
 @return table - 统计数据
 ]]
 function PathService.GetPerformanceStats()
-	performanceStats.QueuedRequests = #computeQueue
+	performanceStats.QueuedRequests = GetTotalQueueLength()  -- V2.2：使用新的总队列长度函数
 	performanceStats.ActiveMoveTasks = 0
 	performanceStats.TotalUnitsMoving = 0
 
@@ -1191,137 +1208,170 @@ function PathService.PrintPerformanceStats()
 end
 
 --[[
-将路径计算请求加入队列（V2.1优化：支持优先队列）
+将路径计算请求加入队列（V2.2重构：三段式优先级队列，O(1)入队）
 @param unitInstance - 单位实例
 @param targetPart - 目标Part
 @param unitId - 单位ID
 @param callback - 完成回调 function(success, pathState)
-@param pathType - 路径类型："Battle"或"Campaign"（可选，默认"Battle"）
-@param priority - 优先级（可选，如不提供则自动计算）
+@param pathType - 路径类型："Battle"或"Campaign"（默认"Battle"）
+@param priority - 优先级（可选，自动计算）
 ]]
 QueuePathCompute = function(unitInstance, targetPart, unitId, callback, pathType, priority)
-	-- 如果没有指定优先级，自动计算
+	pathType = pathType or "Battle"
 	priority = priority or CalculatePathPriority(unitInstance, targetPart)
 
-	-- V2.1优化：检查是否已经在队列中，避免重复排队
-	for i, request in ipairs(computeQueue) do
-		if request.unitInstance == unitInstance then
-			-- V2.1.3修正：更新所有请求信息，避免使用旧数据
-			-- 销毁旧的targetPart引用（如果是临时创建的）
-			if request.targetPart and request.targetPart:IsA("Part") and request.targetPart.Name == "TempTarget" then
-				pcall(function() request.targetPart:Destroy() end)
-			end
+	-- V2.2：根据pathType选择队列
+	local queue = (pathType == "Campaign") and campaignQueue or battleQueue
 
-			-- 更新所有字段，保证使用最新的请求数据
-			request.targetPart = targetPart
-			request.callback = callback
-			request.pathType = pathType or "Battle"
-			request.priority = priority
-			request.queueTime = tick()
-
-			-- 重新排序
-			table.sort(computeQueue, function(a, b)
-				if a.priority == b.priority then
-					return a.queueTime < b.queueTime  -- 同优先级按时间排序
+	-- V2.2优化：检查是否已在队列中（遍历所有优先级）
+	for _, priorityName in ipairs({"high", "medium", "low"}) do
+		local subQueue = queue[priorityName]
+		for i, request in ipairs(subQueue) do
+			if request.unitInstance == unitInstance then
+				-- 更新现有请求
+				if request.targetPart and request.targetPart:IsA("Part") and request.targetPart.Name == "TempTarget" then
+					pcall(function() request.targetPart:Destroy() end)
 				end
-				return a.priority < b.priority  -- 优先级越小越优先
-			end)
-			return
+
+				request.targetPart = targetPart
+				request.callback = callback
+				request.pathType = pathType
+				request.queueTime = tick()
+
+				-- V2.2关键优化：如果优先级改变，从旧队列移除并加入新队列
+				if priorityName ~= priority then
+					table.remove(subQueue, i)
+					table.insert(queue[priority], {
+						unitInstance = unitInstance,
+						targetPart = targetPart,
+						unitId = unitId,
+						callback = callback,
+						queueTime = tick(),
+						pathType = pathType,
+					})
+					DebugLog(string.format("请求优先级变更: %s (%s → %s)", unitId, priorityName, priority))
+				end
+				return
+			end
 		end
 	end
 
-	-- 新增请求
-	table.insert(computeQueue, {
+	-- V2.2：新增请求，直接插入对应优先级队列（O(1)，无需排序）
+	table.insert(queue[priority], {
 		unitInstance = unitInstance,
 		targetPart = targetPart,
 		unitId = unitId,
 		callback = callback,
 		queueTime = tick(),
-		pathType = pathType or "Battle",  -- V2.0.5新增：标记路径类型
-		priority = priority,              -- V2.1新增：优先级
+		pathType = pathType,
 	})
 
-	-- V2.1优化：按优先级排序
-	table.sort(computeQueue, function(a, b)
-		if a.priority == b.priority then
-			return a.queueTime < b.queueTime  -- 同优先级按时间排序
-		end
-		return a.priority < b.priority  -- 优先级越小越优先
-	end)
-
 	performanceStats.TotalPathRequests = performanceStats.TotalPathRequests + 1
+	DebugLog(string.format("入队成功: %s (%s,%s) 总队列长度:%d", unitId, pathType, priority, GetTotalQueueLength()))
 end
 
 --[[
-处理路径计算队列（每帧最多处理MAX_COMPUTE_PER_FRAME个）
-修复：添加 pcall 保护，确保 computingCount 始终正确递减
+处理路径计算队列（V2.2重构：三段式优先级队列+动态吞吐）
+核心改进：
+1. 三段式遍历（high → medium → low），O(1)出队
+2. 动态MAX_COMPUTE_PER_FRAME：min(20, queueLength)
+3. 动态BATCH_UPDATE_INTERVAL：队列积压时加速处理
+4. Campaign/Battle分离，互不干扰
 ]]
 local function ProcessComputeQueue()
 	local now = tick()
+	local queueLength = GetTotalQueueLength()
 
-	-- 节流：每CONFIG.BATCH_UPDATE_INTERVAL秒检查一次
-	if now - lastComputeCheckTime < CONFIG.BATCH_UPDATE_INTERVAL then
+	-- V2.2优化：动态节流间隔（队列积压时加速）
+	local updateInterval = (queueLength > 20) and 0.05 or CONFIG.BATCH_UPDATE_INTERVAL
+	if now - lastComputeCheckTime < updateInterval then
 		return
 	end
 	lastComputeCheckTime = now
 
-	-- 处理队列中的请求
-	while #computeQueue > 0 and computingCount < CONFIG.MAX_COMPUTE_PER_FRAME do
-		local request = table.remove(computeQueue, 1)
+	-- V2.2优化：动态并发限制（根据队列长度调整）
+	local maxCompute = math.min(CONFIG.MAX_COMPUTE_PER_FRAME, queueLength)
 
-		-- V2.0修复：跳过无效请求（单位或目标已被删除）
-		if not request.unitInstance or not request.unitInstance.Parent then
-			DebugLog(string.format("⚠️ 跳过无效请求: 单位已被删除"))
-			continue
-		end
+	-- V2.3修复：按比例分配配额，避免Campaign队列饥饿
+	-- 战斗队列获得60%配额，战役队列获得40%配额
+	local battleQuota = math.ceil(maxCompute * 0.6)
+	local campaignQuota = math.ceil(maxCompute * 0.4)
 
-		if not request.targetPart or not request.targetPart.Parent then
-			DebugLog(string.format("⚠️ 跳过无效请求: 目标Part已被删除 (%s)", request.unitId or "Unknown"))
-			-- 仍然需要调用回调通知失败
-			if request.callback then
-				pcall(function()
-					request.callback(false, nil)
+	-- V2.2：三段式优先级遍历（高→中→低）
+	local function ProcessSingleQueue(queue, queueName, quota)
+		local processed = 0
+		for _, priorityName in ipairs({"high", "medium", "low"}) do
+			local subQueue = queue[priorityName]
+			while #subQueue > 0 and computingCount < maxCompute and processed < quota do
+				local request = table.remove(subQueue, 1)  -- O(1) 出队
+
+				-- 跳过无效请求
+				if not request.unitInstance or not request.unitInstance.Parent then
+					DebugLog(string.format("⚠️ 跳过无效请求: 单位已删除 (%s)", queueName))
+					continue
+				end
+
+				if not request.targetPart or not request.targetPart.Parent then
+					DebugLog(string.format("⚠️ 跳过无效请求: 目标已删除 (%s,%s)", queueName, request.unitId or "Unknown"))
+					if request.callback then
+						pcall(function()
+							request.callback(false, nil)
+						end)
+					end
+					continue
+				end
+
+				computingCount = computingCount + 1
+				processed = processed + 1
+				performanceStats.TotalComputeAsync = performanceStats.TotalComputeAsync + 1
+
+				-- 分类统计
+				if request.pathType == "Campaign" then
+					performanceStats.CampaignPathComputes = performanceStats.CampaignPathComputes + 1
+				else
+					performanceStats.BattlePathComputes = performanceStats.BattlePathComputes + 1
+				end
+
+				-- 异步执行路径计算（pcall保护）
+				task.spawn(function()
+					local success = false
+					local pathState = nil
+
+					local pcallSuccess, pcallError = pcall(function()
+						success = PathService.RequestPath(request.unitInstance, request.targetPart, request.unitId)
+						pathState = GetPathState(request.unitInstance)
+					end)
+
+					if not pcallSuccess then
+						warn(string.format("[PathService] 路径计算异常: %s, 错误: %s",
+							request.unitId or "Unknown", tostring(pcallError)))
+					end
+
+					-- 无论成功失败，都减少 computingCount
+					computingCount = computingCount - 1
+
+					-- 触发回调
+					if request.callback then
+						pcall(function()
+							request.callback(success, pathState)
+						end)
+					end
 				end)
 			end
-			continue
 		end
+		return processed
+	end
 
-		computingCount = computingCount + 1
-		performanceStats.TotalComputeAsync = performanceStats.TotalComputeAsync + 1
+	-- 先处理战斗队列（战斗配额60%）
+	local battleProcessed = ProcessSingleQueue(battleQueue, "Battle", battleQuota)
+	-- 再处理战役队列（战役配额40%）
+	local campaignProcessed = ProcessSingleQueue(campaignQueue, "Campaign", campaignQuota)
 
-		-- V2.0.5修复：根据pathType分类统计
-		if request.pathType == "Campaign" then
-			performanceStats.CampaignPathComputes = performanceStats.CampaignPathComputes + 1
-		else
-			performanceStats.BattlePathComputes = performanceStats.BattlePathComputes + 1
-		end
-
-		-- 异步执行路径计算（带异常保护）
-		task.spawn(function()
-			local success = false
-			local pathState = nil
-
-			-- 关键修复：使用 pcall 保护，确保异常不会导致 computingCount 泄漏
-			local pcallSuccess, pcallError = pcall(function()
-				success = PathService.RequestPath(request.unitInstance, request.targetPart, request.unitId)
-				pathState = GetPathState(request.unitInstance)
-			end)
-
-			if not pcallSuccess then
-				warn(string.format("[PathService] 路径计算异常: %s, 错误: %s",
-					request.unitId or "Unknown", tostring(pcallError)))
-			end
-
-			-- 关键：无论成功或失败，都必须减少 computingCount
-			computingCount = computingCount - 1
-
-			-- 触发回调（回调本身也用 pcall 保护）
-			if request.callback then
-				pcall(function()
-					request.callback(success, pathState)
-				end)
-			end
-		end)
+	-- 如果某个队列没用完配额，另一个队列可以补充使用剩余slot
+	if battleProcessed < battleQuota and computingCount < maxCompute then
+		ProcessSingleQueue(campaignQueue, "Campaign", maxCompute - computingCount)
+	elseif campaignProcessed < campaignQuota and computingCount < maxCompute then
+		ProcessSingleQueue(battleQueue, "Battle", maxCompute - computingCount)
 	end
 end
 
@@ -1335,6 +1385,7 @@ RunService.Heartbeat:Connect(ProcessComputeQueue)
 2. 路径计算限流（队列机制）
 3. 分批启动（避免瞬时大量ComputeAsync）
 4. 降低更新频率（0.15秒而非60FPS）
+5. V2.3新增：支持缓存路径，避免重复ComputeAsync
 
 @param moveTargets table - {[unitInstance] = targetCFrame, ...}
 @param callbacks table - 回调函数表 {
@@ -1343,7 +1394,7 @@ RunService.Heartbeat:Connect(ProcessComputeQueue)
 }
 @return string - 移动任务ID，可用于取消
 ]]
-function PathService.MoveUnitsToPositions(moveTargets, callbacks)
+function PathService.MoveUnitsToPositions(moveTargets, callbacks)  -- V2.3.1：移除cachedWaypoints参数
 	if not moveTargets or type(moveTargets) ~= "table" then
 		warn("[PathService] MoveUnitsToPositions: moveTargets无效")
 		return nil
@@ -1401,10 +1452,11 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 				MoveToConnection = nil,  -- MoveToFinished连接
 				PathRequested = false,   -- 是否已请求路径
 
-				-- V2.0.4新增：持续MoveTo推进
+				-- V2.0.4新增：持续MoveTo推进（V2.3：已整合到批处理器）
 				LastMoveCommand = 0,     -- 上次发送MoveTo命令的时间
 				CurrentWaypoint = nil,   -- 当前目标路径点
-				HeartbeatConn = nil,     -- Heartbeat连接，用于持续推进
+
+				-- V2.3.1：移除CachedWaypoints字段
 			}
 
 			table.insert(unitsList, unitInstance)
@@ -1420,8 +1472,11 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 		return nil
 	end
 
-	DebugLog(string.format("[PathService] 批量寻路开始，兵种数量: %d, MoveId: %s, 批次限制: %d",
-		moveCount, moveId, CONFIG.MARCH_BATCH_LIMIT))
+	-- V2.2优化：动态计算并发限制 max(20, ceil(moveCount * 0.5))
+	local dynamicBatchLimit = math.max(CONFIG.MARCH_BATCH_LIMIT_MIN, math.ceil(moveCount * CONFIG.MARCH_BATCH_LIMIT_RATIO))
+
+	DebugLog(string.format("[PathService] 批量寻路开始，兵种数量: %d, MoveId: %s, 动态批次限制: %d (基于%d单位)",
+		moveCount, moveId, dynamicBatchLimit, moveCount))
 
 	-- ==================== 核心逻辑：事件驱动移动 ====================
 
@@ -1449,10 +1504,7 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 			data.MoveToConnection:Disconnect()
 			data.MoveToConnection = nil
 		end
-		if data.HeartbeatConn then
-			data.HeartbeatConn:Disconnect()
-			data.HeartbeatConn = nil
-		end
+		-- V2.3优化：HeartbeatConn已移除，不再需要断开
 
 		-- 清理路径
 		PathService.ClearPath(unitInstance)
@@ -1471,16 +1523,19 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 	end
 
 	--[[
-	V2.1.3新增：尝试从队列启动下一批单位
+	V2.2优化：尝试从队列启动下一批单位（使用动态限制）
+	V2.3.1修复：根据StartUnitMovement返回值决定是否增加marchingCount
 	]]
 	TryStartNextBatch = function()
-		while marchingCount < CONFIG.MARCH_BATCH_LIMIT and #pendingQueue > 0 do
+		while marchingCount < dynamicBatchLimit and #pendingQueue > 0 do
 			local unitInstance = table.remove(pendingQueue, 1)
 			if unitInstance and unitInstance.Parent then
-				StartUnitMovement(unitInstance)
-				marchingCount = marchingCount + 1
-				DebugLog(string.format("🚀 从队列启动单位: %s (当前行军数: %d/%d)",
-					unitInstance.Name, marchingCount, CONFIG.MARCH_BATCH_LIMIT))
+				-- V2.3.1：只有成功启动才增加marchingCount
+				if StartUnitMovement(unitInstance) then
+					marchingCount = marchingCount + 1
+					DebugLog(string.format("🚀 从队列启动单位: %s (当前行军数: %d/%d)",
+						unitInstance.Name, marchingCount, dynamicBatchLimit))
+				end
 			end
 		end
 	end
@@ -1491,20 +1546,24 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 	1. 检查 reached 标志，避免盲目推进路径点
 	2. 路径失效时重置 PathRequested 并重新入队
 	V2.1.3修正：启动时才设置StartTime
+	V2.3.1修正：返回布尔值，指示是否成功启动（解决marchingCount泄漏问题）
+	@return boolean - true表示成功启动，false表示启动失败（无需占用并发槽位）
 	]]
 	StartUnitMovement = function(unitInstance)
 		local data = moveData[unitInstance]
 		-- V2.0修复：同时检查Arrived和Cancelled
 		if not data or data.Arrived or data.Cancelled then
-			return
+			-- V2.3.1：提前退出，返回false表示不应占用并发槽位
+			return false
 		end
 
 		local humanoid = unitInstance:FindFirstChild("Humanoid")
 		local rootPart = unitInstance:FindFirstChild("HumanoidRootPart")
 		if not humanoid or not rootPart then
+			-- V2.3.1修复：启动失败，标记为失败并返回false
 			data.Arrived = true
 			table.insert(failedList, unitInstance)
-			return
+			return false
 		end
 
 		-- V2.1.3新增：实际启动时才设置StartTime
@@ -1534,12 +1593,7 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 					data.MoveToConnection:Disconnect()
 					data.MoveToConnection = nil
 				end
-
-				-- V2.0.4新增：断开Heartbeat连接
-				if data.HeartbeatConn then
-					data.HeartbeatConn:Disconnect()
-					data.HeartbeatConn = nil
-				end
+				-- V2.3优化：HeartbeatConn已移除，不再需要断开
 
 				-- 清理
 				PathService.ClearPath(unitInstance)
@@ -1645,107 +1699,12 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 			end
 		end)
 
-		-- V2.0.4新增：注册持续MoveTo推进的Heartbeat连接
-		-- 这样即使MoveToFinished被挤停（reached=false），也能在Heartbeat中持续重试
-		local lastContinuousMove = 0
-		data.HeartbeatConn = RunService.Heartbeat:Connect(function()
-			-- V2.0.4：检查任务是否已完成或取消
-			if data.Arrived or data.Cancelled or not unitInstance or not unitInstance.Parent then
-				if data.HeartbeatConn then
-					data.HeartbeatConn:Disconnect()
-					data.HeartbeatConn = nil
-				end
-				return
-			end
-
-			local now = tick()
-			-- 每0.1s尝试一次持续推进
-			if now - lastContinuousMove < 0.1 then
-				return
-			end
-			lastContinuousMove = now
-
-			-- V2.1.3修复：先检查是否已接近最终目标
-			local currentPos = rootPart.Position
-			local finalTargetPos = data.TargetCFrame.Position
-			local distanceXZToFinal = math.sqrt((currentPos.X - finalTargetPos.X)^2 + (currentPos.Z - finalTargetPos.Z)^2)
-			local arrivalThreshold = GameConfig.Campaign.ArrivalThreshold or 8
-
-			if distanceXZToFinal < arrivalThreshold then
-				-- 已经接近最终目标，标记为到达
-				data.Arrived = true
-
-				-- 断开连接
-				if data.MoveToConnection then
-					data.MoveToConnection:Disconnect()
-					data.MoveToConnection = nil
-				end
-				if data.HeartbeatConn then
-					data.HeartbeatConn:Disconnect()
-					data.HeartbeatConn = nil
-				end
-
-				-- 清理
-				PathService.ClearPath(unitInstance)
-				if data.TargetPart and data.TargetPart.Parent then
-					data.TargetPart:Destroy()
-				end
-
-				table.insert(arrivedList, unitInstance)
-				DebugLog(string.format("✅ 兵种到达 (Heartbeat检测): %s (距离=%.1f studs)", unitInstance.Name, distanceXZToFinal))
-
-				-- 触发回调
-				if onUnitArrived then
-					pcall(function()
-						onUnitArrived(unitInstance, "Arrived")
-					end)
-				end
-
-				-- V2.1.3新增：减少行军计数，尝试启动下一批
-				marchingCount = marchingCount - 1
-				TryStartNextBatch()
-
-				return
-			end
-
-			-- 获取当前路径点或目标位置
-			local targetPos = nil
-			local pathStatus = PathService.GetPathStatus(unitInstance)
-
-			if pathStatus == PathStatus.SUCCESS then
-				-- 路径有效，获取当前路径点
-				local currentWaypoint = PathService.GetNextWaypoint(unitInstance)
-				if currentWaypoint then
-					targetPos = currentWaypoint
-					data.CurrentWaypoint = currentWaypoint
-				else
-					targetPos = data.TargetCFrame.Position
-				end
-			else
-				-- 路径无效或无路径，直线移动到目标
-				targetPos = data.TargetCFrame.Position
-			end
-
-			-- 检查是否还需要移动（距离阈值）
-			if targetPos then
-				local distance = (currentPos - targetPos).Magnitude
-
-				-- 只有在距离超过阈值时才发送MoveTo
-				if distance > CONFIG.WAYPOINT_REACH_THRESHOLD then
-					-- 更新LastMoveCommand时间
-					data.LastMoveCommand = now
-
-					-- 发送持续的MoveTo命令
-					pcall(function()
-						humanoid:MoveTo(targetPos)
-					end)
-
-					DebugLog(string.format("📍 %s 持续推进: 距离=%.1f studs", unitId, distance))
-				end
-			end
-		end)
+		-- V2.3优化：移除per-unit Heartbeat连接
+		-- 原V2.0.4的持续MoveTo推进逻辑已整合到checkConnection批处理器中
+		-- 消除100个单位×10Hz=1000次/秒的Heartbeat回调开销
 
 		-- 请求路径（加入限流队列）
+		-- V2.3.1：移除缓存路径逻辑，所有单位使用真实起点per-unit寻路
 		if not data.PathRequested then
 			data.PathRequested = true
 			QueuePathCompute(unitInstance, data.TargetPart, unitId, function(success, pathState)
@@ -1774,20 +1733,26 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 				end
 			end, "Campaign")  -- V2.0.5：标记为战役路径
 		end
+
+		-- V2.3.1：成功启动，返回true表示应占用并发槽位
+		return true
 	end
 
-	-- 2. V2.1.3修正：分批启动单位，遵守并发限制（不再使用时间延迟）
+	-- 2. V2.2优化：分批启动单位，使用动态并发限制
+	-- V2.3.1修复：根据StartUnitMovement返回值决定是否增加marchingCount
 	for i = 1, #unitsList do
-		if marchingCount < CONFIG.MARCH_BATCH_LIMIT then
-			StartUnitMovement(unitsList[i])
-			marchingCount = marchingCount + 1
+		if marchingCount < dynamicBatchLimit then
+			-- V2.3.1：只有成功启动才增加marchingCount
+			if StartUnitMovement(unitsList[i]) then
+				marchingCount = marchingCount + 1
+			end
 		else
 			table.insert(pendingQueue, unitsList[i])
 		end
 	end
 
-	DebugLog(string.format("📊 批量寻路启动完成 - 立即启动: %d, 队列等待: %d",
-		marchingCount, #pendingQueue))
+	DebugLog(string.format("📊 批量寻路启动完成 - 立即启动: %d, 队列等待: %d, 动态限制: %d",
+		marchingCount, #pendingQueue, dynamicBatchLimit))
 
 	-- 保留旧的变量以兼容后续代码引用（实际不再使用task.spawn延迟启动）
 	local startedCount = #unitsList  -- 所有单位都已分配（启动或排队）
@@ -1809,6 +1774,8 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 		local allArrived = true
 		local arrivedCount = 0
 
+		-- V2.3新增：批量处理所有单位的持续MoveTo推进
+		-- 替代V2.0.4的per-unit Heartbeat，降低回调频率从1000次/秒到~60次/秒
 		for unitInstance, data in pairs(moveData) do
 			if not data.Arrived then
 				-- 检查实例有效性
@@ -1821,11 +1788,7 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 						data.MoveToConnection:Disconnect()
 						data.MoveToConnection = nil
 					end
-					-- V2.0.4新增：断开Heartbeat连接
-					if data.HeartbeatConn then
-						data.HeartbeatConn:Disconnect()
-						data.HeartbeatConn = nil
-					end
+					-- V2.3优化：移除HeartbeatConn断开（已不存在）
 					if data.TargetPart and data.TargetPart.Parent then
 						data.TargetPart:Destroy()
 					end
@@ -1839,49 +1802,127 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 					continue
 				end
 
-				-- 超时检测
-				if now - data.StartTime > GameConfig.Campaign.MoveTimeout then
-					warn(string.format("[PathService] ⏱️ 兵种寻路超时，强制传送: %s", unitInstance.Name))
+				-- V2.3新增：批量持续MoveTo推进逻辑（整合自V2.0.4的per-unit Heartbeat）
+				-- 检查是否已接近最终目标
+				local rootPart = unitInstance.HumanoidRootPart
+				local currentPos = rootPart.Position
+				local finalTargetPos = data.TargetCFrame.Position
+				local distanceXZToFinal = math.sqrt((currentPos.X - finalTargetPos.X)^2 + (currentPos.Z - finalTargetPos.Z)^2)
+				local arrivalThreshold = GameConfig.Campaign.ArrivalThreshold or 8
 
-					-- V2.1.3新增：停止单位移动（在传送前）
-					StopUnitMovement(unitInstance, "超时")
-
-					local rootPart = unitInstance.HumanoidRootPart
-					rootPart.CFrame = data.TargetCFrame
-
+				if distanceXZToFinal < arrivalThreshold then
+					-- 已经接近最终目标，标记为到达
 					data.Arrived = true
-					data.ForceTeleported = true
-					arrivedCount = arrivedCount + 1
 
-					-- 清理
+					-- 断开连接
 					if data.MoveToConnection then
 						data.MoveToConnection:Disconnect()
 						data.MoveToConnection = nil
 					end
-					-- V2.0.4新增：断开Heartbeat连接
-					if data.HeartbeatConn then
-						data.HeartbeatConn:Disconnect()
-						data.HeartbeatConn = nil
-					end
+
+					-- 清理
 					PathService.ClearPath(unitInstance)
 					if data.TargetPart and data.TargetPart.Parent then
 						data.TargetPart:Destroy()
 					end
 
-					table.insert(timedOutList, unitInstance)
+					table.insert(arrivedList, unitInstance)
+					DebugLog(string.format("✅ 兵种到达 (批处理检测): %s (距离=%.1f studs)", unitInstance.Name, distanceXZToFinal))
 
 					-- 触发回调
 					if onUnitArrived then
 						pcall(function()
-							onUnitArrived(unitInstance, "TimedOut")
+							onUnitArrived(unitInstance, "Arrived")
 						end)
 					end
 
 					-- V2.1.3新增：减少行军计数，尝试启动下一批
 					marchingCount = marchingCount - 1
 					TryStartNextBatch()
+
+					arrivedCount = arrivedCount + 1
+					-- continue到下一个单位
 				else
-					allArrived = false
+					-- 未到达最终目标，持续推进MoveTo
+					-- 获取当前路径点或目标位置
+					local targetPos = nil
+					local pathStatus = PathService.GetPathStatus(unitInstance)
+
+					if pathStatus == PathStatus.SUCCESS then
+						-- 路径有效，获取当前路径点
+						local currentWaypoint = PathService.GetNextWaypoint(unitInstance)
+						if currentWaypoint then
+							targetPos = currentWaypoint
+							data.CurrentWaypoint = currentWaypoint
+						else
+							targetPos = data.TargetCFrame.Position
+						end
+					else
+						-- 路径无效或无路径，直线移动到目标
+						targetPos = data.TargetCFrame.Position
+					end
+
+					-- 检查是否还需要移动（距离阈值）
+					if targetPos then
+						local distance = (currentPos - targetPos).Magnitude
+
+						-- 只有在距离超过阈值时才发送MoveTo
+						if distance > CONFIG.WAYPOINT_REACH_THRESHOLD then
+							-- 更新LastMoveCommand时间
+							data.LastMoveCommand = now
+
+							-- 发送持续的MoveTo命令
+							local humanoid = unitInstance:FindFirstChild("Humanoid")
+							if humanoid then
+								pcall(function()
+									humanoid:MoveTo(targetPos)
+								end)
+								DebugLog(string.format("📍 %s 批量推进: 距离=%.1f studs", unitInstance.Name, distance))
+							end
+						end
+					end
+
+					-- 超时检测 - V2.3.1修复：只检测已启动的单位（StartTime > 0）
+					-- 排队等待的单位 StartTime = 0，不应被视为超时
+					if data.StartTime > 0 and now - data.StartTime > GameConfig.Campaign.MoveTimeout then
+						warn(string.format("[PathService] ⏱️ 兵种寻路超时，强制传送: %s", unitInstance.Name))
+
+						-- V2.1.3新增：停止单位移动（在传送前）
+						StopUnitMovement(unitInstance, "超时")
+
+						local rootPart = unitInstance.HumanoidRootPart
+						rootPart.CFrame = data.TargetCFrame
+
+						data.Arrived = true
+						data.ForceTeleported = true
+						arrivedCount = arrivedCount + 1
+
+						-- 清理
+						if data.MoveToConnection then
+							data.MoveToConnection:Disconnect()
+							data.MoveToConnection = nil
+						end
+						-- V2.3优化：移除HeartbeatConn断开（已不存在）
+						PathService.ClearPath(unitInstance)
+						if data.TargetPart and data.TargetPart.Parent then
+							data.TargetPart:Destroy()
+						end
+
+						table.insert(timedOutList, unitInstance)
+
+						-- 触发回调
+						if onUnitArrived then
+							pcall(function()
+								onUnitArrived(unitInstance, "TimedOut")
+							end)
+						end
+
+						-- V2.1.3新增：减少行军计数，尝试启动下一批
+						marchingCount = marchingCount - 1
+						TryStartNextBatch()
+					else
+						allArrived = false
+					end
 				end
 			else
 				arrivedCount = arrivedCount + 1
@@ -1927,7 +1968,7 @@ end
 --[[
 取消批量移动任务
 @param moveId string - 移动任务ID
-V2.0修复：清空computeQueue中的请求，防止已取消的单位继续寻路
+V2.3修复：从battleQueue和campaignQueue中清除请求，防止已取消的单位继续寻路
 ]]
 function PathService.CancelGroupMove(moveId)
 	local moveTask = activeMoves[moveId]
@@ -1940,15 +1981,22 @@ function PathService.CancelGroupMove(moveId)
 		moveTask.connection:Disconnect()
 	end
 
-	-- V2.0修复：从computeQueue中移除此任务相关的路径请求
+	-- V2.3修复：从battleQueue和campaignQueue中移除此任务相关的路径请求
 	local cancelledCount = 0
-	for i = #computeQueue, 1, -1 do
-		local request = computeQueue[i]
-		local data = moveTask.moveData[request.unitInstance]
-		if data then
-			-- 找到了此任务相关的请求，移除它
-			table.remove(computeQueue, i)
-			cancelledCount = cancelledCount + 1
+
+	-- 遍历两个队列的所有优先级
+	for _, queue in ipairs({battleQueue, campaignQueue}) do
+		for _, priorityName in ipairs({"high", "medium", "low"}) do
+			local subQueue = queue[priorityName]
+			for i = #subQueue, 1, -1 do
+				local request = subQueue[i]
+				local data = moveTask.moveData[request.unitInstance]
+				if data then
+					-- 找到了此任务相关的请求，移除它
+					table.remove(subQueue, i)
+					cancelledCount = cancelledCount + 1
+				end
+			end
 		end
 	end
 
@@ -1968,11 +2016,7 @@ function PathService.CancelGroupMove(moveId)
 			data.MoveToConnection = nil
 		end
 
-		-- V2.0.4新增：断开Heartbeat连接
-		if data.HeartbeatConn then
-			data.HeartbeatConn:Disconnect()
-			data.HeartbeatConn = nil
-		end
+		-- V2.3优化：移除HeartbeatConn断开（已不存在）
 
 		-- 清理路径
 		PathService.ClearPath(unitInstance)

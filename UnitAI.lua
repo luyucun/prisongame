@@ -1044,8 +1044,17 @@ local AI_UPDATE_INTERVALS = {
 	[BattleConfig.AIState.IDLE] = 0.5,       -- 待机状态每0.5秒一次
 }
 
+-- V2.3性能优化：Round-robin分帧调度
+-- 将100个单位分成3批，每帧只处理1/3，降低单帧CPU峰值
+local AI_BATCH_COUNT = 3  -- 分成3批
+local currentBatch = 0    -- 当前批次（0, 1, 2循环）
+local nextBatchIndex = 0  -- 下一个单位应分配的批次（round-robin计数器）
+
 local function UpdateAllAIs()
 	local currentTime = tick()
+
+	-- V2.3：轮询下一个批次
+	currentBatch = (currentBatch + 1) % AI_BATCH_COUNT
 
 	for unitModel, aiData in pairs(activeAIs) do
 		if not CombatSystem.IsUnitAlive(unitModel) then
@@ -1054,6 +1063,13 @@ local function UpdateAllAIs()
 
 		if not aiData.IsActive then
 			continue
+		end
+
+		-- V2.3优化：Round-robin分批处理
+		-- 每个单位分配到一个固定批次，只在对应帧处理
+		local unitBatch = aiData.BatchIndex or 0
+		if unitBatch ~= currentBatch then
+			continue  -- 跳过不属于当前批次的单位
 		end
 
 		-- V2.1优化：状态节流
@@ -1171,7 +1187,13 @@ function UnitAI.StartAI(unitModel)
 
 		-- V2.0.4新增：路径命令安全容错
 		LastPathCommandTime = 0,  -- 上次成功发送MoveTo命令的时间
+
+		-- V2.3新增：Round-robin批次索引（分帧调度）
+		BatchIndex = nextBatchIndex,
 	}
+
+	-- V2.3: 推进批次计数器（round-robin）
+	nextBatchIndex = (nextBatchIndex + 1) % AI_BATCH_COUNT
 
 	activeAIs[unitModel] = aiData
 
