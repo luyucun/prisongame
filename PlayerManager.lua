@@ -360,6 +360,27 @@ function PlayerManager.OnPlayerAdded(player)
         end
     end)
 
+    -- 6.6 V2.1新增：初始化商店库存定时器
+    task.spawn(function()
+        -- 短暂延迟，确保其他系统初始化完成
+        task.wait(0.5)
+
+        local ShopSystem = ServerScriptService.Systems:FindFirstChild("ShopSystem")
+        if ShopSystem then
+            local shopModule = require(ShopSystem)
+            if shopModule.InitializePlayerShopTimer then
+                shopModule.InitializePlayerShopTimer(player, "UnitShop")
+                if GameConfig.DEBUG_MODE then
+                    print(GameConfig.LOG_PREFIX, "商店定时器初始化完成:", player.Name)
+                end
+            end
+        else
+            if GameConfig.DEBUG_MODE then
+                warn(GameConfig.LOG_PREFIX, "ShopSystem未找到，跳过商店定时器初始化")
+            end
+        end
+    end)
+
     -- 7. 处理角色传送 - 使用异步方式避免阻塞
     -- 标记是否应跳过首次传送（用于Studio Play Here模式）
     local shouldSkipFirstTeleport = skipHomeAssignment

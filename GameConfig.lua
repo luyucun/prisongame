@@ -93,6 +93,27 @@ GameConfig.Door = {
 	EasingDirection = Enum.EasingDirection.InOut  -- 缓动方向
 }
 
+-- ==================== 商店系统配置 (V2.1) ====================
+GameConfig.Shop = {
+	NPCName = "KeepShoper01",            -- 默认商店NPC名称
+	OpenDistance = 11,                   -- 触发距离(studs) - V2.1修复：从15缩短约25%到11
+	CheckInterval = 0.2,                 -- 距离检测间隔(秒)
+	PurchaseCooldown = 0.3,              -- 购买冷却(秒)
+	EnableDistanceCheck = true,          -- 是否启用服务端距离校验
+	FallbackToUnitConfig = true,         -- ShopConfig缺失时是否回退到UnitConfig
+
+	-- 库存系统配置 (V2.1库存功能)
+	DefaultRefreshInterval = 300,        -- 默认库存刷新间隔(秒) 5分钟
+	RefreshTimerUpdateInterval = 1,      -- 刷新倒计时更新间隔(秒)
+	EnableStockSystem = true,            -- 是否启用库存系统
+}
+
+-- ==================== UI配置 (V2.1) ====================
+GameConfig.UI = GameConfig.UI or {}
+GameConfig.UI.CoinRollDuration = 0.8     -- 金币滚动动画时长(秒)
+GameConfig.UI.ButtonScaleDown = 0.9      -- 按钮按下缩放比例
+GameConfig.UI.ButtonScaleDuration = 0.1  -- 按钮缩放动画时长(秒)
+
 -- ==================== 调试配置 ====================
 -- 是否启用调试模式
 GameConfig.DEBUG_MODE = true

@@ -2,6 +2,7 @@
 脚本名称: CoinDisplay
 脚本类型: LocalScript (客户端脚本)
 脚本位置: StarterPlayer/StarterPlayerScripts/UI/CoinDisplay
+版本: V2.1（集成金币滚动动画）
 ]]
 
 --[[
@@ -10,6 +11,7 @@
 1. 监听服务端的货币变化事件
 2. 实时更新UI显示玩家金币数量
 3. 使用格式化工具显示金币($XXXXX格式)
+4. V2.1新增：金币变化时播放滚动动画
 ]]
 
 -- 等待必要的服务和对象加载
@@ -33,6 +35,9 @@ end
 
 local FormatHelper = require(Modules:WaitForChild("FormatHelper", 10))
 
+-- V2.1新增：动画工具（延迟加载，避免循环依赖）
+local CoinAnimationHelper = nil
+
 -- 引用远程事件
 local Events = ReplicatedStorage:WaitForChild("Events", 10)
 if not Events then
@@ -54,6 +59,33 @@ local CoinNumLabel = nil
 local currentCoins = 0
 
 -- ==================== 私有函数 ====================
+
+--[[
+延迟加载动画助手
+@return boolean - 是否成功加载
+]]
+local function LoadAnimationHelper()
+    if CoinAnimationHelper then
+        return true -- 已加载
+    end
+
+    -- 尝试加载动画助手模块
+    local success, result = pcall(function()
+        local script = game:GetService("StarterPlayer").StarterPlayerScripts.Utils.CoinAnimationHelper
+        return require(script)
+    end)
+
+    if success then
+        CoinAnimationHelper = result
+        if DEBUG_MODE then
+            print(LOG_PREFIX, "动画助手加载成功")
+        end
+        return true
+    else
+        warn(LOG_PREFIX, "动画助手加载失败:", result)
+        return false
+    end
+end
 
 --[[
 获取或刷新UI引用
@@ -96,18 +128,19 @@ local function RefreshUIReferences()
 end
 
 --[[
-更新金币显示
-@param amount number - 新的金币数量
+更新金币显示（V2.1增强：支持动画）
+@param newAmount number - 新的金币数量
+@param useAnimation boolean - 是否使用动画（默认true）
 ]]
-local function UpdateCoinDisplay(amount)
+local function UpdateCoinDisplay(newAmount, useAnimation)
     -- 验证金币数量
-    if type(amount) ~= "number" then
-        warn(LOG_PREFIX, "金币数量必须是数字:", amount)
+    if type(newAmount) ~= "number" then
+        warn(LOG_PREFIX, "金币数量必须是数字:", newAmount)
         return
     end
 
-    -- 更新缓存
-    currentCoins = amount
+    -- 默认使用动画
+    useAnimation = useAnimation ~= false
 
     -- 刷新UI引用
     if not RefreshUIReferences() then
@@ -115,17 +148,32 @@ local function UpdateCoinDisplay(amount)
         return
     end
 
-    -- 格式化并更新显示
-    local formattedText = FormatHelper.FormatCoins(amount)
-    CoinNumLabel.Text = formattedText
+    local oldAmount = currentCoins
+    currentCoins = newAmount
+
+    -- V2.1新增：动画逻辑
+    if useAnimation and LoadAnimationHelper() and math.abs(newAmount - oldAmount) > 0 then
+        -- 使用动画更新
+        CoinAnimationHelper.AnimateCoinRoll(CoinNumLabel, oldAmount, newAmount, {
+            OnComplete = function()
+                if DEBUG_MODE then
+                    print(LOG_PREFIX, "金币动画完成:", oldAmount, "->", newAmount)
+                end
+            end
+        })
+    else
+        -- 直接更新（无动画）
+        local formattedText = FormatHelper.FormatCoins(newAmount)
+        CoinNumLabel.Text = formattedText
+    end
 
     if DEBUG_MODE then
-        print(LOG_PREFIX, "更新金币显示:", amount, "->", formattedText)
+        print(LOG_PREFIX, "更新金币显示:", oldAmount, "->", newAmount, useAnimation and "(动画)" or "(直接)")
     end
 end
 
 --[[
-处理货币变化事件
+处理货币变化事件（V2.1增强：动画支持）
 @param currencyType string - 货币类型
 @param newAmount number - 新的货币数量
 ]]
@@ -136,7 +184,7 @@ local function OnCurrencyChanged(currencyType, newAmount)
 
     -- 目前只处理金币
     if currencyType == "Coins" then
-        UpdateCoinDisplay(newAmount)
+        UpdateCoinDisplay(newAmount, true) -- V2.1：默认使用动画
     end
 end
 
@@ -161,8 +209,8 @@ local function Initialize()
         return false
     end
 
-    -- 设置初始显示
-    UpdateCoinDisplay(0)
+    -- 设置初始显示（不使用动画）
+    UpdateCoinDisplay(0, false)
 
     -- 监听PlayerGui的ChildAdded事件,处理GUI重建
     PlayerGui.ChildAdded:Connect(function(child)
@@ -178,9 +226,9 @@ local function Initialize()
             -- 等待一帧确保GUI完全加载
             task.wait()
 
-            -- 刷新引用并更新显示
+            -- 刷新引用并更新显示（不使用动画）
             if RefreshUIReferences() then
-                UpdateCoinDisplay(currentCoins)
+                UpdateCoinDisplay(currentCoins, false)
             end
         end
     end)
@@ -220,12 +268,13 @@ end
 --[[
 手动更新金币显示(调试用)
 @param amount number - 金币数量
+@param useAnimation boolean - 是否使用动画（可选）
 ]]
-local function DebugSetCoins(amount)
+local function DebugSetCoins(amount, useAnimation)
     if DEBUG_MODE then
         print(LOG_PREFIX, "[调试] 手动设置金币:", amount)
     end
-    UpdateCoinDisplay(amount)
+    UpdateCoinDisplay(amount, useAnimation)
 end
 
 -- 导出调试函数到全局(仅调试模式)

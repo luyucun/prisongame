@@ -34,11 +34,29 @@ ReplicatedStorage
         ├──CampaignStateUpdate（RemoteEvent） - 服务器→客户端：战役状态更新(state, stageNum)
         ├──StageProgress（RemoteEvent） - 服务器→客户端：关卡进度更新(stageNum, status)
         └──LockHomeOperations（RemoteEvent） - 服务器→客户端：锁定/解锁基地操作(locked)
-
+    └──ShopEvents（Folder）/  【V2.1新增】
+        ├──RequestShopList（RemoteEvent） - 客户端→服务器：请求商店列表
+        ├──ShopList（RemoteEvent） - 服务器→客户端：返回商品数据数组（含库存信息）
+        ├──PurchaseUnit（RemoteEvent） - 客户端→服务器：请求购买兵种(unitId)
+        ├──PurchaseResult（RemoteEvent） - 服务器→客户端：返回购买结果(success,message,unitId,newCoins)
+        ├──StockUpdate（RemoteEvent） 【V2.1库存系统】✅已实现 - 服务器→客户端：库存更新通知(shopId, stockData)
+        └──RefreshTimeUpdate（RemoteEvent） 【V2.1库存系统】✅已实现 - 服务器→客户端：刷新倒计时更新(remainingTime)
 
 
 如果需要补充新的RemoteEvent或者Remotefunction，请在这里列出来，我会自己去创建
 
-需要创建的新RemoteEvent:
-- ReplicatedStorage/Events/BattleEvents/ShowDamageNumber (RemoteEvent)
+【V2.1库存系统RemoteEvent创建说明】
+位置：ReplicatedStorage/Events/ShopEvents/
+✅ StockUpdate (RemoteEvent) - 已在代码中实现，需在Studio中手动创建
+✅ RefreshTimeUpdate (RemoteEvent) - 已在代码中实现，需在Studio中手动创建
+
+创建步骤：
+1. 打开Roblox Studio
+2. 导航到 ReplicatedStorage > Events > ShopEvents
+3. 右键点击 ShopEvents 文件夹
+4. 选择 "Insert Object" > "RemoteEvent"
+5. 将新建的 RemoteEvent 重命名为 "StockUpdate"
+6. 重复步骤3-5，创建 "RefreshTimeUpdate"
+7. 保存游戏
+
 

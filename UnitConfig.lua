@@ -40,6 +40,8 @@ UnitData = {
     Description = string,      -- 描述
     -- V2.0.2新增UI配置
     Icon = string,             -- 兵种图标资源ID (格式: "rbxassetid://数字" 或留空使用默认图标)
+    -- V2.1新增商店配置
+    Quality = string,          -- 品质 (Common/Rare/Epic/Legendary)
     -- V1.4新增属性
     BaseHealth = number,       -- 基础生命值
     BaseAttack = number,       -- 基础攻击力
@@ -104,6 +106,8 @@ UnitConfig.Units = {
 		Description = "最基础的近战单位,适合新手使用",
 		-- V2.0.2新增UI配置
 		Icon = "rbxassetid://98616255072587",  -- 兵种图标(暂时使用默认值,后续替换为实际图标ID)
+		-- V2.1新增商店配置
+		Quality = "Common",  -- 品质
 		-- V1.4新增属性
 		BaseHealth = 100,       -- 基础生命值
 		BaseAttack = 10,        -- 基础攻击力
@@ -147,6 +151,8 @@ UnitConfig.Units = {
 		Description = "进阶的近战单位,比Noob更强力",
 		-- V2.0.2新增UI配置
 		Icon = "rbxassetid://80710637196540",  -- 兵种图标(暂时使用默认值,后续替换为实际图标ID)
+		-- V2.1新增商店配置
+		Quality = "Common",  -- 品质
 		-- V1.4新增属性
 		BaseHealth = 100,       -- 基础生命值
 		BaseAttack = 10,        -- 基础攻击力
@@ -185,11 +191,13 @@ UnitConfig.Units = {
 		ModelPath = "Role/Rifle/AK-47",
 		Type = UnitConfig.UnitType.RANGED,  -- 修正1: 改为大写RANGED
 		BaseLevel = 1,
-		Price = 200,
+		Price = 300,
 		GridSize = 1,
 		Description = "测试基础远程单位",
 		-- V2.0.2新增UI配置
 		Icon = "rbxassetid://96684518109328",  -- 兵种图标(暂时使用默认值,后续替换为实际图标ID)
+		-- V2.1新增商店配置
+		Quality = "Common",  -- 品质
 		-- V1.4新增属性
 		-- V1.4新增属性
 		BaseHealth = 100,       -- 基础生命值
@@ -230,11 +238,13 @@ UnitConfig.Units = {
 		ModelPath = "Role/Handgun/Mafia",
 		Type = UnitConfig.UnitType.RANGED,  -- 修正1: 改为大写RANGED
 		BaseLevel = 1,
-		Price = 200,
+		Price = 400,
 		GridSize = 1,
 		Description = "测试基础远程单位",
 		-- V2.0.2新增UI配置
 		Icon = "rbxassetid://80744151898936",  -- 兵种图标(暂时使用默认值,后续替换为实际图标ID)
+		-- V2.1新增商店配置
+		Quality = "Common",  -- 品质
 		-- V1.4新增属性
 		-- V1.4新增属性
 		BaseHealth = 100,       -- 基础生命值
@@ -721,6 +731,21 @@ function UnitConfig.GetIcon(unitId)
 		return "rbxassetid://0"  -- 返回默认图标
 	end
 	return unitData.Icon
+end
+
+-- ==================== V2.1新增: 商店配置接口 ====================
+
+--[[
+获取兵种品质
+@param unitId string - 兵种ID
+@return string - 品质（Common/Rare/Epic/Legendary）
+]]
+function UnitConfig.GetQuality(unitId)
+	local unitData = UnitConfig.GetUnitById(unitId)
+	if not unitData or not unitData.Quality then
+		return "Common"  -- 默认品质
+	end
+	return unitData.Quality
 end
 
 -- ==================== V1.6新增: 寻路配置接口 ====================

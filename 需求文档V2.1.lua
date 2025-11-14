@@ -614,8 +614,8 @@ V2.0.3
 4.这么做的目的就是为了防止玩家提前跑到下一关去
 
 
-v2.0.4
-关于兵种购买的逻辑
+v2.1
+关于兵种购买
 
 概述：我们的游戏中，兵种是需要玩家花费金币进行购买的，玩家可以在商人处购买兵种
 
@@ -631,10 +631,12 @@ v2.0.4
 2.我们需要设定一张专门的商店表，表中填写可以在商店中购买到的兵种，只有填写在这个兵种商店表中的兵种，才可以在该商店中出现并供玩家购买
 3.填写在兵种商店表中的兵种（填兵种配置表中的UnitId即可），需要有多个基础配置：
     1）基础等级，决定了该兵种出售时是出售的几级兵，基础默认都是1级，也就是只能买到1级的某某兵种
-    2）出售价格，决定了买一个这个兵种的金币价格
+    2）金币价格，决定了买一个这个兵种的金币价格
     3）刷新概率，决定了每次库存更新时，有多少概率这个兵种会出现可购买数量（库存逻辑下面会详细说）
     4）库存上限：决定了刷新时如果判定可被购买，那么刷新时最多刷多少个库存
     5）库存下限：决定了刷新时如果判定可被购买，那么刷新时最少刷多少个库存
+    6）罗布币价格，决定了买一个兵种的罗布币价格，这里只是信息显示，具体价格根据开发者商品信息来
+    7）开发者商品id：决定了使用罗布币购买时对应的开发者商品id
 4.库存刷新逻辑：
     1）从玩家进入游戏后开始倒计时，玩家加入游戏时先瞬间立刻刷新一波库存，然后开始倒计时5分钟，5分钟后刷新一波库存，循环往复，这个5分钟要可以配置
     2）玩家离线时需要记录离线时间，玩家再次上线时比对二者的时间差，如果小于5分钟（配置的时间），则不立即刷新，而是继续倒计时，倒计时是刷新间隔减去离线时间，比如刷新倒计时5分钟，玩家离线2分钟，再进来从3分钟开始倒计时，结束后再刷新，这么做是为了防止玩家恶意刷库存
@@ -647,22 +649,204 @@ v2.0.4
 商店信息展示：
 1.在我们的商店界面中，按顺序展示我们可购买的兵种的信息，具体排序从上到下就按我们配置表中的顺序排序即可
 2.具体的界面结构是：
-
 StarterGui
-└── ArmyStore
-    └── StoreBg
-        ├── UIScrollingFrame
+└── ArmyStore（ScreenGUi）
+    └── StoreBg（frame）
+        ├── ScrollingFrame（ScrollingFrame）
         │   ├── UIListLayout
-        │   ├── UIStroke
-        │   └── BuyButtonFrame
-        │       ├── RobuxBuy
-        │       └── ItemCard
-        │           ├── IconBg
-        │           ├── Name
-        │           └── Number
-        ├── CloseButton
-        └── TitleLabel
+        │   └── BuyButtonFrame（frame）
+        │       ├── GoldBuy(imageButton)
+        │           ├── Price(textLabel)
+        │       ├── RobuxBuy(imageButton)
+        │           ├── Price(textLabel)
+        │   └── ItemCardTemplate（frame）
+        │       └── IconBg（frame）
+        │           ├── Icon(imageLabel)
+        │       └── ATK(textLabel)
+        │       └── RANGE(textLabel)
+        │       └── HP(textLabel)
+        │       └── Level(textLabel)
+        │       └── Name(textLabel)
+        │       └── Number(textLabel)
+        │       └── Price(textLabel)
+        │       └── Quality(textLabel)
+        ├── CloseButton(imageButton)
+        └── Title(textLabel)
+具体的客户端规则是：
+1.BuyButtonFrame是一个Frame，常驻状态下的visible属性是false
+2.BuyButtonFrame下面分别是GoldBuy和RobuxBuy这两个按钮，分别用于代表触发金币购买还是罗布币购买，在我们的商店表中有配置每个兵种用罗布币购买时候的开发者商品id
+3.GoldBuy和RobuxBuy下面都有一个叫Price的TextLabel，用于显示价格文本，GoldBuy下的Price显示格式为XXX $,XXX代表金币数值，RobuxBuy下的Price显示格式为XXX R$，XXX是配置的罗布币价格
+4.ItemCardTemplate是我们的兵种卡片信息模板，常规状态下是Visible属性为False，当商店形成时，根据兵种信息去复制一份ItemCardTemplate，把visible属性改成true，把其下的各种属性改成该兵种的对应信息，就时商品卡片
+5.ItemCardTemplate下的各种结构信息为：
+    1）ATK代表攻击力，显示该兵种当前等级的基础攻击力
+    2）RANGE代表近战还是远程，在兵种配置unitConfig中有关于近战还是远程的文本说明配置，使用对应的文本即可，比如Melee
+    3）HP代表血量，显示该兵种当前等级的基础血量
+    4）Level代表等级，显示该兵种的等级，格式固定为Lv.XXX
+    5）Name代表兵种名字
+    6）Number代表库存数量，格式固定为X（这是乘号）Y，Y代表固定数量
+    7）Price代表金币价格，显示格式固定为XXX $
+    8）Quality代表品质，这个我们需要在兵种表unitConfig中增加一个字段用于显示品质，默认全部为Common（品质我们后续再拓展，这里先全部Common）
+6.CloseButton是关闭按钮，点击后关闭商店界面（也就是把StarterGui - ArmyStore - StoreBg的Visible属性改成False），手动关闭后就算玩家在NPC范围内也不立刻开启界面，需要玩家先离开再进来才再次显示
+7.Title是一串文本，用于显示当前的库存刷新倒计时，格式固定为：Stock refreshes in XX:YY，XX:YY代表分秒，界面打开时需要实时更新倒计时
+
+这里有一些补充：玩家金币购买的时候不需要二次确认，直接扣除金币并加入玩家背包对应的兵种即可
+在购买过程中由于库存正好刷新，如果在刷新前确实库存数量大于等于1且刷新完成为0了，也要允许购买，扣除金币并发放一个道具
+
+关于ScrollingFrame中的卡片列表和购买有一定的规则：
+1.商店展开时会复制多个商品信息形成商品列表，按照UIListLayout的排序进行排序即可
+2.BuyButtonFrame常规是不可见的，所以在UIListLayout中不占据位置，但是当玩家点击某个商品卡片时，需要：
+    1）立即将BuyButtonFrame移动到卡片所在位置（整个卡片的中心处）背后，二者中心正好对准
+    2）再立刻把BuyButtonFrame插入到该商品与另一个商品之间（占据一个UIListLayout位置），把下面的卡片挤到更下面的位置，形成一个下拉展开的效果
+    3）再次点击该卡片可以收起BuyButtonFrame，如果在显示BuyButtonFrame的时候玩家又点击了另一个卡片，则需要把BuyButtonFrame先立刻收起来，再走一遍新点击的出现流程效果
+    4）BuyButtonFrame下的GoldBuy和RobuxBuy显示的价格需要实时更新为本次点击的卡片对应的价格，点击购买也是触发对该卡片对应商品的购买
+    5）卡片和按钮点击时我希望有一个通用的点击缩小松开放大的效果，这个最好做成通用功能，后面出现的新按钮都要有这个效果
+    关于以上说的这个效果，本质上是一个下拉列表，具体逻辑可以参考下面这段代码，下面这段你确实是实现了我要的效果的，除了没有移动效果现在只是硬切：
+
+-- 将此脚本放在 StarterPlayer.StarterPlayerScripts 中
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- 等待界面加载
+local armyStore = playerGui:WaitForChild("ArmyStore")
+local storeBg = armyStore:WaitForChild("StoreBg")
+local scrollingFrame = storeBg:WaitForChild("ScrollingFrame")
+local buyButtonFrame = scrollingFrame:WaitForChild("BuyButtonFrame")
+
+-- 初始化
+local currentExpandedCard = nil
+local originalLayoutOrders = {} -- 存储原始LayoutOrder值
+
+-- 隐藏购买按钮
+buyButtonFrame.Visible = false
+
+-- 获取所有ItemCard
+local function getItemCards()
+	local cards = {}
+	for _, child in ipairs(scrollingFrame:GetChildren()) do
+		if child:IsA("Frame") and child.Name == "ItemCard" then
+			table.insert(cards, child)
+		end
+	end
+	return cards
+end
+
+-- 获取卡片在列表中的索引
+local function getCardIndex(targetCard)
+	local cards = getItemCards()
+	for i, card in ipairs(cards) do
+		if card == targetCard then
+			return i
+		end
+	end
+	return 0
+end
+
+-- 获取目标卡片之后的所有卡片
+local function getCardsBelow(startIndex)
+	local cardsBelow = {}
+	local allCards = getItemCards()
+
+	for i = startIndex + 1, #allCards do
+		table.insert(cardsBelow, allCards[i])
+	end
+
+	return cardsBelow
+end
+
+-- 展开卡片
+local function expandCard(card)
+	local cardIndex = getCardIndex(card)
+
+	-- 存储原始LayoutOrder值
+	if not originalLayoutOrders[card] then
+		originalLayoutOrders[card] = card.LayoutOrder
+	end
+
+	-- 设置购买按钮的位置和属性
+	buyButtonFrame.Parent = scrollingFrame
+	buyButtonFrame.LayoutOrder = card.LayoutOrder + 1
+	buyButtonFrame.Visible = true
+
+	-- 调整后续卡片的LayoutOrder，使它们下移
+	local cardsBelow = getCardsBelow(cardIndex)
+	for _, belowCard in ipairs(cardsBelow) do
+		if not originalLayoutOrders[belowCard] then
+			originalLayoutOrders[belowCard] = belowCard.LayoutOrder
+		end
+		belowCard.LayoutOrder = belowCard.LayoutOrder + 2
+	end
+
+	currentExpandedCard = card
+end
+
+-- 收起卡片
+local function collapseCard(card)
+	-- 隐藏购买按钮
+	buyButtonFrame.Visible = false
+
+	-- 恢复所有卡片的原始LayoutOrder
+	for cardObj, originalOrder in pairs(originalLayoutOrders) do
+		cardObj.LayoutOrder = originalOrder
+	end
+
+	-- 清空存储的原始顺序
+	originalLayoutOrders = {}
+	currentExpandedCard = nil
+end
+
+-- 处理卡片点击
+local function onCardClick(clickedCard)
+	if currentExpandedCard == clickedCard then
+		-- 点击已展开的卡片：收起
+		collapseCard(clickedCard)
+	else
+		-- 点击新卡片：先收起之前的，再展开新的
+		if currentExpandedCard then
+			collapseCard(currentExpandedCard)
+		end
+		expandCard(clickedCard)
+	end
+end
+
+-- 为所有卡片绑定点击事件
+local function setupCards()
+	local cards = getItemCards()
+
+	-- 确保所有卡片有正确的LayoutOrder
+	for i, card in ipairs(cards) do
+		card.LayoutOrder = i * 10 -- 使用10的倍数，以便在中间插入按钮
+
+		-- 确保卡片可以被点击
+		if card:IsA("Frame") then
+			local clickDetector = card:FindFirstChildOfClass("TextButton") or Instance.new("TextButton", card)
+			clickDetector.Size = UDim2.new(1, 0, 1, 0)
+			clickDetector.BackgroundTransparency = 1
+			clickDetector.Text = ""
+			clickDetector.ZIndex = 10
+
+			-- 绑定点击事件
+			clickDetector.MouseButton1Click:Connect(function()
+				onCardClick(card)
+			end)
+		else
+			-- 如果卡片本身就是按钮，直接绑定事件
+			card.MouseButton1Click:Connect(function()
+				onCardClick(card)
+			end)
+		end
+	end
+end
+
+-- 初始化UI
+setupCards()
 
 
-商品购买（流程/表现/价格）
-点击交互逻辑
+商品购买：
+1.商品购买时如果判定货币足够就扣除金币然后为玩家发放道具，加入背包中
+
+关于金币数值显示：
+1.StarterGui - MainGui - CoinNum是我们的金币数值，格式固定为$XXXXX
+2.现在我们需要做一个效果：金币数值发生变化时，需要有一个快速的金币数值滚动的效果，时长大概1秒左右，快速从A值变化成B值

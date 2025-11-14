@@ -17,7 +17,11 @@ local DataManager = {}
 -- 引用配置模块
 local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local DataStoreService = game:GetService("DataStoreService")  -- V2.1：添加DataStore服务
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
+
+-- DataStore实例（V2.1库存系统：添加真正的持久化）
+local PlayerDataStore = DataStoreService:GetDataStore("PlayerData_V2.1")
 
 -- 存储所有玩家的数据 [UserId] = PlayerData
 -- 注意: Roblox脚本是单线程执行,因此不存在真正的race condition问题
@@ -34,11 +38,88 @@ PlayerData = {
         Coins = number,        -- 金币数量
     },
     Units = {},                -- 拥有的兵种数据(后续版本)
+    ShopData = {               -- V2.1库存系统：商店数据持久化
+        [shopId] = {
+            LastRefreshTime = number,  -- 上次刷新时间戳
+        }
+    },
     LastSaveTime = number,     -- 最后保存时间
 }
 ]]
 
 -- ==================== 私有函数 ====================
+
+--[[
+从DataStore加载玩家数据（V2.1库存系统：实现真正的持久化）
+@param player Player - 玩家对象
+@return table|nil - 加载的数据，失败返回nil
+]]
+local function LoadFromDataStore(player)
+	local success, data = pcall(function()
+		return PlayerDataStore:GetAsync("Player_" .. player.UserId)
+	end)
+
+	if success and data then
+		if GameConfig.DEBUG_MODE then
+			print(string.format(
+				"%s [DataManager] 从DataStore加载数据成功 - 玩家:%s",
+				GameConfig.LOG_PREFIX,
+				player.Name
+			))
+		end
+		return data
+	elseif not success then
+		warn(string.format(
+			"%s [DataManager] DataStore加载失败 - 玩家:%s 错误:%s",
+			GameConfig.LOG_PREFIX,
+			player.Name,
+			tostring(data)
+		))
+	end
+
+	return nil
+end
+
+--[[
+保存玩家数据到DataStore（V2.1库存系统：实现真正的持久化）
+@param player Player - 玩家对象
+@param playerData table - 玩家数据
+@return boolean - 是否保存成功
+]]
+local function SaveToDataStore(player, playerData)
+	-- 构造要保存的数据（去除Player引用等不可序列化字段）
+	local dataToSave = {
+		UserId = playerData.UserId,
+		HomeSlot = playerData.HomeSlot,
+		Currency = playerData.Currency,
+		Units = playerData.Units,
+		ShopData = playerData.ShopData,  -- V2.1库存系统：保存商店数据
+		LastSaveTime = os.time(),
+	}
+
+	local success, errorMsg = pcall(function()
+		PlayerDataStore:SetAsync("Player_" .. player.UserId, dataToSave)
+	end)
+
+	if success then
+		if GameConfig.DEBUG_MODE then
+			print(string.format(
+				"%s [DataManager] 数据保存成功 - 玩家:%s",
+				GameConfig.LOG_PREFIX,
+				player.Name
+			))
+		end
+		return true
+	else
+		warn(string.format(
+			"%s [DataManager] DataStore保存失败 - 玩家:%s 错误:%s",
+			GameConfig.LOG_PREFIX,
+			player.Name,
+			tostring(errorMsg)
+		))
+		return false
+	end
+end
 
 --[[
 创建默认玩家数据
@@ -58,6 +139,7 @@ local function CreateDefaultData(player)
             Coins = GameConfig.INITIAL_COINS,  -- 初始金币100
         },
         Units = {},  -- 后续版本使用
+        ShopData = {},  -- V2.1库存系统：初始化空商店数据
         LastSaveTime = os.time(),
     }
 end
@@ -65,7 +147,7 @@ end
 -- ==================== 公共接口 ====================
 
 --[[
-初始化玩家数据
+初始化玩家数据（V2.1库存系统：从DataStore加载）
 @param player Player - 玩家对象
 @return table - 玩家数据
 ]]
@@ -83,14 +165,42 @@ function DataManager.InitializePlayerData(player)
         return playerDataCache[player.UserId]
     end
 
-    -- 创建新数据
-    -- TODO: 后续版本从DataStore加载数据
-    local playerData = CreateDefaultData(player)
-    playerDataCache[player.UserId] = playerData
+    -- V2.1库存系统：尝试从DataStore加载数据
+    local loadedData = LoadFromDataStore(player)
+    local playerData
 
-    if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "初始化玩家数据成功:", player.Name, "初始金币:", playerData.Currency.Coins)
+    if loadedData then
+        -- 使用加载的数据，但重新设置Player引用
+        playerData = loadedData
+        playerData.Player = player
+
+        -- 确保ShopData字段存在（向后兼容）
+        if not playerData.ShopData then
+            playerData.ShopData = {}
+        end
+
+        if GameConfig.DEBUG_MODE then
+            print(string.format(
+                "%s 恢复玩家数据成功 - 玩家:%s 金币:%d",
+                GameConfig.LOG_PREFIX,
+                player.Name,
+                playerData.Currency.Coins
+            ))
+            -- 打印ShopData以便调试
+            if next(playerData.ShopData) then
+                print(GameConfig.LOG_PREFIX, "  ShopData:", playerData.ShopData)
+            end
+        end
+    else
+        -- 创建新数据
+        playerData = CreateDefaultData(player)
+
+        if GameConfig.DEBUG_MODE then
+            print(GameConfig.LOG_PREFIX, "创建新玩家数据:", player.Name, "初始金币:", playerData.Currency.Coins)
+        end
     end
+
+    playerDataCache[player.UserId] = playerData
 
     return playerData
 end
@@ -223,7 +333,58 @@ function DataManager.GetAllCurrency(player)
 end
 
 --[[
-保存玩家数据
+V2.1库存系统：获取玩家商店数据
+@param player Player - 玩家对象
+@param shopId string - 商店ID
+@return table|nil - 商店数据 {LastRefreshTime = number}
+]]
+function DataManager.GetShopData(player, shopId)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData then
+        return nil
+    end
+
+    if not playerData.ShopData[shopId] then
+        playerData.ShopData[shopId] = {
+            LastRefreshTime = 0  -- 默认为0表示首次进入
+        }
+    end
+
+    return playerData.ShopData[shopId]
+end
+
+--[[
+V2.1库存系统：设置玩家商店刷新时间
+@param player Player - 玩家对象
+@param shopId string - 商店ID
+@param refreshTime number - 刷新时间戳
+@return boolean - 是否设置成功
+]]
+function DataManager.SetShopRefreshTime(player, shopId, refreshTime)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData then
+        warn(GameConfig.LOG_PREFIX, "SetShopRefreshTime: 找不到玩家数据")
+        return false
+    end
+
+    if not playerData.ShopData[shopId] then
+        playerData.ShopData[shopId] = {}
+    end
+
+    playerData.ShopData[shopId].LastRefreshTime = refreshTime
+
+    if GameConfig.DEBUG_MODE then
+        print(string.format(
+            "%s [DataManager] 设置商店刷新时间 - 玩家:%s 商店:%s 时间:%d",
+            GameConfig.LOG_PREFIX, player.Name, shopId, refreshTime
+        ))
+    end
+
+    return true
+end
+
+--[[
+保存玩家数据（V2.1库存系统：保存到DataStore）
 @param player Player - 玩家对象
 @return boolean - 是否保存成功
 ]]
@@ -236,12 +397,8 @@ function DataManager.SavePlayerData(player)
 
     playerData.LastSaveTime = os.time()
 
-    -- TODO: 后续版本实现DataStore保存
-    if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "保存玩家数据:", player.Name, "(当前版本仅内存保存)")
-    end
-
-    return true
+    -- V2.1库存系统：保存到DataStore
+    return SaveToDataStore(player, playerData)
 end
 
 --[[

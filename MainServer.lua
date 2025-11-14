@@ -50,6 +50,8 @@ local WeaponEffectSystem = require(ServerScriptService.Systems.WeaponEffectSyste
 local CampaignManager = require(ServerScriptService.Systems.CampaignManager)
 -- V2.0.1新增 - 门控系统
 local DoorControlService = require(ServerScriptService.Systems.DoorControlService)
+-- V2.1新增 - 商店系统
+local ShopSystem = require(ServerScriptService.Systems.ShopSystem)
 
 -- ==================== 系统初始化顺序 ====================
 
@@ -173,6 +175,25 @@ local function InitializeServer()
         warn(GameConfig.LOG_PREFIX, "合成系统初始化失败(返回false),合成功能将不可用")
     else
         print(GameConfig.LOG_PREFIX, "合成系统初始化成功")
+    end
+
+    -- 5.6. 初始化商店系统(V2.1新增 - 数据驱动版)
+    print(GameConfig.LOG_PREFIX, "步骤5.6: 初始化商店系统...")
+    success, result = pcall(function()
+        return ShopSystem.Initialize()
+    end)
+    if not success then
+        warn(GameConfig.LOG_PREFIX, "⚠️ 商店系统初始化失败(异常):", result)
+        warn(GameConfig.LOG_PREFIX, "请检查：")
+        warn("  1. ReplicatedStorage/Events/ShopEvents 是否已创建")
+        warn("  2. ShopEvents 下是否有 RequestShopList、ShopList、PurchaseUnit、PurchaseResult")
+        warn("  3. ReplicatedStorage/Config/ShopConfig 是否已创建")
+        warn("  4. ShopConfig 是否正确配置")
+        -- 商店系统不是关键系统,失败不影响游戏运行
+    elseif result == false then
+        warn(GameConfig.LOG_PREFIX, "商店系统初始化失败(返回false),购买功能将不可用")
+    else
+        print(GameConfig.LOG_PREFIX, "✅ 商店系统初始化成功（数据驱动模式）")
     end
 
     -- 6. 初始化GM命令系统(连接聊天事件)
