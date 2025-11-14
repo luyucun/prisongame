@@ -430,6 +430,8 @@ local function CreateUnitModel(unitId, position, instanceId, level, gridSize)
     model:SetAttribute("Level", level)
     model:SetAttribute("UnitId", unitId)
     model:SetAttribute("GridSize", gridSize)
+    -- V2.1补充：添加只读属性用于调试兵种类型（可选）
+    model:SetAttribute("UnitType", UnitConfig.IsRangedUnit(unitId) and "Ranged" or "Melee")
 
     -- V1.4: 更新等级显示
     UpdateLevelDisplay(model, level)

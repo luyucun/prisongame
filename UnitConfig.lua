@@ -104,26 +104,20 @@ UnitConfig.Units = {
 		Price = 100,
 		GridSize = 1,
 		Description = "最基础的近战单位,适合新手使用",
-		-- V2.0.2新增UI配置
 		Icon = "rbxassetid://98616255072587",  -- 兵种图标(暂时使用默认值,后续替换为实际图标ID)
-		-- V2.1新增商店配置
 		Quality = "Common",  -- 品质
-		-- V1.4新增属性
 		BaseHealth = 100,       -- 基础生命值
 		BaseAttack = 10,        -- 基础攻击力
 		BaseAttackSpeed = 1,    -- 基础攻击速度(1秒/次)
-		-- V1.5新增战斗属性
 		BaseAttackRange = 5,    -- 近战攻击距离5 studs
 		BaseMoveSpeed = 16,     -- 移动速度16 studs/秒
 		ProjectileSpeed = 0,    -- 近战无弹道
-		-- V1.5.2新增: 完整动作系统
 		ShowAnimationId = "101776339545224",   -- 展示动画ID (放置在IdleFloor上时循环播放, 暂时留空)
 		IdleAnimationId = "117596019027541",   -- 待机动画ID (战斗中两次攻击之间播放, 暂时留空)
 		MoveAnimationId = "138827448254225",   -- 移动动画ID (从角色Animate脚本的run中获取, 为空则不播放)
 		AttackAnimationId = "109394128574270", -- 攻击动画ID (如果为空则使用Humanoid默认动作, 格式: "12345678")
 		DeathAnimationId = "76536079736472",  -- 死亡动画ID (暂时留空)
 		WeaponName = "Sword",   -- 武器名称
-		-- V1.5.1新增战斗配置
 		CombatProfile = {
 			HitboxRadius = 5,          -- 碰撞半径(studs)
 			HitboxAngle = 90,          -- 扇形角度(度,90表示前方90度扇形)
@@ -133,7 +127,6 @@ UnitConfig.Units = {
 			AnimationEventName = "Damage", -- 动画事件名称
 			ContactOffset = 0,         -- 武器长度补偿(studs) - 长武器正值,拳头0
 		},
-		-- V1.6新增寻路配置
 		PathfindingAgentRadius = 2,    -- 寻路代理半径2 studs
 		PathfindingAgentHeight = 5,    -- 寻路代理高度5 studs
 		PathfindingAgentCanJump = true, -- 允许跳跃
@@ -149,26 +142,20 @@ UnitConfig.Units = {
 		Price = 200,
 		GridSize = 1,
 		Description = "进阶的近战单位,比Noob更强力",
-		-- V2.0.2新增UI配置
 		Icon = "rbxassetid://80710637196540",  -- 兵种图标(暂时使用默认值,后续替换为实际图标ID)
-		-- V2.1新增商店配置
 		Quality = "Common",  -- 品质
-		-- V1.4新增属性
 		BaseHealth = 100,       -- 基础生命值
 		BaseAttack = 10,        -- 基础攻击力
 		BaseAttackSpeed = 1,    -- 基础攻击速度(1秒/次)
-		-- V1.5新增战斗属性
 		BaseAttackRange = 5,    -- 近战攻击距离5 studs
 		BaseMoveSpeed = 16,     -- 移动速度16 studs/秒
 		ProjectileSpeed = 0,    -- 近战无弹道
-		-- V1.5.2新增: 完整动作系统
 		ShowAnimationId = "101776339545224",   -- 展示动画ID (放置在IdleFloor上时循环播放, 暂时留空)
 		IdleAnimationId = "117596019027541",   -- 待机动画ID (战斗中两次攻击之间播放, 暂时留空)
 		MoveAnimationId = "138827448254225",   -- 移动动画ID (暂时留空, 使用默认动画)
 		AttackAnimationId = "109394128574270", -- 攻击动画ID (暂时留空, 使用默认动画)
 		DeathAnimationId = "76536079736472",  -- 死亡动画ID (暂时留空)
 		WeaponName = "Sword",   -- 武器名称
-		-- V1.5.1新增战斗配置
 		CombatProfile = {
 			HitboxRadius = 5,
 			HitboxAngle = 90,
@@ -178,7 +165,6 @@ UnitConfig.Units = {
 			AnimationEventName = "Damage",
 			ContactOffset = 0,         -- 武器长度补偿(studs)
 		},
-		-- V1.6新增寻路配置
 		PathfindingAgentRadius = 2,
 		PathfindingAgentHeight = 5,
 		PathfindingAgentCanJump = true,
@@ -194,20 +180,14 @@ UnitConfig.Units = {
 		Price = 300,
 		GridSize = 1,
 		Description = "测试基础远程单位",
-		-- V2.0.2新增UI配置
 		Icon = "rbxassetid://96684518109328",  -- 兵种图标(暂时使用默认值,后续替换为实际图标ID)
-		-- V2.1新增商店配置
 		Quality = "Common",  -- 品质
-		-- V1.4新增属性
-		-- V1.4新增属性
 		BaseHealth = 100,       -- 基础生命值
 		BaseAttack = 10,        -- 基础攻击力
 		BaseAttackSpeed = 1.2,    -- 基础攻击速度(1秒/次)
-		-- V1.5新增战斗属性
 		BaseAttackRange = 20,    -- 远程攻击距离20 studs
 		BaseMoveSpeed = 16,     -- 移动速度16 studs/秒
 		ProjectileSpeed = 100,    -- 修正2: 远程单位必须>0，子弹速度100 studs/秒
-		-- V1.5.2新增: 完整动作系统
 		ShowAnimationId = "101776339545224",   -- 展示动画ID (放置在IdleFloor上时循环播放, 暂时留空)
 		IdleAnimationId = "117596019027541",   -- 待机动画ID (战斗中两次攻击之间播放, 暂时留空)
 		MoveAnimationId = "100229633875328",   -- 移动动画ID (暂时留空, 使用默认动画)
@@ -215,7 +195,6 @@ UnitConfig.Units = {
 		DeathAnimationId = "76536079736472",  -- 死亡动画ID (暂时留空)
 		WeaponName = "Weapon",   -- 武器名称
 		ProjectileModelPath = "Bullet/BaseBullet",  -- 修正3: 改为字符串路径
-		-- V1.5.1新增战斗配置
 		CombatProfile = {
 			HitboxRadius = 5,
 			HitboxAngle = 90,
@@ -225,7 +204,6 @@ UnitConfig.Units = {
 			AnimationEventName = "Damage",
 			ContactOffset = 0,         -- 武器长度补偿(studs)
 		},
-		-- V1.6新增寻路配置
 		PathfindingAgentRadius = 2,
 		PathfindingAgentHeight = 5,
 		PathfindingAgentCanJump = true,
@@ -241,20 +219,14 @@ UnitConfig.Units = {
 		Price = 400,
 		GridSize = 1,
 		Description = "测试基础远程单位",
-		-- V2.0.2新增UI配置
 		Icon = "rbxassetid://80744151898936",  -- 兵种图标(暂时使用默认值,后续替换为实际图标ID)
-		-- V2.1新增商店配置
 		Quality = "Common",  -- 品质
-		-- V1.4新增属性
-		-- V1.4新增属性
 		BaseHealth = 100,       -- 基础生命值
 		BaseAttack = 10,        -- 基础攻击力
 		BaseAttackSpeed = 1.2,    -- 基础攻击速度(1秒/次)
-		-- V1.5新增战斗属性
 		BaseAttackRange = 20,    -- 远程攻击距离20 studs
 		BaseMoveSpeed = 16,     -- 移动速度16 studs/秒
 		ProjectileSpeed = 100,    -- 修正2: 远程单位必须>0，子弹速度100 studs/秒
-		-- V1.5.2新增: 完整动作系统
 		ShowAnimationId = "101776339545224",   -- 展示动画ID (放置在IdleFloor上时循环播放, 暂时留空)
 		IdleAnimationId = "123569664244954",   -- 待机动画ID (战斗中两次攻击之间播放, 暂时留空)
 		MoveAnimationId = "89625134198433",   -- 移动动画ID (暂时留空, 使用默认动画)
@@ -262,7 +234,6 @@ UnitConfig.Units = {
 		DeathAnimationId = "71584419812250",  -- 死亡动画ID (暂时留空)
 		WeaponName = "Weapon",   -- 武器名称
 		ProjectileModelPath = "Bullet/BaseBullet",  -- 修正3: 改为字符串路径
-		-- V1.5.1新增战斗配置
 		CombatProfile = {
 			HitboxRadius = 5,
 			HitboxAngle = 90,
@@ -272,7 +243,6 @@ UnitConfig.Units = {
 			AnimationEventName = "Damage",
 			ContactOffset = 0,         -- 武器长度补偿(studs)
 		},
-		-- V1.6新增寻路配置
 		PathfindingAgentRadius = 2,
 		PathfindingAgentHeight = 5,
 		PathfindingAgentCanJump = true,

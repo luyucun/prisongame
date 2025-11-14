@@ -612,9 +612,24 @@ local function OnRequestShopList(player)
 			-- 获取库存数据
 			local stockData = GetPlayerStock(player, shopId)
 
-			-- 将库存信息添加到每个商品
+			-- 将库存信息添加到每个商品，并确保Type字段正确
 			for _, item in ipairs(shopItems) do
 				item.Stock = stockData[item.UnitId] or 0
+
+				-- V2.1关键修复：强制添加/覆盖Type字段（确保客户端读到的Type与配置一致）
+				local isRanged = UnitConfig.IsRangedUnit(item.UnitId)
+				item.Type = isRanged and UnitConfig.UnitType.RANGED or UnitConfig.UnitType.MELEE
+
+				-- V2.1补充校验：调试输出兵种类型判定
+				if GameConfig.DEBUG_MODE then
+					print(string.format(
+						"  ├─ %s: IsRanged=%s, Type=%s, ProjectileSpeed=%s",
+						item.UnitId,
+						tostring(isRanged),
+						item.Type,
+						tostring(UnitConfig.GetProjectileSpeed(item.UnitId) or 0)
+					))
+				end
 			end
 		end
 

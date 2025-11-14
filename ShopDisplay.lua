@@ -266,19 +266,17 @@ local function CreateItemCard(itemData, index)
         atk.Text = tostring(atkVal)
     end
 
-    -- V2.1修复：RANGE显示类型文本并根据近战/远程设置颜色
-    local range = cardFrame:FindFirstChild("RANGE")
+    -- V2.1修复：Range显示类型（英文枚举值：Melee/Ranged）【注意：字段名是Range不是RANGE】
+    local range = cardFrame:FindFirstChild("Range")
     if range and range:IsA("TextLabel") then
-        local unitType = (unitData and unitData.Type) or itemData.Type or "Melee"
-        range.Text = unitType
+        -- 强制使用UnitConfig.IsRangedUnit判定，获取标准枚举值
+        local isRanged = UnitConfig.IsRangedUnit(unitId)
+        local unitTypeText = isRanged and UnitConfig.UnitType.RANGED or UnitConfig.UnitType.MELEE
+        range.Text = unitTypeText
 
-        -- 文本颜色：近战 (255,255,127) vs 远程 (170,170,255)
-        local isMelee = (string.lower(unitType) == "melee")
-        if isMelee then
-            range.TextColor3 = Color3.fromRGB(255, 255, 127)
-        else
-            range.TextColor3 = Color3.fromRGB(170, 170, 255)
-        end
+        -- 颜色：近战黄(255,255,127) vs 远程蓝(170,170,255)
+        range.TextColor3 = isRanged and Color3.fromRGB(170, 170, 255)
+                                      or Color3.fromRGB(255, 255, 127)
     end
 
     local hp = cardFrame:FindFirstChild("HP")
