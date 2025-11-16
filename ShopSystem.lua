@@ -200,15 +200,6 @@ local function InitializePlayerStock(player, shopId)
 			LastRefreshTime = lastRefreshTime, -- 从持久化数据恢复
 		}
 
-		if GameConfig.DEBUG_MODE then
-			print(string.format(
-				"%s [ShopSystem] 初始化库存 - 玩家:%s 商店:%s 上次刷新:%d",
-				GameConfig.LOG_PREFIX,
-				player.Name,
-				shopId,
-				lastRefreshTime
-			))
-		end
 	end
 end
 
@@ -253,17 +244,6 @@ local function RefreshShopStock(player, shopId)
 					stockData[unitId] = 0
 				end
 
-				if GameConfig.DEBUG_MODE then
-					print(string.format(
-						"%s [ShopSystem] 刷新库存 - 玩家:%s 商店:%s 商品:%s 库存:%d (概率:%.0f%%)",
-						GameConfig.LOG_PREFIX,
-						player.Name,
-						shopId,
-						unitId,
-						stockData[unitId],
-						probability * 100
-					))
-				end
 			end
 		end
 	end
@@ -463,13 +443,6 @@ local function StopRefreshTimer(player)
 	-- V2.1修复：清理定时器更新时间戳
 	LastTimerUpdate[player] = nil
 
-	if GameConfig.DEBUG_MODE then
-		print(string.format(
-			"%s [ShopSystem] 停止刷新定时器 - 玩家:%s",
-			GameConfig.LOG_PREFIX,
-			player.Name
-		))
-	end
 end
 
 -- ==================== 辅助函数 ====================
@@ -561,13 +534,6 @@ end
 ]]
 local function OnRequestShopList(player)
 	local success, result = pcall(function()
-		if GameConfig.DEBUG_MODE then
-			print(string.format(
-				"%s [ShopSystem] 玩家 %s 请求商店列表",
-				GameConfig.LOG_PREFIX,
-				player.Name
-			))
-		end
 
 		-- 确定商店ID
 		local shopId = GetPlayerNearbyShopId(player)
@@ -621,15 +587,6 @@ local function OnRequestShopList(player)
 				item.Type = isRanged and UnitConfig.UnitType.RANGED or UnitConfig.UnitType.MELEE
 
 				-- V2.1补充校验：调试输出兵种类型判定
-				if GameConfig.DEBUG_MODE then
-					print(string.format(
-						"  ├─ %s: IsRanged=%s, Type=%s, ProjectileSpeed=%s",
-						item.UnitId,
-						tostring(isRanged),
-						item.Type,
-						tostring(UnitConfig.GetProjectileSpeed(item.UnitId) or 0)
-					))
-				end
 			end
 		end
 
@@ -814,13 +771,6 @@ local function OnPlayerRemoving(player)
 		-- 3. 玩家真正离线后，数据会自然被垃圾回收
 	end
 
-	if GameConfig.DEBUG_MODE then
-		print(string.format(
-			"%s [ShopSystem] 清理玩家数据: %s",
-			GameConfig.LOG_PREFIX,
-			player.Name
-		))
-	end
 end
 
 -- ==================== 公共接口 ====================
@@ -830,9 +780,6 @@ end
 @return boolean - 是否成功
 ]]
 function ShopSystem.Initialize()
-	if GameConfig.DEBUG_MODE then
-		print(GameConfig.LOG_PREFIX .. " [ShopSystem] 初始化商店系统...")
-	end
 
 	-- 1. 初始化依赖模块
 	if not InitializeDependencies() then

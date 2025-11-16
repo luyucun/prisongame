@@ -49,10 +49,6 @@ function PhysicsManager.Initialize()
     -- 监听新玩家加入
     Players.PlayerAdded:Connect(OnPlayerAdded)
 
-    if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "PhysicsManager初始化完成")
-    end
-
     return true
 end
 
@@ -66,32 +62,19 @@ function CreateCollisionGroups()
         return
     end
 
-    if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "创建碰撞组...")
-    end
-
     -- 创建玩家碰撞组
     pcall(function()
         PhysicsService:RegisterCollisionGroup("Players")
-        if GameConfig.DEBUG_MODE then
-            print(GameConfig.LOG_PREFIX, "创建'Players'碰撞组成功")
-        end
     end)
 
     -- 创建兵种碰撞组
     pcall(function()
         PhysicsService:RegisterCollisionGroup("Units")
-        if GameConfig.DEBUG_MODE then
-            print(GameConfig.LOG_PREFIX, "创建'Units'碰撞组成功")
-        end
     end)
 
     -- 禁用两组之间的碰撞
     pcall(function()
         PhysicsService:CollisionGroupSetCollidable("Players", "Units", false)
-        if GameConfig.DEBUG_MODE then
-            print(GameConfig.LOG_PREFIX, "禁用'Players'和'Units'之间的碰撞")
-        end
     end)
 
     groupsCreated = true
@@ -104,10 +87,6 @@ end
 @param player Player
 ]]
 function OnPlayerAdded(player)
-    if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "玩家加入:", player.Name)
-    end
-
     -- 等待玩家角色加载
     local character = player.Character or player.CharacterAdded:Wait()
     task.wait(0.1)
@@ -118,9 +97,6 @@ function OnPlayerAdded(player)
     -- 监听角色重生
     local characterAddedConnection
     characterAddedConnection = player.CharacterAdded:Connect(function(newCharacter)
-        if GameConfig.DEBUG_MODE then
-            print(GameConfig.LOG_PREFIX, "玩家角色重生:", player.Name)
-        end
         task.wait(0.1)
         DisablePlayerCollisions(player, newCharacter)
     end)
@@ -167,16 +143,9 @@ function DisablePlayerCollisions(player, character)
         if descendant:IsA("BasePart") then
             pcall(function()
                 descendant.CollisionGroup = "Players"
-                if GameConfig.DEBUG_MODE then
-                    print(GameConfig.LOG_PREFIX, "动态添加玩家Part到碰撞组:", descendant:GetFullName())
-                end
             end)
         end
     end)
-
-    if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "为玩家添加到碰撞组:", player.Name, "Part数量:", addedCount)
-    end
 end
 
 -- ==================== 兵种处理 ====================
@@ -188,10 +157,6 @@ end
 function PhysicsManager.ConfigureUnitPhysics(model)
     if not model then
         return
-    end
-
-    if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "配置兵种物理:", model:GetFullName())
     end
 
     -- 获取兵种模型的所有Part
@@ -216,16 +181,9 @@ function PhysicsManager.ConfigureUnitPhysics(model)
         if descendant:IsA("BasePart") then
             pcall(function()
                 descendant.CollisionGroup = "Units"
-                if GameConfig.DEBUG_MODE then
-                    print(GameConfig.LOG_PREFIX, "动态添加兵种Part到碰撞组:", descendant:GetFullName())
-                end
             end)
         end
     end)
-
-    if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "兵种Part添加到Units组:", addedCount, "个")
-    end
 end
 
 return PhysicsManager

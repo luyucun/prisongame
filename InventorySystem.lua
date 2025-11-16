@@ -98,9 +98,6 @@ local function CreateUnitInstance(unitId)
         PlacedPosition = nil,
     }
 
-    if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "创建兵种实例:", unitId, "InstanceId:", instance.InstanceId)
-    end
 
     return instance
 end
@@ -229,12 +226,6 @@ function InventorySystem.AddUnit(player, unitId)
     -- 改用InventoryRefresh确保客户端获得完整的实例信息
     NotifyClientInventoryRefresh(player)
 
-    if GameConfig.DEBUG_MODE then
-        print(string.format(
-            "%s 添加兵种成功 - 玩家:%s 兵种:%s 实例ID:%s 当前数量:%d",
-            GameConfig.LOG_PREFIX, player.Name, unitId, instance.InstanceId, #units
-        ))
-    end
 
     return true, instance
 end
@@ -266,12 +257,6 @@ function InventorySystem.RemoveUnit(player, instanceId)
             -- 改用InventoryRefresh确保客户端获得完整的实例信息
             NotifyClientInventoryRefresh(player)
 
-            if GameConfig.DEBUG_MODE then
-                print(string.format(
-                    "%s 删除兵种成功 - 玩家:%s 实例ID:%s 剩余数量:%d",
-                    GameConfig.LOG_PREFIX, player.Name, instanceId, #units
-                ))
-            end
 
             return true, "删除成功"
         end
@@ -380,9 +365,6 @@ function InventorySystem.ClearInventory(player)
     -- 通知客户端刷新背包(显示为空)
     NotifyClientInventoryRefresh(player)
 
-    if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "清空玩家背包:", player.Name)
-    end
 
     return true
 end
@@ -430,9 +412,6 @@ end
 @param player Player - 请求的玩家
 ]]
 local function OnClientRequestInventory(player)
-    if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "客户端请求背包数据:", player.Name)
-    end
 
     NotifyClientInventoryRefresh(player)
 end
@@ -443,9 +422,6 @@ end
 @param unitId string
 ]]
 local function OnClientRequestUnitInstance(player, unitId)
-    if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "客户端请求兵种实例:", player.Name, unitId)
-    end
 
     -- 获取该兵种的第一个未放置的实例
     local instances = InventorySystem.GetUnitsByUnitId(player, unitId)
@@ -488,9 +464,6 @@ end
 连接远程事件
 ]]
 function InventorySystem.Initialize()
-    if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "初始化InventorySystem...")
-    end
 
     -- 初始化事件
     InitializeEvents()
@@ -500,24 +473,15 @@ function InventorySystem.Initialize()
         local requestEvent = InventoryEvents:FindFirstChild("RequestInventory")
         if requestEvent then
             requestEvent.OnServerEvent:Connect(OnClientRequestInventory)
-            if GameConfig.DEBUG_MODE then
-                print(GameConfig.LOG_PREFIX, "已连接RequestInventory事件")
-            end
         end
 
         -- 连接请求实例事件
         local requestInstanceEvent = InventoryEvents:FindFirstChild("RequestUnitInstance")
         if requestInstanceEvent then
             requestInstanceEvent.OnServerEvent:Connect(OnClientRequestUnitInstance)
-            if GameConfig.DEBUG_MODE then
-                print(GameConfig.LOG_PREFIX, "已连接RequestUnitInstance事件")
-            end
         end
     end
 
-    if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "InventorySystem初始化完成")
-    end
 end
 
 return InventorySystem

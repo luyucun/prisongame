@@ -60,13 +60,6 @@ local function LoadFromDataStore(player)
 	end)
 
 	if success and data then
-		if GameConfig.DEBUG_MODE then
-			print(string.format(
-				"%s [DataManager] 从DataStore加载数据成功 - 玩家:%s",
-				GameConfig.LOG_PREFIX,
-				player.Name
-			))
-		end
 		return data
 	elseif not success then
 		warn(string.format(
@@ -102,13 +95,6 @@ local function SaveToDataStore(player, playerData)
 	end)
 
 	if success then
-		if GameConfig.DEBUG_MODE then
-			print(string.format(
-				"%s [DataManager] 数据保存成功 - 玩家:%s",
-				GameConfig.LOG_PREFIX,
-				player.Name
-			))
-		end
 		return true
 	else
 		warn(string.format(
@@ -127,9 +113,6 @@ end
 @return table - 初始化的玩家数据
 ]]
 local function CreateDefaultData(player)
-    if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "创建默认数据 for:", player.Name)
-    end
 
     return {
         UserId = player.UserId,
@@ -159,9 +142,6 @@ function DataManager.InitializePlayerData(player)
 
     -- 检查是否已存在数据
     if playerDataCache[player.UserId] then
-        if GameConfig.DEBUG_MODE then
-            print(GameConfig.LOG_PREFIX, "玩家数据已存在:", player.Name)
-        end
         return playerDataCache[player.UserId]
     end
 
@@ -179,25 +159,10 @@ function DataManager.InitializePlayerData(player)
             playerData.ShopData = {}
         end
 
-        if GameConfig.DEBUG_MODE then
-            print(string.format(
-                "%s 恢复玩家数据成功 - 玩家:%s 金币:%d",
-                GameConfig.LOG_PREFIX,
-                player.Name,
-                playerData.Currency.Coins
-            ))
-            -- 打印ShopData以便调试
-            if next(playerData.ShopData) then
-                print(GameConfig.LOG_PREFIX, "  ShopData:", playerData.ShopData)
-            end
-        end
     else
         -- 创建新数据
         playerData = CreateDefaultData(player)
 
-        if GameConfig.DEBUG_MODE then
-            print(GameConfig.LOG_PREFIX, "创建新玩家数据:", player.Name, "初始金币:", playerData.Currency.Coins)
-        end
     end
 
     playerDataCache[player.UserId] = playerData
@@ -240,9 +205,6 @@ function DataManager.SetPlayerHomeSlot(player, homeSlot)
 
     playerData.HomeSlot = homeSlot
 
-    if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "设置玩家基地:", player.Name, "基地编号:", homeSlot)
-    end
 
     return true
 end
@@ -293,12 +255,6 @@ function DataManager.UpdateCurrency(player, currencyType, amount, reason)
 
     playerData.Currency[currencyType] = newAmount
 
-    if GameConfig.DEBUG_MODE then
-        print(string.format(
-            "%s 更新货币 - 玩家:%s 类型:%s 原值:%d 变化:%d 新值:%d 原因:%s",
-            GameConfig.LOG_PREFIX, player.Name, currencyType, oldAmount, amount, newAmount, reason or "未知"
-        ))
-    end
 
     return true, newAmount
 end
@@ -373,12 +329,6 @@ function DataManager.SetShopRefreshTime(player, shopId, refreshTime)
 
     playerData.ShopData[shopId].LastRefreshTime = refreshTime
 
-    if GameConfig.DEBUG_MODE then
-        print(string.format(
-            "%s [DataManager] 设置商店刷新时间 - 玩家:%s 商店:%s 时间:%d",
-            GameConfig.LOG_PREFIX, player.Name, shopId, refreshTime
-        ))
-    end
 
     return true
 end
@@ -416,9 +366,6 @@ function DataManager.ClearPlayerData(player)
     -- 从缓存中移除
     playerDataCache[player.UserId] = nil
 
-    if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "清除玩家数据:", player.Name)
-    end
 end
 
 --[[

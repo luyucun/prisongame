@@ -17,7 +17,7 @@ local ContentProvider = game:GetService("ContentProvider")
 local LocalPlayer = Players.LocalPlayer
 
 -- 调试日志
-local DEBUG_MODE = true
+local DEBUG_MODE = false
 local LOG_PREFIX = "[AnimationPreloader]"
 
 local function DebugLog(...)

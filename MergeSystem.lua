@@ -42,9 +42,6 @@ local MergeEvents = nil
 local function PlayMergeEffect(position, gridSize)
 	local effectFolder = ReplicatedStorage:FindFirstChild("Effect")
 	if not effectFolder then
-		if GameConfig.DEBUG_MODE then
-			warn(GameConfig.LOG_PREFIX, "未找到特效文件夹 Effect")
-		end
 		return
 	end
 
@@ -57,17 +54,11 @@ local function PlayMergeEffect(position, gridSize)
 	elseif gridSize == 9 then
 		effectName = "Merge03"
 	else
-		if GameConfig.DEBUG_MODE then
-			warn(GameConfig.LOG_PREFIX, "无效的GridSize:", gridSize)
-		end
 		return
 	end
 
 	local effectTemplate = effectFolder:FindFirstChild(effectName)
 	if not effectTemplate then
-		if GameConfig.DEBUG_MODE then
-			warn(GameConfig.LOG_PREFIX, "未找到特效:", effectName)
-		end
 		return
 	end
 
@@ -95,9 +86,6 @@ local function PlayMergeEffect(position, gridSize)
 		effect.CFrame = CFrame.new(position)
 	end
 
-	if GameConfig.DEBUG_MODE then
-		print(string.format("%s 播放合成特效: %s 位置: %s", GameConfig.LOG_PREFIX, effectName, tostring(position)))
-	end
 
 	-- 4. 3秒后移除特效父节点
 	task.delay(3, function()
@@ -247,28 +235,11 @@ function MergeSystem.MergeUnits(player, instanceIdA, instanceIdB)
             local finalY = math.min(baseY, bottomY)
             effectPosition = Vector3.new(hrp.Position.X, finalY, hrp.Position.Z)
 
-            if GameConfig.DEBUG_MODE then
-                print(string.format("%s 找到兵种模型 %s，HRP Y: %.2f, 脚底Y: %.2f, baseY: %.2f, 最终Y: %.2f, HipHeight: %.2f, HRP Size.Y: %.2f",
-                    GameConfig.LOG_PREFIX, unitB.UnitId, hrp.Position.Y, bottomY, baseY, finalY,
-                    (humanoid and humanoid.HipHeight) or 0, hrp.Size.Y))
-            end
         else
-            if GameConfig.DEBUG_MODE then
-                warn(GameConfig.LOG_PREFIX, "找到模型但没有HumanoidRootPart")
-            end
         end
     else
-        if GameConfig.DEBUG_MODE then
-            warn(GameConfig.LOG_PREFIX, "未找到兵种B的模型，使用默认位置")
-        end
     end
 
-    if GameConfig.DEBUG_MODE then
-        print(string.format(
-            "%s 开始合成 - 玩家:%s UnitId:%s 等级:%d -> %d GridSize:%d",
-            GameConfig.LOG_PREFIX, player.Name, unitA.UnitId, unitA.Level, newLevel, gridSize
-        ))
-    end
 
     -- 4. 先创建新兵种（确保创建成功后再移除旧兵种，避免数据丢失）
     local success, newInstance = InventorySystem.AddUnit(player, unitA.UnitId)
@@ -298,12 +269,6 @@ function MergeSystem.MergeUnits(player, instanceIdA, instanceIdB)
         -- 如果放置失败，兵种会留在背包中
     end
 
-    if GameConfig.DEBUG_MODE then
-        print(string.format(
-            "%s 合成成功 - 新兵种ID:%s 等级:%d",
-            GameConfig.LOG_PREFIX, newInstance.InstanceId, newLevel
-        ))
-    end
 
     return true, "合成成功", {
         InstanceId = newInstance.InstanceId,
@@ -322,9 +287,6 @@ end
 @param instanceIdB string - 目标兵种
 ]]
 local function OnRequestMerge(player, instanceIdA, instanceIdB)
-    if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "收到合成请求:", player.Name, instanceIdA, "->", instanceIdB)
-    end
 
     -- 执行合成
     local success, message, newUnitData = MergeSystem.MergeUnits(player, instanceIdA, instanceIdB)
@@ -342,9 +304,6 @@ end
 初始化合成系统
 ]]
 function MergeSystem.Initialize()
-    if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "初始化MergeSystem...")
-    end
 
     -- 初始化事件
     if not InitializeEvents() then
@@ -356,14 +315,8 @@ function MergeSystem.Initialize()
     local requestEvent = MergeEvents:FindFirstChild("RequestMerge")
     if requestEvent then
         requestEvent.OnServerEvent:Connect(OnRequestMerge)
-        if GameConfig.DEBUG_MODE then
-            print(GameConfig.LOG_PREFIX, "已连接RequestMerge事件")
-        end
     end
 
-    if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "MergeSystem初始化完成")
-    end
 
     return true
 end

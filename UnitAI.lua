@@ -614,6 +614,15 @@ AIData = {
     PathRequested = boolean,             -- 是否已在队列中请求路径（战斗）
     MoveConnection = RBXScriptConnection, -- 当前的 MoveToFinished 连接
 
+    -- V2.4性能优化：MoveTo节流
+    LastMoveToPos = Vector3|nil,         -- 上次MoveTo的目标位置
+    LastMoveToTick = number,             -- 上次MoveTo的时间戳
+
+    -- V2.4性能优化：Raycast节流与缓存
+    LastLoSResult = boolean|nil,         -- 上次直线可达检测结果
+    LastLoSCheckTick = number,           -- 上次检测时间戳
+    LastLoSDistance = number,            -- 上次检测时的距离
+
     -- 动画状态
     CurrentState = string,               -- 当前动画状态: "MOVE"/"IDLE"/"ATTACK"
     LastState = string,                  -- 上次动画状态
@@ -760,13 +769,47 @@ local function ValidateTarget(unitModel)
 end
 
 --[[
-直线可达检测（V2.1.1修正：始终进行射线检测）
+节流的MoveTo：避免重复下发相同位置的移动命令
+@param aiData AIData - AI数据
+@param targetPos Vector3 - 目标位置
+@return boolean - 是否执行了MoveTo
+]]
+local function ThrottledMoveTo(aiData, targetPos)
+	if not aiData or not aiData.Humanoid or not targetPos then
+		return false
+	end
+
+	local now = tick()
+
+	-- V2.4优化：节流检查，收紧阈值避免waypoint附近卡顿
+	-- 距离小于1.5 studs且时间间隔小于0.25秒则跳过
+	if aiData.LastMoveToPos and aiData.LastMoveToTick then
+		local posDiff = (targetPos - aiData.LastMoveToPos).Magnitude
+		local timeDiff = now - aiData.LastMoveToTick
+
+		if posDiff < 1.5 and timeDiff < 0.25 then
+			-- 跳过：目标位置变化太小且时间间隔太短
+			return false
+		end
+	end
+
+	-- 执行MoveTo
+	aiData.Humanoid:MoveTo(targetPos)
+	aiData.LastMoveToPos = targetPos
+	aiData.LastMoveToTick = now
+
+	return true
+end
+
+--[[
+直线可达检测（V2.4优化：增加缓存，减少射线检测频率）
 修正问题：不能仅凭距离判断，必须检测障碍物
 @param unitModel Model - 攻击方单位
 @param targetModel Model - 目标单位
+@param aiData AIData - AI数据（用于缓存）
 @return boolean - 是否直线可达
 ]]
-local function HasLineOfSight(unitModel, targetModel)
+local function HasLineOfSight(unitModel, targetModel, aiData)
 	local root = unitModel:FindFirstChild("HumanoidRootPart")
 	local targetRoot = targetModel:FindFirstChild("HumanoidRootPart") or targetModel.PrimaryPart
 	if not root or not targetRoot then
@@ -781,6 +824,18 @@ local function HasLineOfSight(unitModel, targetModel)
 		return true
 	end
 
+	-- V2.4优化：缓存检查
+	-- 仅当距离变化>3 studs 或超过 0.25 秒未检查时才重新射线
+	if aiData and aiData.LastLoSCheckTick then
+		local timeDiff = tick() - aiData.LastLoSCheckTick
+		local distanceDiff = aiData.LastLoSDistance and math.abs(distance - aiData.LastLoSDistance) or math.huge
+
+		if timeDiff < 0.25 and distanceDiff < 3 then
+			-- 使用缓存结果
+			return aiData.LastLoSResult or false
+		end
+	end
+
 	-- V2.1.1修正：无论距离远近，都执行射线检测
 	-- 这样可以正确处理"距离近但有墙"的情况
 	local rayParams = RaycastParams.new()
@@ -789,20 +844,31 @@ local function HasLineOfSight(unitModel, targetModel)
 	rayParams.IgnoreWater = true
 
 	local result = workspace:Raycast(root.Position, direction, rayParams)
+	local losResult = false
+
 	if not result then
 		-- 没有任何命中，视为可直走
-		return true
+		losResult = true
+	else
+		-- 命中的对象若明显是"动态单位"，可以忽略（示例：命中对象的父包含Humanoid）
+		local hitParent = result.Instance and result.Instance.Parent
+		if hitParent and hitParent:FindFirstChildOfClass("Humanoid") then
+			-- 命中的是其他单位，视为"拥挤阻挡"，直走可能也有用，这里返回true试图直线逼近
+			losResult = true
+		else
+			-- 命中静态障碍，视为不可直走
+			losResult = false
+		end
 	end
 
-	-- 命中的对象若明显是"动态单位"，可以忽略（示例：命中对象的父包含Humanoid）
-	local hitParent = result.Instance and result.Instance.Parent
-	if hitParent and hitParent:FindFirstChildOfClass("Humanoid") then
-		-- 命中的是其他单位，视为"拥挤阻挡"，直走可能也有用，这里返回true试图直线逼近
-		return true
+	-- V2.4优化：更新缓存
+	if aiData then
+		aiData.LastLoSResult = losResult
+		aiData.LastLoSCheckTick = tick()
+		aiData.LastLoSDistance = distance
 	end
 
-	-- 命中静态障碍，视为不可直走
-	return false
+	return losResult
 end
 
 -- ==================== 状态处理函数（重构版） ====================
@@ -925,18 +991,18 @@ local function HandleMoving(unitModel, aiData, state)
 		if hasValidPath then
 			local nextWaypoint = PathService.GetNextWaypoint(unitModel)
 			if nextWaypoint then
-				aiData.Humanoid:MoveTo(nextWaypoint)
+				ThrottledMoveTo(aiData, nextWaypoint)
 				return
 			end
 		end
 	end
 
 	-- 策略2：优先直线移动（简单场景，无寻路开销）
-	if HasLineOfSight(unitModel, target) then
+	if HasLineOfSight(unitModel, target, aiData) then
 		-- 直线可达，直接移动
 		local targetPos = target:FindFirstChild("HumanoidRootPart") or target.PrimaryPart
 		if targetPos then
-			aiData.Humanoid:MoveTo(targetPos.Position)
+			ThrottledMoveTo(aiData, targetPos.Position)
 		end
 
 		-- 清理旧路径
@@ -968,13 +1034,13 @@ local function HandleMoving(unitModel, aiData, state)
 		-- 等待寻路期间，先尝试直线靠近
 		local targetPos = target:FindFirstChild("HumanoidRootPart") or target.PrimaryPart
 		if targetPos then
-			aiData.Humanoid:MoveTo(targetPos.Position)
+			ThrottledMoveTo(aiData, targetPos.Position)
 		end
 	else
 		-- 已经在排队中，继续直线移动
 		local targetPos = target:FindFirstChild("HumanoidRootPart") or target.PrimaryPart
 		if targetPos then
-			aiData.Humanoid:MoveTo(targetPos.Position)
+			ThrottledMoveTo(aiData, targetPos.Position)
 		end
 	end
 end
@@ -1045,9 +1111,9 @@ local AI_UPDATE_INTERVALS = {
 }
 
 -- V2.3性能优化：Round-robin分帧调度
--- 将100个单位分成3批，每帧只处理1/3，降低单帧CPU峰值
-local AI_BATCH_COUNT = 3  -- 分成3批
-local currentBatch = 0    -- 当前批次（0, 1, 2循环）
+-- 将100个单位分成4批，每帧只处理1/4，降低单帧CPU峰值
+local AI_BATCH_COUNT = 4  -- 从3增加到4批，更平滑
+local currentBatch = 0    -- 当前批次（0, 1, 2, 3循环）
 local nextBatchIndex = 0  -- 下一个单位应分配的批次（round-robin计数器）
 
 local function UpdateAllAIs()
@@ -1177,6 +1243,15 @@ function UnitAI.StartAI(unitModel)
 		PathRequested = false,     -- 是否已在队列中请求路径（战斗）
 		MoveConnection = nil,      -- 当前的 MoveToFinished 连接
 
+		-- V2.4性能优化：MoveTo节流
+		LastMoveToPos = nil,       -- 上次MoveTo的目标位置
+		LastMoveToTick = 0,        -- 上次MoveTo的时间戳
+
+		-- V2.4性能优化：Raycast节流与缓存
+		LastLoSResult = nil,       -- 上次直线可达检测结果
+		LastLoSCheckTick = 0,      -- 上次检测时间戳
+		LastLoSDistance = 0,       -- 上次检测时的距离
+
 		-- 动画状态
 		CurrentState = nil,
 		LastState = nil,
@@ -1250,19 +1325,19 @@ function UnitAI.StartAI(unitModel)
 				if PathService.AdvancePath(unitModel) then
 					local nextWaypoint = PathService.GetNextWaypoint(unitModel)
 					if nextWaypoint then
-						aiData.Humanoid:MoveTo(nextWaypoint)
+						ThrottledMoveTo(aiData, nextWaypoint)
 					else
 						-- 路径走完，直线移动到目标
 						local targetPos = currentTarget:FindFirstChild("HumanoidRootPart") or currentTarget.PrimaryPart
 						if targetPos then
-							aiData.Humanoid:MoveTo(targetPos.Position)
+							ThrottledMoveTo(aiData, targetPos.Position)
 						end
 					end
 				else
 					-- 路径走完，直线移动到目标
 					local targetPos = currentTarget:FindFirstChild("HumanoidRootPart") or currentTarget.PrimaryPart
 					if targetPos then
-						aiData.Humanoid:MoveTo(targetPos.Position)
+						ThrottledMoveTo(aiData, targetPos.Position)
 					end
 				end
 			end
@@ -1454,7 +1529,7 @@ function UnitAI.MoveToTarget(unitModel, target, aiData, state)
 		return
 	end
 
-	aiData.Humanoid:MoveTo(moveTarget)
+	ThrottledMoveTo(aiData, moveTarget)
 
 	local unitType = UnitConfig.IsRangedUnit(state.UnitId) and "远程" or "近战"
 	DebugLog(string.format("%s (%s) 移动中，当前距离=%.1f，停靠距离=%.1f，需移动=%.1f",

@@ -20,7 +20,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer = Players.LocalPlayer
 
 -- 调试模式和日志前缀(必须在最前面定义)
-local DEBUG_MODE = true
+local DEBUG_MODE = false
 local LOG_PREFIX = "[CoinDisplay]"
 
 -- 等待玩家GUI加载
@@ -97,9 +97,7 @@ local function RefreshUIReferences()
         MainGui = PlayerGui:FindFirstChild("MainGui")
 
         if not MainGui then
-            if DEBUG_MODE then
-                warn(LOG_PREFIX, "MainGui未找到,等待重建...")
-            end
+            -- 静默等待，由 ChildAdded 回调负责后续刷新
             return false
         end
 
@@ -113,9 +111,7 @@ local function RefreshUIReferences()
         CoinNumLabel = MainGui:FindFirstChild("CoinNum")
 
         if not CoinNumLabel then
-            if DEBUG_MODE then
-                warn(LOG_PREFIX, "CoinNum未找到,等待重建...")
-            end
+            -- 静默等待，由 ChildAdded 回调负责后续刷新
             return false
         end
 
@@ -144,7 +140,9 @@ local function UpdateCoinDisplay(newAmount, useAnimation)
 
     -- 刷新UI引用
     if not RefreshUIReferences() then
-        warn(LOG_PREFIX, "UI引用无效,无法更新显示")
+        if DEBUG_MODE then
+            print(LOG_PREFIX, "UI引用无效,等待GUI...")
+        end
         return
     end
 
@@ -199,8 +197,14 @@ local function Initialize()
     end
 
     -- 获取初始UI引用
-    if not RefreshUIReferences() then
-        warn(LOG_PREFIX, "初始UI引用获取失败,将在后续尝试")
+    local uiReady = RefreshUIReferences()
+    if not uiReady then
+        if DEBUG_MODE then
+            print(LOG_PREFIX, "等待MainGui/CoinNum创建后再初始化显示")
+        end
+    else
+        -- 仅在UI就绪时设置初始显示（不使用动画）
+        UpdateCoinDisplay(0, false)
     end
 
     if not CurrencyEvents then
@@ -208,9 +212,6 @@ local function Initialize()
         warn(LOG_PREFIX, "请确保ReplicatedStorage/Events中存在CurrencyEvents")
         return false
     end
-
-    -- 设置初始显示（不使用动画）
-    UpdateCoinDisplay(0, false)
 
     -- 监听PlayerGui的ChildAdded事件,处理GUI重建
     PlayerGui.ChildAdded:Connect(function(child)

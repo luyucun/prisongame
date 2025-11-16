@@ -197,34 +197,22 @@ end
 ]]
 local function UpdateLevelDisplay(model, level)
     if not model then
-        if GameConfig.DEBUG_MODE then
-            warn(GameConfig.LOG_PREFIX, "UpdateLevelDisplay: 模型为空")
-        end
         return
     end
 
     -- 查找Head下的BillboardGui
     local head = model:FindFirstChild("Head")
     if not head then
-        if GameConfig.DEBUG_MODE then
-            warn(GameConfig.LOG_PREFIX, "UpdateLevelDisplay: 模型没有Head部件:", model.Name)
-        end
         return
     end
 
     local billboardGui = head:FindFirstChild("BillboardGui")
     if not billboardGui then
-        if GameConfig.DEBUG_MODE then
-            warn(GameConfig.LOG_PREFIX, "UpdateLevelDisplay: Head下没有BillboardGui:", model.Name)
-        end
         return
     end
 
     local textLabel = billboardGui:FindFirstChild("TextLabel")
     if not textLabel then
-        if GameConfig.DEBUG_MODE then
-            warn(GameConfig.LOG_PREFIX, "UpdateLevelDisplay: BillboardGui下没有TextLabel:", model.Name)
-        end
         return
     end
 
@@ -233,10 +221,6 @@ local function UpdateLevelDisplay(model, level)
         textLabel.Text = "Lv.Max"
     else
         textLabel.Text = "Lv." .. tostring(level)
-    end
-
-    if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "更新等级显示成功:", model.Name, "Level:", level, "显示:", textLabel.Text)
     end
 end
 
@@ -247,9 +231,6 @@ end
 ]]
 local function PlayShowAnimation(model, unitId)
 	if not model or not unitId then
-		if GameConfig.DEBUG_MODE then
-			warn(GameConfig.LOG_PREFIX, "PlayShowAnimation: 参数无效")
-		end
 		return
 	end
 
@@ -258,9 +239,6 @@ local function PlayShowAnimation(model, unitId)
 
 	-- 如果没有配置展示动画，直接返回
 	if not showAnimId or showAnimId == "" or showAnimId == "0" then
-		if GameConfig.DEBUG_MODE then
-			print(GameConfig.LOG_PREFIX, "PlayShowAnimation: 单位", unitId, "未配置展示动画")
-		end
 		return
 	end
 
@@ -273,9 +251,6 @@ local function PlayShowAnimation(model, unitId)
 	-- 查找Humanoid
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
 	if not humanoid then
-		if GameConfig.DEBUG_MODE then
-			warn(GameConfig.LOG_PREFIX, "PlayShowAnimation: 模型没有Humanoid:", model.Name)
-		end
 		return
 	end
 
@@ -294,10 +269,6 @@ local function PlayShowAnimation(model, unitId)
 	-- 创建动画实例
 	local animation = Instance.new("Animation")
 	animation.AnimationId = "rbxassetid://" .. showAnimId
-
-	if GameConfig.DEBUG_MODE then
-		print(GameConfig.LOG_PREFIX, "PlayShowAnimation: 准备加载动画 -", unitId, "完整AnimationId:", animation.AnimationId)
-	end
 
 	-- 加载动画
 	local success, result = pcall(function()
@@ -320,10 +291,6 @@ local function PlayShowAnimation(model, unitId)
 	-- 设置循环播放
 	animTrack.Looped = true
 
-	if GameConfig.DEBUG_MODE then
-		print(GameConfig.LOG_PREFIX, "PlayShowAnimation: 动画加载成功，准备播放 -", unitId, "动画长度:", animTrack.Length, "秒")
-	end
-
 	-- 播放动画
 	local playSuccess, playError = pcall(function()
 		animTrack:Play()
@@ -335,16 +302,6 @@ local function PlayShowAnimation(model, unitId)
 		return
 	end
 
-	-- 检查动画是否真的在播放
-	task.wait(0.1)  -- 等待一小段时间
-	if animTrack.IsPlaying then
-		if GameConfig.DEBUG_MODE then
-			print(GameConfig.LOG_PREFIX, "PlayShowAnimation: ✅ 动画确认正在播放:", unitId, "当前时间位置:", animTrack.TimePosition)
-		end
-	else
-		warn(GameConfig.LOG_PREFIX, "PlayShowAnimation: ⚠️ 动画未播放:", unitId, "IsPlaying=false")
-	end
-
 	-- V1.5.2修复：循环动画在停止时清理Animation对象，防止内存泄漏
 	-- 当单位被回收时，animTrack:Stop()会触发此事件
 	animTrack.Stopped:Connect(function()
@@ -352,10 +309,6 @@ local function PlayShowAnimation(model, unitId)
 			animation:Destroy()
 		end
 	end)
-
-	if GameConfig.DEBUG_MODE then
-		print(GameConfig.LOG_PREFIX, "PlayShowAnimation: 成功播放展示动画:", unitId, "AnimID:", showAnimId)
-	end
 end
 
 --[[
@@ -452,9 +405,6 @@ local function CreateUnitModel(unitId, position, instanceId, level, gridSize)
         rootPart.Anchored = true
         rootPart.CanCollide = true
 
-        if GameConfig.DEBUG_MODE then
-            print(GameConfig.LOG_PREFIX, "锚定根部件:", rootPart.Name, "模型:", model.Name)
-        end
     else
         warn(GameConfig.LOG_PREFIX, "CreateUnitModel: 找不到根部件，模型可能会下沉:", model.Name)
     end
@@ -505,43 +455,15 @@ function PlacementSystem.ValidatePlacement(player, instanceId, position)
         return false, "找不到放置地板"
     end
 
-    -- 4.1 调试信息：打印客户端传来的位置和服务端的IdleFloor信息
-    if GameConfig.DEBUG_MODE then
-        local floorCenter = idleFloor.Position
-        print(string.format(
-            "%s ValidatePlacement - 客户端位置:(%.2f, %.2f, %.2f), IdleFloor中心:(%.2f, %.2f, %.2f), 玩家:%s",
-            GameConfig.LOG_PREFIX,
-            position.X, position.Y, position.Z,
-            floorCenter.X, floorCenter.Y, floorCenter.Z,
-            player.Name
-        ))
-    end
+    -- 4.1 调试信息：已移除详细日志
 
     -- 5. 转换为网格坐标
     local floorCenter = idleFloor.Position
     local gridX, gridZ = PlacementConfig.WorldToGrid(position, floorCenter)
 
-    if GameConfig.DEBUG_MODE then
-        print(string.format(
-            "%s 网格索引 - gridX:%d, gridZ:%d, GridSize:%d",
-            GameConfig.LOG_PREFIX, gridX, gridZ, unitInstance.GridSize
-        ))
-    end
 
     -- 6. 检查边界
     if not PlacementConfig.IsGridInBounds(gridX, gridZ, unitInstance.GridSize) then
-        if GameConfig.DEBUG_MODE then
-            print(string.format(
-                "%s 边界检查失败 - 网格:(%d, %d) 占地:%d 最大网格:(120, 120) - 玩家:%s",
-                GameConfig.LOG_PREFIX, gridX, gridZ, unitInstance.GridSize, player.Name
-            ))
-            print(string.format(
-                "%s 详细信息 - 客户端位置:(%.2f, %.2f, %.2f), IdleFloor中心:(%.2f, %.2f, %.2f)",
-                GameConfig.LOG_PREFIX,
-                position.X, position.Y, position.Z,
-                floorCenter.X, floorCenter.Y, floorCenter.Z
-            ))
-        end
         return false, "超出放置范围"
     end
 
@@ -625,9 +547,6 @@ function PlacementSystem.PlaceUnit(player, instanceId, position)
     -- 同时保存到placedUnits表中
     if gridPos then
         placedUnits[userId][instanceId].GridPos = gridPos
-        if GameConfig.DEBUG_MODE then
-            print(GameConfig.LOG_PREFIX, "兵种放置成功，GridPos:", gridPos.X, gridPos.Y)
-        end
     else
         warn(GameConfig.LOG_PREFIX, "保存GridPos失败，使用默认值")
         placedUnits[userId][instanceId].GridPos = {X = gridX, Y = gridZ}
@@ -696,12 +615,6 @@ function PlacementSystem.RemoveUnit(player, instanceId)
     -- 2. 刷新客户端背包显示（兵种已经存在于InventorySystem中，只是IsPlaced变为false）
     InventorySystem.RefreshClientInventory(player)
 
-    if GameConfig.DEBUG_MODE then
-        print(string.format(
-            "%s 回收兵种成功 - 玩家:%s 实例ID:%s",
-            GameConfig.LOG_PREFIX, player.Name, instanceId
-        ))
-    end
 
     return true, "回收成功"
 end
@@ -739,12 +652,6 @@ function PlacementSystem.UpdateUnitPosition(player, instanceId, newPosition)
 
     -- 4. 检查边界
     if not PlacementConfig.IsGridInBounds(newGridX, newGridZ, unitInstance.GridSize) then
-        if GameConfig.DEBUG_MODE then
-            print(string.format(
-                "%s 更新位置边界检查失败 - 网格:(%d, %d) 占地:%d",
-                GameConfig.LOG_PREFIX, newGridX, newGridZ, unitInstance.GridSize
-            ))
-        end
         return false, "超出放置范围"
     end
 
@@ -782,12 +689,6 @@ function PlacementSystem.UpdateUnitPosition(player, instanceId, newPosition)
     -- 11. 更新InventorySystem中的位置
     unitInstance.PlacedPosition = finalPosition
 
-    if GameConfig.DEBUG_MODE then
-        print(string.format(
-            "%s 更新兵种位置成功 - 玩家:%s 实例ID:%s 新网格:(%d, %d)",
-            GameConfig.LOG_PREFIX, player.Name, instanceId, newGridX, newGridZ
-        ))
-    end
 
     return true, "位置更新成功"
 end
@@ -889,9 +790,6 @@ local function OnStartPlacement(player, instanceId)
 				responseEvent:FireClient(player, false, "战役进行中，无法操作基地")
 			end
 		end
-		if GameConfig.DEBUG_MODE then
-			warn(GameConfig.LOG_PREFIX, "玩家", player.Name, "在战役中尝试放置兵种，已拒绝")
-		end
 		return
 	end
 
@@ -938,9 +836,6 @@ local function OnConfirmPlacement(player, instanceId, position)
 				responseEvent:FireClient(player, false, "战役进行中，无法操作基地")
 			end
 		end
-		if GameConfig.DEBUG_MODE then
-			warn(GameConfig.LOG_PREFIX, "玩家", player.Name, "在战役中尝试确认放置，已拒绝")
-		end
 		return
 	end
 
@@ -978,15 +873,9 @@ local function OnRemoveUnit(player, instanceId)
 				responseEvent:FireClient(player, false, "战役进行中，无法操作基地", instanceId)
 			end
 		end
-		if GameConfig.DEBUG_MODE then
-			warn(GameConfig.LOG_PREFIX, "玩家", player.Name, "在战役中尝试回收兵种，已拒绝")
-		end
 		return
 	end
 
-    if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "处理回收请求:", player.Name, instanceId)
-    end
 
     -- 调用RemoveUnit移除兵种
     local success, message = PlacementSystem.RemoveUnit(player, instanceId)
@@ -1015,15 +904,9 @@ local function OnUpdatePosition(player, instanceId, newPosition)
 				responseEvent:FireClient(player, false, "战役进行中，无法操作基地", instanceId)
 			end
 		end
-		if GameConfig.DEBUG_MODE then
-			warn(GameConfig.LOG_PREFIX, "玩家", player.Name, "在战役中尝试移动兵种，已拒绝")
-		end
 		return
 	end
 
-    if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "处理位置更新请求:", player.Name, instanceId)
-    end
 
     -- 调用UpdateUnitPosition更新位置
     local success, message = PlacementSystem.UpdateUnitPosition(player, instanceId, newPosition)
@@ -1067,18 +950,12 @@ function PlacementSystem.Initialize()
     local removeEvent = PlacementEvents:FindFirstChild("RemoveUnit")
     if removeEvent then
         removeEvent.OnServerEvent:Connect(OnRemoveUnit)
-        if GameConfig.DEBUG_MODE then
-            print(GameConfig.LOG_PREFIX, "已连接RemoveUnit事件")
-        end
     end
 
     -- V1.4.1: 连接位置更新事件
     local updateEvent = PlacementEvents:FindFirstChild("UpdatePosition")
     if updateEvent then
         updateEvent.OnServerEvent:Connect(OnUpdatePosition)
-        if GameConfig.DEBUG_MODE then
-            print(GameConfig.LOG_PREFIX, "已连接UpdatePosition事件")
-        end
     end
 
     -- 连接玩家离开事件

@@ -40,7 +40,7 @@ BattleConfig.CLEANUP_DELAY = 3
 BattleConfig.AI_UPDATE_INTERVAL = 0.1
 
 -- AI批量更新间隔(秒) V1.5.1新增 - 用于节流
-BattleConfig.AI_BATCH_UPDATE_INTERVAL = 0.2
+BattleConfig.AI_BATCH_UPDATE_INTERVAL = 0.1  -- 从0.2降低到0.1，提升响应性
 
 -- 目标搜索范围(studs)
 BattleConfig.TARGET_SEARCH_RANGE = 200
@@ -50,7 +50,7 @@ BattleConfig.TARGET_SEARCH_RANGE = 200
 BattleConfig.PATHFINDING_TIMEOUT = 5
 
 -- 路径重算冷却时间(秒) - 避免频繁重建路径
-BattleConfig.PATH_RECALC_COOLDOWN = 0.5
+BattleConfig.PATH_RECALC_COOLDOWN = 0.6  -- 从0.5提高到0.6，减少重算频率
 
 -- V2.3性能优化：大幅提高目标移动阈值，减少频繁重算
 -- 从6提高到35，与PathService的TARGET_MOVE_THRESHOLD对齐
@@ -133,10 +133,10 @@ BattleConfig.DEBUG_SHOW_TARGET_LINE = false
 BattleConfig.DEBUG_SHOW_ATTACK_RANGE = false
 
 -- 是否输出AI详细日志
-BattleConfig.DEBUG_AI_LOGS = true
+BattleConfig.DEBUG_AI_LOGS = false
 
 -- 是否输出战斗详细日志
-BattleConfig.DEBUG_COMBAT_LOGS = true
+BattleConfig.DEBUG_COMBAT_LOGS = false
 
 -- ==================== 动画设置 ====================
 -- 默认移动动画速度

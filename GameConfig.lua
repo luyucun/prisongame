@@ -116,7 +116,7 @@ GameConfig.UI.ButtonScaleDuration = 0.1  -- 按钮缩放动画时长(秒)
 
 -- ==================== 调试配置 ====================
 -- 是否启用调试模式
-GameConfig.DEBUG_MODE = true
+GameConfig.DEBUG_MODE = false
 
 -- 调试日志前缀
 GameConfig.LOG_PREFIX = "[PrisonGame]"

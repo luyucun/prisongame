@@ -255,7 +255,10 @@ function HitboxService.CreateHitboxConfig(radius, angle, height, maxTargets)
 end
 
 --[[
-执行近战命中判定(核心接口)
+执行近战命中判定(核心接口) - V2.4优化版
+改进：使用物理空间查询(GetPartBoundsInRadius)初选候选目标，再进行精确过滤
+性能：从O(N)降至O(K)，K为半径内单位数，通常远小于N
+
 @param attackerModel Model - 攻击者模型
 @param targetTeam string - 目标队伍("Attack"或"Defense")
 @param battleId number - 战斗ID
@@ -289,56 +292,90 @@ function HitboxService.ResolveMeleeHit(attackerModel, targetTeam, battleId, hitb
 	local hitTargets = {}
 	local hitCount = 0
 
-	-- 获取敌方单位列表(通过UnitManager)
-	if not unitManager or not unitManager.GetBattleUnits then
-		WarnLog("ResolveMeleeHit失败: unitManager无效或缺少GetBattleUnits接口")
-		return {Targets = {}, HitCount = 0}
-	end
+	-- V2.4优化：使用物理空间查询代替全量遍历
+	-- 步骤1: 使用GetPartBoundsInRadius获取半径内的候选Part
+	local overlapParams = OverlapParams.new()
+	overlapParams.FilterType = Enum.RaycastFilterType.Exclude
+	overlapParams.FilterDescendantsInstances = {attackerModel}  -- 忽略自己
 
-	local enemyUnits = unitManager.GetBattleUnits(battleId, targetTeam) or {}
+	-- 使用半径初选
+	local candidateParts = Workspace:GetPartBoundsInRadius(attackerPos, hitboxConfig.Radius, overlapParams)
 
-	-- 遍历敌方单位进行判定
-	for _, enemyModel in ipairs(enemyUnits) do
-		-- 跳过自己
-		if enemyModel == attackerModel then
+	-- 步骤2: 将Part映射到Model，并进行精确过滤
+	local processedModels = {}  -- 防止重复处理同一个Model
+
+	for _, part in ipairs(candidateParts) do
+		-- 获取Part对应的Model
+		local candidateModel = GetValidTargetModel(part)
+		if not candidateModel then
 			continue
+		end
+
+		-- 跳过已处理的Model
+		if processedModels[candidateModel] then
+			continue
+		end
+		processedModels[candidateModel] = true
+
+		-- 跳过自己
+		if candidateModel == attackerModel then
+			continue
+		end
+
+		-- V2.4关键修复：使用GetUnitBattleInfo验证是否属于敌方阵营
+		-- 必须验证battleId匹配且Team是敌方，否则会误伤友军
+		if unitManager and unitManager.GetUnitBattleInfo then
+			local candidateInfo = unitManager.GetUnitBattleInfo(candidateModel)
+
+			-- 如果单位未注册或不在同一战斗中，跳过
+			if not candidateInfo or candidateInfo.BattleId ~= battleId then
+				continue
+			end
+
+			-- 如果不是目标队伍(敌方)，跳过(避免友军误伤)
+			if candidateInfo.Team ~= targetTeam then
+				continue
+			end
+		else
+			-- 如果没有UnitManager接口，降级到不安全模式并警告
+			WarnLog("ResolveMeleeHit警告: unitManager缺少GetUnitBattleInfo接口，无法过滤友军")
 		end
 
 		-- 跳过已经命中的目标(同帧去重)
-		if IsAlreadyHitThisFrame(attackerModel, enemyModel) then
+		if IsAlreadyHitThisFrame(attackerModel, candidateModel) then
 			continue
 		end
 
-		-- 检查目标是否有效
-		local enemyRoot = enemyModel:FindFirstChild("HumanoidRootPart")
+		-- 获取目标位置
+		local enemyRoot = candidateModel:FindFirstChild("HumanoidRootPart")
 		if not enemyRoot then
 			continue
 		end
 
 		local enemyPos = enemyRoot.Position
 
-		-- 1. 距离过滤
+		-- 精确过滤1: 距离验证（冗余检查，确保精度）
 		local distance = (enemyPos - attackerPos).Magnitude
 		if distance > hitboxConfig.Radius then
 			continue
 		end
 
-		-- 2. 扇形角度过滤
+		-- 精确过滤2: 扇形角度过滤
 		if hitboxConfig.Angle < 180 then
 			if not IsInAttackAngle(attackerPos, attackerLook, enemyPos, hitboxConfig.Angle) then
 				continue
 			end
 		end
 
-		-- 3. 高度过滤(可选)
+		-- 精确过滤3: 高度过滤
 		local heightDiff = math.abs(enemyPos.Y - attackerPos.Y)
 		if heightDiff > hitboxConfig.Height then
 			continue
 		end
 
 		-- 通过所有过滤,记录命中
-		table.insert(hitTargets, enemyModel)
-		RecordHit(attackerModel, enemyModel)
+		table.insert(hitTargets, candidateModel)
+		RecordHit(attackerModel, candidateModel)
 		hitCount = hitCount + 1
 
 		-- 检查是否达到最大命中数

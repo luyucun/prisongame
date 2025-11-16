@@ -37,7 +37,7 @@ local camera = Workspace.CurrentCamera
 local placementEvents = nil
 
 -- 调试模式（客户端无法访问ServerScriptService中的GameConfig）
-local DEBUG_MODE = true
+local DEBUG_MODE = false
 
 -- ==================== 放置状态 ====================
 local placementState = {
@@ -144,17 +144,10 @@ function FindPlayerIdleFloor()
 	local homeSlotAttr = player:GetAttribute("HomeSlot")
 	if homeSlotAttr and homeSlotAttr > 0 then
 		homeSlot = homeSlotAttr
-		if DEBUG_MODE then
-			print("[PlacementController] 从玩家属性获取权威 HomeSlot:", homeSlot)
-		end
 	end
 
 	-- 如果属性缺失，回退到距离判断
 	if not homeSlot then
-		if DEBUG_MODE then
-			print("[PlacementController] 玩家属性中没有 HomeSlot，进行距离判断")
-		end
-
 		-- 等待玩家角色加载
 		local character = player.Character
 		if not character then
@@ -197,9 +190,6 @@ function FindPlayerIdleFloor()
 
 		-- 如果在合理范围内找到了基地，优先使用
 		if currentFloor then
-			if DEBUG_MODE then
-				print("[PlacementController] 找到玩家当前基地，距离:", minDistance)
-			end
 			return currentFloor
 		end
 
@@ -245,10 +235,6 @@ function FindPlayerIdleFloor()
 	if not idleFloor then
 		warn("[PlacementController] 找不到IdleFloor")
 		return nil
-	end
-
-	if DEBUG_MODE then
-		print("[PlacementController] 通过 HomeSlot 找到 IdleFloor:", playerHome.Name)
 	end
 
 	return idleFloor
@@ -353,14 +339,6 @@ function PlacementController.ConfirmPlacement()
 		warn("[PlacementController] 无法获取模型位置")
 		PlacementController.CancelPlacement()
 		return
-	end
-
-	if DEBUG_MODE then
-		print(string.format(
-			"[PlacementController] 确认放置 - IdleFloor: %s, Position: (%.2f, %.2f, %.2f)",
-			placementState.idleFloor.Name,
-			finalPosition.X, finalPosition.Y, finalPosition.Z
-			))
 	end
 
 	-- 发送确认请求到服务端
@@ -801,10 +779,6 @@ function OnPlacementResponse(success, message, data)
 
 			if hasMore and nextInstanceId then
 				-- 还有库存，自动开始下一次放置
-				if DEBUG_MODE then
-					print("[PlacementController] 检测到库存，自动开始下一次放置:", nextInstanceId)
-				end
-
 				PlacementController.StartPlacement(nextInstanceId, currentUnitId, currentGridSize)
 			else
 				-- 库存耗尽，完全重置状态
@@ -814,10 +788,6 @@ function OnPlacementResponse(success, message, data)
 				-- ✅ V2.0.2新增：通知BackpackDisplay退出放置模式
 				if _G.BackpackDisplay then
 					_G.BackpackDisplay.SetPlacingMode(false)
-				end
-
-				if DEBUG_MODE then
-					print("[PlacementController] 库存耗尽，放置流程结束")
 				end
 			end
 		end)

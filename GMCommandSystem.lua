@@ -538,9 +538,6 @@ function GMCommandSystem.HandleCommand(player, message)
     -- 查找并执行命令
     local handler = COMMAND_HANDLERS[commandName]
     if handler then
-        if GameConfig.DEBUG_MODE then
-            print(string.format("%s GM命令: %s 参数: %s", GameConfig.LOG_PREFIX, commandName, table.concat(args, ", ")))
-        end
 
         local success, err = pcall(handler, player, args)
         if not success then
@@ -560,9 +557,6 @@ end
 连接到聊天事件
 ]]
 function GMCommandSystem.Initialize()
-    if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "初始化GMCommandSystem...")
-    end
 
     -- 连接玩家聊天事件
     Players.PlayerAdded:Connect(function(player)
@@ -578,10 +572,6 @@ function GMCommandSystem.Initialize()
         end)
     end
 
-    if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "GMCommandSystem初始化完成")
-        print(GameConfig.LOG_PREFIX, "权限检查:", ENABLE_PERMISSION_CHECK and "启用" or "禁用(所有人可用)")
-    end
 end
 
 return GMCommandSystem

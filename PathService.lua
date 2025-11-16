@@ -72,7 +72,7 @@ local CONFIG = {
 	AGENT_PARAMS_CACHE_TIME = -1,
 
 	-- 路径参数
-	WAYPOINT_SPACING = 4,
+	WAYPOINT_SPACING = 6,  -- 从4提高到6，减少路径点数量
 
 	-- 体型参数自动计算
 	AUTO_RADIUS_MULTIPLIER = 0.25,  -- max(X,Z) * 0.25
@@ -80,8 +80,8 @@ local CONFIG = {
 	AUTO_HEIGHT_OFFSET = 1,         -- Y + 1 容差
 
 	-- V2.2性能优化：大幅提升吞吐量
-	BATCH_UPDATE_INTERVAL = 0.06,   -- 从0.15降低到0.06，提升处理频率
-	MAX_COMPUTE_PER_FRAME = 20,     -- 从5提升到20，支持100单位场景
+	BATCH_UPDATE_INTERVAL = 0.08,   -- 从0.06提升到0.08，平滑负载
+	MAX_COMPUTE_PER_FRAME = 10,     -- 从20降低到10，避免瞬时尖峰
 	-- 动态调整：实际值为 min(MAX_COMPUTE_PER_FRAME, queueLength)
 
 	-- V2.2优化：动态并发限制（不再硬编码）

@@ -63,9 +63,6 @@ local function InitializeEvents(useWait)
             return false
         end
 
-        if GameConfig.DEBUG_MODE then
-            print(GameConfig.LOG_PREFIX, "远程事件已加载")
-        end
     end
 
     return true
@@ -97,9 +94,6 @@ local function NotifyClient(player, currencyType, newAmount)
     end)
 
     if success then
-        if GameConfig.DEBUG_MODE then
-            print(GameConfig.LOG_PREFIX, "通知客户端货币变化:", player.Name, currencyType, newAmount)
-        end
         return true
     else
         warn(GameConfig.LOG_PREFIX, "通知客户端失败:", player.Name, "错误:", errorMsg)
@@ -344,9 +338,6 @@ local function OnClientRequestCurrency(player)
         -- 发送金币信息给客户端
         NotifyClient(player, GameConfig.CurrencyType.COINS, allCurrency.Coins)
 
-        if GameConfig.DEBUG_MODE then
-            print(GameConfig.LOG_PREFIX, "客户端请求货币:", player.Name, "金币:", allCurrency.Coins)
-        end
     else
         warn(GameConfig.LOG_PREFIX, "OnClientRequestCurrency: 找不到玩家货币数据")
     end
@@ -358,9 +349,6 @@ end
 @return boolean - 是否初始化成功
 ]]
 function CurrencySystem.Initialize()
-    if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "初始化CurrencySystem...")
-    end
 
     -- 初始化事件(使用WaitForChild等待事件创建)
     local eventsInitialized = InitializeEvents(true)
@@ -381,17 +369,11 @@ function CurrencySystem.Initialize()
             return false
         end
 
-        if GameConfig.DEBUG_MODE then
-            print(GameConfig.LOG_PREFIX, "已连接OnServerEvent事件处理")
-        end
     else
         warn(GameConfig.LOG_PREFIX, "CurrencyEvents未找到,无法连接事件")
         return false
     end
 
-    if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "CurrencySystem初始化完成")
-    end
 
     return true
 end

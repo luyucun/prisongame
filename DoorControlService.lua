@@ -389,7 +389,6 @@ local function Transition(homeId, targetState, options)
 		rightAngle = DOOR_CONFIG.RightOpenAngle
 
 		if currentState == DoorState.OPEN then
-			Log("门已经是打开状态: PlayerHome" .. homeId)
 			if onCompleted then
 				task.spawn(onCompleted)
 			end
@@ -397,7 +396,6 @@ local function Transition(homeId, targetState, options)
 		end
 
 		if currentState == DoorState.OPENING then
-			Log("门正在打开中: PlayerHome" .. homeId .. "，跳过重复调用")
 			return true
 		end
 
@@ -408,7 +406,6 @@ local function Transition(homeId, targetState, options)
 		rightAngle = DOOR_CONFIG.ClosedAngle
 
 		if currentState == DoorState.CLOSED then
-			Log("门已经是关闭状态: PlayerHome" .. homeId)
 			if onCompleted then
 				task.spawn(onCompleted)
 			end
@@ -416,7 +413,6 @@ local function Transition(homeId, targetState, options)
 		end
 
 		if currentState == DoorState.CLOSING then
-			Log("门正在关闭中: PlayerHome" .. homeId .. "，跳过重复调用")
 			return true
 		end
 
@@ -424,8 +420,6 @@ local function Transition(homeId, targetState, options)
 		WarnLog("未知的目标状态: " .. tostring(targetState))
 		return false
 	end
-
-	Log("开始 " .. transitionState .. " 门: PlayerHome" .. homeId)
 
 	-- 取消旧的Tween（防抖）
 	CancelDoorTweens(doorData)
@@ -464,7 +458,6 @@ local function Transition(homeId, targetState, options)
 		if completedCount >= totalDoors then
 			-- 所有门都完成，切换到最终状态
 			doorData.State = finalState
-			Log("门已 " .. finalState .. ": PlayerHome" .. homeId)
 
 			-- 清理引用（避免残留）
 			doorData.Tweens.Left = nil
@@ -532,8 +525,6 @@ function DoorControlService.Initialize()
 		WarnLog("DoorControlService已初始化，跳过")
 		return true
 	end
-
-	Log("开始初始化门控制服务...")
 
 	local workspace = game:GetService("Workspace")
 	local homeFolder = workspace:FindFirstChild("Home")
@@ -613,7 +604,6 @@ function DoorControlService.Initialize()
 		doorData.State = DoorState.CLOSED
 
 		successCount = successCount + 1
-		Log("✓ " .. homeName .. " 门结构正确，已缓存并关闭")
 	end
 
 	Initialized = true
@@ -781,8 +771,6 @@ function DoorControlService.SetDoorState(homeId, state)
 	end
 
 	doorData.State = finalState
-	Log("门已强制设置为 " .. finalState .. ": PlayerHome" .. homeId)
-
 	return true
 end
 

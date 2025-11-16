@@ -70,11 +70,6 @@ local function SelectRandomHome()
     local randomIndex = math.random(1, #availableHomes)
     local selectedHome = availableHomes[randomIndex]
 
-    if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "可用基地列表:", table.concat(availableHomes, ", "))
-        print(GameConfig.LOG_PREFIX, "随机选择基地编号:", selectedHome)
-    end
-
     return selectedHome
 end
 
@@ -93,10 +88,6 @@ local function OccupyHome(homeSlot, player)
 
     homeOccupancy[homeSlot] = player
 
-    if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "玩家", player.Name, "占用基地", homeSlot)
-    end
-
     return true
 end
 
@@ -106,12 +97,7 @@ end
 ]]
 local function ReleaseHome(homeSlot)
     if homeOccupancy[homeSlot] then
-        local playerName = homeOccupancy[homeSlot].Name
         homeOccupancy[homeSlot] = nil
-
-        if GameConfig.DEBUG_MODE then
-            print(GameConfig.LOG_PREFIX, "释放基地", homeSlot, "原玩家:", playerName)
-        end
     end
 end
 
@@ -172,10 +158,6 @@ local function FindClosestAvailableHome(position)
         end
     end
 
-    if GameConfig.DEBUG_MODE and closestHome then
-        print(GameConfig.LOG_PREFIX, "根据位置选择最近基地:", closestHome, "距离:", math.floor(closestDistance))
-    end
-
     return closestHome
 end
 
@@ -222,10 +204,6 @@ local function TeleportPlayerToHome(player, homeSlot)
     -- 传送玩家
     humanoidRootPart.CFrame = spawnLocation.CFrame + Vector3.new(0, 5, 0)  -- 向上偏移5避免卡地
 
-    if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "传送玩家", player.Name, "到基地", homeSlot)
-    end
-
     return true
 end
 
@@ -246,29 +224,10 @@ local function ShouldSkipHomeAssignment(player)
         return player:GetJoinData()
     end)
 
-    if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "GetJoinData success:", success)
-        if success and joinData then
-            print(GameConfig.LOG_PREFIX, "JoinData type:", typeof(joinData))
-            for k, v in pairs(joinData) do
-                print(GameConfig.LOG_PREFIX, "  JoinData." .. tostring(k) .. " =", tostring(v))
-            end
-        else
-            print(GameConfig.LOG_PREFIX, "JoinData is nil or error")
-        end
-    end
-
     -- 在 Studio 的 PlayHere 模式下，GetJoinData 通常返回空表或 nil
     -- 正式服务器或普通 Play 模式会有 TeleportData 等字段
     if not success or not joinData or (type(joinData) == "table" and next(joinData) == nil) then
-        if GameConfig.DEBUG_MODE then
-            print(GameConfig.LOG_PREFIX, "检测到Studio PlayHere模式（joinData为空），跳过家园分配：", player.Name)
-        end
         return true
-    end
-
-    if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "joinData存在且有内容，保持默认家园分配行为")
     end
 
     return false
@@ -290,9 +249,6 @@ function PlayerManager.OnPlayerAdded(player)
 
     -- 2. 检查是否在Studio Play Here模式下
     local skipHomeAssignment = ShouldSkipHomeAssignment(player)
-    if skipHomeAssignment and GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "检测到Studio Play Here模式，将根据玩家位置选择基地:", player.Name)
-    end
 
     -- 3. 选择基地
     local homeSlot = nil
@@ -306,9 +262,6 @@ function PlayerManager.OnPlayerAdded(player)
         if humanoidRootPart then
             -- 根据玩家当前位置找到最近的可用基地
             homeSlot = FindClosestAvailableHome(humanoidRootPart.Position)
-            if GameConfig.DEBUG_MODE and homeSlot then
-                print(GameConfig.LOG_PREFIX, "Play Here模式 - 玩家位置:", humanoidRootPart.Position, "选择基地:", homeSlot)
-            end
         else
             warn(GameConfig.LOG_PREFIX, "Play Here模式下无法获取角色位置，回退到随机分配")
         end
@@ -337,10 +290,6 @@ function PlayerManager.OnPlayerAdded(player)
     -- 5.1 同步HomeSlot到客户端（用于客户端确定正确的IdleFloor）
     player:SetAttribute("HomeSlot", homeSlot)
 
-    if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "同步HomeSlot到客户端:", player.Name, "HomeSlot:", homeSlot)
-    end
-
     -- 6. 初始化玩家基地(HomeSystem)
     local HomeSystem = require(ServerScriptService.Systems.HomeSystem)
     HomeSystem.InitializePlayerHome(homeSlot, player)  -- V2.0.1修复：传入正确的参数 (homeId, player)
@@ -353,9 +302,7 @@ function PlayerManager.OnPlayerAdded(player)
 
         local StageService = require(ServerScriptService.Systems.StageService)
         local stage001 = StageService.GetOrCreateStage(player.UserId, 1)
-        if stage001 then
-            print(GameConfig.LOG_PREFIX, "Stage001已准备完成:", player.Name, "HomeSlot:", homeSlot)
-        else
+        if not stage001 and GameConfig.DEBUG_MODE then
             warn(GameConfig.LOG_PREFIX, "Stage001生成失败:", player.Name, "HomeSlot:", homeSlot)
         end
     end)
@@ -370,13 +317,6 @@ function PlayerManager.OnPlayerAdded(player)
             local shopModule = require(ShopSystem)
             if shopModule.InitializePlayerShopTimer then
                 shopModule.InitializePlayerShopTimer(player, "UnitShop")
-                if GameConfig.DEBUG_MODE then
-                    print(GameConfig.LOG_PREFIX, "商店定时器初始化完成:", player.Name)
-                end
-            end
-        else
-            if GameConfig.DEBUG_MODE then
-                warn(GameConfig.LOG_PREFIX, "ShopSystem未找到，跳过商店定时器初始化")
             end
         end
     end)
@@ -392,9 +332,6 @@ function PlayerManager.OnPlayerAdded(player)
         task.spawn(function()
             -- 检查是否应跳过首次传送（Studio Play Here模式）
             if shouldSkipFirstTeleport then
-                if GameConfig.DEBUG_MODE then
-                    print(GameConfig.LOG_PREFIX, "检测到Studio Play Here模式，跳过首次传送:", player.Name)
-                end
                 shouldSkipFirstTeleport = false  -- 只跳过第一次，后续重生正常传送
                 hasProcessedInitialCharacter = true  -- 标记已处理初始角色
                 return
@@ -406,19 +343,12 @@ function PlayerManager.OnPlayerAdded(player)
             local success = TeleportPlayerToHome(player, homeSlot)
             if not success then
                 warn(GameConfig.LOG_PREFIX, "传送失败,将在角色重生时重试:", player.Name)
-            else
-                if GameConfig.DEBUG_MODE then
-                    print(GameConfig.LOG_PREFIX, "成功传送玩家到基地:", player.Name, "HomeSlot:", homeSlot)
-                end
             end
         end)
     end
 
     -- 连接玩家重生事件（必须在检查Character之前连接，避免竞态条件）
     local characterAddedConnection = player.CharacterAdded:Connect(function(character)
-        if GameConfig.DEBUG_MODE then
-            print(GameConfig.LOG_PREFIX, "玩家角色加载/重生:", player.Name)
-        end
         HandleCharacterSpawn(character)
     end)
 
@@ -473,10 +403,6 @@ function PlayerManager.OnPlayerRemoving(player)
 
     -- 5. 清除玩家数据
     DataManager.ClearPlayerData(player)
-
-    if GameConfig.DEBUG_MODE then
-        print(GameConfig.LOG_PREFIX, "玩家", player.Name, "清理完成")
-    end
 end
 
 --[[
