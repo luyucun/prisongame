@@ -251,12 +251,17 @@ local function CreateItemCard(itemData, index)
     local atkVal = UnitConfig.CalculateAttack(unitId, level)
     local hpVal = UnitConfig.CalculateHealth(unitId, level)
 
-    -- 填充卡片数据
+    -- V2.3优化: 填充卡片图标 - 预加载系统应该已经缓存了这些图片
     local iconBg = cardFrame:FindFirstChild("IconBg")
     if iconBg then
         local icon = iconBg:FindFirstChild("Icon")
         if icon and icon:IsA("ImageLabel") then
             icon.Image = itemData.Icon or "rbxassetid://0"
+
+            -- 可选: 调试图标设置
+            if DEBUG_MODE and itemData.Icon and itemData.Icon ~= "rbxassetid://0" then
+                print(LOG_PREFIX, "设置商店图标:", unitId, "→", itemData.Icon)
+            end
         end
     end
 

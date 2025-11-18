@@ -17,6 +17,7 @@ GM命令系统模块
 - /clearunits : 清空背包
 - /listunits : 列出背包中的所有兵种
 - /addcoins <amount> : 添加金币
+- /clearcoins : 清空金币
 - /unitlist : 列出所有可用的兵种ID
 ]]
 
@@ -230,6 +231,45 @@ local function CMD_AddCoins(player, args)
 end
 
 --[[
+命令: /clearcoins
+清空金币
+]]
+local function CMD_ClearCoins(player, args)
+    local currentCoins = DataManager.GetCurrency(player, GameConfig.CurrencyType.COINS)
+
+    if currentCoins <= 0 then
+        SendMessage(player, "当前金币已经是0了")
+        return
+    end
+
+    -- 使用负数添加来清空金币
+    local success = CurrencySystem.AddCoinsFromGM(player, -currentCoins)
+    if success then
+        SendMessage(player, string.format("成功清空金币(原金币: %d)", currentCoins))
+    else
+        SendMessage(player, "清空金币失败")
+    end
+end
+
+--[[
+命令: /iconpreload
+检查图标预加载状态
+]]
+local function CMD_IconPreload(player, args)
+    if _G.IconPreloadComplete then
+        local stats = _G.IconPreloadStats
+        if stats then
+            SendMessage(player, string.format("✅ 图标预加载已完成\n总数: %d, 成功: %d, 失败: %d\n耗时: %.2f 秒",
+                stats.Total, stats.Success, stats.Failed, stats.Duration))
+        else
+            SendMessage(player, "✅ 图标预加载已完成(无详细统计)")
+        end
+    else
+        SendMessage(player, "⏳ 图标预加载尚未完成或失败")
+    end
+end
+
+--[[
 命令: /help
 显示帮助信息
 ]]
@@ -256,6 +296,10 @@ local function CMD_Help(player, args)
 
 货币管理:
 /addcoins <amount> - 添加金币
+/clearcoins - 清空金币
+
+系统调试:
+/iconpreload - 检查图标预加载状态
 
 其他:
 /help - 显示此帮助
@@ -495,6 +539,8 @@ local COMMAND_HANDLERS = {
     ["clearunits"] = CMD_ClearUnits,
     ["unitlist"] = CMD_UnitList,
     ["addcoins"] = CMD_AddCoins,
+    ["clearcoins"] = CMD_ClearCoins,         -- V2.3新增
+    ["iconpreload"] = CMD_IconPreload,       -- V2.3新增
     ["listplaced"] = CMD_ListPlaced,      -- V1.2新增
     ["clearplaced"] = CMD_ClearPlaced,    -- V1.2新增
     ["battletest"] = CMD_BattleTest,      -- V1.5新增

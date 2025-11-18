@@ -449,62 +449,44 @@ function StageService.LoadEnemyData(stageFolder, stageNum)
 				return nil
 			end
 
-			-- 从ReplicatedStorage查找模型（支持递归搜索）
-			local function SearchFolderRecursive(folder, targetName)
-				local found = folder:FindFirstChild(targetName)
-				if found and found:IsA("Model") then
-					return found
-				end
-
-				for _, child in ipairs(folder:GetChildren()) do
-					if child:IsA("Folder") then
-						local result = SearchFolderRecursive(child, targetName)
-						if result then
-							return result
-						end
-					end
-				end
-
-				return nil
-			end
-
-			local roleFolder = ReplicatedStorage:FindFirstChild("Role")
-			if not roleFolder then
-				warn("[StageService] Role文件夹未找到")
-				return nil
-			end
-
-			-- V2.3.2新增：优先使用ModelPath精确路径查找
+			-- V2.3.3修复：使用ModelPath配置查找模型（与PlacementHelper保持一致）
 			local modelTemplate = nil
-			if unitInfo.ModelPath then
-				-- 按配置的ModelPath精确路径查找
-				local node = ReplicatedStorage
-				local pathParts = string.split(unitInfo.ModelPath, "/")
-				for _, name in ipairs(pathParts) do
-					if node then
-						node = node:FindFirstChild(name)
-					else
-						break
-					end
-				end
-				if node and node:IsA("Model") then
-					modelTemplate = node
-					DebugLog(string.format("[StageService] ✅ 用ModelPath精确找到模型: %s → %s", enemyData.UnitId, unitInfo.ModelPath))
-				end
-			end
 
-			-- 回退：如果ModelPath失效，再按名字递归搜索
-			if not modelTemplate then
-				modelTemplate = SearchFolderRecursive(roleFolder, enemyData.UnitId)
-				if modelTemplate then
-					DebugLog(string.format("[StageService] ✅ 用递归搜索找到模型: %s (ModelPath无效或未配置)", enemyData.UnitId))
-				end
-			end
-
-			if not modelTemplate then
-				warn("[StageService] 兵种模型未找到:", enemyData.UnitId, "(已尝试ModelPath和递归搜索)")
+			-- 获取模型路径,例如 "Role/Basic/Noob"
+			local modelPath = unitInfo.ModelPath
+			if not modelPath or modelPath == "" then
+				warn(string.format("[StageService] 兵种%s没有配置ModelPath", enemyData.UnitId))
 				return nil
 			end
+
+			-- 解析路径
+			local pathParts = string.split(modelPath, "/")
+
+			-- 从ReplicatedStorage开始遍历路径
+			local currentFolder = ReplicatedStorage
+			for i = 1, #pathParts - 1 do
+				local nextFolder = currentFolder:FindFirstChild(pathParts[i])
+				if not nextFolder then
+					warn(string.format("[StageService] 路径不存在: %s (在 %s)", pathParts[i], currentFolder:GetFullName()))
+					return nil
+				end
+				currentFolder = nextFolder
+			end
+
+			-- 最后一个部分是模型名称
+			local modelName = pathParts[#pathParts]
+			modelTemplate = currentFolder:FindFirstChild(modelName)
+
+			if not modelTemplate then
+				warn(string.format("[StageService] 找不到模型: %s (路径: %s)", modelName, modelPath))
+				return nil
+			end
+
+			if not modelTemplate:IsA("Model") then
+				warn(string.format("[StageService] %s 不是一个Model类型", modelName))
+				return nil
+			end
+
 
 			-- 克隆模型
 			local unitModel = modelTemplate:Clone()

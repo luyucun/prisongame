@@ -263,49 +263,64 @@ function PlacementHelper.GetModelPosition(model)
 end
 
 --[[
-递归搜索文件夹
-@param folder Instance - 要搜索的文件夹
-@param targetName string - 目标名称
-@return Model|nil - 找到的模型
-]]
-local function SearchFolderRecursive(folder, targetName)
-    -- 先在当前层级查找
-    local found = folder:FindFirstChild(targetName)
-    if found and found:IsA("Model") then
-        return found
-    end
-
-    -- 递归搜索所有子文件夹
-    for _, child in ipairs(folder:GetChildren()) do
-        if child:IsA("Folder") then
-            local result = SearchFolderRecursive(child, targetName)
-            if result then
-                return result
-            end
-        end
-    end
-
-    return nil
-end
-
---[[
 获取兵种模型模板
 @param unitId string
 @return Model|nil
 ]]
 function PlacementHelper.GetUnitModelTemplate(unitId)
-    local roleFolder = ReplicatedStorage:FindFirstChild("Role")
-    if not roleFolder then
-        warn("[PlacementHelper] 找不到Role文件夹")
+    -- 首先需要从UnitConfig获取模型路径
+    local UnitConfig = ReplicatedStorage:FindFirstChild("Config")
+    if UnitConfig then
+        UnitConfig = UnitConfig:FindFirstChild("UnitConfig")
+    end
+
+    if not UnitConfig then
+        warn("[PlacementHelper] 找不到UnitConfig")
         return nil
     end
 
-    -- V1.5.1修复: 递归搜索Role文件夹下的所有子文件夹
-    -- 支持任意文件夹结构，如 Role/Basic/Noob, Role/Rifle/AK-47 等
-    local model = SearchFolderRecursive(roleFolder, unitId)
+    -- 加载UnitConfig模块
+    local unitConfigModule = require(UnitConfig)
+    local unitData = unitConfigModule.GetUnitById(unitId)
+
+    if not unitData then
+        warn(string.format("[PlacementHelper] 找不到兵种配置: %s", unitId))
+        return nil
+    end
+
+    -- 获取模型路径,例如 "Role/Basic/Noob"
+    local modelPath = unitData.ModelPath
+    if not modelPath or modelPath == "" then
+        warn(string.format("[PlacementHelper] 兵种%s没有配置ModelPath", unitId))
+        return nil
+    end
+
+    -- 解析路径
+    local pathParts = string.split(modelPath, "/")
+
+    -- 从ReplicatedStorage开始遍历路径
+    local currentFolder = ReplicatedStorage
+    for i = 1, #pathParts - 1 do
+        local nextFolder = currentFolder:FindFirstChild(pathParts[i])
+        if not nextFolder then
+            warn(string.format("[PlacementHelper] 路径不存在: %s (在 %s)", pathParts[i], currentFolder:GetFullName()))
+            return nil
+        end
+        currentFolder = nextFolder
+    end
+
+    -- 最后一个部分是模型名称
+    local modelName = pathParts[#pathParts]
+    local model = currentFolder:FindFirstChild(modelName)
 
     if not model then
-        warn(string.format("[PlacementHelper] 在Role文件夹下找不到模型: %s", unitId))
+        warn(string.format("[PlacementHelper] 找不到模型: %s (路径: %s)", modelName, modelPath))
+        return nil
+    end
+
+    if not model:IsA("Model") then
+        warn(string.format("[PlacementHelper] %s 不是一个Model类型", modelName))
+        return nil
     end
 
     return model

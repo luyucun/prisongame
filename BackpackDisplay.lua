@@ -235,10 +235,15 @@ local function CreateItemButton(unitId, unitName, count, iconId)
 	itemButton.Name = "Item_" .. unitId
 	itemButton.Visible = true
 
-	-- 设置图标
+	-- V2.3优化: 设置图标 - 预加载系统应该已经缓存了这些图片
 	local iconLabel = itemButton:FindFirstChild("Icon")
 	if iconLabel and iconLabel:IsA("ImageLabel") then
 		iconLabel.Image = iconId or "rbxassetid://0"
+
+		-- 可选: 调试图标设置
+		if DEBUG_MODE and iconId and iconId ~= "rbxassetid://0" then
+			print("[BackpackDisplay] 设置图标:", unitId, "→", iconId)
+		end
 	else
 		warn("[BackpackDisplay] 找不到Icon或类型不对:", iconLabel and iconLabel.ClassName or "nil")
 	end

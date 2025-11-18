@@ -312,32 +312,6 @@ local function PlayShowAnimation(model, unitId)
 end
 
 --[[
-递归搜索文件夹
-@param folder Instance - 要搜索的文件夹
-@param targetName string - 目标名称
-@return Model|nil - 找到的模型
-]]
-local function SearchFolderRecursive(folder, targetName)
-    -- 先在当前层级查找
-    local found = folder:FindFirstChild(targetName)
-    if found and found:IsA("Model") then
-        return found
-    end
-
-    -- 递归搜索所有子文件夹
-    for _, child in ipairs(folder:GetChildren()) do
-        if child:IsA("Folder") then
-            local result = SearchFolderRecursive(child, targetName)
-            if result then
-                return result
-            end
-        end
-    end
-
-    return nil
-end
-
---[[
 创建兵种模型到世界
 @param unitId string
 @param position Vector3
@@ -356,34 +330,44 @@ local function CreateUnitModel(unitId, position, instanceId, level, gridSize)
         return nil
     end
 
-    -- 优先使用UnitConfig.ModelPath查找模型（与StageService对齐）
-    local modelTemplate = nil
+	-- V2.3.3修复：使用ModelPath配置查找模型（与PlacementHelper保持一致）
+	local modelTemplate = nil
 
-    -- 第一步：尝试使用配置的ModelPath
-    if unitConfig.ModelPath then
-        local node = ReplicatedStorage
-        for _, name in ipairs(string.split(unitConfig.ModelPath, "/")) do
-            node = node and node:FindFirstChild(name)
-        end
-        if node and node:IsA("Model") then
-            modelTemplate = node
-        end
-    end
+	-- 获取模型路径,例如 "Role/Basic/Noob"
+	local modelPath = unitConfig.ModelPath
+	if not modelPath or modelPath == "" then
+		warn(GameConfig.LOG_PREFIX, "兵种没有配置ModelPath:", unitId)
+		return nil
+	end
 
-    -- 第二步：回退到递归搜索Role文件夹（向后兼容）
-    if not modelTemplate then
-        local roleFolder = ReplicatedStorage:FindFirstChild("Role")
-        if not roleFolder then
-            warn(GameConfig.LOG_PREFIX, "找不到Role文件夹")
-            return nil
-        end
-        modelTemplate = SearchFolderRecursive(roleFolder, unitId)
-    end
+	-- 解析路径
+	local pathParts = string.split(modelPath, "/")
 
-    if not modelTemplate then
-        warn(GameConfig.LOG_PREFIX, "找不到模型:", unitId, "(配置路径:", unitConfig.ModelPath or "未配置", ")")
-        return nil
-    end
+	-- 从ReplicatedStorage开始遍历路径
+	local currentFolder = ReplicatedStorage
+	for i = 1, #pathParts - 1 do
+		local nextFolder = currentFolder:FindFirstChild(pathParts[i])
+		if not nextFolder then
+			warn(GameConfig.LOG_PREFIX, "路径不存在:", pathParts[i], "在", currentFolder:GetFullName())
+			return nil
+		end
+		currentFolder = nextFolder
+	end
+
+	-- 最后一个部分是模型名称
+	local modelName = pathParts[#pathParts]
+	modelTemplate = currentFolder:FindFirstChild(modelName)
+
+	if not modelTemplate then
+		warn(GameConfig.LOG_PREFIX, "找不到模型:", modelName, "路径:", modelPath)
+		return nil
+	end
+
+	if not modelTemplate:IsA("Model") then
+		warn(GameConfig.LOG_PREFIX, modelName, "不是一个Model类型")
+		return nil
+	end
+
 
     -- 第三步：验证模型包含Humanoid（防止使用错误的展示模型）
     if not modelTemplate:FindFirstChildOfClass("Humanoid") then
