@@ -50,6 +50,79 @@ PlayerData = {
 -- ==================== 私有函数 ====================
 
 --[[
+把值清洗为DataStore可接受的类型（number/boolean/string/table）
+@param v any - 要清洗的值
+@return any - 清洗后的值
+]]
+local function SanitizeForDataStore(v)
+    local t = typeof(v)
+    if t == "Vector3" then
+        return {__type="Vector3", x=v.X, y=v.Y, z=v.Z}
+    elseif t == "CFrame" then
+        local cf = {v:GetComponents()}
+        return {__type="CFrame", components=cf}
+    elseif t == "Color3" then
+        return {__type="Color3", r=v.R, g=v.G, b=v.B}
+    elseif t == "table" then
+        local out = {}
+        for k, val in pairs(v) do
+            out[k] = SanitizeForDataStore(val)
+        end
+        return out
+    elseif t == "Instance" then
+        return nil -- 丢弃Instance，不能序列化
+    else
+        return v  -- number/boolean/string/nil直接返回
+    end
+end
+
+--[[
+清洗Units数组，处理其中的Vector3等不可序列化类型
+@param units table|nil - 兵种数组
+@return table - 清洗后的兵种数组
+]]
+local function CleanUnits(units)
+    if type(units) ~= "table" then
+        return {}
+    end
+
+    local out = {}
+    for i, unitInstance in ipairs(units) do
+        local cleaned = SanitizeForDataStore(unitInstance)
+        if cleaned then  -- 过滤掉nil值
+            table.insert(out, cleaned)
+        end
+    end
+    return out
+end
+
+--[[
+还原Vector3等类型（加载时使用）
+@param data any - 要还原的数据
+@return any - 还原后的数据
+]]
+local function RestoreFromDataStore(data)
+    if type(data) == "table" then
+        if data.__type == "Vector3" then
+            return Vector3.new(data.x, data.y, data.z)
+        elseif data.__type == "CFrame" then
+            return CFrame.new(unpack(data.components))
+        elseif data.__type == "Color3" then
+            return Color3.new(data.r, data.g, data.b)
+        else
+            -- 普通table，递归处理
+            local out = {}
+            for k, v in pairs(data) do
+                out[k] = RestoreFromDataStore(v)
+            end
+            return out
+        end
+    else
+        return data
+    end
+end
+
+--[[
 从DataStore加载玩家数据（V2.1库存系统：实现真正的持久化）
 @param player Player - 玩家对象
 @return table|nil - 加载的数据，失败返回nil
@@ -60,6 +133,16 @@ local function LoadFromDataStore(player)
 	end)
 
 	if success and data then
+		-- 还原Vector3等类型（如果需要）
+		if data.Units then
+			data.Units = RestoreFromDataStore(data.Units)
+		end
+		if data.Currency then
+			data.Currency = RestoreFromDataStore(data.Currency)
+		end
+		if data.ShopData then
+			data.ShopData = RestoreFromDataStore(data.ShopData)
+		end
 		return data
 	elseif not success then
 		warn(string.format(
@@ -84,9 +167,9 @@ local function SaveToDataStore(player, playerData)
 	local dataToSave = {
 		UserId = playerData.UserId,
 		HomeSlot = playerData.HomeSlot,
-		Currency = playerData.Currency,
-		Units = playerData.Units,
-		ShopData = playerData.ShopData,  -- V2.1库存系统：保存商店数据
+		Currency = SanitizeForDataStore(playerData.Currency),
+		Units = CleanUnits(playerData.Units),  -- 关键：清洗Units中的Vector3等类型
+		ShopData = SanitizeForDataStore(playerData.ShopData),  -- V2.1库存系统：保存商店数据
 		LastSaveTime = os.time(),
 	}
 

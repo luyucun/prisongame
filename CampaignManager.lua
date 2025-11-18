@@ -65,6 +65,14 @@ local pathCache = {}
 -- V2.3配置：路径缓存时间（秒）
 local PATH_CACHE_EXPIRY = 300  -- 5分钟过期（关卡地形变化时自动失效）
 
+-- ==================== 调试日志 ====================
+
+local function DebugLog(...)
+	if GameConfig.Campaign.EnablePathDebugLogs or GameConfig.DEBUG_MODE then
+		print(GameConfig.LOG_PREFIX, "[CampaignManager]", ...)
+	end
+end
+
 -- ==================== 私有函数 ====================
 
 --[[
@@ -187,7 +195,6 @@ local function InitializeEvents()
 		end
 
 		if not CampaignEvents then
-			warn("[CampaignManager] CampaignEvents未找到!")
 		end
 	end
 	return CampaignEvents ~= nil
@@ -285,14 +292,12 @@ function CampaignManager.StartCampaign(player)
 
 	-- 检查是否已在战役中
 	if CampaignManager.ActiveCampaigns[playerId] then
-		warn("[CampaignManager] 玩家已在战役中:", player.Name)
 		return false
 	end
 
 	-- 获取HomeId
 	local homeId = PlayerManager.GetPlayerHomeId(player)
 	if not homeId then
-		warn("[CampaignManager] 玩家未分配基地:", player.Name)
 		return false
 	end
 
@@ -301,11 +306,8 @@ function CampaignManager.StartCampaign(player)
 	local placedUnits = PlacementSystem.GetPlacedUnitModels(player)
 
 	if not placedUnits or #placedUnits == 0 then
-		warn("[CampaignManager] 没有可用兵种:", player.Name)
 		return false
 	end
-
-	print("[CampaignManager] 开始战役:", player.Name, "兵种数量:", #placedUnits)
 
 	-- 创建CampaignData
 	local campaignData = {
@@ -323,7 +325,6 @@ function CampaignManager.StartCampaign(player)
 	-- 保存兵种数据
 	local homeIdleFloor = GetHomeIdleFloor(homeId)
 	if not homeIdleFloor then
-		warn("[CampaignManager] 找不到基地IdleFloor:", homeId)
 		return false
 	end
 
@@ -404,6 +405,14 @@ end
 @param stageNum number - 关卡编号
 ]]
 function CampaignManager.MarchToStage(campaignData, stageNum)
+	-- 检查玩家是否仍在线
+	local playerId = campaignData.PlayerId
+	local player = game.Players:GetPlayerByUserId(playerId)
+	if not player then
+		DebugLog("玩家已离线，跳过行军:", playerId, "关卡:", stageNum)
+		return  -- 直接返回，不处理离线玩家的任务
+	end
+
 	campaignData.State = CampaignState.MARCHING
 
 	-- 通知客户端
@@ -414,10 +423,26 @@ function CampaignManager.MarchToStage(campaignData, stageNum)
 		end
 	end
 
+	-- V2.4新增：行军前禁用所有单位的AI（避免100个单位的AI轮询开销）
+	for unitInstance, unitData in pairs(campaignData.Units) do
+		if unitInstance and unitInstance.Parent and unitInstance:FindFirstChild("Humanoid") then
+			-- 关键优化：设置MarchMode，禁用AI战斗决策
+			-- 行军只需要纯寻路，不需要寻敌、换目标等复杂AI逻辑
+			if UnitAI.SetMode then
+				local success = UnitAI.SetMode(unitInstance, "MarchMode")
+				if success then
+					DebugLog(string.format("  🚀 %s 进入行军模式（AI已禁用）", unitData.UnitId))
+				else
+					-- AI未启动，这在行军阶段是正常的，不需要警告
+					-- DebugLog(string.format("  ⚠️ %s AI未启动，跳过行军模式设置", unitData.UnitId))
+				end
+			end
+		end
+	end
+
 	-- 获取目标关卡
 	local stageFolder = StageService.GetOrCreateStage(campaignData.PlayerId, stageNum)
 	if not stageFolder then
-		warn("[CampaignManager] 关卡未找到:", stageNum)
 		return CampaignManager.OnCampaignEnd(campaignData, false)
 	end
 
@@ -436,7 +461,6 @@ function CampaignManager.MarchToStage(campaignData, stageNum)
 	-- V2.0修复：使用递归搜索，支持IdleFloor在子文件夹中（如Stage001/StageNodes/IdleFloor）
 	local targetIdleFloor = stageFolder:FindFirstChild("IdleFloor", true)
 	if not targetIdleFloor then
-		warn("[CampaignManager] 关卡IdleFloor未找到（已递归搜索）:", stageNum, "关卡路径:", stageFolder:GetFullName())
 		return CampaignManager.OnCampaignEnd(campaignData, false)
 	end
 
@@ -481,6 +505,7 @@ function CampaignManager.MarchToStage(campaignData, stageNum)
 
 	-- 调用PathService批量寻路（使用新的回调API）
 	-- V2.3.1：移除缓存路径传入，让每个单位使用真实起点寻路
+	DebugLog(string.format("[MarchToStage] 开始PathService寻路，共 %d 个目标", #moveTargets))
 	local moveId = PathService.MoveUnitsToPositions(moveTargets, {
 		onUnitArrived = function(unitInstance, status)
 			-- 单位到达时的回调（可选，这里暂时不处理）
@@ -488,6 +513,8 @@ function CampaignManager.MarchToStage(campaignData, stageNum)
 
 		onAllSettled = function(arrivedList, timedOutList, failedList)
 			-- 所有单位完成移动后的回调
+			DebugLog(string.format("[MarchToStage] PathService回调触发 - 到达:%d, 超时:%d, 失败:%d",
+				#arrivedList, #timedOutList, #failedList))
 
 			-- V2.0修复：到达后停止移动动画，切换到Idle
 			for _, unitInstance in ipairs(arrivedList) do
@@ -503,6 +530,7 @@ function CampaignManager.MarchToStage(campaignData, stageNum)
 			end
 
 			-- V2.0重构：进入准备战斗阶段
+			DebugLog("[MarchToStage] 即将调用BeginBattlePrep...")
 			task.wait(0.1)  -- 给客户端缓冲
 			CampaignManager.BeginBattlePrep(campaignData, stageNum, arrivedList, timedOutList, failedList)
 		end
@@ -539,7 +567,6 @@ function CampaignManager.BeginBattlePrep(campaignData, stageNum, arrivedList, ti
 		local unitData = campaignData.Units[unitInstance]
 		if unitData then
 			unitData.IsDead = true
-			warn("[CampaignManager] 单位失败，标记为死亡:", unitData.UnitId)
 		end
 	end
 
@@ -556,7 +583,7 @@ function CampaignManager.BeginBattlePrep(campaignData, stageNum, arrivedList, ti
 	for _, unitInstance in ipairs(allArrivedUnits) do
 		local unitData = campaignData.Units[unitInstance]
 		if unitData then
-			local rootPart = unitInstance:FindFirstChild("HumanoidRootPart")
+			local rootPart = unitInstance:FindFirstChild("HumanoidRootPart") or unitInstance.PrimaryPart
 			if rootPart then
 				unitData.LastKnownPosition = rootPart.Position
 			end
@@ -564,32 +591,54 @@ function CampaignManager.BeginBattlePrep(campaignData, stageNum, arrivedList, ti
 	end
 
 	-- 准备友军：激活单位并准备进入战斗
+	DebugLog(string.format("[BeginBattlePrep] 开始准备友军，共有 %d 个到达单位", #allArrivedUnits))
 	local preparedAllies = {}
 
-	for _, unitInstance in ipairs(allArrivedUnits) do
+	for i, unitInstance in ipairs(allArrivedUnits) do
 		local unitData = campaignData.Units[unitInstance]
 		if unitData and not unitData.IsDead then
+			DebugLog(string.format("  准备友军 %d/%d: %s", i, #allArrivedUnits, unitData.UnitId))
+
+			-- V2.4新增：从MarchMode恢复到CombatMode（重新启用AI）
+			if UnitAI.SetMode then
+				local success = UnitAI.SetMode(unitInstance, "CombatMode")
+				if success then
+					DebugLog(string.format("    ⚔️  %s 进入战斗模式（AI已启用）", unitData.UnitId))
+				else
+					-- AI未启动，在战斗准备时是正常的，稍后会由UnitAI启动
+					DebugLog(string.format("    ⚠️ %s AI未启动，稍后将在战斗中自动启动", unitData.UnitId))
+				end
+			end
+
 			-- 1. 激活单位（解除锚定等）
+			DebugLog(string.format("    正在激活单位 %s...", unitData.UnitId))
 			local activated = CampaignUnitHelper.ActivateUnit(unitInstance)
+			DebugLog(string.format("    激活结果: %s", activated and "成功" or "失败"))
 			if activated then
 				unitData.IsActivated = true
 			end
 
 			-- 2. 准备进入战斗（清理PathService残留、重置AI状态）
+			DebugLog(string.format("    正在准备战斗 %s...", unitData.UnitId))
 			local prepared = CampaignUnitHelper.PrepareForBattle(unitInstance)
+			DebugLog(string.format("    战斗准备结果: %s", prepared and "成功" or "失败"))
 
 			if activated and prepared then
 				table.insert(preparedAllies, unitInstance)
-			else
-				warn(string.format("  ❌ 友军准备失败: %s", unitData.UnitId))
+				DebugLog(string.format("    ✅ %s 准备完成，加入友军列表", unitData.UnitId))
+			end
+		else
+			if unitData then
+				DebugLog(string.format("  跳过已死亡单位: %s", unitData.UnitId))
 			end
 		end
 	end
 
+	DebugLog(string.format("[BeginBattlePrep] 友军准备完成，成功准备 %d/%d 个单位", #preparedAllies, #allArrivedUnits))
+
 	-- 获取并激活敌军
 	local stageFolder = StageService.GetOrCreateStage(campaignData.PlayerId, stageNum)
 	if not stageFolder then
-		warn("[CampaignManager] 关卡未找到，战斗准备失败")
 		return CampaignManager.OnDefeat(campaignData)
 	end
 
@@ -606,13 +655,53 @@ function CampaignManager.BeginBattlePrep(campaignData, stageNum, arrivedList, ti
 				end
 			end
 		end
-	else
-		warn("[CampaignManager] IdleFloorEnemy未找到")
+	end
+
+	-- V2.3.2新增：敌军为0时的容错重试机制
+	-- 如果初次激活敌军为空，尝试重新加载一次敌人配置
+	if #preparedEnemies == 0 then
+		-- 重新调用LoadEnemyData强制重新生成敌人
+		StageService.LoadEnemyData(stageFolder, stageNum)
+		task.wait(0.2)  -- 给生成一点时间
+
+		-- 再次扫描IdleFloorEnemy并尝试激活
+		idleFloorEnemy = stageFolder:FindFirstChild("IdleFloorEnemy", true)
+		preparedEnemies = {}
+		if idleFloorEnemy then
+			for _, child in ipairs(idleFloorEnemy:GetChildren()) do
+				if child:IsA("Model") and child:FindFirstChild("Humanoid") then
+					local activated = CampaignUnitHelper.ActivateUnit(child)
+					if activated then
+						table.insert(preparedEnemies, child)
+					end
+				end
+			end
+		end
+
+		if #preparedEnemies > 0 then
+		end
 	end
 
 	-- 检查是否可以开战
+	DebugLog(string.format("[BeginBattlePrep] 战斗准备完成 - 友军:%d，敌军:%d", #preparedAllies, #preparedEnemies))
+
+	-- 详细列出友军信息
+	if #preparedAllies > 0 then
+		DebugLog("[BeginBattlePrep] 友军列表:")
+		for i, ally in ipairs(preparedAllies) do
+			DebugLog(string.format("    %d. %s (Humanoid: %s)", i, ally.Name, ally:FindFirstChild("Humanoid") and "✓" or "✗"))
+		end
+	end
+
+	-- 详细列出敌军信息
+	if #preparedEnemies > 0 then
+		DebugLog("[BeginBattlePrep] 敌军列表:")
+		for i, enemy in ipairs(preparedEnemies) do
+			DebugLog(string.format("    %d. %s (Humanoid: %s)", i, enemy.Name, enemy:FindFirstChild("Humanoid") and "✓" or "✗"))
+		end
+	end
+
 	if #preparedAllies == 0 or #preparedEnemies == 0 then
-		warn(string.format("[CampaignManager] 无法开战：友军%d，敌军%d", #preparedAllies, #preparedEnemies))
 		return CampaignManager.OnDefeat(campaignData)
 	end
 
@@ -629,6 +718,8 @@ end
 @param preparedEnemies table - 已准备好的敌军列表
 ]]
 function CampaignManager.StartStageBattle(campaignData, stageNum, preparedAllies, preparedEnemies)
+	DebugLog(string.format("[StartStageBattle] 开始关卡 %d 战斗 - 友军:%d，敌军:%d", stageNum, #preparedAllies, #preparedEnemies))
+
 	campaignData.State = CampaignState.FIGHTING
 
 	-- 通知客户端
@@ -641,6 +732,7 @@ function CampaignManager.StartStageBattle(campaignData, stageNum, preparedAllies
 
 	-- V2.0重构：直接使用已准备好的列表，无需再次激活
 	-- 创建战斗实例
+	DebugLog("[StartStageBattle] 正在创建战斗实例...")
 	local battleId = BattleManager.CreateBattle({
 		PlayerId = campaignData.PlayerId,
 		BattleType = "Campaign",
@@ -653,6 +745,12 @@ function CampaignManager.StartStageBattle(campaignData, stageNum, preparedAllies
 
 	campaignData.CurrentBattleId = battleId
 
+	if not battleId then
+		return CampaignManager.OnDefeat(campaignData)
+	end
+
+	DebugLog(string.format("[StartStageBattle] 战斗实例创建成功，BattleId: %s", tostring(battleId)))
+
 	-- 更新 LastBattleId
 	for _, unitInstance in ipairs(preparedAllies) do
 		local unitData = campaignData.Units[unitInstance]
@@ -662,7 +760,9 @@ function CampaignManager.StartStageBattle(campaignData, stageNum, preparedAllies
 	end
 
 	-- 开始战斗
-	BattleManager.StartBattle(battleId)
+	DebugLog("[StartStageBattle] 正在启动战斗...")
+	local startResult = BattleManager.StartBattle(battleId)
+	DebugLog(string.format("[StartStageBattle] 战斗启动结果: %s", tostring(startResult)))
 end
 
 --[[
@@ -700,6 +800,14 @@ end
 @param stageNum number - 关卡编号
 ]]
 function CampaignManager.OnStageClear(campaignData, stageNum)
+	-- 检查玩家是否仍在线
+	local playerId = campaignData.PlayerId
+	local player = game.Players:GetPlayerByUserId(playerId)
+	if not player then
+		DebugLog("玩家已离线，跳过关卡清理:", playerId, "关卡:", stageNum)
+		return  -- 直接返回，不处理离线玩家的任务
+	end
+
 	campaignData.State = CampaignState.STAGE_CLEAR
 
 	-- 通知客户端
@@ -747,8 +855,6 @@ end
 function CampaignManager.OnVictory(campaignData)
 	campaignData.State = CampaignState.VICTORY
 
-	print("[CampaignManager] 战役胜利!", campaignData.Player.Name)
-
 	-- 通知客户端
 	if InitializeEvents() then
 		local stateUpdate = CampaignEvents:FindFirstChild("CampaignStateUpdate")
@@ -769,8 +875,6 @@ function CampaignManager.OnVictory(campaignData)
 				totalReward = totalReward + (reward.Coins or 0)
 			end
 		end
-	else
-		warn("[CampaignManager] 未找到风格奖励配置:", templateStyle)
 	end
 
 	-- 发放奖励 (V2.0修复：使用AddCoins而不是AddCurrency)
@@ -865,7 +969,6 @@ local function RestoreUnitAnimationState(unitModel, unitId)
 
 	local humanoid = unitModel:FindFirstChildOfClass("Humanoid")
 	if not humanoid then
-		warn("[CampaignManager] RestoreUnitAnimationState失败：找不到Humanoid", unitId)
 		return
 	end
 
@@ -911,7 +1014,6 @@ end
 function CampaignManager.RespawnUnits(campaignData)
 	local homeIdleFloor = GetHomeIdleFloor(campaignData.HomeId)
 	if not homeIdleFloor then
-		warn("[CampaignManager] 找不到基地IdleFloor")
 		return
 	end
 
@@ -926,7 +1028,6 @@ function CampaignManager.RespawnUnits(campaignData)
 					local _ = unitInstance.Name  -- 尝试访问属性
 				end)
 				if not success then
-					warn("[CampaignManager] 单位已被销毁，跳过重生:", unitData.UnitId)
 					continue
 				end
 			end
@@ -939,13 +1040,11 @@ function CampaignManager.RespawnUnits(campaignData)
 					if homeFolder then
 						unitInstance.Parent = homeFolder
 					else
-						warn("[CampaignManager] 找不到基地根节点（IdleFloor.Parent）")
 						unitInstance.Parent = homeIdleFloor  -- 回退方案
 					end
 				end)
 
 				if not success then
-					warn("[CampaignManager] 设置Parent失败（单位可能已被销毁）:", unitData.UnitId, err)
 					continue
 				end
 			end
@@ -1011,7 +1110,6 @@ end
 function CampaignManager.Initialize()
 	-- 初始化远程事件
 	if not InitializeEvents() then
-		warn("[CampaignManager] CampaignEvents未找到，战役系统将不可用!")
 		return false
 	end
 
@@ -1023,9 +1121,6 @@ function CampaignManager.Initialize()
 				CampaignManager.StartCampaign(player)
 			end)
 
-			if not success then
-				warn("[CampaignManager] 开始战役失败:", err)
-			end
 		end)
 	end
 
@@ -1036,9 +1131,6 @@ function CampaignManager.Initialize()
 				CampaignManager.RequestRetreat(player)
 			end)
 
-			if not success then
-				warn("[CampaignManager] 撤退失败:", err)
-			end
 		end)
 	end
 

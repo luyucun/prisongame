@@ -44,6 +44,54 @@ local unitBattleInfo = {}
 -- 是否已初始化
 local isInitialized = false
 
+-- V2.4新增：空间分桶系统（SpatialGrid）
+-- 将战场划分为网格，加速敌人查询从O(m)→O(1)
+local GRID_SIZE = 4  -- 网格大小（studs）
+local spatialGrids = {}  -- [battleId] = {gridKey = {unitModel1, unitModel2, ...}}
+local unitGridMapping = {}  -- [unitModel] = {battleId = xx, gridKey = "x,y,z"}
+
+--[[
+V2.4新增：计算位置对应的网格key
+@param position Vector3 - 位置
+@return string - 网格key (格式: "x,y,z")
+]]
+local function GetGridKey(position)
+	local gridX = math.floor(position.X / GRID_SIZE)
+	local gridY = math.floor(position.Y / GRID_SIZE)
+	local gridZ = math.floor(position.Z / GRID_SIZE)
+	return string.format("%d,%d,%d", gridX, gridY, gridZ)
+end
+
+--[[
+V2.4新增：获取相邻的网格keys（包括中心）
+@param gridKey string - 中心网格key
+@param searchRange number - 搜索范围（studs）
+@return table - 相邻网格key列表
+]]
+local function GetAdjacentGridKeys(gridKey, searchRange)
+	local x, y, z = gridKey:match("(-?%d+),(-?%d+),(-?%d+)")
+	x, y, z = tonumber(x), tonumber(y), tonumber(z)
+
+	-- 根据搜索范围动态计算网格半径
+	-- 例如：searchRange=200 studs, GRID_SIZE=4 studs → radius=50格
+	local radius = math.ceil(searchRange / GRID_SIZE)
+
+	-- 限制最大半径，避免性能问题（最多检查100x100x100的立方体）
+	radius = math.min(radius, 50)
+
+	local adjacent = {}
+	-- 检查中心及周围的网格立方体
+	for dx = -radius, radius do
+		for dy = -radius, radius do
+			for dz = -radius, radius do
+				table.insert(adjacent, string.format("%d,%d,%d", x + dx, y + dy, z + dz))
+			end
+		end
+	end
+
+	return adjacent
+end
+
 -- ==================== 私有函数 ====================
 
 --[[
@@ -93,6 +141,105 @@ local function GetUnitPosition(unitModel, forceUpdate)
 	}
 
 	return position
+end
+
+--[[
+V2.4新增：更新单位的网格位置
+@param unitModel Model - 单位模型
+@param battleId number - 战斗ID
+]]
+local function UpdateUnitGridPosition(unitModel, battleId)
+	local position = GetUnitPosition(unitModel)
+	if not position then
+		return
+	end
+
+	local newGridKey = GetGridKey(position)
+
+	-- 获取或初始化战斗网格
+	if not spatialGrids[battleId] then
+		spatialGrids[battleId] = {}
+	end
+
+	-- 检查单位是否需要更新网格位置
+	local currentMapping = unitGridMapping[unitModel]
+	if currentMapping and currentMapping.battleId == battleId and currentMapping.gridKey == newGridKey then
+		return  -- 单位仍在同一网格，无需更新
+	end
+
+	-- 从旧网格中移除单位（如果存在）
+	if currentMapping then
+		local oldGrid = spatialGrids[currentMapping.battleId]
+		if oldGrid and oldGrid[currentMapping.gridKey] then
+			local oldGridList = oldGrid[currentMapping.gridKey]
+			for i, unit in ipairs(oldGridList) do
+				if unit == unitModel then
+					table.remove(oldGridList, i)
+					break
+				end
+			end
+		end
+	end
+
+	-- 添加单位到新网格
+	if not spatialGrids[battleId][newGridKey] then
+		spatialGrids[battleId][newGridKey] = {}
+	end
+	table.insert(spatialGrids[battleId][newGridKey], unitModel)
+
+	-- 更新映射
+	unitGridMapping[unitModel] = {
+		battleId = battleId,
+		gridKey = newGridKey,
+	}
+end
+
+--[[
+V2.4新增：从空间网格中查询范围内的敌人
+@param unitModel Model - 查询单位
+@param battleId number - 战斗ID
+@param enemyTeam string - 敌方队伍
+@param searchRange number - 搜索范围
+@return table - 范围内的敌人列表
+]]
+local function GetNearbyEnemiesFromGrid(unitModel, battleId, enemyTeam, searchRange)
+	local position = GetUnitPosition(unitModel)
+	if not position then
+		return {}
+	end
+
+	local battleGrid = spatialGrids[battleId]
+	if not battleGrid then
+		return {}
+	end
+
+	local gridKey = GetGridKey(position)
+	local adjacentKeys = GetAdjacentGridKeys(gridKey, searchRange)
+
+	local nearbyEnemies = {}
+	for _, key in ipairs(adjacentKeys) do
+		local gridUnits = battleGrid[key]
+		if gridUnits then
+			for _, otherUnit in ipairs(gridUnits) do
+				-- 检查是否属于敌方队伍
+				local otherInfo = unitBattleInfo[otherUnit]
+				if otherInfo and otherInfo.BattleId == battleId and otherInfo.Team == enemyTeam then
+					-- 进行最终距离检查
+					local otherPos = GetUnitPosition(otherUnit)
+					if otherPos then
+						local distance = (position - otherPos).Magnitude
+						if distance <= searchRange then
+							table.insert(nearbyEnemies, {Unit = otherUnit, Distance = distance})
+						end
+					end
+				end
+			end
+		end
+	end
+
+	-- 按距离排序
+	table.sort(nearbyEnemies, function(a, b) return a.Distance < b.Distance end)
+	return nearbyEnemies
 end
 
 -- ==================== 公共接口 ====================
@@ -167,6 +314,9 @@ function UnitManager.RegisterUnit(battleId, team, unitModel)
 	-- 初始化位置缓存
 	GetUnitPosition(unitModel, true)
 
+	-- V2.4新增：初始化网格位置（SpatialGrid）
+	UpdateUnitGridPosition(unitModel, battleId)
+
 	DebugLog(string.format("注册单位: BattleId=%d, Team=%s, Unit=%s",
 		battleId, team, unitModel.Name))
 
@@ -207,6 +357,22 @@ function UnitManager.UnregisterUnit(unitModel)
 	unitBattleInfo[unitModel] = nil
 	unitPositionCache[unitModel] = nil
 
+	-- V2.4新增：清理网格映射
+	local mapping = unitGridMapping[unitModel]
+	if mapping then
+		local grid = spatialGrids[mapping.battleId]
+		if grid and grid[mapping.gridKey] then
+			local gridList = grid[mapping.gridKey]
+			for i, unit in ipairs(gridList) do
+				if unit == unitModel then
+					table.remove(gridList, i)
+					break
+				end
+			end
+		end
+		unitGridMapping[unitModel] = nil
+	end
+
 	DebugLog(string.format("注销单位: BattleId=%d, Team=%s, Unit=%s",
 		battleId, team, unitModel.Name))
 
@@ -246,7 +412,7 @@ function UnitManager.GetEnemyTeam(team)
 end
 
 --[[
-获取最近的敌人(优化版)
+获取最近的敌人(优化版 - V2.4使用SpatialGrid)
 @param unitModel Model - 当前单位
 @param maxDistance number - 最大搜索距离
 @return Model|nil - 最近的敌人
@@ -268,45 +434,23 @@ function UnitManager.GetClosestEnemy(unitModel, maxDistance)
 		return nil, nil
 	end
 
-	-- 获取敌方单位列表
-	local enemies = UnitManager.GetBattleUnits(battleId, enemyTeam)
-	if not enemies or #enemies == 0 then
-		return nil, nil
-	end
-
 	-- 获取自己的位置
 	local myPos = GetUnitPosition(unitModel, false)
 	if not myPos then
 		return nil, nil
 	end
 
-	-- 查找最近的敌人
-	local closestEnemy = nil
-	local closestDistance = maxDistance or math.huge
+	-- V2.4优化：使用SpatialGrid查询（O(1)而非O(m)）
+	-- 注意：GetNearbyEnemiesFromGrid已按距离排序，直接返回第一个即可
+	local nearbyEnemies = GetNearbyEnemiesFromGrid(unitModel, battleId, enemyTeam, maxDistance or math.huge)
 
-	for _, enemy in ipairs(enemies) do
-		-- 跳过自己
-		if enemy == unitModel then
-			continue
-		end
-
-		-- 获取敌人位置
-		local enemyPos = GetUnitPosition(enemy, false)
-		if not enemyPos then
-			continue
-		end
-
-		-- 计算距离
-		local distance = (enemyPos - myPos).Magnitude
-
-		-- 更新最近的敌人
-		if distance < closestDistance then
-			closestDistance = distance
-			closestEnemy = enemy
-		end
+	if nearbyEnemies and #nearbyEnemies > 0 then
+		-- 列表已按距离排序，第一个就是最近的
+		local closestResult = nearbyEnemies[1]
+		return closestResult.Unit, closestResult.Distance
 	end
 
-	return closestEnemy, closestDistance
+	return nil, nil
 end
 
 --[[
@@ -389,8 +533,27 @@ function UnitManager.ClearBattle(battleId)
 		for _, unit in ipairs(units) do
 			unitBattleInfo[unit] = nil
 			unitPositionCache[unit] = nil
+
+			-- V2.4新增：清理网格映射
+			local mapping = unitGridMapping[unit]
+			if mapping then
+				local grid = spatialGrids[mapping.battleId]
+				if grid and grid[mapping.gridKey] then
+					local gridList = grid[mapping.gridKey]
+					for i, gridUnit in ipairs(gridList) do
+						if gridUnit == unit then
+							table.remove(gridList, i)
+							break
+						end
+					end
+				end
+				unitGridMapping[unit] = nil
+			end
 		end
 	end
+
+	-- 清理网格数据
+	spatialGrids[battleId] = nil
 
 	-- 清理战斗索引
 	battleUnits[battleId] = nil

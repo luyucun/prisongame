@@ -12,10 +12,6 @@
 3. 处理系统启动错误
 ]]
 
-print("==========================================")
-print("游戏服务端启动中...")
-print("==========================================")
-
 -- 引用服务
 local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -56,13 +52,9 @@ local ShopSystem = require(ServerScriptService.Systems.ShopSystem)
 -- ==================== 系统初始化顺序 ====================
 
 local function InitializeServer()
-    print(GameConfig.LOG_PREFIX, "开始初始化服务端系统...")
-    print(GameConfig.LOG_PREFIX, "调试模式:", GameConfig.DEBUG_MODE and "开启" or "关闭")
-
     local initializationFailed = false
 
     -- 0. 初始化物理管理系统(必须首先初始化)
-    print(GameConfig.LOG_PREFIX, "步骤0: 初始化物理管理系统...")
     local success, result = pcall(function()
         return PhysicsManager.Initialize()
     end)
@@ -72,13 +64,10 @@ local function InitializeServer()
     elseif result == false then
         warn(GameConfig.LOG_PREFIX, "物理管理系统初始化失败(返回false)")
         initializationFailed = true
-    else
-        print(GameConfig.LOG_PREFIX, "物理管理系统初始化成功")
     end
 
     -- 1. 初始化基地系统(验证地图结构)
-    print(GameConfig.LOG_PREFIX, "步骤1: 初始化基地系统...")
-    local success, result = pcall(function()
+    success, result = pcall(function()
         return HomeSystem.Initialize()
     end)
     if not success then
@@ -87,12 +76,9 @@ local function InitializeServer()
     elseif result == false then
         warn(GameConfig.LOG_PREFIX, "基地系统初始化失败(返回false)")
         initializationFailed = true
-    else
-        print(GameConfig.LOG_PREFIX, "基地系统初始化成功")
     end
 
     -- 1.1 初始化门控系统 (V2.0.1新增)
-    print(GameConfig.LOG_PREFIX, "步骤1.1: 初始化门控系统...")
     success, result = pcall(function()
         return DoorControlService.Initialize()
     end)
@@ -101,12 +87,9 @@ local function InitializeServer()
         -- 门控不是关键系统，失败不阻止游戏运行
     elseif result == false then
         warn(GameConfig.LOG_PREFIX, "门控系统初始化失败(返回false)")
-    else
-        print(GameConfig.LOG_PREFIX, "门控系统初始化成功")
     end
 
     -- 2. 初始化货币系统(连接远程事件)
-    print(GameConfig.LOG_PREFIX, "步骤2: 初始化货币系统...")
     success, result = pcall(function()
         return CurrencySystem.Initialize()
     end)
@@ -117,12 +100,9 @@ local function InitializeServer()
         warn(GameConfig.LOG_PREFIX, "货币系统初始化失败(返回false),无法处理货币操作!")
         warn(GameConfig.LOG_PREFIX, "请检查ReplicatedStorage/Events/CurrencyEvents是否存在")
         initializationFailed = true
-    else
-        print(GameConfig.LOG_PREFIX, "货币系统初始化成功")
     end
 
     -- 3. 初始化玩家管理器(连接玩家事件)
-    print(GameConfig.LOG_PREFIX, "步骤3: 初始化玩家管理器...")
     success, result = pcall(function()
         return PlayerManager.Initialize()
     end)
@@ -132,12 +112,9 @@ local function InitializeServer()
     elseif result == false then
         warn(GameConfig.LOG_PREFIX, "玩家管理器初始化失败(返回false)")
         initializationFailed = true
-    else
-        print(GameConfig.LOG_PREFIX, "玩家管理器初始化成功")
     end
 
     -- 4. 初始化背包系统(连接背包事件)
-    print(GameConfig.LOG_PREFIX, "步骤4: 初始化背包系统...")
     success, result = pcall(function()
         InventorySystem.Initialize()
         return true
@@ -145,12 +122,9 @@ local function InitializeServer()
     if not success then
         warn(GameConfig.LOG_PREFIX, "背包系统初始化失败(异常):", result)
         -- 背包系统不是关键系统,失败不影响游戏运行
-    else
-        print(GameConfig.LOG_PREFIX, "背包系统初始化成功")
     end
 
     -- 5. 初始化放置系统(连接放置事件) V1.2新增
-    print(GameConfig.LOG_PREFIX, "步骤5: 初始化放置系统...")
     success, result = pcall(function()
         return PlacementSystem.Initialize()
     end)
@@ -159,12 +133,9 @@ local function InitializeServer()
         -- 放置系统不是关键系统,失败不影响游戏运行
     elseif result == false then
         warn(GameConfig.LOG_PREFIX, "放置系统初始化失败(返回false),放置功能将不可用")
-    else
-        print(GameConfig.LOG_PREFIX, "放置系统初始化成功")
     end
 
     -- 5.5. 初始化合成系统(连接合成事件) V1.4新增
-    print(GameConfig.LOG_PREFIX, "步骤5.5: 初始化合成系统...")
     success, result = pcall(function()
         return MergeSystem.Initialize()
     end)
@@ -173,12 +144,9 @@ local function InitializeServer()
         -- 合成系统不是关键系统,失败不影响游戏运行
     elseif result == false then
         warn(GameConfig.LOG_PREFIX, "合成系统初始化失败(返回false),合成功能将不可用")
-    else
-        print(GameConfig.LOG_PREFIX, "合成系统初始化成功")
     end
 
     -- 5.6. 初始化商店系统(V2.1新增 - 数据驱动版)
-    print(GameConfig.LOG_PREFIX, "步骤5.6: 初始化商店系统...")
     success, result = pcall(function()
         return ShopSystem.Initialize()
     end)
@@ -192,12 +160,9 @@ local function InitializeServer()
         -- 商店系统不是关键系统,失败不影响游戏运行
     elseif result == false then
         warn(GameConfig.LOG_PREFIX, "商店系统初始化失败(返回false),购买功能将不可用")
-    else
-        print(GameConfig.LOG_PREFIX, "✅ 商店系统初始化成功（数据驱动模式）")
     end
 
     -- 6. 初始化GM命令系统(连接聊天事件)
-    print(GameConfig.LOG_PREFIX, "步骤6: 初始化GM命令系统...")
     success, result = pcall(function()
         GMCommandSystem.Initialize()
         return true
@@ -205,15 +170,11 @@ local function InitializeServer()
     if not success then
         warn(GameConfig.LOG_PREFIX, "GM命令系统初始化失败(异常):", result)
         -- GM系统不是关键系统,失败不影响游戏运行
-    else
-        print(GameConfig.LOG_PREFIX, "GM命令系统初始化成功")
     end
 
     -- 7. 初始化战斗系统(V1.5新增, V1.5.1优化)
-    print(GameConfig.LOG_PREFIX, "步骤7: 初始化战斗系统...")
 
     -- 7.0 初始化HitboxService (V1.5.1新增 - 碰撞判定服务)
-    print(GameConfig.LOG_PREFIX, "步骤7.0a: 初始化碰撞判定服务...")
     success, result = pcall(function()
         return HitboxService.Initialize()
     end)
@@ -221,12 +182,9 @@ local function InitializeServer()
         warn(GameConfig.LOG_PREFIX, "碰撞判定服务初始化失败(异常):", result)
     elseif result == false then
         warn(GameConfig.LOG_PREFIX, "碰撞判定服务初始化失败(返回false)")
-    else
-        print(GameConfig.LOG_PREFIX, "碰撞判定服务初始化成功")
     end
 
     -- 7.0b 初始化UnitManager (V1.5.1新增 - 单位索引管理)
-    print(GameConfig.LOG_PREFIX, "步骤7.0b: 初始化单位索引管理...")
     success, result = pcall(function()
         return UnitManager.Initialize()
     end)
@@ -234,12 +192,9 @@ local function InitializeServer()
         warn(GameConfig.LOG_PREFIX, "单位索引管理初始化失败(异常):", result)
     elseif result == false then
         warn(GameConfig.LOG_PREFIX, "单位索引管理初始化失败(返回false)")
-    else
-        print(GameConfig.LOG_PREFIX, "单位索引管理初始化成功")
     end
 
     -- 7.1 初始化CombatSystem
-    print(GameConfig.LOG_PREFIX, "步骤7.1: 初始化战斗系统...")
     success, result = pcall(function()
         return CombatSystem.Initialize()
     end)
@@ -247,12 +202,9 @@ local function InitializeServer()
         warn(GameConfig.LOG_PREFIX, "战斗系统初始化失败(异常):", result)
     elseif result == false then
         warn(GameConfig.LOG_PREFIX, "战斗系统初始化失败(返回false)")
-    else
-        print(GameConfig.LOG_PREFIX, "战斗系统初始化成功")
     end
 
     -- 7.2 初始化ProjectileSystem
-    print(GameConfig.LOG_PREFIX, "步骤7.2: 初始化弹道系统...")
     success, result = pcall(function()
         return ProjectileSystem.Initialize()
     end)
@@ -260,12 +212,9 @@ local function InitializeServer()
         warn(GameConfig.LOG_PREFIX, "弹道系统初始化失败(异常):", result)
     elseif result == false then
         warn(GameConfig.LOG_PREFIX, "弹道系统初始化失败(返回false)")
-    else
-        print(GameConfig.LOG_PREFIX, "弹道系统初始化成功")
     end
 
     -- 7.2.5 初始化WeaponEffectSystem (V1.5.4新增)
-    print(GameConfig.LOG_PREFIX, "步骤7.2.5: 初始化武器特效系统...")
     success, result = pcall(function()
         return WeaponEffectSystem.Initialize()
     end)
@@ -273,12 +222,9 @@ local function InitializeServer()
         warn(GameConfig.LOG_PREFIX, "武器特效系统初始化失败(异常):", result)
     elseif result == false then
         warn(GameConfig.LOG_PREFIX, "武器特效系统初始化失败(返回false)")
-    else
-        print(GameConfig.LOG_PREFIX, "武器特效系统初始化成功")
     end
 
     -- 7.3 初始化UnitAI
-    print(GameConfig.LOG_PREFIX, "步骤7.3: 初始化兵种AI系统...")
     success, result = pcall(function()
         return UnitAI.Initialize()
     end)
@@ -286,12 +232,9 @@ local function InitializeServer()
         warn(GameConfig.LOG_PREFIX, "兵种AI系统初始化失败(异常):", result)
     elseif result == false then
         warn(GameConfig.LOG_PREFIX, "兵种AI系统初始化失败(返回false)")
-    else
-        print(GameConfig.LOG_PREFIX, "兵种AI系统初始化成功")
     end
 
     -- 7.4 初始化BattleManager
-    print(GameConfig.LOG_PREFIX, "步骤7.4: 初始化战斗管理器...")
     success, result = pcall(function()
         return BattleManager.Initialize()
     end)
@@ -299,12 +242,9 @@ local function InitializeServer()
         warn(GameConfig.LOG_PREFIX, "战斗管理器初始化失败(异常):", result)
     elseif result == false then
         warn(GameConfig.LOG_PREFIX, "战斗管理器初始化失败(返回false)")
-    else
-        print(GameConfig.LOG_PREFIX, "战斗管理器初始化成功")
     end
 
     -- 7.5 初始化BattleTestSystem
-    print(GameConfig.LOG_PREFIX, "步骤7.5: 初始化战斗测试系统...")
     success, result = pcall(function()
         return BattleTestSystem.Initialize()
     end)
@@ -312,12 +252,9 @@ local function InitializeServer()
         warn(GameConfig.LOG_PREFIX, "战斗测试系统初始化失败(异常):", result)
     elseif result == false then
         warn(GameConfig.LOG_PREFIX, "战斗测试系统初始化失败(返回false)")
-    else
-        print(GameConfig.LOG_PREFIX, "战斗测试系统初始化成功")
     end
 
     -- 8. 初始化战役系统 (V2.0新增)
-    print(GameConfig.LOG_PREFIX, "步骤8: 初始化战役系统...")
     success, result = pcall(function()
         return CampaignManager.Initialize()
     end)
@@ -325,8 +262,6 @@ local function InitializeServer()
         warn(GameConfig.LOG_PREFIX, "战役系统初始化失败(异常):", result)
     elseif result == false then
         warn(GameConfig.LOG_PREFIX, "战役系统初始化失败(返回false)")
-    else
-        print(GameConfig.LOG_PREFIX, "战役系统初始化成功")
     end
 
     -- 检查是否有关键系统初始化失败
@@ -338,10 +273,6 @@ local function InitializeServer()
         return false
     end
 
-    print("==========================================")
-    print(GameConfig.LOG_PREFIX, "服务端初始化完成!")
-    print(GameConfig.LOG_PREFIX, "等待玩家加入...")
-    print("==========================================")
     return true
 end
 
@@ -359,17 +290,6 @@ elseif result == false then
     warn("==========================================")
     warn(GameConfig.LOG_PREFIX, "服务端初始化未完全成功,某些功能可能不可用")
     warn("==========================================")
-else
-    print(GameConfig.LOG_PREFIX, "服务端运行正常")
-
-    -- 显示系统信息
-    if GameConfig.DEBUG_MODE then
-        print("\n" .. GameConfig.LOG_PREFIX, "系统信息:")
-        print("  - 最大玩家数:", GameConfig.MAX_PLAYERS)
-        print("  - 基地数量:", GameConfig.HOME_COUNT)
-        print("  - 初始金币:", GameConfig.INITIAL_COINS)
-        print("")
-    end
 end
 
 -- ==================== 调试命令(仅调试模式) ====================
@@ -381,7 +301,6 @@ if GameConfig.DEBUG_MODE then
         local player = Players:FindFirstChild(playerName)
         if player then
             CurrencySystem.AddCoins(player, amount, "调试添加")
-            print(GameConfig.LOG_PREFIX, "为", playerName, "添加", amount, "金币")
         else
             warn(GameConfig.LOG_PREFIX, "找不到玩家:", playerName)
         end
@@ -392,12 +311,7 @@ if GameConfig.DEBUG_MODE then
         local player = Players:FindFirstChild(playerName)
         if player then
             local data = DataManager.GetPlayerData(player)
-            if data then
-                print(GameConfig.LOG_PREFIX, "玩家数据:", playerName)
-                print("  UserId:", data.UserId)
-                print("  HomeSlot:", data.HomeSlot)
-                print("  Coins:", data.Currency.Coins)
-            else
+            if not data then
                 warn(GameConfig.LOG_PREFIX, "玩家数据不存在:", playerName)
             end
         else
@@ -407,21 +321,10 @@ if GameConfig.DEBUG_MODE then
 
     _G.DebugGetHomeOccupancy = function()
         local occupancy = PlayerManager.GetHomeOccupancy()
-        print(GameConfig.LOG_PREFIX, "基地占用状态:")
         for slot = 1, GameConfig.HOME_COUNT do
             local player = occupancy[slot]
-            if player then
-                print(string.format("  基地%d: %s", slot, player.Name))
-            else
-                print(string.format("  基地%d: 空闲", slot))
-            end
         end
     end
-
-    print(GameConfig.LOG_PREFIX, "调试命令已加载:")
-    print("  _G.DebugAddCoins(playerName, amount) - 为玩家添加金币")
-    print("  _G.DebugGetPlayerData(playerName) - 查看玩家数据")
-    print("  _G.DebugGetHomeOccupancy() - 查看基地占用状态")
 end
 
 -- ==================== 玩家事件处理 (V2.0.1新增) ====================
@@ -430,8 +333,6 @@ local Players = game:GetService("Players")
 
 -- 玩家加入时初始化基地
 Players.PlayerAdded:Connect(function(player)
-	print(GameConfig.LOG_PREFIX, "玩家加入:", player.Name)
-
 	-- 等待PlayerManager分配基地
 	task.wait(1)
 
@@ -447,15 +348,12 @@ end)
 
 -- 玩家离开时清理
 Players.PlayerRemoving:Connect(function(player)
-	print(GameConfig.LOG_PREFIX, "玩家离开:", player.Name)
-
 	local playerId = player.UserId
 	local homeId = PlayerManager.GetPlayerHomeId(player)
 
 	-- 1. 如果玩家在战役中，强制结束战役并关门
 	local campaignData = CampaignManager.ActiveCampaigns[playerId]
 	if campaignData then
-		print(GameConfig.LOG_PREFIX, "玩家在战役中离开，强制结束战役")
 		pcall(function()
 			CampaignManager.OnCampaignEnd(campaignData, false)
 		end)
@@ -468,6 +366,4 @@ Players.PlayerRemoving:Connect(function(player)
 		end)
 	end
 end)
-
-print(GameConfig.LOG_PREFIX, "玩家事件处理已注册")
 

@@ -80,7 +80,16 @@ GameConfig.Campaign = {
 		[4] = Vector3.new(-360, 0.5, -184),
 		[5] = Vector3.new(-480, 0.5, -184),
 		[6] = Vector3.new(-600, 0.5, -184),
-	}
+	},
+
+	-- V2.4新增：寻路卡住检测参数（Watchdog机制）
+	StuckDetectionThreshold = 0.2,   -- studs（单位移动距离少于这个）
+	StuckDetectionWindow = 0.8,      -- seconds（时间窗口）
+	StuckDetectionMinDistance = 5,   -- studs（距离目标大于这个才认定卡住）
+
+	-- V2.4新增：调试开关
+	EnablePathDebugLogs = false,     -- 详细寻路日志
+	EnableAIDebugLogs = false,       -- 详细AI日志
 }
 
 -- ==================== 门控系统配置 (V2.0.1) ====================

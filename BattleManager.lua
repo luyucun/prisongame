@@ -31,6 +31,7 @@ local BattleConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChi
 local CombatSystem = require(ServerScriptService.Systems.CombatSystem)
 local UnitAI = require(ServerScriptService.Systems.UnitAI)
 local UnitManager = require(ServerScriptService.Systems.UnitManager)  -- V1.5.1新增
+local PhysicsManager = require(ServerScriptService.Systems.PhysicsManager)  -- V2.2新增
 local HitboxService = require(ServerScriptService.Systems.HitboxService)  -- V1.5.1新增
 
 -- ==================== 私有变量 ====================
@@ -326,8 +327,7 @@ function BattleManager.StartBattle(battleId)
     local finalDefenseUnits = {}
 
     -- 处理攻击方
-    for _, unit in ipairs(battle.AttackUnits) do
-        -- 1. 注册到UnitManager
+    for i, unit in ipairs(battle.AttackUnits) do
         UnitManager.RegisterUnit(battleId, BattleConfig.Team.ATTACK, unit)
 
         -- 2. 初始化CombatSystem状态
@@ -336,18 +336,17 @@ function BattleManager.StartBattle(battleId)
         local success = CombatSystem.InitializeUnit(unit, unitId, level, BattleConfig.Team.ATTACK, battleId)
 
         if success then
-            -- 3. 启动AI
-            UnitAI.StartAI(unit)
+            PhysicsManager.ConfigureUnitPhysics(unit, "ally")
+
+            -- 4. 启动AI
+            local aiStartResult = UnitAI.StartAI(unit)
+
             table.insert(finalAttackUnits, unit)
-            DebugLog(string.format("✅ 攻击方单位初始化成功: %s (Lv.%d)", unitId, level))
-        else
-            WarnLog(string.format("❌ 攻击方单位初始化失败: %s", unit.Name))
         end
     end
 
     -- 处理防守方
-    for _, unit in ipairs(battle.DefenseUnits) do
-        -- 1. 注册到UnitManager
+    for i, unit in ipairs(battle.DefenseUnits) do
         UnitManager.RegisterUnit(battleId, BattleConfig.Team.DEFENSE, unit)
 
         -- 2. 初始化CombatSystem状态
@@ -356,12 +355,12 @@ function BattleManager.StartBattle(battleId)
         local success = CombatSystem.InitializeUnit(unit, unitId, level, BattleConfig.Team.DEFENSE, battleId)
 
         if success then
-            -- 3. 启动AI
-            UnitAI.StartAI(unit)
+            PhysicsManager.ConfigureUnitPhysics(unit, "enemy")
+
+            -- 4. 启动AI
+            local aiStartResult = UnitAI.StartAI(unit)
+
             table.insert(finalDefenseUnits, unit)
-            DebugLog(string.format("✅ 防守方单位初始化成功: %s (Lv.%d)", unitId, level))
-        else
-            WarnLog(string.format("❌ 防守方单位初始化失败: %s", unit.Name))
         end
     end
 
@@ -382,15 +381,11 @@ function BattleManager.StartBattle(battleId)
         end
     end
 
-    DebugLog(string.format("战斗开始: BattleId=%d, 攻击方%d个单位, 防守方%d个单位",
-        battleId, #battle.AttackUnits, #battle.DefenseUnits))
-
     -- 通知客户端战斗状态更新
     if battleStateUpdateEvent then
         local player = Players:GetPlayerByUserId(battle.PlayerId)
         if player then
             battleStateUpdateEvent:FireClient(player, battleId, BattleConfig.BattleState.FIGHTING, nil)
-            DebugLog(string.format("已通知客户端战斗开始: BattleId=%d", battleId))
         end
     end
 

@@ -30,6 +30,7 @@ local UnitConfig = require(ReplicatedStorage.Config.UnitConfig)
 -- 引用系统
 local PathService = require(ServerScriptService.Systems.PathService)
 local UnitAI = require(ServerScriptService.Systems.UnitAI)
+local PhysicsManager = require(ServerScriptService.Systems.PhysicsManager)  -- V2.2新增
 
 -- ==================== 调试日志 ====================
 
@@ -120,6 +121,13 @@ function CampaignUnitHelper.ActivateUnit(unitModel)
 		return false
 	end
 
+	-- 严格检查Humanoid：缺少Humanoid直接返回false
+	local humanoid = unitModel:FindFirstChildOfClass("Humanoid")
+	if not humanoid then
+		WarnLog("ActivateUnit失败：单位缺少Humanoid -", unitModel.Name, unitModel:GetFullName())
+		return false
+	end
+
 	-- 检查是否已激活
 	if unitModel:GetAttribute("IsActivated") then
 		return true
@@ -156,14 +164,9 @@ function CampaignUnitHelper.ActivateUnit(unitModel)
 			end
 		end
 
-		-- 重置Humanoid状态
-		local humanoid = unitModel:FindFirstChildOfClass("Humanoid")
-		if humanoid then
-			humanoid.PlatformStand = false
-			humanoid:ChangeState(Enum.HumanoidStateType.Running)
-		else
-			WarnLog("警告：未找到Humanoid")
-		end
+		-- 重置Humanoid状态（已确保humanoid存在）
+		humanoid.PlatformStand = false
+		humanoid:ChangeState(Enum.HumanoidStateType.Running)
 
 		-- 标记为已激活
 		unitModel:SetAttribute("IsActivated", true)
@@ -243,29 +246,84 @@ function CampaignUnitHelper.PrepareForBattle(unitModel)
 		return false
 	end
 
-	local success, err = pcall(function()
-		-- 1. 停止旧的AI（如有）
-		UnitAI.StopAI(unitModel)
-
-		-- 2. 清理PathService残留
-		PathService.ClearPath(unitModel)
-
-		-- 3. 确保解除锚定
-		SetUnitAnchored(unitModel, false)
-
-		-- 4. 重置Humanoid状态
-		local humanoid = unitModel:FindFirstChild("Humanoid")
-		if humanoid then
-			humanoid.PlatformStand = false
-			humanoid:ChangeState(Enum.HumanoidStateType.Running)
-		end
-	end)
-
-	if not success then
-		WarnLog("PrepareForBattle失败:", err)
+	-- 严格检查Humanoid：缺少Humanoid直接返回false
+	local humanoid = unitModel:FindFirstChildOfClass("Humanoid")
+	if not humanoid then
+		WarnLog("PrepareForBattle失败：单位缺少Humanoid -", unitModel.Name, unitModel:GetFullName())
 		return false
 	end
 
+	-- V2.3.2修复：分解成多个独立的pcall，任何单个操作失败不会导致整个函数失败
+	-- 准备进入战斗的操作都是"尽力而为"的，有一个成功即为准备成功
+	local operationCount = 0
+	local successCount = 0
+
+	-- 1. 停止旧的AI（如有）
+	local success1, err1 = pcall(function()
+		UnitAI.StopAI(unitModel)
+	end)
+	operationCount = operationCount + 1
+	if success1 then successCount = successCount + 1 end
+	if not success1 and GameConfig.DEBUG_MODE then
+		WarnLog("    StopAI失败:", err1)
+	end
+
+	-- 2. 清理PathService残留
+	local success2, err2 = pcall(function()
+		PathService.ClearPath(unitModel)
+	end)
+	operationCount = operationCount + 1
+	if success2 then successCount = successCount + 1 end
+	if not success2 and GameConfig.DEBUG_MODE then
+		WarnLog("    ClearPath失败:", err2)
+	end
+
+	-- 3. 确保解除锚定
+	local success3, err3 = pcall(function()
+		SetUnitAnchored(unitModel, false)
+	end)
+	operationCount = operationCount + 1
+	if success3 then successCount = successCount + 1 end
+	if not success3 and GameConfig.DEBUG_MODE then
+		WarnLog("    SetUnitAnchored失败:", err3)
+	end
+
+	-- 4. 重置Humanoid状态（已确保humanoid存在）
+	local success4, err4 = pcall(function()
+		humanoid.PlatformStand = false
+		humanoid:ChangeState(Enum.HumanoidStateType.Running)
+	end)
+	operationCount = operationCount + 1
+	if success4 then successCount = successCount + 1 end
+	if not success4 and GameConfig.DEBUG_MODE then
+		WarnLog("    重置Humanoid失败:", err4)
+	end
+
+	-- 5. 配置物理碰撞（V2.2新增：友军单位）
+	-- V2.3.2修复：物理碰撞配置失败不阻塞战斗准备（降级处理）
+	local success5, err5 = pcall(function()
+		PhysicsManager.ConfigureUnitPhysics(unitModel, "ally")
+	end)
+	operationCount = operationCount + 1
+	if success5 then successCount = successCount + 1 else
+		-- 物理碰撞失败降级：至少不影响战斗，只是碰撞处理可能不完美
+		if GameConfig.DEBUG_MODE then
+			WarnLog("    物理碰撞配置失败(降级处理):", err5)
+		end
+	end
+
+	-- V2.3.2修复：只要至少3个核心操作成功（停止AI、清理路径、解锚、重置状态），就认为准备成功
+	-- 物理碰撞失败不影响战斗进行（只是碰撞处理降级）
+	local coreSuccess = success1 and success2 and success3 and success4
+
+	if not coreSuccess then
+		WarnLog(string.format("  ❌ PrepareForBattle核心操作失败 (成功 %d/%d)，单位: %s",
+			successCount, operationCount, unitModel.Name))
+		return false
+	end
+
+	DebugLog(string.format("  ✅ PrepareForBattle成功 (所有 %d 个操作完成，单位: %s)",
+		operationCount, unitModel.Name))
 	return true
 end
 

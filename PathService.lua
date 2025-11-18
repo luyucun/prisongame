@@ -44,20 +44,24 @@ local CONFIG = {
 	-- 目标移动阈值（studs）- V2.2优化：提高阈值避免频繁重算
 	TARGET_MOVE_THRESHOLD = 35,  -- 从15提高到35，减少重算
 
-	-- Waypoint到达阈值（studs）
-	WAYPOINT_REACH_THRESHOLD = 4,
+	-- Waypoint到达阈值（studs）- V2.3修复：保持2避免卡在阈值
+	WAYPOINT_REACH_THRESHOLD = 2,
 
 	-- 最大重试次数
 	MAX_RETRY_COUNT = 3,
 
-	-- 连续阻挡次数上限
-	MAX_BLOCKED_COUNT = 10,
+	-- 连续阻挡次数上限 - V2.3修复：降低到2加快重寻
+	MAX_BLOCKED_COUNT = 2,
 
-	-- 阻挡时间窗口（秒）
-	BLOCKED_TIME_WINDOW = 5,
+	-- 阻挡时间窗口（秒）- V2.3修复：缩短到1.5秒加快响应
+	BLOCKED_TIME_WINDOW = 1.5,
 
 	-- 降级策略：减小AgentRadius的比例
 	RADIUS_REDUCTION_RATIO = 0.85,
+	
+	-- V2.2: Multi-level fallback strategy
+	RADIUS_REDUCTION_STEP2 = 0.75,  -- Second level
+	RADIUS_REDUCTION_STEP3 = 0.6,   -- Third level
 
 	-- 降级策略：最小AgentRadius
 	MIN_AGENT_RADIUS = 0.5,
@@ -72,7 +76,7 @@ local CONFIG = {
 	AGENT_PARAMS_CACHE_TIME = -1,
 
 	-- 路径参数
-	WAYPOINT_SPACING = 6,  -- 从4提高到6，减少路径点数量
+	WAYPOINT_SPACING = 4,  -- V2.2: from 6 to 4, better corners
 
 	-- 体型参数自动计算
 	AUTO_RADIUS_MULTIPLIER = 0.25,  -- max(X,Z) * 0.25
@@ -80,8 +84,9 @@ local CONFIG = {
 	AUTO_HEIGHT_OFFSET = 1,         -- Y + 1 容差
 
 	-- V2.2性能优化：大幅提升吞吐量
-	BATCH_UPDATE_INTERVAL = 0.08,   -- 从0.06提升到0.08，平滑负载
-	MAX_COMPUTE_PER_FRAME = 10,     -- 从20降低到10，避免瞬时尖峰
+	-- V2.4优化：P0阶段参数调整（保守升级）
+	BATCH_UPDATE_INTERVAL = 0.06,   -- 从0.08→0.06（加速队列处理）
+	MAX_COMPUTE_PER_FRAME = 15,     -- 从10→15（提升吞吐量但避免尖峰）
 	-- 动态调整：实际值为 min(MAX_COMPUTE_PER_FRAME, queueLength)
 
 	-- V2.2优化：动态并发限制（不再硬编码）
@@ -603,9 +608,97 @@ local function TryFallbackStrategy(unitModel, targetModel, pathState, unitId)
 		path:Destroy()
 	end
 
-	-- 策略2: 采样近邻点
+	-- 策略1.5: 第二级降级（更小半径）
+	if pathState.Retries == 1 then
+		local originalRadius = pathState.AgentParams.Radius
+		local reducedRadius = math.max(CONFIG.MIN_AGENT_RADIUS, originalRadius * CONFIG.RADIUS_REDUCTION_STEP2)
+
+		DebugLog(string.format("%s [Fallback-1.5] Radius: %.1f → %.1f", unitId, originalRadius, reducedRadius))
+
+		local newParams = {
+			Radius = reducedRadius,
+			Height = pathState.AgentParams.Height,
+			CanJump = pathState.AgentParams.CanJump,
+		}
+
+		local path = PathfindingService:CreatePath({
+			AgentRadius = newParams.Radius,
+			AgentHeight = newParams.Height,
+			AgentCanJump = newParams.CanJump,
+			WaypointSpacing = CONFIG.WAYPOINT_SPACING,
+		})
+
+		local success, _ = pcall(function()
+			path:ComputeAsync(startPos, targetPos)
+		end)
+
+		if success and path.Status == Enum.PathStatus.Success then
+			local waypoints = path:GetWaypoints()
+			if waypoints and #waypoints >= 2 then
+				pathState.Path = path
+				pathState.Waypoints = DeepCopyWaypoints(waypoints)
+				pathState.Index = 2
+				pathState.AgentParams = newParams
+				pathState.Status = PathStatus.SUCCESS
+				pathState.LastTargetPos = targetPos
+				pathState.Retries = 0
+
+				DrawPath(pathState.Waypoints, pathState)
+				DebugLog(string.format("%s [Fallback-1.5] Success! %d waypoints", unitId, #pathState.Waypoints))
+				return true
+			end
+		end
+
+		path:Destroy()
+	end
+
+	-- 策略1.75: 第三级降级（最小半径）
 	if pathState.Retries == 2 then
-		DebugLog(string.format("%s [回退策略2] 采样近邻可达点", unitId))
+		local originalRadius = pathState.AgentParams.Radius
+		local reducedRadius = math.max(CONFIG.MIN_AGENT_RADIUS, originalRadius * CONFIG.RADIUS_REDUCTION_STEP3)
+
+		DebugLog(string.format("%s [Fallback-1.75] Radius: %.1f → %.1f", unitId, originalRadius, reducedRadius))
+
+		local newParams = {
+			Radius = reducedRadius,
+			Height = pathState.AgentParams.Height,
+			CanJump = pathState.AgentParams.CanJump,
+		}
+
+		local path = PathfindingService:CreatePath({
+			AgentRadius = newParams.Radius,
+			AgentHeight = newParams.Height,
+			AgentCanJump = newParams.CanJump,
+			WaypointSpacing = CONFIG.WAYPOINT_SPACING,
+		})
+
+		local success, _ = pcall(function()
+			path:ComputeAsync(startPos, targetPos)
+		end)
+
+		if success and path.Status == Enum.PathStatus.Success then
+			local waypoints = path:GetWaypoints()
+			if waypoints and #waypoints >= 2 then
+				pathState.Path = path
+				pathState.Waypoints = DeepCopyWaypoints(waypoints)
+				pathState.Index = 2
+				pathState.AgentParams = newParams
+				pathState.Status = PathStatus.SUCCESS
+				pathState.LastTargetPos = targetPos
+				pathState.Retries = 0
+
+				DrawPath(pathState.Waypoints, pathState)
+				DebugLog(string.format("%s [Fallback-1.75] Success! %d waypoints", unitId, #pathState.Waypoints))
+				return true
+			end
+		end
+
+		path:Destroy()
+	end
+
+	-- 策略2: 采样近邻点
+	if pathState.Retries == 3 then
+		DebugLog(string.format("%s [Fallback-2] Sample neighbor", unitId))
 
 		local neighborPos = SampleNeighborPoint(unitModel, targetPos, pathState.AgentParams)
 
@@ -724,19 +817,20 @@ local function BuildPath(unitModel, targetModel, unitId)
 			end
 			pathState.LastBlockedTime = now
 
-			-- 连续阻挡次数过多，放弃当前路径
+			-- V2.3修复：连续阻挡次数过多，立即清理路径并高优先级重寻
 			if pathState.BlockedCount >= CONFIG.MAX_BLOCKED_COUNT then
-				DebugLog(string.format("%s 路径连续阻挡%d次，清理并准备重新寻路", unitId, pathState.BlockedCount))
+				DebugLog(string.format("%s 路径连续阻挡%d次，立即重寻", unitId, pathState.BlockedCount))
 
-				-- V2.1.3修复：不要标记为FAILED，而是清理路径数据并立即允许重新请求
-				-- 这样单位可以重新排队寻路，而不是永久卡死
+				-- 清理旧路径
 				ClearPathData(unitModel)
 				pathState.Status = PathStatus.NEED_REPATH
-				pathState.BlockedCount = 0  -- 重置阻挡计数
-				pathState.LastBlockedTime = nil
+				pathState.BlockedCount = 0
 				pathState.LastRequestTime = 0  -- 允许立即重建
 
-				DebugLog(string.format("%s 路径已重置，可重新寻路", unitId))
+				-- V2.3关键修复：立即高优先级入队重寻，不等待下一帧
+				QueuePathCompute(unitModel, targetModel, unitId, nil, "Campaign", "high")
+
+				DebugLog(string.format("%s 已入队高优先级重寻", unitId))
 				return
 			end
 
@@ -1343,8 +1437,6 @@ local function ProcessComputeQueue()
 					end)
 
 					if not pcallSuccess then
-						warn(string.format("[PathService] 路径计算异常: %s, 错误: %s",
-							request.unitId or "Unknown", tostring(pcallError)))
 					end
 
 					-- 无论成功失败，都减少 computingCount
@@ -1396,7 +1488,6 @@ RunService.Heartbeat:Connect(ProcessComputeQueue)
 ]]
 function PathService.MoveUnitsToPositions(moveTargets, callbacks)  -- V2.3.1：移除cachedWaypoints参数
 	if not moveTargets or type(moveTargets) ~= "table" then
-		warn("[PathService] MoveUnitsToPositions: moveTargets无效")
 		return nil
 	end
 
@@ -1430,7 +1521,7 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)  -- V2.3.1：�
 
 	-- 1. 准备所有单位数据
 	for unitInstance, targetCFrame in pairs(moveTargets) do
-		if unitInstance and unitInstance:FindFirstChild("Humanoid") and unitInstance:FindFirstChild("HumanoidRootPart") then
+		if unitInstance and unitInstance:FindFirstChild("Humanoid") and (unitInstance:FindFirstChild("HumanoidRootPart") or unitInstance.PrimaryPart) then
 			-- 创建虚拟目标Part
 			local targetPart = Instance.new("Part")
 			targetPart.Size = Vector3.new(1, 1, 1)
@@ -1456,7 +1547,9 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)  -- V2.3.1：�
 				LastMoveCommand = 0,     -- 上次发送MoveTo命令的时间
 				CurrentWaypoint = nil,   -- 当前目标路径点
 
-				-- V2.3.1：移除CachedWaypoints字段
+				-- V2.2: Stuck detection
+				LastPosition = nil,         -- Last known position
+				LastPositionTime = 0,       -- Time when position was recorded
 			}
 
 			table.insert(unitsList, unitInstance)
@@ -1465,7 +1558,6 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)  -- V2.3.1：�
 	end
 
 	if moveCount == 0 then
-		warn("[PathService] MoveUnitsToPositions: 没有有效的移动目标")
 		if onAllSettled then
 			onAllSettled({}, {}, {})
 		end
@@ -1558,12 +1650,25 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)  -- V2.3.1：�
 		end
 
 		local humanoid = unitInstance:FindFirstChild("Humanoid")
-		local rootPart = unitInstance:FindFirstChild("HumanoidRootPart")
+		-- V2.3修复：支持HumanoidRootPart或PrimaryPart
+		local rootPart = unitInstance:FindFirstChild("HumanoidRootPart") or unitInstance.PrimaryPart
 		if not humanoid or not rootPart then
 			-- V2.3.1修复：启动失败，标记为失败并返回false
 			data.Arrived = true
 			table.insert(failedList, unitInstance)
+			DebugLog(string.format("⚠️ %s 缺少Humanoid或根部件，标记为失败", unitInstance.Name))
 			return false
+		end
+
+		-- V2.3.2新增：启动移动前保险地确保解锚与移动能力
+		-- 避免少数模型残留锚定/速度为0导致无法移动
+		if rootPart.Anchored then
+			rootPart.Anchored = false
+			DebugLog(string.format("🔓 %s 解锚（启动移动前）", unitInstance.Name))
+		end
+		if humanoid.WalkSpeed <= 0 then
+			humanoid.WalkSpeed = 16
+			DebugLog(string.format("⚡ %s 恢复移动速度为16 (原值<=0)", unitInstance.Name))
 		end
 
 		-- V2.1.3新增：实际启动时才设置StartTime
@@ -1759,6 +1864,10 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)  -- V2.3.1：�
 	local batchSize = CONFIG.BATCH_START_SIZE
 	local batchDelay = CONFIG.BATCH_START_DELAY
 
+	-- V2.3.2新增：队列卡住兜底提额机制
+	-- 记录上次成功启动下一批的时间，用于检测队列长期阻塞
+	local lastBatchKickTime = tick()
+
 	-- 3. 定期检查超时和完成状态（降低频率）
 	local lastCheckTime = tick()
 	local checkConnection
@@ -1778,8 +1887,13 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)  -- V2.3.1：�
 		-- 替代V2.0.4的per-unit Heartbeat，降低回调频率从1000次/秒到~60次/秒
 		for unitInstance, data in pairs(moveData) do
 			if not data.Arrived then
-				-- 检查实例有效性
-				if not unitInstance or not unitInstance.Parent or not unitInstance:FindFirstChild("HumanoidRootPart") then
+				-- V2.3.3关键修复：只要有一个单位未到达，本帧绝不可能全部到达
+				-- 防止因为continue分支而误判allArrived=true
+				allArrived = false
+
+				-- V2.3修复：检查实例有效性，支持HumanoidRootPart或PrimaryPart
+				local rootPart = (unitInstance and unitInstance:FindFirstChild("HumanoidRootPart")) or (unitInstance and unitInstance.PrimaryPart)
+				if not unitInstance or not unitInstance.Parent or not rootPart then
 					-- V2.1.3新增：停止单位移动
 					StopUnitMovement(unitInstance, "实例失效")
 
@@ -1794,6 +1908,7 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)  -- V2.3.1：�
 					end
 					table.insert(failedList, unitInstance)
 					arrivedCount = arrivedCount + 1
+					DebugLog(string.format("⚠️ %s 实例失效，标记为失败", unitInstance and unitInstance.Name or "Unknown"))
 
 					-- V2.1.3新增：减少行军计数，尝试启动下一批
 					marchingCount = marchingCount - 1
@@ -1804,7 +1919,7 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)  -- V2.3.1：�
 
 				-- V2.3新增：批量持续MoveTo推进逻辑（整合自V2.0.4的per-unit Heartbeat）
 				-- 检查是否已接近最终目标
-				local rootPart = unitInstance.HumanoidRootPart
+				-- V2.3修复：使用上面已获取的rootPart，而不是假设HumanoidRootPart存在
 				local currentPos = rootPart.Position
 				local finalTargetPos = data.TargetCFrame.Position
 				local distanceXZToFinal = math.sqrt((currentPos.X - finalTargetPos.X)^2 + (currentPos.Z - finalTargetPos.Z)^2)
@@ -1858,8 +1973,34 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)  -- V2.3.1：�
 							targetPos = data.TargetCFrame.Position
 						end
 					else
-						-- 路径无效或无路径，直线移动到目标
-						targetPos = data.TargetCFrame.Position
+						-- V2.3关键修复：路径失效/失败时，禁止直线MoveTo兜底
+						-- 改为强制重新寻路，避免单位"直冲目标怼墙"
+						if pathStatus == PathStatus.FAILED or pathStatus == PathStatus.NEED_REPATH or pathStatus == PathStatus.IDLE then
+							-- 立即请求重新寻路（如果未在队列中）
+							if not data.PathRequested then
+								data.PathRequested = true
+								DebugLog(string.format("🔄 %s 路径失效(%s)，强制重寻", unitInstance.Name, tostring(pathStatus)))
+
+								QueuePathCompute(unitInstance, data.TargetPart, unitInstance.Name, function(success)
+									data.PathRequested = false
+									if success then
+										DebugLog(string.format("✅ %s 重寻成功", unitInstance.Name))
+									end
+								end, "Campaign", "high")
+							end
+							-- 暂时停止移动，等待路径计算完成，不要直线冲向目标
+							local humanoid = unitInstance:FindFirstChild("Humanoid")
+							local rootPart = unitInstance:FindFirstChild("HumanoidRootPart")
+							if humanoid and rootPart then
+								humanoid:MoveTo(rootPart.Position)  -- 原地待命
+							end
+							-- V2.3.3保险：本单位未到达，防止allArrived被误判为true
+							allArrived = false
+							continue  -- 跳过本次MoveTo
+						else
+							-- 其他状态（COMPUTING/QUEUED），使用目标位置作为临时兜底
+							targetPos = data.TargetCFrame.Position
+						end
 					end
 
 					-- 检查是否还需要移动（距离阈值）
@@ -1868,6 +2009,23 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)  -- V2.3.1：�
 
 						-- 只有在距离超过阈值时才发送MoveTo
 						if distance > CONFIG.WAYPOINT_REACH_THRESHOLD then
+						-- V2.3优化：增强WalkToPoint节流，避免频繁覆盖MoveToFinished
+						-- 参数调优：2.0 studs / 0.6s（根据实测微调）
+						local humanoid = unitInstance:FindFirstChild("Humanoid")
+						if humanoid then
+							local walkToPoint = humanoid.WalkToPoint
+							local walkToDist = (walkToPoint - targetPos).Magnitude
+							local timeSinceLastMove = now - (data.LastMoveCommand or 0)
+
+							-- 跳过条件：已在移动到相同目标且时间窗口内
+							if walkToDist < 2.0 and timeSinceLastMove < 0.6 then
+								-- 已经在移动到这个路径点，跳过
+								allArrived = false  -- V2.3.4修复：continue分支必须确保allArrived=false
+								continue
+							end
+						end
+						
+
 							-- 更新LastMoveCommand时间
 							data.LastMoveCommand = now
 
@@ -1882,16 +2040,72 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)  -- V2.3.1：�
 						end
 					end
 
-					-- 超时检测 - V2.3.1修复：只检测已启动的单位（StartTime > 0）
+					-- V2.3强化：卡住检测watchdog - 如果单位1秒内移动<0.2 studs且远离目标，强制重寻
+				if data.StartTime > 0 then
+					local currentPos = rootPart.Position
+
+					if data.LastPosition then
+						local positionDelta = (currentPos - data.LastPosition).Magnitude
+						local timeDelta = now - data.LastPositionTime
+
+						-- V2.3修复：降低阈值，提高灵敏度（0.3→0.2 studs, 1.0→0.8s）
+						if positionDelta < 0.2 and timeDelta > 0.8 and distanceXZToFinal > 5 then
+							-- 单位卡住，强制高优先级重寻
+							if not data.PathRequested then
+								data.PathRequested = true
+								DebugLog(string.format("🚨 %s 检测到卡住 (%.2f studs in %.1fs)，强制重寻",
+									unitInstance.Name, positionDelta, timeDelta))
+
+								-- 立即清理旧路径
+								PathService.ClearPath(unitInstance)
+
+								-- 高优先级重寻
+								QueuePathCompute(unitInstance, data.TargetPart, unitInstance.Name,
+									function(success)
+										data.PathRequested = false
+										if success then
+											-- 重寻成功，立即开始移动
+											local humanoid = unitInstance:FindFirstChild("Humanoid")
+											if humanoid then
+												local nextWaypoint = PathService.GetNextWaypoint(unitInstance)
+												if nextWaypoint then
+													humanoid:MoveTo(nextWaypoint)
+													DebugLog(string.format("✅ %s 重寻成功，恢复移动", unitInstance.Name))
+												end
+											end
+										end
+									end, "Campaign", "high")
+							end
+
+							-- 更新位置追踪（避免重复触发）
+							data.LastPosition = currentPos
+							data.LastPositionTime = now
+						elseif timeDelta > 0.8 then
+							-- 每0.8秒更新一次位置追踪
+							data.LastPosition = currentPos
+							data.LastPositionTime = now
+						end
+					else
+						-- 初始化位置追踪
+						data.LastPosition = currentPos
+						data.LastPositionTime = now
+						-- V2.3.3保险：未启动同样视为未完成
+						allArrived = false
+					end
+				end
+
+				-- 超时检测 - V2.3.1修复：只检测已启动的单位（StartTime > 0）
 					-- 排队等待的单位 StartTime = 0，不应被视为超时
 					if data.StartTime > 0 and now - data.StartTime > GameConfig.Campaign.MoveTimeout then
-						warn(string.format("[PathService] ⏱️ 兵种寻路超时，强制传送: %s", unitInstance.Name))
 
 						-- V2.1.3新增：停止单位移动（在传送前）
 						StopUnitMovement(unitInstance, "超时")
 
-						local rootPart = unitInstance.HumanoidRootPart
-						rootPart.CFrame = data.TargetCFrame
+						-- V2.3.2新增：支持HumanoidRootPart或PrimaryPart的兜底查找
+						local rootPart = unitInstance:FindFirstChild("HumanoidRootPart") or unitInstance.PrimaryPart
+						if rootPart then
+							rootPart.CFrame = data.TargetCFrame
+						end
 
 						data.Arrived = true
 						data.ForceTeleported = true
@@ -1929,8 +2143,42 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)  -- V2.3.1：�
 			end
 		end
 
+		-- V2.3.2新增：兜底启动下一批机制
+		-- 即便没有单位完成（到达/超时/失败），也要持续放水
+		-- 防止首批单位迟迟不出结果导致整个队列卡住
+		if marchingCount < dynamicBatchLimit and #pendingQueue > 0 then
+			TryStartNextBatch()
+			lastBatchKickTime = now
+			DebugLog(string.format("🔓 兜底启动下一批 (当前: %d/%d, 队列: %d)",
+				marchingCount, dynamicBatchLimit, #pendingQueue))
+		end
+
+		-- V2.3.2新增：队列长期阻塞提额机制
+		-- 如果队列积压超过1.5秒且队列有等待，则临时提高dynamicBatchLimit
+		if #pendingQueue > 0 and now - lastBatchKickTime > 1.5 then
+			if marchingCount >= dynamicBatchLimit then
+				-- 队列积压超过1.5秒，提额5个单位
+				local oldLimit = dynamicBatchLimit
+				dynamicBatchLimit = math.min(moveCount, dynamicBatchLimit + 5)
+				lastBatchKickTime = now
+				DebugLog(string.format("⚠️ 队列积压提额: %d → %d, 队列等待: %d",
+					oldLimit, dynamicBatchLimit, #pendingQueue))
+				-- 立即启动提额后的单位
+				TryStartNextBatch()
+			end
+		end
+
+		-- V2.3.3最终兜底：用arrivedCount硬性校验，防止allArrived再次被遗漏
+		-- 如果到达的单位数少于总单位数，说明还有单位未完成
+		if arrivedCount < moveCount then
+			allArrived = false
+		end
+
 		-- 所有兵种到达
 		if allArrived then
+			DebugLog(string.format("[PathService] 🎯 准备触发onAllSettled回调，到达:%d, 超时:%d, 失败:%d",
+				#arrivedList, #timedOutList, #failedList))
+
 			checkConnection:Disconnect()
 			activeMoves[moveId] = nil
 
@@ -1949,9 +2197,11 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)  -- V2.3.1：�
 
 			-- 触发onAllSettled回调
 			if onAllSettled then
+				DebugLog("[PathService] 🚀 正在调用onAllSettled回调...")
 				pcall(function()
 					onAllSettled(arrivedList, timedOutList, failedList)
 				end)
+				DebugLog("[PathService] ✅ onAllSettled回调执行完成")
 			end
 		end
 	end)

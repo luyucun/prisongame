@@ -290,6 +290,42 @@ local function CreateAndPlayAnimation(humanoid, animationId, looped)
 end
 
 --[[
+V2.4新增：从缓存或创建并播放动画
+优化：优先从aiData.Tracks缓存中查找已加载的Track，避免重复LoadAnimation
+@param unitModel - 单位模型
+@param aiData - AI数据
+@param animationId - 动画ID
+@param trackType - 轨道类型标识（如"Idle", "Move", "Attack"）
+@param looped - 是否循环
+@return AnimationTrack|nil - 动画轨道
+]]
+local function PlayAnimationFromCache(unitModel, aiData, animationId, trackType, looped)
+	if not aiData or not aiData.Tracks then
+		return CreateAndPlayAnimation(aiData.Humanoid, animationId, looped)
+	end
+
+	-- 检查缓存中是否已有此Track
+	local cachedTrack = aiData.Tracks[trackType]
+	if cachedTrack and cachedTrack.Parent then
+		-- 缓存的Track仍有效，直接复用
+		pcall(function()
+			cachedTrack:Stop()
+			cachedTrack:Play()
+		end)
+		return cachedTrack
+	end
+
+	-- 缓存无效，使用CreateAndPlayAnimation（会自动创建新的）
+	local newTrack = CreateAndPlayAnimation(aiData.Humanoid, animationId, looped)
+	if newTrack then
+		-- 缓存新Track供后续使用
+		aiData.Tracks[trackType] = newTrack
+	end
+
+	return newTrack
+end
+
+--[[
 安全停止动画
 @param animationTrack - 动画轨道
 ]]
@@ -345,7 +381,8 @@ function AnimationController.SwitchToMove(unitModel, aiData, state)
 	-- 播放移动动画
 	local animId = UnitConfig.GetMoveAnimationId(state.UnitId)
 	if animId and animId ~= "" then
-		local track = CreateAndPlayAnimation(aiData.Humanoid, animId, true)
+		-- V2.4优化：使用缓存Track
+		local track = PlayAnimationFromCache(unitModel, aiData, animId, "Move", true)
 		if track then
 			aiData.Tracks.Move = track
 			aiData.CurrentState = AnimationState.MOVE
@@ -389,7 +426,7 @@ function AnimationController.SwitchToIdle(unitModel, aiData, state)
 	if animId and animId ~= "" then
 		-- 只有在Idle动画不存在或已停止时才重新播放
 		if not aiData.Tracks.Idle or not aiData.Tracks.Idle.IsPlaying then
-			local track = CreateAndPlayAnimation(aiData.Humanoid, animId, true)
+			local track = PlayAnimationFromCache(unitModel, aiData, animId, "Idle", true)
 			if track then
 				aiData.Tracks.Idle = track
 				aiData.CurrentState = AnimationState.IDLE
@@ -437,7 +474,7 @@ function AnimationController.PlayAttack(unitModel, aiData, state, target, onDama
 
 	-- 播放攻击动画
 	if animationId and animationId ~= "" and combatProfile.UseAnimationEvent then
-		local animTrack = CreateAndPlayAnimation(aiData.Humanoid, animationId, false)
+		local animTrack = PlayAnimationFromCache(unitModel, aiData, animationId, "Attack", false)
 
 		if animTrack then
 			-- 攻击动画成功加载并播放后，再停止旧动画
@@ -874,19 +911,81 @@ end
 -- ==================== 状态处理函数（重构版） ====================
 
 --[[
-处理SEEKING状态：寻找目标
+处理SEEKING状态：寻找目标 (V2.4新增：目标黏滞机制)
+目标黏滞逻辑：
+1. 仅当新目标比当前目标近5+ studs时才切换
+2. 防止目标抖动和频繁切换
+3. 添加目标超时机制
 ]]
 local function HandleSeeking(unitModel, aiData, state)
-	local target = UnitAI.FindNearestEnemy(unitModel)
+	local newTarget = UnitAI.FindNearestEnemy(unitModel)
+	local currentTarget = CombatSystem.GetTarget(unitModel)
 
-	if target then
-		CombatSystem.SetTarget(unitModel, target)
-		CombatSystem.SetAIState(unitModel, BattleConfig.AIState.MOVING)
-		LogStateChange(state.UnitId, "SEEKING", "MOVING", "找到目标")
+	-- V2.4新增：目标黏滞检查
+	if newTarget then
+		-- 如果已有目标，检查是否应该切换
+		if currentTarget and currentTarget.Parent then
+			-- 计算距离差
+			local newTargetDistance = GetDistance(unitModel, newTarget)
+			local currentTargetDistance = GetDistance(unitModel, currentTarget)
+			local distanceDifference = currentTargetDistance - newTargetDistance
+
+			-- V2.4：只有当新目标至少近5 studs时才切换
+			-- 防止单位频繁切换目标造成抖动
+			if distanceDifference >= 5 then
+				-- 新目标足够接近，切换
+				CombatSystem.SetTarget(unitModel, newTarget)
+				CombatSystem.SetAIState(unitModel, BattleConfig.AIState.MOVING)
+				LogStateChange(state.UnitId, "SEEKING", "MOVING",
+					string.format("切换目标 (节省%.1f studs)", distanceDifference))
+
+				-- V2.4新增：重置目标超时计数
+				if not aiData.TargetLockTick then
+					aiData.TargetLockTick = {}
+				end
+				aiData.TargetLockTick[newTarget] = tick()
+			else
+				-- 新目标不够接近，保持当前目标
+				CombatSystem.SetAIState(unitModel, BattleConfig.AIState.MOVING)
+				LogStateChange(state.UnitId, "SEEKING", "MOVING",
+					string.format("保持目标 (新目标仅近%.1f studs)", distanceDifference))
+			end
+		else
+			-- 没有当前目标，直接采用新目标
+			CombatSystem.SetTarget(unitModel, newTarget)
+			CombatSystem.SetAIState(unitModel, BattleConfig.AIState.MOVING)
+			LogStateChange(state.UnitId, "SEEKING", "MOVING", "找到目标")
+
+			-- V2.4新增：记录目标锁定时间
+			if not aiData.TargetLockTick then
+				aiData.TargetLockTick = {}
+			end
+			aiData.TargetLockTick[newTarget] = tick()
+		end
 	else
-		CombatSystem.SetAIState(unitModel, BattleConfig.AIState.IDLE)
-		-- 无目标时播放Idle
-		AnimationController.SwitchToIdle(unitModel, aiData, state)
+		-- 没有找到新目标
+		if currentTarget and currentTarget.Parent then
+			-- 还有当前目标，检查超时
+			-- V2.4新增：如果追踪当前目标超过30秒，强制放弃
+			local targetLockTime = aiData.TargetLockTick and aiData.TargetLockTick[currentTarget] or tick()
+			local lockDuration = tick() - targetLockTime
+
+			if lockDuration > 30 then
+				-- 目标超时，放弃
+				DebugLog(string.format("%s 目标超时(%.1f秒)，放弃并寻找新目标",
+					state.UnitId, lockDuration))
+				CombatSystem.SetTarget(unitModel, nil)
+				CombatSystem.SetAIState(unitModel, BattleConfig.AIState.IDLE)
+				AnimationController.SwitchToIdle(unitModel, aiData, state)
+			else
+				-- 保持当前目标，继续移动
+				CombatSystem.SetAIState(unitModel, BattleConfig.AIState.MOVING)
+			end
+		else
+			-- 无任何目标，切换到IDLE
+			CombatSystem.SetAIState(unitModel, BattleConfig.AIState.IDLE)
+			AnimationController.SwitchToIdle(unitModel, aiData, state)
+		end
 	end
 end
 
@@ -1104,10 +1203,10 @@ end
 
 -- V2.1性能优化：不同AI状态使用不同更新间隔
 local AI_UPDATE_INTERVALS = {
-	[BattleConfig.AIState.SEEKING] = 0.5,    -- 寻找目标每0.5秒一次
-	[BattleConfig.AIState.MOVING] = 0.2,     -- 移动状态每0.2秒一次
-	[BattleConfig.AIState.ATTACKING] = 0.1,  -- 攻击状态保持原频率
-	[BattleConfig.AIState.IDLE] = 0.5,       -- 待机状态每0.5秒一次
+	[BattleConfig.AIState.SEEKING] = 0.6,    -- 从0.5→0.6: 寻找目标频率降低
+	[BattleConfig.AIState.MOVING] = 0.2,     -- 保持: 移动状态需要较频繁检查
+	[BattleConfig.AIState.ATTACKING] = 0.1,  -- 保持: 攻击状态需要实时判断
+	[BattleConfig.AIState.IDLE] = 1.0,       -- 从0.5→1.0: 待机状态频率可以大幅降低
 }
 
 -- V2.3性能优化：Round-robin分帧调度
@@ -1121,6 +1220,16 @@ local function UpdateAllAIs()
 
 	-- V2.3：轮询下一个批次
 	currentBatch = (currentBatch + 1) % AI_BATCH_COUNT
+
+	-- 临时调试：确认AI更新循环运行
+	if currentBatch == 0 then
+		local activeCount = 0
+		for _, aiData in pairs(activeAIs) do
+			if aiData.IsActive then
+				activeCount = activeCount + 1
+			end
+		end
+	end
 
 	for unitModel, aiData in pairs(activeAIs) do
 		if not CombatSystem.IsUnitAlive(unitModel) then
@@ -1265,6 +1374,9 @@ function UnitAI.StartAI(unitModel)
 
 		-- V2.3新增：Round-robin批次索引（分帧调度）
 		BatchIndex = nextBatchIndex,
+
+		-- V2.4新增：目标黏滞机制
+		TargetLockTick = {},       -- [target] = tick() 记录每个目标的锁定时间，防止频繁切换
 	}
 
 	-- V2.3: 推进批次计数器（round-robin）
@@ -1474,7 +1586,33 @@ function UnitAI.UpdateAI(unitModel, aiData)
 end
 
 function UnitAI.FindNearestEnemy(unitModel)
+	-- V2.4优化：快速范围检查，避免不必要的寻敌
+	local state = CombatSystem.GetUnitState(unitModel)
+	if not state then
+		return nil
+	end
+
+	local unitConfig = UnitConfig.Units[state.UnitId]
+	if not unitConfig then
+		return nil
+	end
+
+	-- 获取攻击范围（带1.5倍安全系数）
+	local baseRange = unitConfig.AttackRange or 20
+	local extendedRange = baseRange * 1.5
+
+	-- 快速距离预检查：如果单位距离敌人太远，可能不值得寻敌
 	local enemy, distance = UnitManager.GetClosestEnemy(unitModel, BattleConfig.TARGET_SEARCH_RANGE)
+
+	if not enemy then
+		return nil
+	end
+
+	-- 距离过远直接返回nil，节省后续复杂计算
+	if distance > extendedRange and distance > BattleConfig.TARGET_SEARCH_RANGE * 0.7 then
+		return nil
+	end
+
 	return enemy
 end
 
@@ -1933,7 +2071,8 @@ V2.0 新增: AI模式切换API
 function UnitAI.SetMode(unitModel, mode)
 	local aiData = activeAIs[unitModel]
 	if not aiData then
-		WarnLog("SetMode失败：AI未启动")
+		-- 修改：AI未启动时不再警告，这在战役流程中是正常状态
+		-- WarnLog("SetMode失败：AI未启动")
 		return false
 	end
 

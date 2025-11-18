@@ -181,8 +181,9 @@ end)
 local stateUpdateEvent = CampaignEvents:FindFirstChild("CampaignStateUpdate")
 if stateUpdateEvent then
 	stateUpdateEvent.OnClientEvent:Connect(function(state, stageNum)
-		if state == "Preparing" then
-			-- 准备阶段
+		if state == "Preparing" or state == "PrepareBattle" then
+			-- V2.3修复：支持"Preparing"和"PrepareBattle"两种状态字符串
+			-- 准备阶段（包括战斗准备）
 			playButton.Visible = false
 			retreatButton.Visible = true
 			LockHomeOperations(true)

@@ -24,6 +24,11 @@ local GridPositionSystem = require(ServerScriptService.Systems.GridPositionSyste
 
 local StageService = {}
 
+-- V2.3.2新增：简单调试日志函数
+local function DebugLog(msg)
+	print("[StageService] " .. tostring(msg))
+end
+
 -- 缓存: [playerId] = {[stageNum] = stageFolderRef}
 StageService.StageCache = {}
 
@@ -100,9 +105,6 @@ function StageService.SetAirWallState(stageFolder, isOpen)
         airWall.Transparency = isOpen and 0.9 or 0.5
     end
 
-    print(string.format("[StageService] 空气墙状态更新: %s, 开启=%s, CanCollide=%s",
-        stageFolder.Name, tostring(isOpen), tostring(airWall.CanCollide)))
-
     return true
 end
 
@@ -164,7 +166,6 @@ function StageService.GetOrCreateStage(playerId, stageNum)
 
         local existing = stageFolder:FindFirstChild("Stage001")
         if existing then
-            print("[StageService] Stage001已存在（场景预制），homeId:", homeId)
             -- V2.0.3：场景预制的Stage001也需要设置空气墙状态
             StageService.SetAirWallState(existing, false)
             -- 缓存并返回
@@ -176,7 +177,6 @@ function StageService.GetOrCreateStage(playerId, stageNum)
         end
 
         -- 2. 场景中不存在，动态生成Stage001
-        print("[StageService] 动态生成Stage001，homeId:", homeId)
         local stage001 = StageService.GenerateStage001(homeId)
         if stage001 then
             -- 缓存
@@ -276,8 +276,6 @@ function StageService.GenerateStage001(homeId)
         end
 
         newStage.Parent = stageContainer
-
-        print("[StageService] Stage001生成成功，homeId:", homeId, "位置:", targetPosition)
 
         -- 8. 加载敌人数据
         StageService.LoadEnemyData(newStage, 1)
@@ -393,8 +391,6 @@ function StageService.GenerateStage(playerId, stageNum)
 
         newStage.Parent = stageContainer
 
-        print("[StageService] 关卡生成成功:", newStage.Name, "位置:", newBaseCFrame.Position)
-
         -- 加载敌人数据
         StageService.LoadEnemyData(newStage, stageNum)
 
@@ -478,9 +474,35 @@ function StageService.LoadEnemyData(stageFolder, stageNum)
 				return nil
 			end
 
-			local modelTemplate = SearchFolderRecursive(roleFolder, enemyData.UnitId)
+			-- V2.3.2新增：优先使用ModelPath精确路径查找
+			local modelTemplate = nil
+			if unitInfo.ModelPath then
+				-- 按配置的ModelPath精确路径查找
+				local node = ReplicatedStorage
+				local pathParts = string.split(unitInfo.ModelPath, "/")
+				for _, name in ipairs(pathParts) do
+					if node then
+						node = node:FindFirstChild(name)
+					else
+						break
+					end
+				end
+				if node and node:IsA("Model") then
+					modelTemplate = node
+					DebugLog(string.format("[StageService] ✅ 用ModelPath精确找到模型: %s → %s", enemyData.UnitId, unitInfo.ModelPath))
+				end
+			end
+
+			-- 回退：如果ModelPath失效，再按名字递归搜索
 			if not modelTemplate then
-				warn("[StageService] 兵种模型未找到:", enemyData.UnitId)
+				modelTemplate = SearchFolderRecursive(roleFolder, enemyData.UnitId)
+				if modelTemplate then
+					DebugLog(string.format("[StageService] ✅ 用递归搜索找到模型: %s (ModelPath无效或未配置)", enemyData.UnitId))
+				end
+			end
+
+			if not modelTemplate then
+				warn("[StageService] 兵种模型未找到:", enemyData.UnitId, "(已尝试ModelPath和递归搜索)")
 				return nil
 			end
 
@@ -546,8 +568,6 @@ function StageService.LoadEnemyData(stageFolder, stageNum)
 			-- 添加到场景
 			unitModel.Parent = idleFloorEnemy
 
-			print("[StageService] 生成敌人:", unitModel.Name, "位置:", enemyData.GridPos.X, enemyData.GridPos.Y)
-
 			return unitModel
 		end)
 
@@ -558,7 +578,6 @@ function StageService.LoadEnemyData(stageFolder, stageNum)
 		end
 	end
 
-	print("[StageService] 敌人加载完成，总数:", #enemies)
 	return enemies
 end
 
@@ -573,20 +592,15 @@ function StageService.CleanupStages(playerId)
             return
         end
 
-        print("[StageService] 开始清理关卡，playerId:", playerId)
-
         -- V2.0.1修改：遍历并销毁所有关卡（包括Stage001）
         for stageNum, stageFolder in pairs(cache) do
             if stageFolder and stageFolder.Parent then
-                print("[StageService] 清理关卡:", stageFolder.Name)
                 stageFolder:Destroy()
             end
         end
 
         -- 完全清除该玩家的缓存
         StageService.StageCache[playerId] = nil
-
-        print("[StageService] 关卡清理完成")
     end)
 
     if not success then

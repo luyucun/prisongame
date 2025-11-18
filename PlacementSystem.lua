@@ -356,18 +356,38 @@ local function CreateUnitModel(unitId, position, instanceId, level, gridSize)
         return nil
     end
 
-    -- V1.5.1修复: 递归搜索Role文件夹下的所有子文件夹
-    -- 支持任意文件夹结构，如 Role/Basic/Noob, Role/Rifle/AK-47 等
-    local roleFolder = ReplicatedStorage:FindFirstChild("Role")
-    if not roleFolder then
-        warn(GameConfig.LOG_PREFIX, "找不到Role文件夹")
+    -- 优先使用UnitConfig.ModelPath查找模型（与StageService对齐）
+    local modelTemplate = nil
+
+    -- 第一步：尝试使用配置的ModelPath
+    if unitConfig.ModelPath then
+        local node = ReplicatedStorage
+        for _, name in ipairs(string.split(unitConfig.ModelPath, "/")) do
+            node = node and node:FindFirstChild(name)
+        end
+        if node and node:IsA("Model") then
+            modelTemplate = node
+        end
+    end
+
+    -- 第二步：回退到递归搜索Role文件夹（向后兼容）
+    if not modelTemplate then
+        local roleFolder = ReplicatedStorage:FindFirstChild("Role")
+        if not roleFolder then
+            warn(GameConfig.LOG_PREFIX, "找不到Role文件夹")
+            return nil
+        end
+        modelTemplate = SearchFolderRecursive(roleFolder, unitId)
+    end
+
+    if not modelTemplate then
+        warn(GameConfig.LOG_PREFIX, "找不到模型:", unitId, "(配置路径:", unitConfig.ModelPath or "未配置", ")")
         return nil
     end
 
-    local modelTemplate = SearchFolderRecursive(roleFolder, unitId)
-
-    if not modelTemplate then
-        warn(GameConfig.LOG_PREFIX, "在Role文件夹下找不到模型:", unitId, "(配置路径:", unitConfig.ModelPath, ")")
+    -- 第三步：验证模型包含Humanoid（防止使用错误的展示模型）
+    if not modelTemplate:FindFirstChildOfClass("Humanoid") then
+        warn(GameConfig.LOG_PREFIX, "模板缺少Humanoid:", unitId, modelTemplate:GetFullName())
         return nil
     end
 
@@ -553,7 +573,7 @@ function PlacementSystem.PlaceUnit(player, instanceId, position)
     end
 
     -- 配置兵种物理（禁用与玩家的碰撞）
-    PhysicsManager.ConfigureUnitPhysics(model)
+    PhysicsManager.ConfigureUnitPhysics(model, "ally")  -- 玩家的兵种为友军
 
     -- V1.5.2新增: 播放show动画（展示动画）
     PlayShowAnimation(model, unitInstance.UnitId)
