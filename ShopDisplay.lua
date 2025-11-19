@@ -33,7 +33,7 @@ local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
 -- 调试和日志
-local DEBUG_MODE = true
+local DEBUG_MODE = true  -- V2.1修复：临时启用调试，排查价格显示问题
 local LOG_PREFIX = "[ShopDisplay]"
 
 -- 状态变量
@@ -48,6 +48,8 @@ local coinDisplay = nil          -- 金币显示
 -- 购买状态管理
 local isPurchasing = false       -- V2.1修复：防止重复购买
 local purchaseConnections = {}   -- V2.1修复：存储事件连接，避免重复绑定
+local currentSelectedItem = nil  -- V2.1修复：当前选中的商品数据
+local globalBuyConnections = {}  -- V2.1修复：全局购买按钮连接
 
 -- UI组件引用
 local ButtonEffectHelper = nil
@@ -314,6 +316,17 @@ local function CreateItemCard(itemData, index)
     local price = cardFrame:FindFirstChild("Price")
     if price and price:IsA("TextLabel") then
         price.Text = FormatCoins(itemData.Price or 0)
+
+        -- V2.1调试：验证UI显示价格与ShopConfig一致性
+        if DEBUG_MODE and itemData.Price then
+            print(string.format(
+                "%s UI显示价格 - UnitId:%s 价格:%d 显示:%s",
+                LOG_PREFIX,
+                itemData.UnitId,
+                itemData.Price,
+                price.Text
+            ))
+        end
     end
 
     local quality = cardFrame:FindFirstChild("Quality")
@@ -339,10 +352,18 @@ end
 @param itemData table - 商品数据
 ]]
 function OnPurchaseButtonClick(itemData)
-    -- V2.1修复：防止重复购买
+    -- V2.1修复：防重复购买和空数据检查
     if isPurchasing then
         if DEBUG_MODE then
             print(LOG_PREFIX, "购买处理中，请稍候")
+        end
+        return
+    end
+
+    -- V2.1修复：验证传入的商品数据
+    if not itemData or not itemData.UnitId then
+        if DEBUG_MODE then
+            print(LOG_PREFIX, "商品数据无效:", itemData)
         end
         return
     end
@@ -374,6 +395,20 @@ function OnPurchaseButtonClick(itemData)
     task.delay(0.5, function()
         isPurchasing = false
     end)
+end
+
+--[[
+全局购买按钮点击处理（V2.1修复：统一处理）
+]]
+local function OnGlobalBuyButtonClick()
+    -- 使用当前选中的商品数据
+    if currentSelectedItem then
+        OnPurchaseButtonClick(currentSelectedItem)
+    else
+        if DEBUG_MODE then
+            print(LOG_PREFIX, "没有选中的商品")
+        end
+    end
 end
 
 --[[
@@ -424,6 +459,7 @@ local function SetupCardClickLogic(cardFrame, itemData)
             -- 收起
             buyButtonFrame.Visible = false
             buyButtonFrame:SetAttribute("CurrentCardId", nil)
+            currentSelectedItem = nil  -- V2.1修复：清空选中项
             if DEBUG_MODE then
                 print(LOG_PREFIX, "收起购买按钮")
             end
@@ -431,6 +467,9 @@ local function SetupCardClickLogic(cardFrame, itemData)
             -- 展开：移动到当前卡片下方
             local cardIndex = cardFrame.LayoutOrder
             buyButtonFrame.LayoutOrder = cardIndex + 1
+
+            -- V2.1修复：设置当前选中商品（关键修复）
+            currentSelectedItem = itemData
 
             -- 更新按钮价格
             if goldBuy then
@@ -453,37 +492,76 @@ local function SetupCardClickLogic(cardFrame, itemData)
             buyButtonFrame:SetAttribute("CurrentCardId", itemData.UnitId)
 
             if DEBUG_MODE then
-                print(LOG_PREFIX, "展开购买按钮:", itemData.UnitId)
+                print(LOG_PREFIX, "展开购买按钮:", itemData.UnitId, "价格:", itemData.Price)
             end
         end
     end)
     table.insert(purchaseConnections[cardId], clickConnection)
 
-    -- V2.1修复：绑定购买按钮点击（使用:Once()确保只触发一次，或者断开旧连接）
+    -- V2.1修复：添加按钮特效（仅为卡片点击添加，购买按钮特效在初始化时统一处理）
+    if LoadUIHelpers() and ButtonEffectHelper then
+        ButtonEffectHelper.AddClickEffect(clickButton)
+    end
+end
+
+--[[
+初始化全局购买按钮事件（V2.1修复：统一管理）
+]]
+local function InitializeGlobalBuyButtons()
+    if not itemContainer then
+        return false
+    end
+
+    local buyButtonFrame = itemContainer:FindFirstChild("BuyButtonFrame")
+    if not buyButtonFrame then
+        warn(LOG_PREFIX, "找不到 BuyButtonFrame")
+        return false
+    end
+
+    local goldBuy = buyButtonFrame:FindFirstChild("GoldBuy")
+    local robuxBuy = buyButtonFrame:FindFirstChild("RobuxBuy")
+
+    -- V2.1修复：清理旧的全局连接
+    for _, connection in ipairs(globalBuyConnections) do
+        if connection and connection.Connected then
+            connection:Disconnect()
+        end
+    end
+    globalBuyConnections = {}
+
+    -- V2.1修复：只绑定一次全局购买按钮事件
     if goldBuy then
-        local goldBuyConnection = goldBuy.MouseButton1Click:Connect(function()
-            OnPurchaseButtonClick(itemData)
-        end)
-        table.insert(purchaseConnections[cardId], goldBuyConnection)
+        local goldConnection = goldBuy.MouseButton1Click:Connect(OnGlobalBuyButtonClick)
+        table.insert(globalBuyConnections, goldConnection)
 
         -- 添加按钮特效
         if LoadUIHelpers() and ButtonEffectHelper then
             ButtonEffectHelper.AddClickEffect(goldBuy)
         end
+
+        if DEBUG_MODE then
+            print(LOG_PREFIX, "已绑定全局金币购买按钮")
+        end
     end
 
     if robuxBuy then
-        local robuxBuyConnection = robuxBuy.MouseButton1Click:Connect(function()
+        local robuxConnection = robuxBuy.MouseButton1Click:Connect(function()
             -- TODO: 实现Robux购买逻辑
-            warn(LOG_PREFIX, "Robux购买功能尚未实现")
+            if currentSelectedItem then
+                warn(LOG_PREFIX, "Robux购买功能尚未实现:", currentSelectedItem.UnitId)
+            else
+                warn(LOG_PREFIX, "Robux购买功能尚未实现")
+            end
         end)
-        table.insert(purchaseConnections[cardId], robuxBuyConnection)
+        table.insert(globalBuyConnections, robuxConnection)
 
         -- 添加按钮特效
         if LoadUIHelpers() and ButtonEffectHelper then
             ButtonEffectHelper.AddClickEffect(robuxBuy)
         end
     end
+
+    return true
 end
 
 --[[
@@ -504,6 +582,9 @@ local function UpdateShopDisplay()
 
     -- 加载UI助手
     LoadUIHelpers()
+
+    -- V2.1修复：初始化全局购买按钮（只执行一次）
+    InitializeGlobalBuyButtons()
 
     -- 创建商品卡片
     for index, itemData in ipairs(shopData) do
@@ -530,6 +611,25 @@ end
 local function OnShopListReceived(shopList)
     if DEBUG_MODE then
         print(LOG_PREFIX, "收到商店列表，商品数量:", shopList and #shopList or 0)
+
+        -- V2.1调试：详细打印每个商品的价格信息
+        if shopList then
+            for i, item in ipairs(shopList) do
+                if i <= 5 then -- 只打印前5个，避免日志过多
+                    print(string.format(
+                        "%s 商品[%d] UnitId:%s 名称:%s 价格:%s",
+                        LOG_PREFIX,
+                        i,
+                        item.UnitId or "nil",
+                        item.Name or "nil",
+                        tostring(item.Price or "nil")
+                    ))
+                end
+            end
+            if #shopList > 5 then
+                print(LOG_PREFIX, "... 还有", #shopList - 5, "个商品")
+            end
+        end
     end
 
     if not shopList or type(shopList) ~= "table" then
@@ -833,6 +933,25 @@ end
 ]]
 function ShopDisplay.Cleanup()
     shopData = {}
+
+    -- V2.1修复：清理选中状态和全局连接
+    currentSelectedItem = nil
+    for _, connection in ipairs(globalBuyConnections) do
+        if connection and connection.Connected then
+            connection:Disconnect()
+        end
+    end
+    globalBuyConnections = {}
+
+    -- 清理所有购买连接
+    for cardId, connections in pairs(purchaseConnections) do
+        for _, connection in ipairs(connections) do
+            if connection and connection.Connected then
+                connection:Disconnect()
+            end
+        end
+    end
+    purchaseConnections = {}
 
     if itemContainer then
         for _, child in ipairs(itemContainer:GetChildren()) do

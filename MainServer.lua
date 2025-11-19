@@ -344,6 +344,16 @@ Players.PlayerAdded:Connect(function(player)
 			HomeSystem.InitializePlayerHome(homeId, player)
 		end)
 	end
+
+	-- V2.1修复：初始化玩家商店库存系统
+	pcall(function()
+		ShopSystem.InitializePlayerShopTimer(player, "UnitShop")
+		print(string.format(
+			"%s [MainServer] 玩家 %s 商店库存系统已初始化",
+			GameConfig.LOG_PREFIX,
+			player.Name
+		))
+	end)
 end)
 
 -- 玩家离开时清理

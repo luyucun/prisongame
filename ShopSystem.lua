@@ -8,6 +8,9 @@
 
 local ShopSystem = {}
 
+-- 调试配置
+local DEBUG_MODE = true  -- V2.1调试：临时启用详细日志，排查价格问题
+
 -- 引用服务
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
@@ -224,7 +227,18 @@ local function RefreshShopStock(player, shopId)
 		return {}
 	end
 
+	-- V2.1调试：记录刷新开始
+	if DEBUG_MODE then
+		print(string.format(
+			"%s [ShopSystem] 开始刷新库存 - 玩家:%s 商店:%s",
+			GameConfig.LOG_PREFIX,
+			player.Name,
+			shopId
+		))
+	end
+
 	-- 遍历商店中的所有商品并刷新库存
+	local refreshCount = 0
 	for _, itemConfig in ipairs(shopData.Items) do
 		if itemConfig.ItemType == "Unit" and itemConfig.Enabled then
 			local unitId = itemConfig.UnitId
@@ -239,13 +253,44 @@ local function RefreshShopStock(player, shopId)
 					-- 在上下限之间随机库存数量
 					local stock = math.random(stockConfig.StockMin, stockConfig.StockMax)
 					stockData[unitId] = stock
+					refreshCount = refreshCount + 1
+
+					-- V2.1调试：详细记录每个商品的库存
+					if DEBUG_MODE and refreshCount <= 5 then
+						print(string.format(
+							"  [%s] 库存:%d (概率:%.0f%% 范围:%d-%d)",
+							unitId,
+							stock,
+							probability * 100,
+							stockConfig.StockMin,
+							stockConfig.StockMax
+						))
+					end
 				else
 					-- 无库存
 					stockData[unitId] = 0
+					if DEBUG_MODE and refreshCount <= 5 then
+						print(string.format(
+							"  [%s] 售罄 (概率:%.0f%% 未中)",
+							unitId,
+							probability * 100
+						))
+					end
 				end
 
 			end
 		end
+	end
+
+	-- V2.1调试：总结刷新结果
+	if DEBUG_MODE then
+		print(string.format(
+			"%s [ShopSystem] 库存刷新完成 - 玩家:%s 有库存商品:%d/%d",
+			GameConfig.LOG_PREFIX,
+			player.Name,
+			refreshCount,
+			#shopData.Items
+		))
 	end
 
 	-- 更新刷新时间
@@ -595,6 +640,26 @@ local function OnRequestShopList(player)
 			ShopListEvent:FireClient(player, shopItems)
 		end
 
+		-- V2.1调试：详细打印发送给客户端的价格数据
+		if DEBUG_MODE and shopItems and #shopItems > 0 then
+			print(string.format(
+				"%s [ShopSystem] 发送给客户端的商品数据（前5个）:",
+				GameConfig.LOG_PREFIX
+			))
+			for i, item in ipairs(shopItems) do
+				if i <= 5 then
+					print(string.format(
+						"  商品[%d] UnitId:%s 价格:%d 库存:%s 名称:%s",
+						i,
+						item.UnitId,
+						item.Price or 0,
+						tostring(item.Stock or "nil"),
+						item.Name or "unknown"
+					))
+				end
+			end
+		end
+
 		print(string.format(
 			"%s [ShopSystem] 玩家 %s 请求商店[%s]，返回 %d 个商品%s",
 			GameConfig.LOG_PREFIX,
@@ -669,20 +734,27 @@ local function OnPurchaseUnit(player, unitId)
 			end
 		end
 
-		-- 5. 读取价格（优先ShopConfig，回退UnitConfig）
+		-- 5. 读取价格（V2.1修复：优先且强制使用ShopConfig价格）
 		local price = ShopConfig.GetPrice(shopId, unitId)
 		if not price then
-			-- 回退到UnitConfig
-			local unitData = UnitConfig.GetUnitById(unitId)
-			if not unitData then
-				PurchaseLocks[player] = false
-				SendFailure(player, "无效的兵种ID")
-				return
-			end
-			price = unitData.Price
+			-- ShopConfig中必须配置价格，如果没有则是配置错误
+			PurchaseLocks[player] = false
+			SendFailure(player, string.format("商品[%s]价格配置错误", unitId))
 			warn(string.format(
-				"[ShopSystem] 商店[%s]中[%s]无价格配置，使用UnitConfig价格: %d",
-				shopId, unitId, price
+				"[ShopSystem] 商店[%s]中[%s]没有配置价格，请检查ShopConfig",
+				shopId, unitId
+			))
+			return
+		end
+
+		-- V2.1调试：记录实际使用的价格
+		if DEBUG_MODE then
+			print(string.format(
+				"%s [ShopSystem] 购买验证 - 玩家:%s UnitId:%s 价格:%d金币",
+				GameConfig.LOG_PREFIX,
+				player.Name,
+				unitId,
+				price
 			))
 		end
 

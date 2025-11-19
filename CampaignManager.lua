@@ -334,7 +334,9 @@ function CampaignManager.StartCampaign(player)
 
 		-- 获取兵种配置
 		local UnitConfig = require(ReplicatedStorage.Config.UnitConfig)
-		local unitId = unitModel.Name
+		-- V2.0.5修复：从Attribute获取UnitId，而不是Name
+		-- Name是显示名称(如"Noob")，UnitId是配置key(如"10001")
+		local unitId = unitModel:GetAttribute("UnitId") or unitModel.Name
 		local unitConfig = UnitConfig.Units[unitId]
 
 		if unitConfig and unitModel:FindFirstChild("Humanoid") then
@@ -377,8 +379,8 @@ function CampaignManager.StartCampaign(player)
 	-- 锁定基地操作
 	LockHomeOperations(player, true)
 
-	-- 生成Stage002
-	StageService.GetOrCreateStage(playerId, 2)
+	-- V2.0.4修复：预生成Stage002，但不重置空气墙(稍后会统一设置)
+	StageService.GetOrCreateStage(playerId, 2, false)
 
 	-- 注册战役
 	CampaignManager.ActiveCampaigns[playerId] = campaignData
@@ -441,7 +443,8 @@ function CampaignManager.MarchToStage(campaignData, stageNum)
 	end
 
 	-- 获取目标关卡
-	local stageFolder = StageService.GetOrCreateStage(campaignData.PlayerId, stageNum)
+	-- V2.0.4修复：不重置空气墙状态,后面会显式控制
+	local stageFolder = StageService.GetOrCreateStage(campaignData.PlayerId, stageNum, false)
 	if not stageFolder then
 		return CampaignManager.OnCampaignEnd(campaignData, false)
 	end
@@ -449,13 +452,22 @@ function CampaignManager.MarchToStage(campaignData, stageNum)
 	-- V2.0.3：解锁当前关的空气墙（允许玩家进入）
 	StageService.SetAirWallState(stageFolder, true)
 
-	-- V2.0.3：确保下一关的空气墙保持锁定（如果已生成）
+	-- V2.0.3修复：确保下一关的空气墙保持锁定（如果已生成）
+	-- 注意：只处理还未到达的关卡，避免锁定当前正在挑战的关卡
 	local nextStageNum = stageNum + 1
 	if nextStageNum <= campaignData.TotalStages then
-		local nextStageFolder = StageService.GetOrCreateStage(campaignData.PlayerId, nextStageNum)
+		-- 检查下一关是否已存在但还未解锁
+		local nextStageFolder = nil
+		if StageService.StageCache[campaignData.PlayerId] and
+		   StageService.StageCache[campaignData.PlayerId][nextStageNum] then
+			nextStageFolder = StageService.StageCache[campaignData.PlayerId][nextStageNum]
+		end
+
+		-- 只有当下一关已经预加载但我们还没到达时，才锁定它的空气墙
 		if nextStageFolder then
 			StageService.SetAirWallState(nextStageFolder, false)
 		end
+		-- 如果下一关还不存在，等OnStageClear时会正确设置
 	end
 
 	-- V2.0修复：使用递归搜索，支持IdleFloor在子文件夹中（如Stage001/StageNodes/IdleFloor）
@@ -637,7 +649,8 @@ function CampaignManager.BeginBattlePrep(campaignData, stageNum, arrivedList, ti
 	DebugLog(string.format("[BeginBattlePrep] 友军准备完成，成功准备 %d/%d 个单位", #preparedAllies, #allArrivedUnits))
 
 	-- 获取并激活敌军
-	local stageFolder = StageService.GetOrCreateStage(campaignData.PlayerId, stageNum)
+	-- V2.0.4修复：不重置空气墙状态,只读取关卡信息
+	local stageFolder = StageService.GetOrCreateStage(campaignData.PlayerId, stageNum, false)
 	if not stageFolder then
 		return CampaignManager.OnDefeat(campaignData)
 	end
@@ -772,24 +785,37 @@ end
 @param result table - 战斗结果
 ]]
 function CampaignManager.OnBattleEnd(campaignData, stageNum, result)
+	DebugLog(string.format("🏁 OnBattleEnd被调用: stageNum=%d, Winner=%s",
+		stageNum, tostring(result.Winner)))
+
 	-- 保存兵种HP
+	local aliveCount = 0
+	local deadCount = 0
 	for unitInstance, unitData in pairs(campaignData.Units) do
 		if unitInstance and unitInstance.Parent and unitInstance:FindFirstChild("Humanoid") then
 			unitData.CurrentHP = unitInstance.Humanoid.Health
 			if unitData.CurrentHP <= 0 then
 				unitData.IsDead = true
+				deadCount = deadCount + 1
+			else
+				aliveCount = aliveCount + 1
 			end
 		else
 			unitData.IsDead = true
+			deadCount = deadCount + 1
 		end
 	end
+
+	DebugLog(string.format("📊 兵种状态统计: 存活=%d, 死亡=%d", aliveCount, deadCount))
 
 	-- 判定结果
 	if result.Winner == "Attack" then
 		-- 我方胜利
+		DebugLog("🎉 我方胜利，推进下一关")
 		CampaignManager.OnStageClear(campaignData, stageNum)
 	else
 		-- 我方失败
+		DebugLog(string.format("💀 我方失败，战役结束 (Winner=%s)", tostring(result.Winner)))
 		CampaignManager.OnDefeat(campaignData)
 	end
 end
@@ -826,8 +852,8 @@ function CampaignManager.OnStageClear(campaignData, stageNum)
 	-- 前往下一关
 	local nextStage = stageNum + 1
 
-	-- V2.0.3：立刻解锁下一关的空气墙
-	local nextStageFolder = StageService.GetOrCreateStage(campaignData.PlayerId, nextStage)
+	-- V2.0.4修复：获取下一关并解锁空气墙,不重置状态避免已解锁的被再次锁定
+	local nextStageFolder = StageService.GetOrCreateStage(campaignData.PlayerId, nextStage, false)
 	if nextStageFolder then
 		StageService.SetAirWallState(nextStageFolder, true)
 	end
@@ -835,7 +861,8 @@ function CampaignManager.OnStageClear(campaignData, stageNum)
 	-- 提前生成下下关（并保持其空气墙锁定）
 	if nextStage + 1 <= campaignData.TotalStages then
 		task.spawn(function()
-			local nextNextStageFolder = StageService.GetOrCreateStage(campaignData.PlayerId, nextStage + 1)
+			-- V2.0.4修复：生成新关卡时显式锁定空气墙
+			local nextNextStageFolder = StageService.GetOrCreateStage(campaignData.PlayerId, nextStage + 1, false)
 			if nextNextStageFolder then
 				-- V2.0.3：确保新预加载的下下关空气墙保持锁定
 				StageService.SetAirWallState(nextNextStageFolder, false)
@@ -892,6 +919,7 @@ end
 @param campaignData table - 战役数据
 ]]
 function CampaignManager.OnDefeat(campaignData)
+	DebugLog("💀 OnDefeat被调用 - 战役失败")
 	campaignData.State = CampaignState.DEFEAT
 
 	-- 通知客户端
@@ -903,7 +931,9 @@ function CampaignManager.OnDefeat(campaignData)
 	end
 
 	-- 结束战役
+	DebugLog("⏰ OnDefeat等待3秒后调用OnCampaignEnd")
 	task.wait(3)
+	DebugLog("🔚 OnDefeat调用OnCampaignEnd(false)")
 	CampaignManager.OnCampaignEnd(campaignData, false)
 end
 
@@ -913,6 +943,7 @@ end
 @param isVictory boolean - 是否胜利
 ]]
 function CampaignManager.OnCampaignEnd(campaignData, isVictory)
+	DebugLog(string.format("🔚 OnCampaignEnd被调用: isVictory=%s", tostring(isVictory)))
 	campaignData.State = CampaignState.CLEANUP
 
 	-- V2.0.1新增：关闭基地大门（确保门总是被关闭）
@@ -924,6 +955,7 @@ function CampaignManager.OnCampaignEnd(campaignData, isVictory)
 	ClearPathCache(campaignData.HomeId)
 
 	-- 重生兵种
+	DebugLog("🔄 OnCampaignEnd调用RespawnUnits")
 	CampaignManager.RespawnUnits(campaignData)
 
 	-- V2.0.3修复：战役彻底结束后，清除所有单位的CampaignKeepInstance标记
@@ -1014,12 +1046,30 @@ end
 function CampaignManager.RespawnUnits(campaignData)
 	local homeIdleFloor = GetHomeIdleFloor(campaignData.HomeId)
 	if not homeIdleFloor then
+		DebugLog("❌ RespawnUnits失败: 未找到基地IdleFloor，HomeId =", campaignData.HomeId)
 		return
 	end
+
+	local totalUnits = 0
+	for _ in pairs(campaignData.Units) do
+		totalUnits = totalUnits + 1
+	end
+
+	DebugLog(string.format("🔄 开始复生单位，HomeId = %d，共 %d 个单位",
+		campaignData.HomeId,
+		totalUnits))
+
+	local respawnCount = 0
+	local failCount = 0
 
 	-- V2.0.1修复：支持重生死亡隐藏的单位
 	for unitInstance, unitData in pairs(campaignData.Units) do
 		if unitInstance then
+			DebugLog(string.format("  🔍 检查单位: %s (IsDead=%s, Parent=%s)",
+				unitData.UnitId,
+				tostring(unitData.IsDead),
+				tostring(unitInstance.Parent ~= nil)))
+
 			-- V2.0.3修复：检查单位是否已被销毁（避免Parent locked错误）
 			-- 如果实例已经被Destroy()，跳过该单位
 			if not unitInstance:IsDescendantOf(game) and unitInstance.Parent == nil then
@@ -1028,6 +1078,8 @@ function CampaignManager.RespawnUnits(campaignData)
 					local _ = unitInstance.Name  -- 尝试访问属性
 				end)
 				if not success then
+					DebugLog(string.format("    ⚠️  %s 已被彻底销毁，跳过", unitData.UnitId))
+					failCount = failCount + 1
 					continue
 				end
 			end
@@ -1035,16 +1087,22 @@ function CampaignManager.RespawnUnits(campaignData)
 			-- V2.0.3修复：如果单位被隐藏（Parent = nil），重新挂回基地根节点（PlayerHome）
 			-- 使用pcall包裹，防止Parent locked错误
 			if not unitInstance.Parent then
+				DebugLog(string.format("    📌 %s 当前被隐藏，尝试重新挂载...", unitData.UnitId))
 				local homeFolder = homeIdleFloor.Parent
+				local targetParent = homeFolder or Workspace
 				local success, err = pcall(function()
-					if homeFolder then
-						unitInstance.Parent = homeFolder
-					else
-						unitInstance.Parent = homeIdleFloor  -- 回退方案
-					end
+					unitInstance.Parent = targetParent
 				end)
 
-				if not success then
+				if success then
+					if homeFolder then
+						DebugLog(string.format("      ✅ 已挂载到 %s", homeFolder.Name))
+					else
+						DebugLog(string.format("      ⚠️  HomeFolder不存在，挂载到Workspace"))
+					end
+				else
+					DebugLog(string.format("    ❌ %s 挂载失败: %s", unitData.UnitId, tostring(err)))
+					failCount = failCount + 1
 					continue
 				end
 			end
@@ -1055,21 +1113,73 @@ function CampaignManager.RespawnUnits(campaignData)
 				unitData.GridPos
 			)
 
-			-- 传送回去
-			if unitInstance.PrimaryPart then
-				unitInstance:SetPrimaryPartCFrame(targetCFrame)
-			elseif unitInstance:FindFirstChild("HumanoidRootPart") then
-				unitInstance.HumanoidRootPart.CFrame = targetCFrame
+			if not targetCFrame then
+				DebugLog(string.format("    ❌ %s GridPos无效，无法计算目标坐标", unitData.UnitId))
+				failCount = failCount + 1
+				continue
 			end
 
-			-- V2.0修复：重新锚定所有部件，恢复基地静止状态
-			if unitData.WasAnchored then
-				SetUnitAnchored(unitInstance, true)
+			-- 修复Y坐标：使用与GridPositionSystem相同的算法
+			-- 参考GridPositionSystem.lua:100行的Y坐标计算
+			local Y_OFFSET = 3  -- 与GridPositionSystem保持一致
+			local correctedY = homeIdleFloor.Position.Y + (homeIdleFloor.Size.Y / 2) + Y_OFFSET
+			local correctedCFrame = CFrame.new(
+				targetCFrame.Position.X,
+				correctedY,  -- 使用与放置系统相同的Y计算方式
+				targetCFrame.Position.Z
+			) * targetCFrame.Rotation
+
+			DebugLog(string.format("    📍 传送 %s 到坐标 (%.1f, %.3f, %.1f) [Y修正: %.3f→%.3f]",
+				unitData.UnitId,
+				correctedCFrame.Position.X,
+				correctedCFrame.Position.Y,
+				correctedCFrame.Position.Z,
+				targetCFrame.Position.Y,
+				correctedCFrame.Position.Y))
+
+			-- 传送回去（使用修正后的坐标）
+			local teleportSuccess = false
+			pcall(function()
+				if unitInstance.PrimaryPart then
+					unitInstance:SetPrimaryPartCFrame(correctedCFrame)
+					teleportSuccess = true
+				elseif unitInstance:FindFirstChild("HumanoidRootPart") then
+					unitInstance.HumanoidRootPart.CFrame = correctedCFrame
+					teleportSuccess = true
+				end
+			end)
+
+			if not teleportSuccess then
+				DebugLog(string.format("    ❌ %s 没有PrimaryPart或HumanoidRootPart，无法传送", unitData.UnitId))
+				failCount = failCount + 1
+				continue
 			end
+
+			-- 验证传送结果
+			local actualPos = nil
+			if unitInstance.PrimaryPart then
+				actualPos = unitInstance.PrimaryPart.Position
+			elseif unitInstance:FindFirstChild("HumanoidRootPart") then
+				actualPos = unitInstance.HumanoidRootPart.Position
+			end
+
+			if actualPos then
+				DebugLog(string.format("    ✅ 传送完成，实际位置: (%.1f, %.1f, %.1f)",
+					actualPos.X, actualPos.Y, actualPos.Z))
+			end
+
+			-- 验证Parent和可见性
+			DebugLog(string.format("    🔍 传送后状态: Parent=%s, PrimaryPart=%s",
+				tostring(unitInstance.Parent and unitInstance.Parent.Name),
+				tostring(unitInstance.PrimaryPart ~= nil)))
+
+			-- 重要：先恢复血量和状态，再锚定
+			-- 这样可以避免锚定状态影响Humanoid的Physics
 
 			-- 恢复满血
 			if unitInstance:FindFirstChild("Humanoid") then
 				unitInstance.Humanoid.Health = unitData.MaxHP
+				DebugLog(string.format("    ❤️  %s 血量恢复至 %d", unitData.UnitId, unitData.MaxHP))
 			end
 
 			-- 复活标记
@@ -1077,16 +1187,44 @@ function CampaignManager.RespawnUnits(campaignData)
 			unitData.CurrentHP = unitData.MaxHP
 
 			-- 播放特效
+			DebugLog(string.format("    ✨ 为 %s 播放复生特效", unitData.UnitId))
 			PlayRespawnEffect(unitInstance, unitData.GridSize)
 
 			-- V2.0.1新增：恢复动画和Humanoid状态（必须在播放特效后）
+			DebugLog(string.format("    🎭 恢复 %s 的动画状态", unitData.UnitId))
 			RestoreUnitAnimationState(unitInstance, unitData.UnitId)
+
+			-- 等待一下让Humanoid稳定
+			task.wait(0.1)
+
+			-- 最后才锚定：确保兵种已经稳定在正确位置
+			if unitData.WasAnchored then
+				SetUnitAnchored(unitInstance, true)
+				DebugLog(string.format("    🔒 %s 已重新锚定", unitData.UnitId))
+			end
+
+			-- 最终状态检查
+			task.wait(0.1) -- 给动画恢复一点时间
+			if unitInstance.Parent and unitInstance:FindFirstChild("HumanoidRootPart") then
+				local finalPos = unitInstance.HumanoidRootPart.Position
+				DebugLog(string.format("    🎯 最终状态: Parent=%s, 位置=(%.1f, %.1f, %.1f), Anchored=%s",
+					unitInstance.Parent.Name,
+					finalPos.X, finalPos.Y, finalPos.Z,
+					tostring(unitInstance.HumanoidRootPart.Anchored)))
+			else
+				DebugLog(string.format("    ⚠️  %s 最终检查失败: Parent或HumanoidRootPart丢失", unitData.UnitId))
+			end
 
 			-- V2.0.3修复：不要在这里清除CampaignKeepInstance
 			-- 保持该标记直到战役彻底结束（在OnCampaignEnd中统一清除）
 			-- 这样多关卡战斗中单位死亡后不会被Destroy()
+
+			respawnCount = respawnCount + 1
+			DebugLog(string.format("    ✅ %s 复生成功", unitData.UnitId))
 		end
 	end
+
+	DebugLog(string.format("🎉 单位复生完成: 成功 %d，失败 %d", respawnCount, failCount))
 end
 
 --[[

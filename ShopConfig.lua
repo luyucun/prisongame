@@ -20,7 +20,7 @@ local ShopConfig = {}
     Items: 商品列表数组
       - ItemType: 商品类型（"Unit" / "Skill"）
       - UnitId: 兵种ID（关联UnitConfig）
-      - Price: 价格（可选，覆盖UnitConfig；nil则使用UnitConfig.Price）
+      - Price: 价格（必须设置，不再使用UnitConfig回退）
       - Icon: 图标（可选，nil则使用UnitConfig.Icon）
       - Sort: 排序权重（数字越小越靠前）
       - Enabled: 是否上架（true/false）
@@ -41,7 +41,7 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10001",
-				Price = nil,             -- nil使用UnitConfig.Price
+				Price = 200,             -- 明确价格：200金币
 				RobuxPrice = 10,
 				DevProductId = "",
 				Icon = nil,
@@ -58,7 +58,7 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10002",
-				Price = nil,
+				Price = 200,
 				RobuxPrice = 10,
 				DevProductId = "",
 				Icon = nil,
@@ -75,7 +75,7 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10003",
-				Price = nil,
+				Price = 200,
 				RobuxPrice = 10,
 				DevProductId = "",
 				Icon = nil,
@@ -92,7 +92,7 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10004",
-				Price = nil,
+				Price = 300,
 				RobuxPrice = 10,
 				DevProductId = "",
 				Icon = nil,
@@ -109,7 +109,7 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10005",
-				Price = nil,
+				Price = 400,
 				RobuxPrice = 15,
 				DevProductId = "",
 				Icon = nil,
@@ -126,7 +126,7 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10006",
-				Price = nil,
+				Price = 500,
 				RobuxPrice = 15,
 				DevProductId = "",
 				Icon = nil,
@@ -143,7 +143,7 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10007",
-				Price = nil,
+				Price = 600,
 				RobuxPrice = 15,
 				DevProductId = "",
 				Icon = nil,
@@ -160,7 +160,7 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10008",
-				Price = nil,
+				Price = 800,
 				RobuxPrice = 15,
 				DevProductId = "",
 				Icon = nil,
@@ -177,7 +177,7 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10009",
-				Price = nil,
+				Price = 1000,
 				RobuxPrice = 20,
 				DevProductId = "",
 				Icon = nil,
@@ -194,7 +194,7 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10010",
-				Price = nil,
+				Price = 1200,
 				RobuxPrice = 20,
 				DevProductId = "",
 				Icon = nil,
@@ -211,7 +211,7 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10011",
-				Price = nil,
+				Price = 1500,
 				RobuxPrice = 20,
 				DevProductId = "",
 				Icon = nil,
@@ -228,7 +228,7 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10012",
-				Price = nil,
+				Price = 1800,
 				RobuxPrice = 20,
 				DevProductId = "",
 				Icon = nil,
@@ -245,7 +245,7 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10013",
-				Price = nil,
+				Price = 2200,
 				RobuxPrice = 25,
 				DevProductId = "",
 				Icon = nil,
@@ -262,7 +262,7 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10014",
-				Price = nil,
+				Price = 2500,
 				RobuxPrice = 25,
 				DevProductId = "",
 				Icon = nil,
@@ -279,7 +279,7 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10015",
-				Price = nil,
+				Price = 3000,
 				RobuxPrice = 25,
 				DevProductId = "",
 				Icon = nil,
@@ -296,7 +296,7 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10016",
-				Price = nil,
+				Price = 3500,
 				RobuxPrice = 25,
 				DevProductId = "",
 				Icon = nil,
@@ -313,7 +313,7 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10017",
-				Price = nil,
+				Price = 4000,
 				RobuxPrice = 30,
 				DevProductId = "",
 				Icon = nil,
@@ -330,7 +330,7 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10018",
-				Price = nil,
+				Price = 4500,
 				RobuxPrice = 30,
 				DevProductId = "",
 				Icon = nil,
@@ -347,7 +347,7 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10019",
-				Price = nil,
+				Price = 5000,
 				RobuxPrice = 30,
 				DevProductId = "",
 				Icon = nil,
@@ -364,7 +364,7 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10020",
-				Price = nil,
+				Price = 6000,
 				RobuxPrice = 30,
 				DevProductId = "",
 				Icon = nil,
@@ -381,7 +381,7 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10021",
-				Price = nil,
+				Price = 7000,
 				RobuxPrice = 30,
 				DevProductId = "",
 				Icon = nil,
@@ -398,7 +398,7 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10022",
-				Price = nil,
+				Price = 8000,
 				RobuxPrice = 40,
 				DevProductId = "",
 				Icon = nil,
@@ -415,7 +415,7 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10023",
-				Price = nil,
+				Price = 9000,
 				RobuxPrice = 40,
 				DevProductId = "",
 				Icon = nil,
@@ -432,7 +432,7 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10024",
-				Price = nil,
+				Price = 10000,
 				RobuxPrice = 40,
 				DevProductId = "",
 				Icon = nil,
@@ -449,7 +449,7 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10025",
-				Price = nil,
+				Price = 12000,
 				RobuxPrice = 40,
 				DevProductId = "",
 				Icon = nil,
@@ -537,31 +537,41 @@ function ShopConfig.GetShopItems(shopId, player)
 				local unitData = UnitConfig.GetUnitById(unitId)
 
 				if unitData then
-					local price = itemConfig.Price or unitData.Price
-					local icon = itemConfig.Icon or unitData.Icon or "rbxassetid://0"
+					-- V2.1修复：强制使用ShopConfig价格，不再回退到UnitConfig
+					local price = itemConfig.Price
+					if price and price > 0 then
+						-- 价格有效，添加商品
+						local icon = itemConfig.Icon or unitData.Icon or "rbxassetid://0"
 
-					table.insert(items, {
-						UnitId = unitId,
-						Name = unitData.Name,
-						Price = price,
-						Icon = icon,
-						Description = unitData.Description,
-						GridSize = unitData.GridSize,
-						Quality = unitData.Quality or "Common",
-						Type = unitData.Type,
-						Sort = itemConfig.Sort,
-						-- 战斗属性
-						BaseHealth = UnitConfig.CalculateHealth(unitId, unitData.BaseLevel),
-						BaseAttack = UnitConfig.CalculateAttack(unitId, unitData.BaseLevel),
-						BaseAttackSpeed = unitData.BaseAttackSpeed,
-						BaseAttackRange = unitData.BaseAttackRange,
-						-- 罗布币相关字段（V2.1新增）
-						RobuxPrice = itemConfig.RobuxPrice,
-						DevProductId = itemConfig.DevProductId,
-						-- 预留字段
-						LimitPerDay = itemConfig.LimitPerDay,
-						LimitTotal = itemConfig.LimitTotal,
-					})
+						table.insert(items, {
+							UnitId = unitId,
+							Name = unitData.Name,
+							Price = price,
+							Icon = icon,
+							Description = unitData.Description,
+							GridSize = unitData.GridSize,
+							Quality = unitData.Quality or "Common",
+							Type = unitData.Type,
+							Sort = itemConfig.Sort,
+							-- 战斗属性
+							BaseHealth = UnitConfig.CalculateHealth(unitId, unitData.BaseLevel),
+							BaseAttack = UnitConfig.CalculateAttack(unitId, unitData.BaseLevel),
+							BaseAttackSpeed = unitData.BaseAttackSpeed,
+							BaseAttackRange = unitData.BaseAttackRange,
+							-- 罗布币相关字段（V2.1新增）
+							RobuxPrice = itemConfig.RobuxPrice,
+							DevProductId = itemConfig.DevProductId,
+							-- 预留字段
+							LimitPerDay = itemConfig.LimitPerDay,
+							LimitTotal = itemConfig.LimitTotal,
+						})
+					else
+						-- 价格无效，跳过此商品
+						warn(string.format(
+							"[ShopConfig] 商品[%s]价格配置无效: %s，请检查配置",
+							unitId, tostring(price)
+						))
+					end
 				else
 					warn("[ShopConfig] UnitId不存在: " .. unitId)
 				end

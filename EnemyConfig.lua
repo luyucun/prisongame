@@ -12,54 +12,56 @@
 local EnemyConfig = {}
 
 -- ==================== Style01关卡敌人配置 ====================
+-- V2.3修复: 使用兵种ID而非名称(与UnitConfig.Units的key保持一致)
+-- 10001 = Noob, 10005 = Rookie
 
 -- 第1关: 简单测试
 EnemyConfig["Stage001"] = {
-	{UnitId = "Noob", Level = 1, GridPos = {X = 7, Y = 7}},
-	{UnitId = "Noob", Level = 1, GridPos = {X = 7, Y = 8}},
-	{UnitId = "Noob", Level = 1, GridPos = {X = 8, Y = 7}},
+	{UnitId = "10001", Level = 1, GridPos = {X = 7, Y = 7}},
+	{UnitId = "10001", Level = 1, GridPos = {X = 7, Y = 8}},
+	{UnitId = "10001", Level = 1, GridPos = {X = 8, Y = 7}},
 }
 
 -- 第2关: 增加难度
 EnemyConfig["Stage002"] = {
-	{UnitId = "Rookie", Level = 1, GridPos = {X = 6, Y = 7}},
-	{UnitId = "Rookie", Level = 1, GridPos = {X = 7, Y = 6}},
-	{UnitId = "Noob", Level = 2, GridPos = {X = 7, Y = 7}},
-	{UnitId = "Rookie", Level = 1, GridPos = {X = 7, Y = 8}},
-	{UnitId = "Rookie", Level = 1, GridPos = {X = 8, Y = 7}},
+	{UnitId = "10005", Level = 1, GridPos = {X = 6, Y = 7}},
+	{UnitId = "10005", Level = 1, GridPos = {X = 7, Y = 6}},
+	{UnitId = "10001", Level = 2, GridPos = {X = 7, Y = 7}},
+	{UnitId = "10005", Level = 1, GridPos = {X = 7, Y = 8}},
+	{UnitId = "10005", Level = 1, GridPos = {X = 8, Y = 7}},
 }
 
 -- 第3关: 更强的敌人
 EnemyConfig["Stage003"] = {
-	{UnitId = "Rookie", Level = 2, GridPos = {X = 5, Y = 7}},
-	{UnitId = "Rookie", Level = 2, GridPos = {X = 7, Y = 5}},
-	{UnitId = "Rookie", Level = 2, GridPos = {X = 7, Y = 7}},
-	{UnitId = "Rookie", Level = 2, GridPos = {X = 7, Y = 9}},
-	{UnitId = "Rookie", Level = 2, GridPos = {X = 9, Y = 7}},
-	{UnitId = "Noob", Level = 3, GridPos = {X = 7, Y = 8}},
+	{UnitId = "10005", Level = 2, GridPos = {X = 5, Y = 7}},
+	{UnitId = "10005", Level = 2, GridPos = {X = 7, Y = 5}},
+	{UnitId = "10005", Level = 2, GridPos = {X = 7, Y = 7}},
+	{UnitId = "10005", Level = 2, GridPos = {X = 7, Y = 9}},
+	{UnitId = "10005", Level = 2, GridPos = {X = 9, Y = 7}},
+	{UnitId = "10001", Level = 3, GridPos = {X = 7, Y = 8}},
 }
 
 -- 第4关: 多样化敌人
 EnemyConfig["Stage004"] = {
-	{UnitId = "Rookie", Level = 2, GridPos = {X = 5, Y = 5}},
-	{UnitId = "Rookie", Level = 2, GridPos = {X = 5, Y = 9}},
-	{UnitId = "Noob", Level = 3, GridPos = {X = 7, Y = 7}},
-	{UnitId = "Rookie", Level = 2, GridPos = {X = 9, Y = 5}},
-	{UnitId = "Rookie", Level = 2, GridPos = {X = 9, Y = 9}},
-	{UnitId = "Rookie", Level = 3, GridPos = {X = 7, Y = 6}},
-	{UnitId = "Rookie", Level = 3, GridPos = {X = 7, Y = 8}},
+	{UnitId = "10005", Level = 2, GridPos = {X = 5, Y = 5}},
+	{UnitId = "10005", Level = 2, GridPos = {X = 5, Y = 9}},
+	{UnitId = "10001", Level = 3, GridPos = {X = 7, Y = 7}},
+	{UnitId = "10005", Level = 2, GridPos = {X = 9, Y = 5}},
+	{UnitId = "10005", Level = 2, GridPos = {X = 9, Y = 9}},
+	{UnitId = "10005", Level = 3, GridPos = {X = 7, Y = 6}},
+	{UnitId = "10005", Level = 3, GridPos = {X = 7, Y = 8}},
 }
 
 -- 第5关: 精英敌人
 EnemyConfig["Stage005"] = {
-	{UnitId = "Rookie", Level = 3, GridPos = {X = 5, Y = 6}},
-	{UnitId = "Rookie", Level = 3, GridPos = {X = 5, Y = 8}},
-	{UnitId = "Rookie", Level = 3, GridPos = {X = 6, Y = 7}},
-	{UnitId = "Noob", Level = 3, GridPos = {X = 7, Y = 7}},
-	{UnitId = "Rookie", Level = 3, GridPos = {X = 8, Y = 7}},
-	{UnitId = "Rookie", Level = 3, GridPos = {X = 9, Y = 6}},
-	{UnitId = "Rookie", Level = 3, GridPos = {X = 9, Y = 8}},
-	{UnitId = "Noob", Level = 3, GridPos = {X = 7, Y = 9}},
+	{UnitId = "10005", Level = 3, GridPos = {X = 5, Y = 6}},
+	{UnitId = "10005", Level = 3, GridPos = {X = 5, Y = 8}},
+	{UnitId = "10005", Level = 3, GridPos = {X = 6, Y = 7}},
+	{UnitId = "10001", Level = 3, GridPos = {X = 7, Y = 7}},
+	{UnitId = "10005", Level = 3, GridPos = {X = 8, Y = 7}},
+	{UnitId = "10005", Level = 3, GridPos = {X = 9, Y = 6}},
+	{UnitId = "10005", Level = 3, GridPos = {X = 9, Y = 8}},
+	{UnitId = "10001", Level = 3, GridPos = {X = 7, Y = 9}},
 }
 
 -- 第6-10关: 使用默认配置(逐渐增加难度)
@@ -80,8 +82,8 @@ for i = 6, 10 do
 		local gridX = math.max(1, math.min(14, centerX + offsetX))
 		local gridY = math.max(1, math.min(14, centerY + offsetY))
 
-		-- 交替生成Noob和Rookie
-		local unitId = (j % 2 == 0) and "Rookie" or "Noob"
+		-- V2.3修复: 使用兵种ID (10001=Noob, 10005=Rookie)
+		local unitId = (j % 2 == 0) and "10005" or "10001"
 
 		table.insert(EnemyConfig[stageName], {
 			UnitId = unitId,

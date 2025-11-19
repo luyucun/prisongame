@@ -112,9 +112,10 @@ end
     获取或创建关卡
     @param playerId number - 玩家ID
     @param stageNum number - 关卡编号
+    @param resetAirWall boolean - 是否重置空气墙状态(可选,默认false不重置)
     @return Folder - 关卡文件夹引用
 ]]
-function StageService.GetOrCreateStage(playerId, stageNum)
+function StageService.GetOrCreateStage(playerId, stageNum, resetAirWall)
     -- 检查缓存
     if StageService.StageCache[playerId] and StageService.StageCache[playerId][stageNum] then
         local cached = StageService.StageCache[playerId][stageNum]
@@ -130,14 +131,18 @@ function StageService.GetOrCreateStage(playerId, stageNum)
                         warn("[StageService] Stage001缓存失效，HomeId已变化")
                         StageService.StageCache[playerId][stageNum] = nil
                     else
-                        -- V2.0.3：刷新缓存关卡的空气墙状态为关闭
-                        StageService.SetAirWallState(cached, false)
+                        -- V2.0.4修复：只有显式要求时才重置空气墙状态
+                        if resetAirWall then
+                            StageService.SetAirWallState(cached, false)
+                        end
                         return cached
                     end
                 end
             else
-                -- V2.0.3：刷新缓存关卡的空气墙状态为关闭
-                StageService.SetAirWallState(cached, false)
+                -- V2.0.4修复：只有显式要求时才重置空气墙状态
+                if resetAirWall then
+                    StageService.SetAirWallState(cached, false)
+                end
                 return cached
             end
         end
@@ -166,8 +171,10 @@ function StageService.GetOrCreateStage(playerId, stageNum)
 
         local existing = stageFolder:FindFirstChild("Stage001")
         if existing then
-            -- V2.0.3：场景预制的Stage001也需要设置空气墙状态
-            StageService.SetAirWallState(existing, false)
+            -- V2.0.4修复：只有显式要求时才重置空气墙状态
+            if resetAirWall then
+                StageService.SetAirWallState(existing, false)
+            end
             -- 缓存并返回
             if not StageService.StageCache[playerId] then
                 StageService.StageCache[playerId] = {}
