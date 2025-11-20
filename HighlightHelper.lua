@@ -110,6 +110,18 @@ function HighlightHelper.SetPreviewMode(model)
         return
     end
 
+    -- V2.1修复：预览期间隐藏头顶等级牌
+    local head = model:FindFirstChild("Head")
+    if head then
+        local billboardGui = head:FindFirstChild("BillboardGui")
+        if billboardGui then
+            -- 记录原始显示状态
+            model:SetAttribute("_PreviewOriginalEnabled", billboardGui.Enabled)
+            -- 隐藏等级牌
+            billboardGui.Enabled = false
+        end
+    end
+
     -- V1.4.1: 彻底禁用Humanoid的自动行为（防止自动切回Running状态）
     local humanoid = model:FindFirstChildOfClass("Humanoid")
     if humanoid then
@@ -146,6 +158,24 @@ end
 function HighlightHelper.RestoreNormalMode(model)
     if not model then
         return
+    end
+
+    -- V2.1修复：恢复头顶等级牌显示状态
+    local head = model:FindFirstChild("Head")
+    if head then
+        local billboardGui = head:FindFirstChild("BillboardGui")
+        if billboardGui then
+            -- 取出记录的原始状态，如果没有记录则默认为true
+            local originalEnabled = model:GetAttribute("_PreviewOriginalEnabled")
+            if originalEnabled ~= nil then
+                billboardGui.Enabled = originalEnabled
+                -- 清除临时属性
+                model:SetAttribute("_PreviewOriginalEnabled", nil)
+            else
+                -- 默认显示等级牌
+                billboardGui.Enabled = true
+            end
+        end
     end
 
     -- V1.4.1: 恢复Humanoid的正常行为
