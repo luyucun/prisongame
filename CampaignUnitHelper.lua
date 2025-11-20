@@ -115,6 +115,40 @@ function CampaignUnitHelper.PrepareForBattle(unitModel)
 end
 
 --[[
+重新锚定单位（展示模式 - 只锚定HRP）
+用于基地展示状态，保证动画能正常播放
+@param unitModel Model - 单位模型
+@return boolean - 是否成功
+]]
+function CampaignUnitHelper.DeactivateUnitDisplayMode(unitModel)
+	if not unitModel or not unitModel.Parent then
+		return false
+	end
+
+	local success = pcall(function()
+		-- 展示模式：只锚定HumanoidRootPart，其他部件不锚定但关闭碰撞
+		local humanoidRootPart = unitModel:FindFirstChild("HumanoidRootPart")
+		if humanoidRootPart then
+			humanoidRootPart.Anchored = true
+			humanoidRootPart.CanCollide = true
+		end
+
+		-- 其他部件：不锚定，关闭碰撞
+		for _, descendant in ipairs(unitModel:GetDescendants()) do
+			if descendant:IsA("BasePart") and descendant.Name ~= "HumanoidRootPart" then
+				descendant.Anchored = false      -- 不锚定，允许动画播放
+				descendant.CanCollide = false    -- 禁用碰撞，避免肢体碰撞干扰
+			end
+		end
+
+		-- 清除激活标记
+		unitModel:SetAttribute("IsActivated", false)
+	end)
+
+	return success
+end
+
+--[[
 重新锚定单位（返回基地展示态）
 @param unitModel Model - 兵种模型
 @return boolean - 是否成功

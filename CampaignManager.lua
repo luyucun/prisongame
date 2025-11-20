@@ -199,9 +199,30 @@ end
 设置兵种的锚定状态（内部使用）
 @param unitModel Model - 兵种模型
 @param anchored boolean - 是否锚定
+@param displayMode boolean - 展示模式（可选）：true=只锚定HRP，false/nil=全部锚定（默认）
 ]]
-local function SetUnitAnchored(unitModel, anchored)
+local function SetUnitAnchored(unitModel, anchored, displayMode)
 	if not unitModel then
+		return
+	end
+
+	-- V2.1修复：展示模式下只锚定HRP，让Motor6D能正常驱动动画
+	if displayMode and anchored then
+		-- 展示模式：只锚定HumanoidRootPart，其他部件不锚定但关闭碰撞
+		local humanoidRootPart = unitModel:FindFirstChild("HumanoidRootPart")
+		if humanoidRootPart then
+			humanoidRootPart.Anchored = true
+			humanoidRootPart.CanCollide = true
+		end
+
+		-- 其他部件：不锚定，关闭碰撞
+		for _, descendant in ipairs(unitModel:GetDescendants()) do
+			if descendant:IsA("BasePart") and descendant.Name ~= "HumanoidRootPart" then
+				descendant.Anchored = false      -- 不锚定，允许动画播放
+				descendant.CanCollide = false    -- 禁用碰撞，避免肢体碰撞干扰
+			end
+		end
+
 		return
 	end
 
@@ -553,7 +574,7 @@ function CampaignManager.MarchToStage(campaignData, stageNum)
 		-- 检查下一关是否已存在但还未解锁
 		local nextStageFolder = nil
 		if StageService.StageCache[campaignData.PlayerId] and
-		   StageService.StageCache[campaignData.PlayerId][nextStageNum] then
+			StageService.StageCache[campaignData.PlayerId][nextStageNum] then
 			nextStageFolder = StageService.StageCache[campaignData.PlayerId][nextStageNum]
 		end
 
@@ -1085,8 +1106,8 @@ function CampaignManager.OnCampaignEnd(campaignData, isVictory)
 end
 
 --[[
-恢复单位的动画和Humanoid状态（V2.0.1新增）
-用于战役重生后清理死亡状态，恢复正常基地状态
+恢复单位的动画和Humanoid状态（V2.0.2 完全重制版）
+专门用于战役重生后立即重置状态，确保单位能正确站立
 @param unitModel Model - 单位模型
 @param unitId string - 单位ID（用于日志）
 ]]
@@ -1097,42 +1118,151 @@ local function RestoreUnitAnimationState(unitModel, unitId)
 
 	local humanoid = unitModel:FindFirstChildOfClass("Humanoid")
 	if not humanoid then
+		DebugLog(string.format("    ❌ %s 没有找到Humanoid", unitId))
 		return
 	end
 
-	-- 1. 恢复Humanoid状态
+	local rootPart = unitModel:FindFirstChild("HumanoidRootPart")
+	if not rootPart then
+		DebugLog(string.format("    ❌ %s 没有找到HumanoidRootPart", unitId))
+		return
+	end
+
+	DebugLog(string.format("    🔧 开始重置 %s 状态", unitId))
+
+	-- 1. 重建Animator（关键修复：删除失效的旧Animator）
+	local oldAnimator = humanoid:FindFirstChild("Animator")
+	if oldAnimator then
+		oldAnimator:Destroy()
+		DebugLog(string.format("    🔧 %s 删除旧Animator", unitId))
+	end
+
+	-- 创建全新的Animator
+	local newAnimator = Instance.new("Animator")
+	newAnimator.Parent = humanoid
+	DebugLog(string.format("    🔧 %s 创建新Animator", unitId))
+
+	-- 2. 立即重置Humanoid核心状态
 	pcall(function()
+		-- 防止关节破碎
+		humanoid.BreakJointsOnDeath = false
+		-- 退出死亡/倒地状态
 		humanoid.PlatformStand = false
+		humanoid.Sit = false
 		humanoid.AutoRotate = true
-		humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+
+		-- 清零速度
+		rootPart.AssemblyLinearVelocity = Vector3.zero
+		rootPart.AssemblyAngularVelocity = Vector3.zero
+
+		DebugLog(string.format("    🔧 %s Humanoid属性已重置", unitId))
 	end)
 
-	-- 2. 重新启用所有Animate脚本
+	-- 3. 强制状态切换：Physics → Running
+	pcall(function()
+		-- 先切换到Physics确保干净过渡
+		humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+		task.wait() -- 等待一帧确保状态更新
+		-- 再切换到Running，单位会立即站起
+		humanoid:ChangeState(Enum.HumanoidStateType.Running)
+
+		DebugLog(string.format("    🔧 %s 状态已切换到Running", unitId))
+	end)
+
+	-- 4. 重启Animate脚本
 	for _, descendant in ipairs(unitModel:GetDescendants()) do
-		if descendant:IsA("Script") or descendant:IsA("LocalScript") then
-			if descendant.Name == "Animate" then
-				descendant.Disabled = false
-			end
-		end
-	end
-
-	-- 3. 清理残留的死亡动画Track
-	local animator = humanoid:FindFirstChild("Animator")
-	if not animator then
-		animator = unitModel:FindFirstChildOfClass("Animator")
-	end
-
-	if animator then
-		local playingTracks = animator:GetPlayingAnimationTracks()
-		for _, track in ipairs(playingTracks) do
+		if (descendant:IsA("Script") or descendant:IsA("LocalScript")) and descendant.Name == "Animate" then
 			pcall(function()
-				track:Stop(0)
+				descendant.Disabled = true
+				task.wait() -- 短暂等待确保脚本停止
+				descendant.Disabled = false
+				DebugLog(string.format("    🔧 %s Animate脚本已重启", unitId))
 			end)
 		end
 	end
 
-	-- 4. 短暂延迟后，Animate脚本会自动播放show/idle动画
-	-- 无需手动启动，Animate脚本会根据Humanoid状态自动处理
+	-- 5. 重置骨骼位置（新Animator不需要清理残留动画）
+	for _, descendant in ipairs(unitModel:GetDescendants()) do
+		if descendant:IsA("Motor6D") then
+			pcall(function()
+				descendant.Transform = CFrame.new()
+			end)
+		end
+	end
+
+	DebugLog(string.format("    ✅ %s 状态重置完成（新Animator已创建）", unitId))
+end
+
+--[[
+播放展示动画 (修复复生后没有动画的问题)
+@param unitModel Model - 兵种模型
+@param unitId string - 兵种ID
+]]
+local function PlayShowAnimation(unitModel, unitId)
+	if not unitModel or not unitId then
+		return
+	end
+	-- 1. 确保Humanoid处于正确状态
+	local humanoid = unitModel:FindFirstChildOfClass("Humanoid")
+	if not humanoid then
+		return
+	end
+	-- 2. 强制确保Humanoid状态正确
+	pcall(function()
+		-- 确保不是Physics状态，否则动画可能不更新
+		if humanoid:GetState() == Enum.HumanoidStateType.Physics then
+			humanoid:ChangeState(Enum.HumanoidStateType.Running)
+		end
+	end)
+	-- 3. 获取动画ID
+	local UnitConfig = require(ReplicatedStorage.Config.UnitConfig)
+	local animId = UnitConfig.GetShowAnimationId(unitId)
+	if not animId or animId == "" or animId == "0" then
+		animId = UnitConfig.GetIdleAnimationId(unitId)
+	end
+	if not animId or animId == "" or animId == "0" then
+		return
+	end
+	-- 4. 获取Animator
+	local animator = humanoid:FindFirstChild("Animator")
+	if not animator then
+		animator = Instance.new("Animator")
+		animator.Parent = humanoid
+	end
+	-- 5. 加载并播放动画
+	local animation = Instance.new("Animation")
+	animation.AnimationId = "rbxassetid://" .. animId
+	local success, track = pcall(function()
+		-- 清理当前正在播放的轨道，避免混杂
+		for _, oldTrack in ipairs(animator:GetPlayingAnimationTracks()) do
+			pcall(function()
+				oldTrack:Stop(0.1) -- 给一点点淡出时间
+			end)
+		end
+		return animator:LoadAnimation(animation)
+	end)
+	if success and track then
+		--  关键修复1：使用Action4优先级
+		track.Priority = Enum.AnimationPriority.Action4
+		track.Looped = true
+
+		--  关键修复2：不要立即销毁Animation对象，而是绑定到Stopped事件
+		-- 如果立即Destroy，循环动画会失效或卡住
+		track.Stopped:Connect(function()
+			if animation then
+				animation:Destroy()
+			end
+		end)
+
+		track:Play(0.1) -- 0.1秒淡入
+
+		DebugLog(string.format("   [CampaignManager] 已为 %s 重新播放展示动画 (Priority=Action4, Looped=true)", unitId))
+	else
+		warn("复生动画加载失败:", unitId)
+		if animation then
+			animation:Destroy()
+		end
+	end
 end
 
 --[[
@@ -1272,8 +1402,14 @@ function CampaignManager.RespawnUnits(campaignData)
 				tostring(unitInstance.Parent and unitInstance.Parent.Name),
 				tostring(unitInstance.PrimaryPart ~= nil)))
 
-			-- 重要：先恢复血量和状态，再锚定
-			-- 这样可以避免锚定状态影响Humanoid的Physics
+			-- 关键顺序调整：先解锚，让 Humanoid/Motor6D 能拉起姿态，再重置状态和动画
+			SetUnitAnchored(unitInstance, false)
+			DebugLog(string.format("    🔓 %s 先解锚，允许动画拉回站姿", unitData.UnitId))
+
+			-- V2.0.2修复：立即重置状态，防止在未锚定状态下摔倒
+			-- 先重置Humanoid状态，再处理其他
+			DebugLog(string.format("    🎭 立即重置 %s 的动画状态", unitData.UnitId))
+			RestoreUnitAnimationState(unitInstance, unitData.UnitId)
 
 			-- 恢复满血
 			if unitInstance:FindFirstChild("Humanoid") then
@@ -1289,29 +1425,25 @@ function CampaignManager.RespawnUnits(campaignData)
 			DebugLog(string.format("    ✨ 为 %s 播放复生特效", unitData.UnitId))
 			PlayRespawnEffect(unitInstance, unitData.GridSize)
 
-			-- V2.0.1新增：恢复动画和Humanoid状态（必须在播放特效后）
-			DebugLog(string.format("    🎭 恢复 %s 的动画状态", unitData.UnitId))
-			RestoreUnitAnimationState(unitInstance, unitData.UnitId)
+			-- ==========================================
+			-- ⭐⭐【新增代码】复活后立即播放展示动画 ⭐⭐
+			-- ==========================================
+			-- 立即播放展示动画，因为状态已经正确重置
+			PlayShowAnimation(unitInstance, unitData.UnitId)
+			DebugLog(string.format("    🎭 %s 开始播放展示动画", unitData.UnitId))
+			-- ==========================================
 
-			-- 等待一下让Humanoid稳定
-			task.wait(0.1)
-
-			-- 最后才锚定：确保兵种已经稳定在正确位置
+			-- 延迟锚定：给动画一帧时间拉直姿态，避免躺倒被锁定
 			if unitData.WasAnchored then
-				SetUnitAnchored(unitInstance, true)
-				DebugLog(string.format("    🔒 %s 已重新锚定", unitData.UnitId))
-			end
-
-			-- 最终状态检查
-			task.wait(0.1) -- 给动画恢复一点时间
-			if unitInstance.Parent and unitInstance:FindFirstChild("HumanoidRootPart") then
-				local finalPos = unitInstance.HumanoidRootPart.Position
-				DebugLog(string.format("    🎯 最终状态: Parent=%s, 位置=(%.1f, %.1f, %.1f), Anchored=%s",
-					unitInstance.Parent.Name,
-					finalPos.X, finalPos.Y, finalPos.Z,
-					tostring(unitInstance.HumanoidRootPart.Anchored)))
-			else
-				DebugLog(string.format("    ⚠️  %s 最终检查失败: Parent或HumanoidRootPart丢失", unitData.UnitId))
+				task.delay(0.1, function()
+					if unitInstance and unitInstance.Parent then
+						-- V2.1修复：使用展示模式锚定，只锚定HRP让动画能正常播放
+						SetUnitAnchored(unitInstance, true, true)  -- 第三个参数true=展示模式
+						DebugLog(string.format("    🔒 %s 延迟锚定完成（展示模式）", unitData.UnitId))
+						-- 锚定后再确保展示动画处于播放状态（防止状态切换/锚定打断播放）
+						PlayShowAnimation(unitInstance, unitData.UnitId)
+					end
+				end)
 			end
 
 			-- V2.0.3修复：不要在这里清除CampaignKeepInstance

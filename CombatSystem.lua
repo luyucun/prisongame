@@ -669,6 +669,25 @@ function CombatSystem.KillUnit(unitModel, killer)
 			local isCampaignUnit = unitModel:GetAttribute("CampaignKeepInstance")
 
 			if isCampaignUnit then
+				-- V2.0.2修复：战役单位隐藏前确保已软冻结
+				-- 调用UnitAI的软冻结确保状态稳定
+				local UnitAI = require(ServerScriptService.Systems.UnitAI)
+				local humanoid = unitModel:FindFirstChildOfClass("Humanoid")
+				local rootPart = unitModel:FindFirstChild("HumanoidRootPart")
+				if humanoid and rootPart then
+					-- 确保状态已冻结
+					pcall(function()
+						humanoid.BreakJointsOnDeath = false
+						humanoid.PlatformStand = true
+						humanoid.AutoRotate = false
+						humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+						rootPart.AssemblyLinearVelocity = Vector3.zero
+						rootPart.AssemblyAngularVelocity = Vector3.zero
+						rootPart.Anchored = true
+					end)
+					DebugLog(string.format("%s 战役单位隐藏前已确保软冻结状态", unitId))
+				end
+
 				-- 战役单位：隐藏但不销毁，用于后续重生
 				unitModel.Parent = nil
 				DebugLog(string.format("%s 战役单位已隐藏（保留实例用于重生）", unitId))

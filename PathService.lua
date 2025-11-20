@@ -2,7 +2,7 @@
 脚本名称: PathService
 脚本类型: ModuleScript (服务端系统)
 脚本位置: ServerScriptService/Systems/PathService
-版本: V2.0 - 寻路系统重构版
+版本: V2.4 - 修复兵种原地转圈问题
 
 职责：
 1. 统一管理所有单位的路径状态
@@ -10,12 +10,20 @@
 3. 自动处理体型参数、重试、阻挡、降级
 4. 提供多级回退策略
 5. 集中调试可视化和日志
+6. V2.4新增：修复路径计算前MoveTo导致原地转圈的问题
 
 核心设计原则：
 - 单一职责：只负责路径计算和管理，不涉及AI逻辑
 - 异步处理：避免瞬间大量ComputeAsync
 - 防御式编程：深拷贝数据，避免引用失效
 - 智能降级：多级回退策略，确保单位总能移动
+- V2.4新增：等待路径完成再移动，避免Humanoid自行寻路
+
+V2.4修复要点：
+- 路径状态为COMPUTING/QUEUED时，不执行MoveTo，原地等待
+- 增加ForceStraightMove标志，只有多次失败后才允许直线移动
+- 增加PathFailureCount计数，追踪失败次数
+- 启动时不直接MoveTo目标，等待路径计算完成
 ]]
 
 local PathService = {}
@@ -99,6 +107,7 @@ local CONFIG = {
 	-- 调试选项
 	DEBUG_SHOW_PATH = false,        -- 是否显示路径可视化
 	DEBUG_PATH_LOGS = false,        -- 是否打印详细日志
+	DEBUG_WAIT_PATH_LOGS = false,   -- V2.4新增：是否打印等待路径的日志
 	PATH_WAYPOINT_COLOR = Color3.new(0, 1, 0),  -- 绿色
 	PATH_LINE_COLOR = Color3.new(1, 1, 0),       -- 黄色
 }
@@ -1550,6 +1559,10 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)  -- V2.3.1：�
 				-- V2.2: Stuck detection
 				LastPosition = nil,         -- Last known position
 				LastPositionTime = 0,       -- Time when position was recorded
+
+				-- V2.4新增：防止路径计算前MoveTo导致原地转圈
+				ForceStraightMove = false,  -- 是否强制直线移动（多次寻路失败后）
+				PathFailureCount = 0,       -- 路径失败计数
 			}
 
 			table.insert(unitsList, unitInstance)
@@ -1765,19 +1778,36 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)  -- V2.3.1：�
 								if nextWaypoint then
 									humanoid:MoveTo(nextWaypoint)
 									DebugLog(string.format("🚀 %s 重新寻路成功", unitId))
+									-- 重寻成功，重置失败计数
+									data.PathFailureCount = 0
 								else
+									-- 设置强制直线移动标志，允许直线移动
+									data.ForceStraightMove = true
 									humanoid:MoveTo(data.TargetCFrame.Position)
 								end
 							else
-								-- 寻路失败，直线移动
+								-- 重寻失败，增加失败计数
+								data.PathFailureCount = (data.PathFailureCount or 0) + 1
+								if data.PathFailureCount >= CONFIG.MAX_RETRY_COUNT then
+									-- 多次失败，允许强制直线移动
+									data.ForceStraightMove = true
+									DebugLog(string.format("⚠️ %s 多次重寻失败(%d次)，允许强制直线移动",
+										unitId, data.PathFailureCount))
+								end
+								-- 设置强制直线移动标志
+								data.ForceStraightMove = true
 								humanoid:MoveTo(data.TargetCFrame.Position)
 								DebugLog(string.format("⚠️ %s 重新寻路失败，直线移动", unitId))
 							end
 						end, "Campaign")  -- V2.0.5：标记为战役路径
 					else
-						-- 已经在排队中，直接直线移动到目标
-						humanoid:MoveTo(data.TargetCFrame.Position)
-						DebugLog(string.format("⏳ %s 正在寻路中，临时直线移动", unitId))
+						-- V2.4修复：已经在排队中，不要直线移动到目标，等待路径
+						-- 原地待命，避免原地转圈
+						local rootPart = unitInstance:FindFirstChild("HumanoidRootPart")
+						if humanoid and rootPart then
+							humanoid:MoveTo(rootPart.Position)  -- 原地待命
+						end
+						DebugLog(string.format("⏳ %s 正在寻路队列中，原地待命", unitId))
 					end
 				end
 			else
@@ -1828,11 +1858,24 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)  -- V2.3.1：�
 					if nextWaypoint then
 						humanoid:MoveTo(nextWaypoint)
 						DebugLog(string.format("🚀 %s 开始移动", unitId))
+						-- 路径成功，重置失败计数
+						data.PathFailureCount = 0
 					else
+						-- 设置强制直线移动标志，允许使用兜底移动
+						data.ForceStraightMove = true
 						humanoid:MoveTo(data.TargetCFrame.Position)
 					end
 				else
-					-- 路径计算失败，直线移动
+					-- 路径计算失败，增加失败计数
+					data.PathFailureCount = (data.PathFailureCount or 0) + 1
+					if data.PathFailureCount >= CONFIG.MAX_RETRY_COUNT then
+						-- 多次失败，允许强制直线移动
+						data.ForceStraightMove = true
+						DebugLog(string.format("⚠️ %s 多次寻路失败(%d次)，允许强制直线移动",
+							unitId, data.PathFailureCount))
+					end
+					-- 设置强制直线移动标志
+					data.ForceStraightMove = true
 					humanoid:MoveTo(data.TargetCFrame.Position)
 					DebugLog(string.format("⚠️ %s 寻路失败，直线移动", unitId))
 				end
@@ -1985,6 +2028,17 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)  -- V2.3.1：�
 									data.PathRequested = false
 									if success then
 										DebugLog(string.format("✅ %s 重寻成功", unitInstance.Name))
+										-- 重寻成功，重置失败计数
+										data.PathFailureCount = 0
+									else
+										-- 重寻失败，增加失败计数
+										data.PathFailureCount = (data.PathFailureCount or 0) + 1
+										if data.PathFailureCount >= CONFIG.MAX_RETRY_COUNT then
+											-- 多次失败，允许强制直线移动
+											data.ForceStraightMove = true
+											DebugLog(string.format("⚠️ %s 多次重寻失败(%d次)，允许强制直线移动",
+												unitInstance.Name, data.PathFailureCount))
+										end
 									end
 								end, "Campaign", "high")
 							end
@@ -1998,8 +2052,22 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)  -- V2.3.1：�
 							allArrived = false
 							continue  -- 跳过本次MoveTo
 						else
-							-- 其他状态（COMPUTING/QUEUED），使用目标位置作为临时兜底
-							targetPos = data.TargetCFrame.Position
+							-- V2.4修复：路径计算中(COMPUTING/QUEUED)时，不要设置targetPos
+							-- 等待路径计算完成，避免Humanoid自行寻路导致原地转圈
+							if pathStatus == PathStatus.COMPUTING or pathStatus == PathStatus.QUEUED then
+								-- 路径正在计算中，原地待命
+								if CONFIG.DEBUG_WAIT_PATH_LOGS then
+									DebugLog(string.format("⏳ %s 路径计算中(%s)，等待完成", unitInstance.Name, tostring(pathStatus)))
+								end
+								targetPos = nil  -- 设为nil，跳过本次MoveTo
+							else
+								-- 其他未知状态，且已设置强制直线移动标志时才允许直线移动
+								if data.ForceStraightMove then
+									targetPos = data.TargetCFrame.Position
+								else
+									targetPos = nil  -- 不强制移动，等待路径
+								end
+							end
 						end
 					end
 
@@ -2072,6 +2140,17 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)  -- V2.3.1：�
 													humanoid:MoveTo(nextWaypoint)
 													DebugLog(string.format("✅ %s 重寻成功，恢复移动", unitInstance.Name))
 												end
+											end
+											-- 重寻成功，重置失败计数
+											data.PathFailureCount = 0
+										else
+											-- 重寻失败，增加失败计数
+											data.PathFailureCount = (data.PathFailureCount or 0) + 1
+											if data.PathFailureCount >= CONFIG.MAX_RETRY_COUNT then
+												-- 多次失败，允许强制直线移动
+												data.ForceStraightMove = true
+												DebugLog(string.format("⚠️ %s 卡住重寻失败(%d次)，允许强制直线移动",
+													unitInstance.Name, data.PathFailureCount))
 											end
 										end
 									end, "Campaign", "high")

@@ -115,27 +115,72 @@ local function FreezeCorpse(unitModel, humanoid, rootPart, unitName)
 		return
 	end
 
-	-- 步骤1: 禁用PlatformStand并设置Dead状态
-	-- PlatformStand=true 禁用Humanoid自动控制
-	humanoid.PlatformStand = true
+	-- 步骤1: 禁用自动死亡导致的关节破碎 (关键修复)
+	humanoid.BreakJointsOnDeath = false
+	-- 防止血量归零导致强制进入Dead状态
+	if humanoid.Health <= 0 then
+		humanoid.Health = 1 -- 保持一点点血量防止系统判定真死
+	end
 
-	-- 使用Dead状态代替Physics，避免释放Motor6D约束
+	-- 步骤2: 禁用控制并设置物理状态 (修复：使用Physics代替Dead)
+	humanoid.PlatformStand = true
+	humanoid.AutoRotate = false
+
+	-- 使用Physics状态，这样Humanoid不会被系统判定为"死亡"，可以被复活
 	pcall(function()
-		humanoid:ChangeState(Enum.HumanoidStateType.Dead)
+		humanoid:ChangeState(Enum.HumanoidStateType.Physics)
 	end)
 
-	-- 步骤2: 归零速度（消除任何剩余的移动或旋转动量）
+	-- 步骤3: 归零速度（消除任何剩余的移动或旋转动量）
 	pcall(function()
 		rootPart.AssemblyLinearVelocity = Vector3.zero
 		rootPart.AssemblyAngularVelocity = Vector3.zero
 	end)
 
-	-- 步骤3: 锚定根部件（完全阻止物理模拟）
+	-- 步骤4: 锚定根部件（完全阻止物理模拟）
 	pcall(function()
 		rootPart.Anchored = true
 	end)
 
-	DebugLog(string.format("[%s] 尸体已冻结 (归零速度、设置Dead状态、锚定)", unitName))
+	DebugLog(string.format("[%s] 尸体已冻结 (Physics状态、锚定)", unitName))
+end
+
+--[[
+战役单位软冻结（保持死亡姿态但可恢复）
+与FreezeCorpse不同，此函数专门为战役单位设计，保持姿态但不锚定，
+以便复活时能正确恢复状态
+]]
+local function SoftFreezeForCampaign(unitModel, humanoid, rootPart, unitName)
+	if not unitModel or not unitModel.Parent then
+		return
+	end
+
+	DebugLog(string.format("[%s] 战役单位开始软冻结", unitName))
+
+	-- 步骤1: 防止关节破碎，但保留死亡姿态
+	pcall(function()
+		humanoid.BreakJointsOnDeath = false
+	end)
+
+	-- 步骤2: 设置物理状态但不使用Dead状态
+	pcall(function()
+		humanoid.PlatformStand = true    -- 保持倒地状态
+		humanoid.AutoRotate = false     -- 禁用自动旋转
+		humanoid:ChangeState(Enum.HumanoidStateType.Physics) -- 使用物理状态，可恢复
+	end)
+
+	-- 步骤3: 清零速度但不锚定（让复活时能正确传送）
+	pcall(function()
+		rootPart.AssemblyLinearVelocity = Vector3.zero
+		rootPart.AssemblyAngularVelocity = Vector3.zero
+	end)
+
+	-- 步骤4: 立即锚定防止Parent=nil时姿态塌陷
+	pcall(function()
+		rootPart.Anchored = true
+	end)
+
+	DebugLog(string.format("[%s] 软冻结完成 (PlatformStand=true, Physics状态, 已锚定)", unitName))
 end
 
 -- ==================== 动画基础函数 ====================
@@ -1936,15 +1981,17 @@ function UnitAI.BeginDeathAnimation(unitModel, animationId, unitId)
 
 				DebugLog(string.format("[%s] ✅ 死亡动画播放成功 (Priority=Action4, Fade=0)", unitName))
 
-				-- 动画结束时冻结尸体（V2.0.1修复：战役单位跳过冻结）
+				-- 动画结束时冻结尸体（V2.0.1修复：战役单位使用软冻结）
 				animTrack.Stopped:Connect(function()
 					if unitModel and unitModel.Parent then
-						-- V2.0.1修复：检查是否是战役单位，如果是则跳过尸体冻结
+						-- V2.0.1修复：检查是否是战役单位
 						local isCampaignUnit = unitModel:GetAttribute("CampaignKeepInstance")
 						if not isCampaignUnit then
+							-- 非战役单位：完全冻结
 							FreezeCorpse(unitModel, humanoid, rootPart, unitName)
 						else
-							DebugLog(string.format("[%s] 战役单位，跳过尸体冻结", unitName))
+							-- 战役单位：软冻结（保持姿态但可恢复）
+							SoftFreezeForCampaign(unitModel, humanoid, rootPart, unitName)
 						end
 					end
 				end)
@@ -1958,32 +2005,38 @@ function UnitAI.BeginDeathAnimation(unitModel, animationId, unitId)
 			else
 				WarnLog(string.format("[%s] ❌ 死亡动画加载失败! 动画ID可能无效: %s", unitName, animationId))
 				animation:Destroy()
-				-- 动画加载失败，直接冻结尸体（V2.0.1修复：战役单位跳过冻结）
+				-- 动画加载失败，直接冻结尸体（V2.0.1修复：战役单位使用软冻结）
 				local isCampaignUnit = unitModel:GetAttribute("CampaignKeepInstance")
 				if not isCampaignUnit then
+					-- 非战役单位：完全冻结
 					FreezeCorpse(unitModel, humanoid, rootPart, unitName)
 				else
-					DebugLog(string.format("[%s] 战役单位，跳过尸体冻结", unitName))
+					-- 战役单位：软冻结（保持姿态但可恢复）
+					SoftFreezeForCampaign(unitModel, humanoid, rootPart, unitName)
 				end
 			end
 		else
 			WarnLog(string.format("[%s] ❌ 找不到Animator", unitName))
-			-- V2.0.1修复：战役单位跳过冻结
+			-- V2.0.1修复：战役单位使用软冻结
 			local isCampaignUnit = unitModel:GetAttribute("CampaignKeepInstance")
 			if not isCampaignUnit then
+				-- 非战役单位：完全冻结
 				FreezeCorpse(unitModel, humanoid, rootPart, unitName)
 			else
-				DebugLog(string.format("[%s] 战役单位，跳过尸体冻结", unitName))
+				-- 战役单位：软冻结（保持姿态但可恢复）
+				SoftFreezeForCampaign(unitModel, humanoid, rootPart, unitName)
 			end
 		end
 	else
 		DebugLog(string.format("[%s] 无死亡动画配置，直接冻结尸体", unitName))
-		-- 无动画配置时，直接冻结尸体（V2.0.1修复：战役单位跳过冻结）
+		-- 无动画配置时，直接冻结尸体（V2.0.1修复：战役单位使用软冻结）
 		local isCampaignUnit = unitModel:GetAttribute("CampaignKeepInstance")
 		if not isCampaignUnit then
+			-- 非战役单位：完全冻结
 			FreezeCorpse(unitModel, humanoid, rootPart, unitName)
 		else
-			DebugLog(string.format("[%s] 战役单位，跳过尸体冻结", unitName))
+			-- 战役单位：软冻结（保持姿态但可恢复）
+			SoftFreezeForCampaign(unitModel, humanoid, rootPart, unitName)
 		end
 	end
 end
