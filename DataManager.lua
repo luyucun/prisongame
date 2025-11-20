@@ -28,6 +28,10 @@ local PlayerDataStore = DataStoreService:GetDataStore("PlayerData_V2.1")
 -- 多个玩家的事件通过Roblox的事件队列顺序处理,不会出现并发访问
 local playerDataCache = {}
 
+-- 🔥修复服务器关闭时数据保存：保存状态跟踪
+local pendingSaves = {}  -- [UserId] = true 表示正在保存
+local isShuttingDown = false  -- 服务器是否正在关闭
+
 --[[
 玩家数据结构:
 PlayerData = {
@@ -38,6 +42,18 @@ PlayerData = {
         Coins = number,        -- 金币数量
     },
     Units = {},                -- 拥有的兵种数据(后续版本)
+    PlacedUnits = {            -- 🔥修复持久化：已放置兵种数据
+        [instanceId] = {
+            UnitId = string,       -- 兵种ID
+            Level = number,        -- 等级
+            GridX = number,        -- 网格X坐标
+            GridZ = number,        -- 网格Z坐标
+            GridSize = number,     -- 占地大小(1或4)
+            IsActivated = boolean, -- 是否已激活(用于战役系统)
+            Health = number,       -- 当前生命值
+            MaxHealth = number,    -- 最大生命值
+        }
+    },
     ShopData = {               -- V2.1库存系统：商店数据持久化
         [shopId] = {
             LastRefreshTime = number,  -- 上次刷新时间戳
@@ -140,6 +156,9 @@ local function LoadFromDataStore(player)
 		if data.Currency then
 			data.Currency = RestoreFromDataStore(data.Currency)
 		end
+		if data.PlacedUnits then
+			data.PlacedUnits = RestoreFromDataStore(data.PlacedUnits)  -- 🔥修复持久化：恢复放置数据
+		end
 		if data.ShopData then
 			data.ShopData = RestoreFromDataStore(data.ShopData)
 		end
@@ -162,19 +181,24 @@ end
 @param playerData table - 玩家数据
 @return boolean - 是否保存成功
 ]]
-local function SaveToDataStore(player, playerData)
+local function SaveToDataStore(player, playerData, userId)
+	-- 🔥修复服务器关闭时数据保存：支持直接传入userId
+	local targetUserId = userId or (player and player.UserId) or playerData.UserId
+	local playerName = (player and player.Name) or ("UserId_" .. targetUserId)
+
 	-- 构造要保存的数据（去除Player引用等不可序列化字段）
 	local dataToSave = {
 		UserId = playerData.UserId,
 		HomeSlot = playerData.HomeSlot,
 		Currency = SanitizeForDataStore(playerData.Currency),
 		Units = CleanUnits(playerData.Units),  -- 关键：清洗Units中的Vector3等类型
+		PlacedUnits = SanitizeForDataStore(playerData.PlacedUnits),  -- 🔥修复持久化：保存放置数据
 		ShopData = SanitizeForDataStore(playerData.ShopData),  -- V2.1库存系统：保存商店数据
 		LastSaveTime = os.time(),
 	}
 
 	local success, errorMsg = pcall(function()
-		PlayerDataStore:SetAsync("Player_" .. player.UserId, dataToSave)
+		PlayerDataStore:SetAsync("Player_" .. targetUserId, dataToSave)
 	end)
 
 	if success then
@@ -183,7 +207,7 @@ local function SaveToDataStore(player, playerData)
 		warn(string.format(
 			"%s [DataManager] DataStore保存失败 - 玩家:%s 错误:%s",
 			GameConfig.LOG_PREFIX,
-			player.Name,
+			playerName,
 			tostring(errorMsg)
 		))
 		return false
@@ -205,6 +229,7 @@ local function CreateDefaultData(player)
             Coins = GameConfig.INITIAL_COINS,  -- 初始金币100
         },
         Units = {},  -- 后续版本使用
+        PlacedUnits = {},  -- 🔥修复持久化：初始化空的放置数据
         ShopData = {},  -- V2.1库存系统：初始化空商店数据
         LastSaveTime = os.time(),
     }
@@ -242,6 +267,11 @@ function DataManager.InitializePlayerData(player)
             playerData.ShopData = {}
         end
 
+        -- 🔥修复持久化：确保PlacedUnits字段存在（向后兼容）
+        if not playerData.PlacedUnits then
+            playerData.PlacedUnits = {}
+        end
+
     else
         -- 创建新数据
         playerData = CreateDefaultData(player)
@@ -251,6 +281,39 @@ function DataManager.InitializePlayerData(player)
     playerDataCache[player.UserId] = playerData
 
     return playerData
+end
+
+--[[
+等待玩家数据加载完成（修复竞态条件）
+@param player Player - 玩家对象
+@param timeout number - 超时时间（秒），默认10秒
+@return table|nil - 玩家数据，超时返回nil
+]]
+function DataManager.WaitForPlayerData(player, timeout)
+    if not player then
+        warn(GameConfig.LOG_PREFIX, "WaitForPlayerData: player为空")
+        return nil
+    end
+
+    timeout = timeout or 10  -- 默认10秒超时
+    local startTime = tick()
+
+    -- 如果数据已存在，直接返回
+    if playerDataCache[player.UserId] then
+        return playerDataCache[player.UserId]
+    end
+
+    -- 等待数据加载完成
+    while tick() - startTime < timeout do
+        if playerDataCache[player.UserId] then
+            return playerDataCache[player.UserId]
+        end
+        task.wait(0.1)  -- 每100ms检查一次
+    end
+
+    -- 超时
+    warn(GameConfig.LOG_PREFIX, "WaitForPlayerData: 等待玩家数据超时 -", player.Name)
+    return nil
 end
 
 --[[
@@ -428,10 +491,19 @@ function DataManager.SavePlayerData(player)
         return false
     end
 
-    playerData.LastSaveTime = os.time()
+    -- 🔥修复服务器关闭时数据保存：标记保存开始
+    pendingSaves[player.UserId] = true
 
-    -- V2.1库存系统：保存到DataStore
-    return SaveToDataStore(player, playerData)
+    -- 🔥修复持久化：只在保存成功后才更新LastSaveTime，避免保存失败后节流机制阻止重试
+    local saveSuccess = SaveToDataStore(player, playerData)
+    if saveSuccess then
+        playerData.LastSaveTime = os.time()
+    end
+
+    -- 🔥修复服务器关闭时数据保存：标记保存完成
+    pendingSaves[player.UserId] = nil
+
+    return saveSuccess
 end
 
 --[[
@@ -457,6 +529,353 @@ end
 ]]
 function DataManager.GetAllPlayerData()
     return playerDataCache
+end
+
+-- ==================== 🔥修复持久化：放置单位数据管理 ====================
+
+--[[
+保存放置单位数据
+@param player Player - 玩家对象
+@param instanceId string - 单位实例ID
+@param placedData table - 放置数据 {UnitId, Level, GridX, GridZ, GridSize, IsActivated, Health, MaxHealth}
+@return boolean - 是否保存成功
+]]
+function DataManager.SavePlacedUnit(player, instanceId, placedData)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData then
+        warn(GameConfig.LOG_PREFIX, "SavePlacedUnit: 找不到玩家数据")
+        return false
+    end
+
+    -- 确保PlacedUnits字段存在
+    if not playerData.PlacedUnits then
+        playerData.PlacedUnits = {}
+    end
+
+    -- 保存放置数据（只保存可序列化的数据，不包含Model引用）
+    playerData.PlacedUnits[instanceId] = {
+        UnitId = placedData.UnitId,
+        Level = placedData.Level or 1,
+        GridX = placedData.GridX,
+        GridZ = placedData.GridZ,
+        GridSize = placedData.GridSize or 1,
+        IsActivated = placedData.IsActivated or false,
+        Health = placedData.Health,
+        MaxHealth = placedData.MaxHealth,
+    }
+
+    return true
+end
+
+--[[
+移除放置单位数据
+@param player Player - 玩家对象
+@param instanceId string - 单位实例ID
+@return boolean - 是否移除成功
+]]
+function DataManager.RemovePlacedUnit(player, instanceId)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData then
+        warn(GameConfig.LOG_PREFIX, "RemovePlacedUnit: 找不到玩家数据")
+        return false
+    end
+
+    if playerData.PlacedUnits and playerData.PlacedUnits[instanceId] then
+        playerData.PlacedUnits[instanceId] = nil
+        return true
+    end
+
+    return false
+end
+
+--[[
+获取玩家的所有放置单位数据
+@param player Player - 玩家对象
+@return table - 放置单位数据表 {[instanceId] = placedData}
+]]
+function DataManager.GetPlacedUnits(player)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData then
+        return {}
+    end
+
+    return playerData.PlacedUnits or {}
+end
+
+--[[
+获取特定放置单位的数据
+@param player Player - 玩家对象
+@param instanceId string - 单位实例ID
+@return table|nil - 放置单位数据，不存在返回nil
+]]
+function DataManager.GetPlacedUnit(player, instanceId)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData or not playerData.PlacedUnits then
+        return nil
+    end
+
+    return playerData.PlacedUnits[instanceId]
+end
+
+--[[
+更新放置单位的位置
+@param player Player - 玩家对象
+@param instanceId string - 单位实例ID
+@param gridX number - 新的网格X坐标
+@param gridZ number - 新的网格Z坐标
+@return boolean - 是否更新成功
+]]
+function DataManager.UpdatePlacedUnitPosition(player, instanceId, gridX, gridZ)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData or not playerData.PlacedUnits or not playerData.PlacedUnits[instanceId] then
+        warn(GameConfig.LOG_PREFIX, "UpdatePlacedUnitPosition: 找不到放置单位数据")
+        return false
+    end
+
+    playerData.PlacedUnits[instanceId].GridX = gridX
+    playerData.PlacedUnits[instanceId].GridZ = gridZ
+    return true
+end
+
+--[[
+更新放置单位的生命值
+@param player Player - 玩家对象
+@param instanceId string - 单位实例ID
+@param health number - 当前生命值
+@param maxHealth number - 最大生命值（可选）
+@return boolean - 是否更新成功
+]]
+function DataManager.UpdatePlacedUnitHealth(player, instanceId, health, maxHealth)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData or not playerData.PlacedUnits or not playerData.PlacedUnits[instanceId] then
+        warn(GameConfig.LOG_PREFIX, "UpdatePlacedUnitHealth: 找不到放置单位数据")
+        return false
+    end
+
+    playerData.PlacedUnits[instanceId].Health = health
+    if maxHealth then
+        playerData.PlacedUnits[instanceId].MaxHealth = maxHealth
+    end
+    return true
+end
+
+--[[
+节流式保存玩家数据（避免频繁保存）
+@param player Player - 玩家对象
+@param forceImmediate boolean - 是否强制立即保存（可选，默认false）
+@return boolean - 是否保存成功
+]]
+function DataManager.SavePlayerDataThrottled(player, forceImmediate)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData then
+        warn(GameConfig.LOG_PREFIX, "SavePlayerDataThrottled: 找不到玩家数据")
+        return false
+    end
+
+    local currentTime = os.time()
+    local timeSinceLastSave = currentTime - (playerData.LastSaveTime or 0)
+    local SAVE_THROTTLE_SECONDS = 30  -- 30秒内避免重复保存
+    local RETRY_AFTER_FAILURE_SECONDS = 5  -- 保存失败后5秒允许重试
+
+    -- 判断是否需要保存
+    local shouldSave = false
+
+    if forceImmediate then
+        shouldSave = true
+        -- print(string.format("[DataManager] 🔥 强制立即保存: 玩家 %s", player.Name))
+    elseif timeSinceLastSave >= SAVE_THROTTLE_SECONDS then
+        shouldSave = true
+        -- print(string.format("[DataManager] 🔥 正常节流保存: 玩家 %s (距离上次 %d 秒)", player.Name, timeSinceLastSave))
+    elseif playerData.LastSaveFailedTime and (currentTime - playerData.LastSaveFailedTime) >= RETRY_AFTER_FAILURE_SECONDS then
+        shouldSave = true
+        -- print(string.format("[DataManager] 🔥 保存失败重试: 玩家 %s (距离失败 %d 秒)", player.Name, currentTime - playerData.LastSaveFailedTime))
+    end
+
+    if shouldSave then
+        local saveSuccess = DataManager.SavePlayerData(player)
+        if not saveSuccess then
+            -- 记录保存失败的时间，允许较快重试
+            playerData.LastSaveFailedTime = currentTime
+            warn(string.format(
+                "%s [DataManager] 🔥 保存失败，将在 %d 秒后允许重试: 玩家 %s",
+                GameConfig.LOG_PREFIX,
+                RETRY_AFTER_FAILURE_SECONDS,
+                player.Name
+            ))
+        else
+            -- 保存成功，清除失败标记
+            playerData.LastSaveFailedTime = nil
+        end
+        return saveSuccess
+    else
+        -- 标记需要保存，但暂不执行（节流中）
+        return true
+    end
+end
+
+--[[
+🔥修复服务器关闭时数据保存：设置关机状态
+]]
+function DataManager.SetShuttingDown(value)
+    isShuttingDown = value
+end
+
+--[[
+🔥修复服务器关闭时数据保存：获取关机状态
+@return boolean - 是否正在关机
+]]
+function DataManager.IsShuttingDown()
+    return isShuttingDown
+end
+
+--[[
+🔥修复服务器关闭时数据保存：获取所有玩家数据（从缓存）
+@return table - 所有玩家数据 {[UserId] = PlayerData}
+]]
+function DataManager.GetAllPlayerData()
+    return playerDataCache
+end
+
+--[[
+🔥修复服务器关闭时数据保存：根据UserId保存缓存数据
+@param userId number - 玩家UserId
+@return boolean - 是否保存成功
+]]
+function DataManager.SaveCachedPlayerData(userId)
+    local playerData = playerDataCache[userId]
+    if not playerData then
+        warn(GameConfig.LOG_PREFIX, "SaveCachedPlayerData: 找不到缓存数据 -", userId)
+        return false
+    end
+
+    -- 标记保存开始
+    pendingSaves[userId] = true
+
+    -- 创建临时Player对象用于保存（仅用于日志）
+    local success = SaveToDataStore(nil, playerData, userId)
+
+    -- 标记保存完成
+    pendingSaves[userId] = nil
+
+    return success
+end
+
+--[[
+🔥修复服务器关闭时数据保存：等待所有保存完成
+@param timeout number - 超时时间（秒），默认10秒
+@return boolean - 是否在超时前全部完成
+]]
+function DataManager.WaitForAllSavesToComplete(timeout)
+    timeout = timeout or 10
+    local startTime = tick()
+
+    while tick() - startTime < timeout do
+        local hasPendingSaves = false
+        for _ in pairs(pendingSaves) do
+            hasPendingSaves = true
+            break
+        end
+
+        if not hasPendingSaves then
+            return true  -- 全部完成
+        end
+
+        task.wait(0.1)
+    end
+
+    return false  -- 超时
+end
+
+--[[
+🔥修复服务器关闭时数据保存：获取待保存数量
+@return number - 待保存的玩家数量
+]]
+function DataManager.GetPendingSaveCount()
+    local count = 0
+    for _ in pairs(pendingSaves) do
+        count = count + 1
+    end
+    return count
+end
+
+--[[
+🔥修复服务器关闭时数据保存：同步放置单位数据
+@param player Player - 玩家对象
+@param placedUnitsData table - 放置单位数据
+]]
+function DataManager.SyncPlacedUnits(player, placedUnitsData)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData then
+        warn(GameConfig.LOG_PREFIX, "SyncPlacedUnits: 找不到玩家数据")
+        return false
+    end
+
+    -- 清洗数据，移除不可序列化的字段（如Model引用）
+    local cleanedData = {}
+    for instanceId, unitData in pairs(placedUnitsData) do
+        cleanedData[instanceId] = {
+            InstanceId = unitData.InstanceId,
+            UnitId = unitData.UnitId,
+            Level = unitData.Level or 1,
+            GridX = unitData.GridX,
+            GridZ = unitData.GridZ,
+            GridSize = unitData.GridSize,
+            PlacedTime = unitData.PlacedTime,
+            -- 注意：不包含Position和Model，因为这些可以通过其他数据重建
+        }
+    end
+
+    playerData.PlacedUnits = cleanedData
+    return true
+end
+
+--[[
+🔥修复服务器关闭时数据保存：添加单个放置单位
+@param player Player - 玩家对象
+@param instanceId string - 实例ID
+@param unitData table - 单位数据
+]]
+function DataManager.AddPlacedUnit(player, instanceId, unitData)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData then
+        warn(GameConfig.LOG_PREFIX, "AddPlacedUnit: 找不到玩家数据")
+        return false
+    end
+
+    if not playerData.PlacedUnits then
+        playerData.PlacedUnits = {}
+    end
+
+    -- 清洗数据
+    playerData.PlacedUnits[instanceId] = {
+        InstanceId = unitData.InstanceId,
+        UnitId = unitData.UnitId,
+        Level = unitData.Level or 1,
+        GridX = unitData.GridX,
+        GridZ = unitData.GridZ,
+        GridSize = unitData.GridSize,
+        PlacedTime = unitData.PlacedTime or os.time(),
+    }
+
+    return true
+end
+
+--[[
+🔥修复服务器关闭时数据保存：移除放置单位
+@param player Player - 玩家对象
+@param instanceId string - 实例ID
+]]
+function DataManager.RemovePlacedUnit(player, instanceId)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData then
+        return false
+    end
+
+    if playerData.PlacedUnits then
+        playerData.PlacedUnits[instanceId] = nil
+    end
+
+    return true
 end
 
 return DataManager

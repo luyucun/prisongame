@@ -85,7 +85,7 @@ local function SetupUnitCollision(unitModel)
     for _, descendant in ipairs(unitModel:GetDescendants()) do
         if descendant:IsA("BasePart") then
             pcall(function()
-                PhysicsService:SetPartCollisionGroup(descendant, BattleConfig.UNIT_COLLISION_GROUP)
+                descendant.CollisionGroup = BattleConfig.UNIT_COLLISION_GROUP
             end)
         end
     end

@@ -181,13 +181,20 @@ end
 @param unitId - 兵种ID
 ]]
 local function PreloadAllAnimations(unitModel, humanoid, unitId)
+	-- V2.6修复：添加humanoid空值检查
+	if not humanoid then
+		return
+	end
+
 	local animator = humanoid:FindFirstChild("Animator")
 	if not animator then
 		animator = humanoid.Parent and humanoid.Parent:FindFirstChildOfClass("Animator")
 	end
+
+	-- V2.6修复：静默失败，不要WarnLog刷屏
+	-- 原因：某些情况下Animator尚未创建，这是正常的，不应该刷屏
 	if not animator then
-		WarnLog(string.format("[%s] 预加载动画失败: 找不到Animator", unitId))
-		return
+		return  -- 静默返回，不打印警告
 	end
 
 	-- 获取所有动画ID
@@ -848,20 +855,24 @@ end
 ]]
 local function HasLineOfSight(unitModel, targetModel, aiData)
 	local root = unitModel:FindFirstChild("HumanoidRootPart")
-	local targetRoot = targetModel:FindFirstChild("HumanoidRootPart") or targetModel.PrimaryPart
+	-- 目标可能是 Model 也可能是 Part
+	local targetRoot = targetModel:FindFirstChild("HumanoidRootPart") or targetModel.PrimaryPart or targetModel
+
 	if not root or not targetRoot then
 		return false
 	end
 
-	local direction = targetRoot.Position - root.Position
+	local origin = root.Position
+	local destination = targetRoot.Position
+	local direction = destination - origin
 	local distance = direction.Magnitude
 
-	-- 极短距离直接判定可达（避免精度问题）
+	-- 极短距离直接返回 true
 	if distance < 2 then
 		return true
 	end
 
-	-- V2.4优化：缓存检查
+	-- V2.4 优化：缓存逻辑保持不变
 	-- 仅当距离变化>3 studs 或超过 0.25 秒未检查时才重新射线
 	if aiData and aiData.LastLoSCheckTick then
 		local timeDiff = tick() - aiData.LastLoSCheckTick
@@ -873,32 +884,38 @@ local function HasLineOfSight(unitModel, targetModel, aiData)
 		end
 	end
 
-	-- V2.1.1修正：无论距离远近，都执行射线检测
-	-- 这样可以正确处理"距离近但有墙"的情况
+	-- V2.5寻路优化：关键修改 - 过滤器排除所有兵种
 	local rayParams = RaycastParams.new()
 	rayParams.FilterType = Enum.RaycastFilterType.Exclude
-	rayParams.FilterDescendantsInstances = { unitModel }  -- 忽略自身
-	rayParams.IgnoreWater = true
 
-	local result = workspace:Raycast(root.Position, direction, rayParams)
-	local losResult = false
+	-- 🔥 关键修改：过滤器不仅要排除自己，还要排除所有兵种和目标 🔥
+	local filterList = { unitModel, targetModel }
 
-	if not result then
-		-- 没有任何命中，视为可直走
-		losResult = true
-	else
-		-- 命中的对象若明显是"动态单位"，可以忽略（示例：命中对象的父包含Humanoid）
-		local hitParent = result.Instance and result.Instance.Parent
-		if hitParent and hitParent:FindFirstChildOfClass("Humanoid") then
-			-- 命中的是其他单位，视为"拥挤阻挡"，直走可能也有用，这里返回true试图直线逼近
-			losResult = true
-		else
-			-- 命中静态障碍，视为不可直走
-			losResult = false
-		end
+	-- 如果workspace下有Units文件夹存放所有兵种，直接排除
+	local unitsFolder = workspace:FindFirstChild("Units")
+	if unitsFolder then
+		table.insert(filterList, unitsFolder)
 	end
 
-	-- V2.4优化：更新缓存
+	-- V2.5优化：使用PhysicsService碰撞组（如果已实施CollisionSystem）
+	-- 尝试使用Units碰撞组，让射线忽略所有兵种
+	local success, _ = pcall(function()
+		rayParams.CollisionGroup = "Units"
+	end)
+	if not success then
+		-- 如果碰撞组未设置，回退到FilterDescendantsInstances
+		rayParams.CollisionGroup = "Default"
+	end
+
+	rayParams.FilterDescendantsInstances = filterList
+	rayParams.IgnoreWater = true
+
+	local result = workspace:Raycast(origin, direction, rayParams)
+
+	-- 如果结果为 nil，说明直线无障碍
+	local losResult = (result == nil)
+
+	-- V2.4 优化：更新缓存
 	if aiData then
 		aiData.LastLoSResult = losResult
 		aiData.LastLoSCheckTick = tick()
@@ -1452,27 +1469,80 @@ function UnitAI.StartAI(unitModel)
 						ThrottledMoveTo(aiData, targetPos.Position)
 					end
 				end
+			else
+				-- V2.7修复：没有路径时也要继续移动，直奔目标
+				-- 这种情况发生在：直线可达、寻路失败、或寻路未完成
+				local targetPos = currentTarget:FindFirstChild("HumanoidRootPart") or currentTarget.PrimaryPart
+				if targetPos then
+					ThrottledMoveTo(aiData, targetPos.Position)
+				end
 			end
 		else
-			-- reached = false：MoveTo被打断或无法到达（被阻挡/拥挤）
-			-- 这是关键：被阻挡时异步请求寻路
+			-- V2.5寻路优化：reached = false，MoveTo被打断或无法到达（被阻挡/拥挤）
+			-- 🔥 优化：不要立即请求完整寻路 🔥
+
+			-- 1. 检查距离：如果距离目标非常近，可能是挤到了，直接算到达或忽略
+			local rootPart = unitModel:FindFirstChild("HumanoidRootPart")
+			local targetRootPart = currentTarget:FindFirstChild("HumanoidRootPart") or currentTarget.PrimaryPart
+			if rootPart and targetRootPart then
+				local dist = (targetRootPart.Position - rootPart.Position).Magnitude
+				if dist < 5 then
+					-- 距离很近被挡住，大概率是友军，直接尝试直线 MoveTo 挤过去，或者什么都不做等待下一帧
+					DebugLog(string.format("%s 距离很近(%.1f)被阻挡，可能是友军拥挤，尝试直线移动", currentState.UnitId, dist))
+					local targetPos = targetRootPart.Position
+					ThrottledMoveTo(aiData, targetPos)
+					return
+				end
+			end
+
+			-- 2. 随机延迟重试：防止30个兵同一帧请求寻路
 			if not aiData.PathRequested then
 				aiData.PathRequested = true
-				DebugLog(string.format("%s MoveTo被阻挡，异步请求寻路", currentState.UnitId))
 
-				PathService.RequestPathAsync(unitModel, currentTarget, currentState.UnitId, function(success, pathState)
-					-- 寻路回调
-					aiData.PathRequested = false
+				-- V2.5优化：延迟 0.1 到 0.5 秒，分散计算压力
+				local delayTime = math.random() * 0.4 + 0.1
+				DebugLog(string.format("%s MoveTo被阻挡，将在%.2f秒后检查是否需要寻路", currentState.UnitId, delayTime))
+
+				task.delay(delayTime, function()
 					if not aiData.IsActive or not CombatSystem.IsUnitAlive(unitModel) then
+						aiData.PathRequested = false
 						return
 					end
 
-					if success and pathState and pathState.Waypoints and #pathState.Waypoints > 0 then
-						DebugLog(string.format("%s 重新寻路成功，路径点数: %d", currentState.UnitId, #pathState.Waypoints))
-						-- 下一次Update会使用这个路径
-					else
-						DebugLog(string.format("%s 重新寻路失败，继续直线移动", currentState.UnitId))
+					-- 再次检查目标是否仍然有效
+					local delayedTarget = ValidateTarget(unitModel)
+					if not delayedTarget then
+						aiData.PathRequested = false
+						return
 					end
+
+					-- V2.5关键优化：再次检查是否真的需要寻路（可能延迟期间已经直线走过去了）
+					if HasLineOfSight(unitModel, delayedTarget, aiData) then
+						aiData.PathRequested = false
+						-- 直线能到就别寻路了
+						DebugLog(string.format("%s 延迟后发现直线可达，取消寻路请求", currentState.UnitId))
+						local tPos = delayedTarget:FindFirstChild("HumanoidRootPart") or delayedTarget.PrimaryPart
+						if tPos then
+							ThrottledMoveTo(aiData, tPos.Position)
+						end
+						return
+					end
+
+					-- 确实需要寻路，再请求
+					DebugLog(string.format("%s 延迟后确认需要寻路，发起请求", currentState.UnitId))
+					PathService.RequestPathAsync(unitModel, delayedTarget, currentState.UnitId, function(success, pathState)
+						aiData.PathRequested = false
+						if not aiData.IsActive or not CombatSystem.IsUnitAlive(unitModel) then
+							return
+						end
+
+						if success and pathState and pathState.Waypoints and #pathState.Waypoints > 0 then
+							DebugLog(string.format("%s 重新寻路成功，路径点数: %d", currentState.UnitId, #pathState.Waypoints))
+							-- 下一次Update会使用这个路径
+						else
+							DebugLog(string.format("%s 重新寻路失败，继续直线移动", currentState.UnitId))
+						end
+					end)
 				end)
 			end
 		end

@@ -2,22 +2,21 @@
 脚本名称: UnitManager
 脚本类型: ModuleScript (服务端系统)
 脚本位置: ServerScriptService/Systems/UnitManager
-版本: V1.5.1
+版本: V2.6 修复版 - 移除导致卡死的空间网格，回归高效列表遍历
 ]]
 
 --[[
-单位索引管理器
+单位索引管理器 (性能优化版)
 职责:
 1. 管理所有战斗中的单位,按 battleId 和 team 分组
 2. 提供高效的寻敌接口
 3. 维护单位位置缓存,减少重复计算
-4. 广播单位死亡/位置变化事件
 
-优势:
-- 分组索引,避免全局遍历
-- 位置缓存,减少实例访问
-- 高效寻敌,只遍历敌方队伍
-- 死亡单位立即清理
+V2.6修复说明:
+- 移除了V2.4引入的空间网格系统（SpatialGrid）
+- 原因：当searchRange很大时，三重循环会导致Script Timeout
+- 改用简单的列表遍历（O(N)），对于<200个单位极快且稳定
+- 保留了位置缓存机制，保持高效
 ]]
 
 local UnitManager = {}
@@ -43,54 +42,6 @@ local unitBattleInfo = {}
 
 -- 是否已初始化
 local isInitialized = false
-
--- V2.4新增：空间分桶系统（SpatialGrid）
--- 将战场划分为网格，加速敌人查询从O(m)→O(1)
-local GRID_SIZE = 4  -- 网格大小（studs）
-local spatialGrids = {}  -- [battleId] = {gridKey = {unitModel1, unitModel2, ...}}
-local unitGridMapping = {}  -- [unitModel] = {battleId = xx, gridKey = "x,y,z"}
-
---[[
-V2.4新增：计算位置对应的网格key
-@param position Vector3 - 位置
-@return string - 网格key (格式: "x,y,z")
-]]
-local function GetGridKey(position)
-	local gridX = math.floor(position.X / GRID_SIZE)
-	local gridY = math.floor(position.Y / GRID_SIZE)
-	local gridZ = math.floor(position.Z / GRID_SIZE)
-	return string.format("%d,%d,%d", gridX, gridY, gridZ)
-end
-
---[[
-V2.4新增：获取相邻的网格keys（包括中心）
-@param gridKey string - 中心网格key
-@param searchRange number - 搜索范围（studs）
-@return table - 相邻网格key列表
-]]
-local function GetAdjacentGridKeys(gridKey, searchRange)
-	local x, y, z = gridKey:match("(-?%d+),(-?%d+),(-?%d+)")
-	x, y, z = tonumber(x), tonumber(y), tonumber(z)
-
-	-- 根据搜索范围动态计算网格半径
-	-- 例如：searchRange=200 studs, GRID_SIZE=4 studs → radius=50格
-	local radius = math.ceil(searchRange / GRID_SIZE)
-
-	-- 限制最大半径，避免性能问题（最多检查100x100x100的立方体）
-	radius = math.min(radius, 50)
-
-	local adjacent = {}
-	-- 检查中心及周围的网格立方体
-	for dx = -radius, radius do
-		for dy = -radius, radius do
-			for dz = -radius, radius do
-				table.insert(adjacent, string.format("%d,%d,%d", x + dx, y + dy, z + dz))
-			end
-		end
-	end
-
-	return adjacent
-end
 
 -- ==================== 私有函数 ====================
 
@@ -122,14 +73,14 @@ local function GetUnitPosition(unitModel, forceUpdate)
 	-- 检查缓存
 	if not forceUpdate and unitPositionCache[unitModel] then
 		local cache = unitPositionCache[unitModel]
-		-- 缓存未过期
+		-- 缓存未过期(0.1秒缓存时间)
 		if tick() - cache.LastUpdateTime < 0.1 then
 			return cache.Position
 		end
 	end
 
 	-- 更新缓存
-	local rootPart = unitModel:FindFirstChild("HumanoidRootPart")
+	local rootPart = unitModel:FindFirstChild("HumanoidRootPart") or unitModel.PrimaryPart
 	if not rootPart then
 		return nil
 	end
@@ -143,105 +94,6 @@ local function GetUnitPosition(unitModel, forceUpdate)
 	return position
 end
 
---[[
-V2.4新增：更新单位的网格位置
-@param unitModel Model - 单位模型
-@param battleId number - 战斗ID
-]]
-local function UpdateUnitGridPosition(unitModel, battleId)
-	local position = GetUnitPosition(unitModel)
-	if not position then
-		return
-	end
-
-	local newGridKey = GetGridKey(position)
-
-	-- 获取或初始化战斗网格
-	if not spatialGrids[battleId] then
-		spatialGrids[battleId] = {}
-	end
-
-	-- 检查单位是否需要更新网格位置
-	local currentMapping = unitGridMapping[unitModel]
-	if currentMapping and currentMapping.battleId == battleId and currentMapping.gridKey == newGridKey then
-		return  -- 单位仍在同一网格，无需更新
-	end
-
-	-- 从旧网格中移除单位（如果存在）
-	if currentMapping then
-		local oldGrid = spatialGrids[currentMapping.battleId]
-		if oldGrid and oldGrid[currentMapping.gridKey] then
-			local oldGridList = oldGrid[currentMapping.gridKey]
-			for i, unit in ipairs(oldGridList) do
-				if unit == unitModel then
-					table.remove(oldGridList, i)
-					break
-				end
-			end
-		end
-	end
-
-	-- 添加单位到新网格
-	if not spatialGrids[battleId][newGridKey] then
-		spatialGrids[battleId][newGridKey] = {}
-	end
-	table.insert(spatialGrids[battleId][newGridKey], unitModel)
-
-	-- 更新映射
-	unitGridMapping[unitModel] = {
-		battleId = battleId,
-		gridKey = newGridKey,
-	}
-end
-
---[[
-V2.4新增：从空间网格中查询范围内的敌人
-@param unitModel Model - 查询单位
-@param battleId number - 战斗ID
-@param enemyTeam string - 敌方队伍
-@param searchRange number - 搜索范围
-@return table - 范围内的敌人列表
-]]
-local function GetNearbyEnemiesFromGrid(unitModel, battleId, enemyTeam, searchRange)
-	local position = GetUnitPosition(unitModel)
-	if not position then
-		return {}
-	end
-
-	local battleGrid = spatialGrids[battleId]
-	if not battleGrid then
-		return {}
-	end
-
-	local gridKey = GetGridKey(position)
-	local adjacentKeys = GetAdjacentGridKeys(gridKey, searchRange)
-
-	local nearbyEnemies = {}
-	for _, key in ipairs(adjacentKeys) do
-		local gridUnits = battleGrid[key]
-		if gridUnits then
-			for _, otherUnit in ipairs(gridUnits) do
-				-- 检查是否属于敌方队伍
-				local otherInfo = unitBattleInfo[otherUnit]
-				if otherInfo and otherInfo.BattleId == battleId and otherInfo.Team == enemyTeam then
-					-- 进行最终距离检查
-					local otherPos = GetUnitPosition(otherUnit)
-					if otherPos then
-						local distance = (position - otherPos).Magnitude
-						if distance <= searchRange then
-							table.insert(nearbyEnemies, {Unit = otherUnit, Distance = distance})
-						end
-					end
-				end
-			end
-		end
-	end
-
-	-- 按距离排序
-	table.sort(nearbyEnemies, function(a, b) return a.Distance < b.Distance end)
-	return nearbyEnemies
-end
-
 -- ==================== 公共接口 ====================
 
 --[[
@@ -250,11 +102,8 @@ end
 ]]
 function UnitManager.Initialize()
 	if isInitialized then
-		WarnLog("UnitManager已经初始化过了")
 		return true
 	end
-
-	DebugLog("正在初始化UnitManager...")
 
 	-- 初始化数据结构
 	battleUnits = {}
@@ -262,7 +111,7 @@ function UnitManager.Initialize()
 	unitBattleInfo = {}
 
 	isInitialized = true
-	DebugLog("UnitManager初始化完成")
+	print(GameConfig.LOG_PREFIX, "[UnitManager] 初始化完成 (高效列表模式)")
 	return true
 end
 
@@ -276,12 +125,6 @@ end
 function UnitManager.RegisterUnit(battleId, team, unitModel)
 	-- 参数验证
 	if not battleId or not team or not unitModel then
-		WarnLog("RegisterUnit失败: 参数无效")
-		return false
-	end
-
-	if not unitModel:IsA("Model") then
-		WarnLog("RegisterUnit失败: unitModel不是Model类型")
 		return false
 	end
 
@@ -294,10 +137,9 @@ function UnitManager.RegisterUnit(battleId, team, unitModel)
 		battleUnits[battleId][team] = {}
 	end
 
-	-- 检查是否已注册
+	-- 检查是否已注册(避免重复)
 	for _, unit in ipairs(battleUnits[battleId][team]) do
 		if unit == unitModel then
-			WarnLog("RegisterUnit警告: 单位已经注册过了")
 			return false
 		end
 	end
@@ -313,9 +155,6 @@ function UnitManager.RegisterUnit(battleId, team, unitModel)
 
 	-- 初始化位置缓存
 	GetUnitPosition(unitModel, true)
-
-	-- V2.4新增：初始化网格位置（SpatialGrid）
-	UpdateUnitGridPosition(unitModel, battleId)
 
 	DebugLog(string.format("注册单位: BattleId=%d, Team=%s, Unit=%s",
 		battleId, team, unitModel.Name))
@@ -357,22 +196,6 @@ function UnitManager.UnregisterUnit(unitModel)
 	unitBattleInfo[unitModel] = nil
 	unitPositionCache[unitModel] = nil
 
-	-- V2.4新增：清理网格映射
-	local mapping = unitGridMapping[unitModel]
-	if mapping then
-		local grid = spatialGrids[mapping.battleId]
-		if grid and grid[mapping.gridKey] then
-			local gridList = grid[mapping.gridKey]
-			for i, unit in ipairs(gridList) do
-				if unit == unitModel then
-					table.remove(gridList, i)
-					break
-				end
-			end
-		end
-		unitGridMapping[unitModel] = nil
-	end
-
 	DebugLog(string.format("注销单位: BattleId=%d, Team=%s, Unit=%s",
 		battleId, team, unitModel.Name))
 
@@ -412,14 +235,16 @@ function UnitManager.GetEnemyTeam(team)
 end
 
 --[[
-获取最近的敌人(优化版 - V2.4使用SpatialGrid)
+🔥 V2.6关键修复：GetClosestEnemy
+移除空间网格搜索，改用直接遍历敌方列表。
+对于 Roblox Lua，直接遍历 50-100 个单位比维护复杂的 3D 网格要快得多，且绝对稳定。
 @param unitModel Model - 当前单位
 @param maxDistance number - 最大搜索距离
 @return Model|nil - 最近的敌人
 @return number|nil - 距离
 ]]
 function UnitManager.GetClosestEnemy(unitModel, maxDistance)
-	-- 获取单位信息
+	-- 1. 获取自身信息
 	local info = unitBattleInfo[unitModel]
 	if not info then
 		return nil, nil
@@ -427,30 +252,41 @@ function UnitManager.GetClosestEnemy(unitModel, maxDistance)
 
 	local battleId = info.BattleId
 	local myTeam = info.Team
-
-	-- 获取敌方队伍名称
 	local enemyTeam = UnitManager.GetEnemyTeam(myTeam)
 	if not enemyTeam then
 		return nil, nil
 	end
 
-	-- 获取自己的位置
+	-- 2. 获取自身位置
 	local myPos = GetUnitPosition(unitModel, false)
 	if not myPos then
 		return nil, nil
 	end
 
-	-- V2.4优化：使用SpatialGrid查询（O(1)而非O(m)）
-	-- 注意：GetNearbyEnemiesFromGrid已按距离排序，直接返回第一个即可
-	local nearbyEnemies = GetNearbyEnemiesFromGrid(unitModel, battleId, enemyTeam, maxDistance or math.huge)
-
-	if nearbyEnemies and #nearbyEnemies > 0 then
-		-- 列表已按距离排序，第一个就是最近的
-		local closestResult = nearbyEnemies[1]
-		return closestResult.Unit, closestResult.Distance
+	-- 3. 获取所有敌人列表
+	local enemies = UnitManager.GetBattleUnits(battleId, enemyTeam)
+	if not enemies or #enemies == 0 then
+		return nil, nil
 	end
 
-	return nil, nil
+	local closestUnit = nil
+	local closestDist = maxDistance or math.huge
+
+	-- 4. 简单直接的循环遍历 (O(N))，这在N<200时极快
+	for _, enemy in ipairs(enemies) do
+		if enemy and enemy.Parent then -- 基础有效性检查
+			local enemyPos = GetUnitPosition(enemy, false)
+			if enemyPos then
+				local dist = (myPos - enemyPos).Magnitude
+				if dist < closestDist then
+					closestDist = dist
+					closestUnit = enemy
+				end
+			end
+		end
+	end
+
+	return closestUnit, closestDist
 end
 
 --[[
@@ -533,27 +369,8 @@ function UnitManager.ClearBattle(battleId)
 		for _, unit in ipairs(units) do
 			unitBattleInfo[unit] = nil
 			unitPositionCache[unit] = nil
-
-			-- V2.4新增：清理网格映射
-			local mapping = unitGridMapping[unit]
-			if mapping then
-				local grid = spatialGrids[mapping.battleId]
-				if grid and grid[mapping.gridKey] then
-					local gridList = grid[mapping.gridKey]
-					for i, gridUnit in ipairs(gridList) do
-						if gridUnit == unit then
-							table.remove(gridList, i)
-							break
-						end
-					end
-				end
-				unitGridMapping[unit] = nil
-			end
 		end
 	end
-
-	-- 清理网格数据
-	spatialGrids[battleId] = nil
 
 	-- 清理战斗索引
 	battleUnits[battleId] = nil
@@ -621,14 +438,7 @@ end
 function UnitManager.GetHomeUnits(player)
 	-- V2.0实现: 使用PlacementSystem获取玩家基地已放置的兵种
 	local PlacementSystem = require(ServerScriptService.Systems.PlacementSystem)
-
-	local homeUnits = PlacementSystem.GetPlacedUnitModels(player)
-
-	if BattleConfig.DEBUG_COMBAT_LOGS then
-		print(GameConfig.LOG_PREFIX, "[UnitManager] GetHomeUnits:", player.Name, "兵种数量:", #homeUnits)
-	end
-
-	return homeUnits
+	return PlacementSystem.GetPlacedUnitModels(player)
 end
 
 --[[
@@ -640,13 +450,7 @@ function UnitManager.SaveUnitHP(unitInstance, currentHP)
 	if not unitInstance or not currentHP then
 		return
 	end
-
-	-- 保存到Attribute
 	unitInstance:SetAttribute("SavedHP", currentHP)
-
-	if BattleConfig.DEBUG_COMBAT_LOGS then
-		print(GameConfig.LOG_PREFIX, "[UnitManager] 保存单位血量:", unitInstance.Name, currentHP)
-	end
 end
 
 --[[
@@ -660,14 +464,8 @@ function UnitManager.RestoreUnitHP(unitInstance)
 	end
 
 	local savedHP = unitInstance:GetAttribute("SavedHP")
-
 	if savedHP and unitInstance:FindFirstChild("Humanoid") then
 		unitInstance.Humanoid.Health = savedHP
-
-		if BattleConfig.DEBUG_COMBAT_LOGS then
-			print(GameConfig.LOG_PREFIX, "[UnitManager] 恢复单位血量:", unitInstance.Name, savedHP)
-		end
-
 		return savedHP
 	end
 

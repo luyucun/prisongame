@@ -48,6 +48,8 @@ local CampaignManager = require(ServerScriptService.Systems.CampaignManager)
 local DoorControlService = require(ServerScriptService.Systems.DoorControlService)
 -- V2.1新增 - 商店系统
 local ShopSystem = require(ServerScriptService.Systems.ShopSystem)
+-- V2.5新增 - 碰撞系统（寻路性能优化）
+local CollisionSystem = require(ServerScriptService.Systems.CollisionSystem)
 
 -- ==================== 系统初始化顺序 ====================
 
@@ -64,6 +66,17 @@ local function InitializeServer()
     elseif result == false then
         warn(GameConfig.LOG_PREFIX, "物理管理系统初始化失败(返回false)")
         initializationFailed = true
+    end
+
+    -- 0.1 初始化碰撞系统 (V2.5寻路性能优化 - 必须在物理系统之后)
+    success, result = pcall(function()
+        return CollisionSystem.Initialize()
+    end)
+    if not success then
+        warn(GameConfig.LOG_PREFIX, "碰撞系统初始化失败(异常):", result)
+        -- 碰撞系统失败不阻止游戏运行，但会影响寻路性能
+    elseif result == false then
+        warn(GameConfig.LOG_PREFIX, "碰撞系统初始化失败(返回false)")
     end
 
     -- 1. 初始化基地系统(验证地图结构)
@@ -333,26 +346,32 @@ local Players = game:GetService("Players")
 
 -- 玩家加入时初始化基地
 Players.PlayerAdded:Connect(function(player)
-	-- 等待PlayerManager分配基地
-	task.wait(1)
+	task.spawn(function()  -- 使用task.spawn避免阻塞其他玩家加入
+		-- 🔥修复竞态条件：等待玩家数据加载完成
+		local playerData = DataManager.WaitForPlayerData(player, 10)
+		if not playerData then
+			warn(GameConfig.LOG_PREFIX, "玩家数据加载失败，跳过初始化 -", player.Name)
+			return
+		end
 
-	-- 获取玩家基地ID
-	local homeId = PlayerManager.GetPlayerHomeId(player)
-	if homeId and homeId > 0 then
-		-- 初始化玩家基地（确保门关闭）
+		-- 获取玩家基地ID
+		local homeId = PlayerManager.GetPlayerHomeId(player)
+		if homeId and homeId > 0 then
+			-- 初始化玩家基地（确保门关闭）
+			pcall(function()
+				HomeSystem.InitializePlayerHome(homeId, player)
+			end)
+		end
+
+		-- V2.1修复：初始化玩家商店库存系统
 		pcall(function()
-			HomeSystem.InitializePlayerHome(homeId, player)
+			ShopSystem.InitializePlayerShopTimer(player, "UnitShop")
+			print(string.format(
+				"%s [MainServer] 玩家 %s 商店库存系统已初始化",
+				GameConfig.LOG_PREFIX,
+				player.Name
+			))
 		end)
-	end
-
-	-- V2.1修复：初始化玩家商店库存系统
-	pcall(function()
-		ShopSystem.InitializePlayerShopTimer(player, "UnitShop")
-		print(string.format(
-			"%s [MainServer] 玩家 %s 商店库存系统已初始化",
-			GameConfig.LOG_PREFIX,
-			player.Name
-		))
 	end)
 end)
 
@@ -375,5 +394,136 @@ Players.PlayerRemoving:Connect(function(player)
 			HomeSystem.CleanupPlayerHome(homeId, player)
 		end)
 	end
+end)
+
+-- ==================== 🔥修复持久化：服务器关闭数据保存 ====================
+
+-- 服务器关闭时保存所有玩家数据（🔥修复数据丢失问题）
+game:BindToClose(function()
+	print(GameConfig.LOG_PREFIX .. " [MainServer] 🔥服务器关闭中，正在保存所有玩家数据...")
+
+	local startTime = tick()
+	local savedCount = 0
+	local errorCount = 0
+
+	-- 🔥修复：标记服务器正在关闭
+	DataManager.SetShuttingDown(true)
+
+	-- 🔥修复：先保存当前在线玩家的快照（避免Roblox清理玩家后无法遍历）
+	local Players = game:GetService("Players")
+	local activePlayersSnapshot = Players:GetPlayers()
+
+	print(string.format(
+		"%s [MainServer] 检测到 %d 个在线玩家，开始保存...",
+		GameConfig.LOG_PREFIX,
+		#activePlayersSnapshot
+	))
+
+	-- 第一步：保存在线玩家数据（包含地面兵种数据）
+	for _, player in pairs(activePlayersSnapshot) do
+		task.spawn(function()  -- 并行保存提高效率
+			local success, error = pcall(function()
+				-- 🔥关键：先保存地面兵种数据到DataManager
+				if PlacementSystem and PlacementSystem.OnPlayerLeaving then
+					PlacementSystem.OnPlayerLeaving(player)
+				end
+
+				-- 然后保存所有数据到DataStore
+				local saved = DataManager.SavePlayerData(player)
+				if saved then
+					savedCount = savedCount + 1
+					print(string.format(
+						"%s [MainServer] ✅ 在线玩家 %s 数据已保存",
+						GameConfig.LOG_PREFIX,
+						player.Name
+					))
+				else
+					errorCount = errorCount + 1
+					warn(string.format(
+						"%s [MainServer] ❌ 在线玩家 %s 数据保存失败",
+						GameConfig.LOG_PREFIX,
+						player.Name
+					))
+				end
+			end)
+
+			if not success then
+				errorCount = errorCount + 1
+				warn(string.format(
+					"%s [MainServer] ❌ 在线玩家 %s 数据保存异常: %s",
+					GameConfig.LOG_PREFIX,
+					player.Name,
+					tostring(error)
+				))
+			end
+		end)
+	end
+
+	-- 第二步：等待并行保存完成
+	task.wait(2)  -- 给并行任务一些时间
+
+	-- 第三步：兜底保存缓存中的数据（防止Roblox已删除Player对象）
+	local allPlayerData = DataManager.GetAllPlayerData()
+	for userId, playerData in pairs(allPlayerData) do
+		local isAlreadySaved = false
+		-- 检查这个用户是否在在线玩家快照中
+		for _, activePlayer in pairs(activePlayersSnapshot) do
+			if activePlayer.UserId == userId then
+				isAlreadySaved = true
+				break
+			end
+		end
+
+		-- 如果不在在线快照中，需要兜底保存
+		if not isAlreadySaved then
+			task.spawn(function()
+				local success = DataManager.SaveCachedPlayerData(userId)
+				if success then
+					savedCount = savedCount + 1
+					print(string.format(
+						"%s [MainServer] ✅ 缓存玩家 UserId_%d 数据已保存",
+						GameConfig.LOG_PREFIX,
+						userId
+					))
+				else
+					errorCount = errorCount + 1
+					warn(string.format(
+						"%s [MainServer] ❌ 缓存玩家 UserId_%d 数据保存失败",
+						GameConfig.LOG_PREFIX,
+						userId
+					))
+				end
+			end)
+		end
+	end
+
+	-- 第四步：等待所有保存操作完成
+	local maxWaitTime = 15  -- 最多等待15秒
+	local waitSuccess = DataManager.WaitForAllSavesToComplete(maxWaitTime)
+
+	local endTime = tick()
+	local duration = endTime - startTime
+
+	if waitSuccess then
+		print(string.format(
+			"%s [MainServer] 🔥数据保存完成：成功 %d 个，失败 %d 个，耗时 %.2f 秒",
+			GameConfig.LOG_PREFIX,
+			savedCount,
+			errorCount,
+			duration
+		))
+	else
+		local pendingCount = DataManager.GetPendingSaveCount()
+		warn(string.format(
+			"%s [MainServer] ⚠️ 保存超时：成功 %d 个，失败 %d 个，仍有 %d 个待保存，耗时 %.2f 秒",
+			GameConfig.LOG_PREFIX,
+			savedCount,
+			errorCount,
+			pendingCount,
+			duration
+		))
+	end
+
+	print(GameConfig.LOG_PREFIX .. " [MainServer] 🔥服务器关闭流程完成")
 end)
 

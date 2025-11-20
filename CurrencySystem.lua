@@ -152,6 +152,9 @@ function CurrencySystem.AddCurrency(player, currencyType, amount, reason)
     if success then
         -- 通知客户端
         NotifyClient(player, currencyType, newAmount)
+
+        -- 🔥修复持久化：金币变化后保存数据
+        DataManager.SavePlayerDataThrottled(player)
     end
 
     return success, newAmount
@@ -196,6 +199,9 @@ function CurrencySystem.RemoveCurrency(player, currencyType, amount, reason)
     if success then
         -- 通知客户端
         NotifyClient(player, currencyType, newAmount)
+
+        -- 🔥修复持久化：金币变化后保存数据
+        DataManager.SavePlayerDataThrottled(player)
     end
 
     return success, newAmount
@@ -331,16 +337,39 @@ end
 @param player Player - 请求的玩家
 ]]
 local function OnClientRequestCurrency(player)
-    -- 获取玩家所有货币
-    local allCurrency = DataManager.GetAllCurrency(player)
+    task.spawn(function()  -- 使用task.spawn避免阻塞其他请求
+        -- 🔥修复竞态条件：等待玩家数据加载完成
+        local playerData = DataManager.WaitForPlayerData(player, 10)
+        if not playerData then
+            warn(GameConfig.LOG_PREFIX, "OnClientRequestCurrency: 玩家数据加载超时 -", player.Name)
+            -- 即使超时也要尝试获取数据，可能数据已经部分加载
+        end
 
-    if allCurrency then
-        -- 发送金币信息给客户端
-        NotifyClient(player, GameConfig.CurrencyType.COINS, allCurrency.Coins)
+        -- 获取玩家所有货币
+        local allCurrency = DataManager.GetAllCurrency(player)
 
-    else
-        warn(GameConfig.LOG_PREFIX, "OnClientRequestCurrency: 找不到玩家货币数据")
-    end
+        if allCurrency then
+            -- 发送金币信息给客户端
+            NotifyClient(player, GameConfig.CurrencyType.COINS, allCurrency.Coins)
+            print(string.format(
+                "%s [CurrencySystem] ✅ 响应客户端请求：玩家 %s 金币 %d",
+                GameConfig.LOG_PREFIX,
+                player.Name,
+                allCurrency.Coins
+            ))
+        else
+            -- 🔥修复：如果数据仍未加载，使用默认值并记录
+            warn(string.format(
+                "%s [CurrencySystem] ⚠️ 玩家 %s 货币数据未就绪，使用默认值 %d",
+                GameConfig.LOG_PREFIX,
+                player.Name,
+                GameConfig.InitialCoins
+            ))
+
+            -- 发送默认金币值，避免客户端界面显示为0
+            NotifyClient(player, GameConfig.CurrencyType.COINS, GameConfig.InitialCoins)
+        end
+    end)
 end
 
 --[[
@@ -374,6 +403,43 @@ function CurrencySystem.Initialize()
         return false
     end
 
+
+    return true
+end
+
+--[[
+🔥修复金币显示延迟：主动推送玩家初始金币
+在玩家数据加载完成后立即调用，确保客户端及时收到金币数据
+@param player Player - 玩家对象
+]]
+function CurrencySystem.PushInitialCurrency(player)
+    if not player or not player.Parent then
+        return false
+    end
+
+    task.spawn(function()
+        -- 获取玩家货币数据
+        local allCurrency = DataManager.GetAllCurrency(player)
+        if allCurrency then
+            -- 主动推送金币信息给客户端
+            NotifyClient(player, GameConfig.CurrencyType.COINS, allCurrency.Coins)
+            print(string.format(
+                "%s [CurrencySystem] 📤 主动推送初始金币：玩家 %s 金币 %d",
+                GameConfig.LOG_PREFIX,
+                player.Name,
+                allCurrency.Coins
+            ))
+        else
+            -- 如果数据加载失败，推送默认值
+            NotifyClient(player, GameConfig.CurrencyType.COINS, GameConfig.InitialCoins)
+            warn(string.format(
+                "%s [CurrencySystem] 📤 推送默认金币：玩家 %s 金币 %d (数据未就绪)",
+                GameConfig.LOG_PREFIX,
+                player.Name,
+                GameConfig.InitialCoins
+            ))
+        end
+    end)
 
     return true
 end

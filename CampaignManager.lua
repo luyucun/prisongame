@@ -130,6 +130,72 @@ local function ClearPathCache(homeId)
 end
 
 --[[
+🔥 修复1: 安全设置 Parent，防止 Locked 报错
+V2.6增强: 增加多重重试机制
+]]
+local function SafeSetParent(instance, newParent)
+	if not instance or not newParent then
+		return false
+	end
+
+	-- 检查实例是否已被销毁
+	local validInstance = pcall(function() return instance.Name end)
+	if not validInstance then
+		return false
+	end
+
+	-- 如果已经在正确的Parent下，直接返回成功
+	if instance.Parent == newParent then
+		return true
+	end
+
+	-- 尝试直接设置
+	local success = pcall(function()
+		instance.Parent = newParent
+	end)
+	if success then
+		return true
+	end
+
+	-- 如果失败，等待一帧后重试
+	task.wait()
+	success = pcall(function()
+		instance.Parent = newParent
+	end)
+	if success then
+		return true
+	end
+
+	-- 最后用defer重试
+	task.defer(function()
+		pcall(function()
+			instance.Parent = newParent
+		end)
+	end)
+
+	-- 等待一下看看是否成功
+	task.wait(0.1)
+	return instance.Parent == newParent
+end
+
+--[[
+🔥 修复2: 强制设置网络所有权为服务器，解决顿卡/鬼畜问题
+]]
+local function SetNetworkOwnerToServer(model)
+	if not model then return end
+
+	for _, part in ipairs(model:GetDescendants()) do
+		if part:IsA("BasePart") and part:CanSetNetworkOwnership() then
+			-- 只有服务器脚本可以调用此函数
+			-- 参数 nil 表示将所有权交给服务器，禁止客户端接管物理计算
+			pcall(function()
+				part:SetNetworkOwner(nil)
+			end)
+		end
+	end
+end
+
+--[[
 设置兵种的锚定状态（内部使用）
 @param unitModel Model - 兵种模型
 @param anchored boolean - 是否锚定
@@ -167,6 +233,23 @@ local function SetUnitAnchored(unitModel, anchored)
 				descendant.CanCollide = false  -- 其他部件关闭碰撞，避免卡住
 			end
 		end
+	end
+
+	-- V2.5寻路优化：设置兵种碰撞组，关闭兵种间碰撞
+	if not anchored then
+		-- V2.6修复：统一使用PhysicsManager的Allies/Enemies系统
+		-- 移除CollisionSystem调用，避免与PhysicsManager冲突
+		local PhysicsManager = ServerScriptService.Systems:FindFirstChild("PhysicsManager")
+		if PhysicsManager then
+			local PhysicsModule = require(PhysicsManager)
+			pcall(function()
+				-- 友军使用"ally"参数，会设置为Allies碰撞组
+				PhysicsModule.ConfigureUnitPhysics(unitModel, "ally")
+			end)
+		end
+
+		-- 🔥 关键修复：强制服务器拥有物理权，防止客户端干扰导致的卡顿
+		SetNetworkOwnerToServer(unitModel)
 	end
 
 	-- 设置 Humanoid 状态
@@ -439,6 +522,17 @@ function CampaignManager.MarchToStage(campaignData, stageNum)
 					-- DebugLog(string.format("  ⚠️ %s AI未启动，跳过行军模式设置", unitData.UnitId))
 				end
 			end
+
+			-- V2.6修复：统一使用PhysicsManager，防止与CollisionSystem冲突
+			local PhysicsManager = ServerScriptService.Systems:FindFirstChild("PhysicsManager")
+			if PhysicsManager then
+				local PhysicsModule = require(PhysicsManager)
+				pcall(function()
+					-- 友军使用"ally"参数，会设置为Allies碰撞组
+					PhysicsModule.ConfigureUnitPhysics(unitInstance, "ally")
+					DebugLog(string.format("  ✅ %s 碰撞组已设置为Allies", unitData.UnitId))
+				end)
+			end
 		end
 	end
 
@@ -662,7 +756,8 @@ function CampaignManager.BeginBattlePrep(campaignData, stageNum, arrivedList, ti
 	if idleFloorEnemy then
 		for _, child in ipairs(idleFloorEnemy:GetChildren()) do
 			if child:IsA("Model") and child:FindFirstChild("Humanoid") then
-				local activated = CampaignUnitHelper.ActivateUnit(child)
+				-- V2.6修复：敌军使用"enemy"参数，设置为Enemies碰撞组
+				local activated = CampaignUnitHelper.ActivateUnit(child, "enemy")
 				if activated then
 					table.insert(preparedEnemies, child)
 				end
@@ -683,7 +778,8 @@ function CampaignManager.BeginBattlePrep(campaignData, stageNum, arrivedList, ti
 		if idleFloorEnemy then
 			for _, child in ipairs(idleFloorEnemy:GetChildren()) do
 				if child:IsA("Model") and child:FindFirstChild("Humanoid") then
-					local activated = CampaignUnitHelper.ActivateUnit(child)
+					-- V2.6修复：敌军使用"enemy"参数
+					local activated = CampaignUnitHelper.ActivateUnit(child, "enemy")
 					if activated then
 						table.insert(preparedEnemies, child)
 					end
@@ -1085,26 +1181,29 @@ function CampaignManager.RespawnUnits(campaignData)
 			end
 
 			-- V2.0.3修复：如果单位被隐藏（Parent = nil），重新挂回基地根节点（PlayerHome）
-			-- 使用pcall包裹，防止Parent locked错误
+			-- 🔥 使用SafeSetParent防止Parent locked错误
 			if not unitInstance.Parent then
 				DebugLog(string.format("    📌 %s 当前被隐藏，尝试重新挂载...", unitData.UnitId))
 				local homeFolder = homeIdleFloor.Parent
 				local targetParent = homeFolder or Workspace
-				local success, err = pcall(function()
-					unitInstance.Parent = targetParent
-				end)
 
-				if success then
-					if homeFolder then
-						DebugLog(string.format("      ✅ 已挂载到 %s", homeFolder.Name))
-					else
-						DebugLog(string.format("      ⚠️  HomeFolder不存在，挂载到Workspace"))
-					end
+				-- V2.6修复：使用增强的SafeSetParent
+				local mountSuccess = SafeSetParent(unitInstance, targetParent)
+
+				if homeFolder then
+					DebugLog(string.format("      ✅ 正在挂载到 %s", homeFolder.Name))
 				else
-					DebugLog(string.format("    ❌ %s 挂载失败: %s", unitData.UnitId, tostring(err)))
+					DebugLog(string.format("      ⚠️  HomeFolder不存在，挂载到Workspace"))
+				end
+
+				-- 再次验证是否成功挂载
+				if not mountSuccess or not unitInstance.Parent then
+					DebugLog(string.format("    ❌ %s 挂载失败: Parent仍为nil", unitData.UnitId))
 					failCount = failCount + 1
 					continue
 				end
+
+				DebugLog(string.format("      ✅ %s 挂载成功", unitData.UnitId))
 			end
 
 			-- 计算原位置（使用基地IdleFloor进行坐标换算）

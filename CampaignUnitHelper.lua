@@ -1,130 +1,42 @@
 --[[
-=====================================================
 脚本名称: CampaignUnitHelper
-脚本类型: ModuleScript (服务端辅助)
-脚本位置: ServerScriptService/Systems/CampaignUnitHelper.lua
-版本: V2.0
-=====================================================
-
-功能描述:
-- 统一管理战役系统中的单位激活/复位/属性重置
-- 确保行军-战斗切换时的状态一致性
-- 提供防御性编程接口
-
-核心原则:
-- 单一职责：只负责单位状态管理
-- 防御式编程：所有操作包裹pcall
-- 详细日志：便于问题定位
+版本: V2.7 简化版 - 移除复杂逻辑,防止Parent报错
 ]]
 
 local CampaignUnitHelper = {}
 
--- 引用服务
 local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
--- 引用配置
 local GameConfig = require(ReplicatedStorage.Config.GameConfig)
-local UnitConfig = require(ReplicatedStorage.Config.UnitConfig)
-
--- 引用系统
-local PathService = require(ServerScriptService.Systems.PathService)
+local PhysicsManager = require(ServerScriptService.Systems.PhysicsManager)
 local UnitAI = require(ServerScriptService.Systems.UnitAI)
-local PhysicsManager = require(ServerScriptService.Systems.PhysicsManager)  -- V2.2新增
-
--- ==================== 调试日志 ====================
+local PathService = require(ServerScriptService.Systems.PathService)
 
 local function DebugLog(...)
-	print(GameConfig.LOG_PREFIX, "[CampaignUnitHelper]", ...)
+	if GameConfig.DEBUG_MODE then
+		print(GameConfig.LOG_PREFIX, "[CampaignUnitHelper]", ...)
+	end
 end
 
 local function WarnLog(...)
 	warn(GameConfig.LOG_PREFIX, "[CampaignUnitHelper]", ...)
 end
 
--- ==================== 私有函数 ====================
-
 --[[
-设置兵种的锚定状态
+激活单位：从展示状态切换到战斗状态
 @param unitModel Model - 兵种模型
-@param anchored boolean - 是否锚定
-]]
-local function SetUnitAnchored(unitModel, anchored)
-	if not unitModel then
-		return false
-	end
-
-	local success, err = pcall(function()
-		-- V2.0修复：保留下半身部件的碰撞，防止解锚后"插入地面"
-		-- 原因：只保留HRP碰撞时，解锚瞬间脚部失去支撑，整个模型会沉到HRP碰到地面为止
-		-- 解决：保留腿部和脚部的碰撞，让兵种正常站在地面上
-		local lowerBodyParts = {
-			"LeftFoot", "RightFoot",           -- 脚部（R15）
-			"LeftLowerLeg", "RightLowerLeg",   -- 小腿（R15）
-			"LowerTorso",                       -- 下半身躯干（R15）
-			"Left Leg", "Right Leg",            -- 腿部（R6）
-		}
-
-		-- 创建快速查找表
-		local lowerBodySet = {}
-		for _, name in ipairs(lowerBodyParts) do
-			lowerBodySet[name] = true
-		end
-
-		-- 遍历所有 BasePart 设置锚定和碰撞
-		for _, descendant in ipairs(unitModel:GetDescendants()) do
-			if descendant:IsA("BasePart") then
-				descendant.Anchored = anchored
-
-				-- HumanoidRootPart 和下半身部件保持碰撞
-				if descendant.Name == "HumanoidRootPart" or lowerBodySet[descendant.Name] then
-					descendant.CanCollide = true
-				else
-					descendant.CanCollide = false
-				end
-			end
-		end
-
-		-- 设置 Humanoid 状态
-		local humanoid = unitModel:FindFirstChild("Humanoid")
-		if humanoid then
-			if not anchored then
-				-- 解除锚定：准备移动
-				humanoid.PlatformStand = false
-				humanoid:ChangeState(Enum.HumanoidStateType.Running)
-			else
-				-- 锚定：站立不动
-				humanoid.PlatformStand = false
-				humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
-			end
-		end
-	end)
-
-	if not success then
-		WarnLog("SetUnitAnchored失败:", err)
-		return false
-	end
-
-	return true
-end
-
--- ==================== 公共接口 ====================
-
---[[
-激活单位（从基地展示态变为可战斗态）
-@param unitModel Model - 兵种模型
+@param team string - 阵营("ally"或"enemy")，默认"ally"
 @return boolean - 是否成功
 ]]
-function CampaignUnitHelper.ActivateUnit(unitModel)
-	if not unitModel or not unitModel:IsA("Model") then
-		WarnLog("ActivateUnit失败：无效的模型")
+function CampaignUnitHelper.ActivateUnit(unitModel, team)
+	-- V2.7关键修复：静默失败，不要报错刷屏
+	if not unitModel or not unitModel.Parent then
 		return false
 	end
 
-	-- 严格检查Humanoid：缺少Humanoid直接返回false
-	local humanoid = unitModel:FindFirstChildOfClass("Humanoid")
+	local humanoid = unitModel:FindFirstChild("Humanoid")
 	if not humanoid then
-		WarnLog("ActivateUnit失败：单位缺少Humanoid -", unitModel.Name, unitModel:GetFullName())
 		return false
 	end
 
@@ -133,198 +45,73 @@ function CampaignUnitHelper.ActivateUnit(unitModel)
 		return true
 	end
 
-	local success, err = pcall(function()
-		-- V2.0修复：保留下半身部件的碰撞，防止解锚后"插入地面"
-		local lowerBodyParts = {
-			"LeftFoot", "RightFoot",           -- 脚部（R15）
-			"LeftLowerLeg", "RightLowerLeg",   -- 小腿（R15）
-			"LowerTorso",                       -- 下半身躯干（R15）
-			"Left Leg", "Right Leg",            -- 腿部（R6）
-		}
+	-- 默认队伍
+	team = team or "ally"
 
-		-- 创建快速查找表
-		local lowerBodySet = {}
-		for _, name in ipairs(lowerBodyParts) do
-			lowerBodySet[name] = true
-		end
-
-		-- 解除所有BasePart的锚定，恢复碰撞
-		local partCount = 0
+	local success = pcall(function()
+		-- 1. 解除锚定
 		for _, part in ipairs(unitModel:GetDescendants()) do
 			if part:IsA("BasePart") then
-				part.Anchored = false  -- 解除锚定，允许物理引擎控制
-
-				-- HumanoidRootPart 和下半身部件保持碰撞
-				if part.Name == "HumanoidRootPart" or lowerBodySet[part.Name] then
+				part.Anchored = false
+				-- HumanoidRootPart保持碰撞
+				if part.Name == "HumanoidRootPart" then
 					part.CanCollide = true
 				else
 					part.CanCollide = false
 				end
-				partCount = partCount + 1
 			end
 		end
 
-		-- 重置Humanoid状态（已确保humanoid存在）
+		-- 2. 激活Humanoid
 		humanoid.PlatformStand = false
 		humanoid:ChangeState(Enum.HumanoidStateType.Running)
 
-		-- 标记为已激活
+		-- 3. 设置碰撞组 (Allies/Enemies)
+		PhysicsManager.ConfigureUnitPhysics(unitModel, team)
+
 		unitModel:SetAttribute("IsActivated", true)
 	end)
 
-	if not success then
-		WarnLog("ActivateUnit失败:", err)
-		return false
-	end
-
-	return true
+	return success
 end
 
 --[[
-复位单位属性（恢复满血等）
-@param unitModel Model - 兵种模型
-@param maxHP number - 最大生命值
-@return boolean - 是否成功
-]]
-function CampaignUnitHelper.ResetUnitAttributes(unitModel, maxHP)
-	if not unitModel or not unitModel:IsA("Model") then
-		WarnLog("ResetUnitAttributes失败：无效的模型")
-		return false
-	end
-
-	local success, err = pcall(function()
-		local humanoid = unitModel:FindFirstChild("Humanoid")
-		if humanoid and maxHP then
-			humanoid.Health = maxHP
-		end
-	end)
-
-	if not success then
-		WarnLog("ResetUnitAttributes失败:", err)
-		return false
-	end
-
-	return true
-end
-
---[[
-恢复已保存的生命值
-@param unitModel Model - 兵种模型
-@param savedHP number - 已保存的生命值
-@return boolean - 是否成功
-]]
-function CampaignUnitHelper.RestoreSavedHP(unitModel, savedHP)
-	if not unitModel or not unitModel:IsA("Model") then
-		WarnLog("RestoreSavedHP失败：无效的模型")
-		return false
-	end
-
-	local success, err = pcall(function()
-		local humanoid = unitModel:FindFirstChild("Humanoid")
-		if humanoid and savedHP then
-			-- 确保不超过最大生命值
-			humanoid.Health = math.min(savedHP, humanoid.MaxHealth)
-		end
-	end)
-
-	if not success then
-		WarnLog("RestoreSavedHP失败:", err)
-		return false
-	end
-
-	return true
-end
-
---[[
-准备单位进入战斗（清理残留状态+重置AI）
+准备战斗：重置状态，清理AI
 @param unitModel Model - 兵种模型
 @return boolean - 是否成功
 ]]
 function CampaignUnitHelper.PrepareForBattle(unitModel)
-	if not unitModel or not unitModel:IsA("Model") then
-		WarnLog("PrepareForBattle失败：无效的模型")
+	-- V2.7关键修复：静默失败
+	if not unitModel or not unitModel.Parent then
 		return false
 	end
 
-	-- 严格检查Humanoid：缺少Humanoid直接返回false
-	local humanoid = unitModel:FindFirstChildOfClass("Humanoid")
+	local humanoid = unitModel:FindFirstChild("Humanoid")
 	if not humanoid then
-		WarnLog("PrepareForBattle失败：单位缺少Humanoid -", unitModel.Name, unitModel:GetFullName())
 		return false
 	end
 
-	-- V2.3.2修复：分解成多个独立的pcall，任何单个操作失败不会导致整个函数失败
-	-- 准备进入战斗的操作都是"尽力而为"的，有一个成功即为准备成功
-	local operationCount = 0
-	local successCount = 0
+	local success = pcall(function()
+		-- 1. 停止旧AI
+		pcall(function()
+			UnitAI.StopAI(unitModel)
+		end)
 
-	-- 1. 停止旧的AI（如有）
-	local success1, err1 = pcall(function()
-		UnitAI.StopAI(unitModel)
-	end)
-	operationCount = operationCount + 1
-	if success1 then successCount = successCount + 1 end
-	if not success1 and GameConfig.DEBUG_MODE then
-		WarnLog("    StopAI失败:", err1)
-	end
+		-- 2. 清理路径
+		pcall(function()
+			PathService.ClearPath(unitModel)
+		end)
 
-	-- 2. 清理PathService残留
-	local success2, err2 = pcall(function()
-		PathService.ClearPath(unitModel)
-	end)
-	operationCount = operationCount + 1
-	if success2 then successCount = successCount + 1 end
-	if not success2 and GameConfig.DEBUG_MODE then
-		WarnLog("    ClearPath失败:", err2)
-	end
-
-	-- 3. 确保解除锚定
-	local success3, err3 = pcall(function()
-		SetUnitAnchored(unitModel, false)
-	end)
-	operationCount = operationCount + 1
-	if success3 then successCount = successCount + 1 end
-	if not success3 and GameConfig.DEBUG_MODE then
-		WarnLog("    SetUnitAnchored失败:", err3)
-	end
-
-	-- 4. 重置Humanoid状态（已确保humanoid存在）
-	local success4, err4 = pcall(function()
+		-- 3. 确保物理状态正确
 		humanoid.PlatformStand = false
 		humanoid:ChangeState(Enum.HumanoidStateType.Running)
-	end)
-	operationCount = operationCount + 1
-	if success4 then successCount = successCount + 1 end
-	if not success4 and GameConfig.DEBUG_MODE then
-		WarnLog("    重置Humanoid失败:", err4)
-	end
 
-	-- 5. 配置物理碰撞（V2.2新增：友军单位）
-	-- V2.3.2修复：物理碰撞配置失败不阻塞战斗准备（降级处理）
-	local success5, err5 = pcall(function()
+		-- 4. 再次确认碰撞组 (防止复活时遗漏)
+		-- 友军统一用"ally"
 		PhysicsManager.ConfigureUnitPhysics(unitModel, "ally")
 	end)
-	operationCount = operationCount + 1
-	if success5 then successCount = successCount + 1 else
-		-- 物理碰撞失败降级：至少不影响战斗，只是碰撞处理可能不完美
-		if GameConfig.DEBUG_MODE then
-			WarnLog("    物理碰撞配置失败(降级处理):", err5)
-		end
-	end
 
-	-- V2.3.2修复：只要至少3个核心操作成功（停止AI、清理路径、解锚、重置状态），就认为准备成功
-	-- 物理碰撞失败不影响战斗进行（只是碰撞处理降级）
-	local coreSuccess = success1 and success2 and success3 and success4
-
-	if not coreSuccess then
-		WarnLog(string.format("  ❌ PrepareForBattle核心操作失败 (成功 %d/%d)，单位: %s",
-			successCount, operationCount, unitModel.Name))
-		return false
-	end
-
-	DebugLog(string.format("  ✅ PrepareForBattle成功 (所有 %d 个操作完成，单位: %s)",
-		operationCount, unitModel.Name))
-	return true
+	return success
 end
 
 --[[
@@ -333,37 +120,36 @@ end
 @return boolean - 是否成功
 ]]
 function CampaignUnitHelper.DeactivateUnit(unitModel)
-	if not unitModel or not unitModel:IsA("Model") then
-		WarnLog("DeactivateUnit失败：无效的模型")
+	if not unitModel or not unitModel.Parent then
 		return false
 	end
 
-	local success, err = pcall(function()
+	local success = pcall(function()
 		-- 重新锚定所有部件
-		SetUnitAnchored(unitModel, true)
+		for _, part in ipairs(unitModel:GetDescendants()) do
+			if part:IsA("BasePart") then
+				part.Anchored = true
+			end
+		end
 
 		-- 清除激活标记
 		unitModel:SetAttribute("IsActivated", false)
 	end)
 
-	if not success then
-		WarnLog("DeactivateUnit失败:", err)
-		return false
-	end
-
-	return true
+	return success
 end
 
 --[[
 批量激活单位
-@param units table - 单位列表 {unitModel1, unitModel2, ...}
+@param units table - 单位列表
+@param team string - 阵营
 @return table - 成功激活的单位列表
 ]]
-function CampaignUnitHelper.ActivateUnits(units)
+function CampaignUnitHelper.ActivateUnits(units, team)
 	local activated = {}
 
 	for _, unitModel in ipairs(units) do
-		if CampaignUnitHelper.ActivateUnit(unitModel) then
+		if CampaignUnitHelper.ActivateUnit(unitModel, team) then
 			table.insert(activated, unitModel)
 		end
 	end
@@ -386,6 +172,48 @@ function CampaignUnitHelper.PrepareUnitsForBattle(units)
 	end
 
 	return prepared
+end
+
+--[[
+复位单位属性（恢复满血等）
+@param unitModel Model - 兵种模型
+@param maxHP number - 最大生命值
+@return boolean - 是否成功
+]]
+function CampaignUnitHelper.ResetUnitAttributes(unitModel, maxHP)
+	if not unitModel or not unitModel.Parent then
+		return false
+	end
+
+	local success = pcall(function()
+		local humanoid = unitModel:FindFirstChild("Humanoid")
+		if humanoid and maxHP then
+			humanoid.Health = maxHP
+		end
+	end)
+
+	return success
+end
+
+--[[
+恢复已保存的生命值
+@param unitModel Model - 兵种模型
+@param savedHP number - 已保存的生命值
+@return boolean - 是否成功
+]]
+function CampaignUnitHelper.RestoreSavedHP(unitModel, savedHP)
+	if not unitModel or not unitModel.Parent then
+		return false
+	end
+
+	local success = pcall(function()
+		local humanoid = unitModel:FindFirstChild("Humanoid")
+		if humanoid and savedHP then
+			humanoid.Health = math.min(savedHP, humanoid.MaxHealth)
+		end
+	end)
+
+	return success
 end
 
 return CampaignUnitHelper

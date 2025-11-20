@@ -83,6 +83,20 @@ local function GetGridKey(gridX, gridZ)
 end
 
 --[[
+计算字典表的大小（用于替代table.maxn）
+@param tbl table - 要计算大小的表
+@return number - 表中的元素数量
+]]
+local function GetTableCount(tbl)
+    if not tbl then return 0 end
+    local count = 0
+    for _ in pairs(tbl) do
+        count = count + 1
+    end
+    return count
+end
+
+--[[
 获取玩家的基地IdleFloor
 @param player Player
 @return Part|nil - IdleFloor对象
@@ -421,6 +435,20 @@ local function CreateUnitModel(unitId, position, instanceId, level, gridSize)
         end
     end
 
+    -- V2.5寻路优化：设置兵种碰撞组，关闭兵种间碰撞
+    local CollisionSystem = ServerScriptService.Systems:FindFirstChild("CollisionSystem")
+    if CollisionSystem then
+        local CollisionModule = require(CollisionSystem)
+        pcall(function()
+            CollisionModule.SetUnitCollision(model)
+            -- 同时优化Humanoid性能
+            local humanoid = model:FindFirstChildOfClass("Humanoid")
+            if humanoid then
+                CollisionModule.OptimizeHumanoid(humanoid)
+            end
+        end)
+    end
+
     model.Parent = Workspace
 
     return model
@@ -536,6 +564,7 @@ function PlacementSystem.PlaceUnit(player, instanceId, position)
     placedUnits[userId][instanceId] = {
         InstanceId = instanceId,
         UnitId = unitInstance.UnitId,
+        Level = unitInstance.Level,  -- 🔥修复：确保包含等级信息
         Position = finalPosition,
         GridX = gridX,
         GridZ = gridZ,
@@ -543,6 +572,9 @@ function PlacementSystem.PlaceUnit(player, instanceId, position)
         Model = model,
         PlacedTime = os.time(),
     }
+
+    -- 🔥修复服务器关闭时数据保存：同步到DataManager
+    DataManager.AddPlacedUnit(player, instanceId, placedUnits[userId][instanceId])
 
     -- V2.0新增: 保存GridPos到模型（用于战役系统）
     local GridPositionSystem = require(ServerScriptService.Systems.GridPositionSystem)
@@ -564,6 +596,39 @@ function PlacementSystem.PlaceUnit(player, instanceId, position)
 
     -- 通知InventorySystem刷新客户端背包显示
     InventorySystem.RefreshClientInventory(player)
+
+    -- 🔥修复持久化：保存放置数据到DataManager
+    local placedData = {
+        UnitId = unitInstance.UnitId,
+        Level = unitInstance.Level,
+        GridX = gridX,
+        GridZ = gridZ,
+        GridSize = unitInstance.GridSize,
+        IsActivated = false,  -- 新放置的单位未激活
+        Health = unitInstance.Health or UnitConfig.CalculateHealth(unitInstance.UnitId, unitInstance.Level),
+        MaxHealth = unitInstance.MaxHealth or UnitConfig.CalculateHealth(unitInstance.UnitId, unitInstance.Level),
+    }
+
+    local saveSuccess = DataManager.SavePlacedUnit(player, instanceId, placedData)
+    if saveSuccess then
+        -- 节流式保存整个玩家数据
+        DataManager.SavePlayerDataThrottled(player)
+        print(string.format(
+            "%s [PlacementSystem] 🔥 已保存放置数据: 玩家 %s, 兵种 %s, 位置 (%d,%d)",
+            GameConfig.LOG_PREFIX,
+            player.Name,
+            unitInstance.UnitId,
+            gridX,
+            gridZ
+        ))
+    else
+        warn(string.format(
+            "%s [PlacementSystem] 🔥 保存放置数据失败: 玩家 %s, 兵种 %s",
+            GameConfig.LOG_PREFIX,
+            player.Name,
+            instanceId
+        ))
+    end
 
     return true, "放置成功"
 end
@@ -599,6 +664,26 @@ function PlacementSystem.RemovePlacedUnit(player, instanceId)
 
     -- 移除放置数据
     placedUnits[userId][instanceId] = nil
+
+    -- 🔥修复持久化：从DataManager移除放置数据
+    local removeSuccess = DataManager.RemovePlacedUnit(player, instanceId)
+    if removeSuccess then
+        -- 节流式保存整个玩家数据
+        DataManager.SavePlayerDataThrottled(player)
+        print(string.format(
+            "%s [PlacementSystem] 🔥 已移除放置数据: 玩家 %s, 兵种 %s",
+            GameConfig.LOG_PREFIX,
+            player.Name,
+            instanceId
+        ))
+    else
+        warn(string.format(
+            "%s [PlacementSystem] 🔥 移除放置数据失败: 玩家 %s, 兵种 %s",
+            GameConfig.LOG_PREFIX,
+            player.Name,
+            instanceId
+        ))
+    end
 
     return true, "移除成功"
 end
@@ -693,6 +778,27 @@ function PlacementSystem.UpdateUnitPosition(player, instanceId, newPosition)
     -- 11. 更新InventorySystem中的位置
     unitInstance.PlacedPosition = finalPosition
 
+    -- 🔥修复持久化：更新DataManager中的位置数据
+    local updateSuccess = DataManager.UpdatePlacedUnitPosition(player, instanceId, newGridX, newGridZ)
+    if updateSuccess then
+        -- 节流式保存整个玩家数据
+        DataManager.SavePlayerDataThrottled(player)
+        print(string.format(
+            "%s [PlacementSystem] 🔥 已更新位置数据: 玩家 %s, 兵种 %s, 新位置 (%d,%d)",
+            GameConfig.LOG_PREFIX,
+            player.Name,
+            instanceId,
+            newGridX,
+            newGridZ
+        ))
+    else
+        warn(string.format(
+            "%s [PlacementSystem] 🔥 更新位置数据失败: 玩家 %s, 兵种 %s",
+            GameConfig.LOG_PREFIX,
+            player.Name,
+            instanceId
+        ))
+    end
 
     return true, "位置更新成功"
 end
@@ -743,20 +849,285 @@ end
 function PlacementSystem.OnPlayerLeaving(player)
     local userId = player.UserId
 
-    -- 清除所有已放置的兵种模型
+    -- 🔥修复持久化：在清理模型前先同步所有数据到DataManager
+    if placedUnits[userId] then
+        print(string.format(
+            "%s [PlacementSystem] 🔥 玩家 %s 离开，同步 %d 个放置单位的数据",
+            GameConfig.LOG_PREFIX,
+            player.Name,
+            GetTableCount(placedUnits[userId])
+        ))
+
+        -- 🔥关键修复：同步内存中的放置数据到DataManager
+        local syncSuccess = DataManager.SyncPlacedUnits(player, placedUnits[userId])
+        if syncSuccess then
+            print(string.format(
+                "%s [PlacementSystem] ✅ 玩家 %s 的放置数据已同步到DataManager",
+                GameConfig.LOG_PREFIX,
+                player.Name
+            ))
+        else
+            warn(string.format(
+                "%s [PlacementSystem] ❌ 玩家 %s 的放置数据同步失败",
+                GameConfig.LOG_PREFIX,
+                player.Name
+            ))
+        end
+
+        -- 强制保存一次玩家数据（包含所有已放置的单位）
+        local saveSuccess, saveError = pcall(function()
+            DataManager.SavePlayerData(player)
+        end)
+
+        if not saveSuccess then
+            warn(string.format(
+                "%s [PlacementSystem] 🔥 玩家 %s 离开时保存数据失败: %s",
+                GameConfig.LOG_PREFIX,
+                player.Name,
+                tostring(saveError)
+            ))
+        end
+    end
+
+    -- 清除所有已放置的兵种模型（注意：不再清除DataManager中的数据）
     if placedUnits[userId] then
         for instanceId, placedData in pairs(placedUnits[userId]) do
             if placedData.Model and placedData.Model.Parent then
                 placedData.Model:Destroy()
             end
         end
-        placedUnits[userId] = nil
+        placedUnits[userId] = nil  -- 只清除内存中的引用
     end
 
     -- 清除网格占用数据
     if gridOccupancy[userId] then
         gridOccupancy[userId] = nil
     end
+
+    print(string.format(
+        "%s [PlacementSystem] 🔥 玩家 %s 的放置数据已清理（保留持久化数据）",
+        GameConfig.LOG_PREFIX,
+        player.Name
+    ))
+end
+
+-- ==================== 🔥修复持久化：放置单位恢复功能 ====================
+
+--[[
+恢复玩家的所有放置单位（玩家重新进入游戏时调用）
+@param player Player - 玩家对象
+@return boolean, string - 是否成功, 恢复的单位数量或错误信息
+]]
+function PlacementSystem.RestorePlacedUnits(player)
+    local userId = player.UserId
+
+    -- 1. 获取玩家的IdleFloor
+    local idleFloor = GetPlayerIdleFloor(player)
+    if not idleFloor then
+        return false, "找不到玩家基地的IdleFloor"
+    end
+
+    -- 2. 从DataManager获取已保存的放置单位数据
+    local savedPlacedUnits = DataManager.GetPlacedUnits(player)
+    if not savedPlacedUnits or next(savedPlacedUnits) == nil then
+        print(string.format(
+            "%s [PlacementSystem] 🔥 玩家 %s 没有需要恢复的放置单位",
+            GameConfig.LOG_PREFIX,
+            player.Name
+        ))
+        return true, "0"
+    end
+
+    print(string.format(
+        "%s [PlacementSystem] 🔥 开始恢复玩家 %s 的 %d 个放置单位...",
+        GameConfig.LOG_PREFIX,
+        player.Name,
+        GetTableCount(savedPlacedUnits)
+    ))
+
+    local floorCenter = idleFloor.Position
+    local restoredCount = 0
+    local errorCount = 0
+
+    -- 3. 初始化玩家的数据结构
+    if not placedUnits[userId] then
+        placedUnits[userId] = {}
+    end
+    if not gridOccupancy[userId] then
+        gridOccupancy[userId] = {}
+    end
+
+    -- 4. 遍历保存的放置单位数据，逐一恢复
+    for instanceId, savedData in pairs(savedPlacedUnits) do
+        local success, error = pcall(function()
+            -- 4.1 验证InventorySystem中是否仍有对应的兵种实例
+            local unitInstance = InventorySystem.GetUnitByInstanceId(player, instanceId)
+            if not unitInstance then
+                warn(string.format(
+                    "%s [PlacementSystem] 🔥 恢复失败：背包中找不到实例 %s，从放置数据中移除",
+                    GameConfig.LOG_PREFIX,
+                    instanceId
+                ))
+                -- 从DataManager中删除无效的放置数据
+                DataManager.RemovePlacedUnit(player, instanceId)
+                return false
+            end
+
+            -- 4.2 验证UnitId是否匹配
+            if unitInstance.UnitId ~= savedData.UnitId then
+                warn(string.format(
+                    "%s [PlacementSystem] 🔥 恢复失败：实例 %s UnitId不匹配 (%s != %s)",
+                    GameConfig.LOG_PREFIX,
+                    instanceId,
+                    unitInstance.UnitId,
+                    savedData.UnitId
+                ))
+                return false
+            end
+
+            -- 4.3 验证网格位置是否在边界内
+            if not PlacementConfig.IsGridInBounds(savedData.GridX, savedData.GridZ, savedData.GridSize) then
+                warn(string.format(
+                    "%s [PlacementSystem] 🔥 恢复失败：实例 %s 网格位置 (%d,%d) 超出边界",
+                    GameConfig.LOG_PREFIX,
+                    instanceId,
+                    savedData.GridX,
+                    savedData.GridZ
+                ))
+                return false
+            end
+
+            -- 4.4 检查网格位置是否被占用（跳过自己占用的情况）
+            local gridOccupied = false
+            for x = savedData.GridX, savedData.GridX + savedData.GridSize - 1 do
+                for z = savedData.GridZ, savedData.GridZ + savedData.GridSize - 1 do
+                    local gridKey = GetGridKey(x, z)
+                    local occupiedBy = gridOccupancy[userId][gridKey]
+                    if occupiedBy and occupiedBy ~= instanceId then
+                        gridOccupied = true
+                        break
+                    end
+                end
+                if gridOccupied then
+                    break
+                end
+            end
+
+            if gridOccupied then
+                warn(string.format(
+                    "%s [PlacementSystem] 🔥 恢复失败：实例 %s 网格位置 (%d,%d) 已被占用",
+                    GameConfig.LOG_PREFIX,
+                    instanceId,
+                    savedData.GridX,
+                    savedData.GridZ
+                ))
+                return false
+            end
+
+            -- 4.5 计算世界坐标位置
+            local worldPosition = PlacementConfig.GridToWorld(
+                savedData.GridX,
+                savedData.GridZ,
+                floorCenter,
+                savedData.GridSize
+            )
+
+            -- 4.6 创建兵种模型
+            local model = CreateUnitModel(
+                savedData.UnitId,
+                worldPosition,
+                instanceId,
+                savedData.Level or 1,
+                savedData.GridSize
+            )
+
+            if not model then
+                warn(string.format(
+                    "%s [PlacementSystem] 🔥 恢复失败：实例 %s 创建模型失败",
+                    GameConfig.LOG_PREFIX,
+                    instanceId
+                ))
+                return false
+            end
+
+            -- 4.7 更新InventorySystem中的兵种状态
+            unitInstance.IsPlaced = true
+            unitInstance.PlacedPosition = worldPosition
+            -- 如果有保存的生命值，恢复它
+            if savedData.Health then
+                unitInstance.Health = savedData.Health
+            end
+            if savedData.MaxHealth then
+                unitInstance.MaxHealth = savedData.MaxHealth
+            end
+
+            -- 4.8 占据网格
+            OccupyGrid(player, savedData.GridX, savedData.GridZ, savedData.GridSize, instanceId)
+
+            -- 4.9 保存放置数据到内存
+            placedUnits[userId][instanceId] = {
+                InstanceId = instanceId,
+                UnitId = savedData.UnitId,
+                Position = worldPosition,
+                GridX = savedData.GridX,
+                GridZ = savedData.GridZ,
+                GridSize = savedData.GridSize,
+                Model = model,
+                PlacedTime = os.time(),
+            }
+
+            -- 4.9.5 保存GridPos到模型（用于战役系统）
+            local GridPositionSystem = require(ServerScriptService.Systems.GridPositionSystem)
+            local gridPos = GridPositionSystem.SaveUnitGridPosition(model, idleFloor)
+            if gridPos then
+                placedUnits[userId][instanceId].GridPos = gridPos
+            else
+                placedUnits[userId][instanceId].GridPos = {X = savedData.GridX, Y = savedData.GridZ}
+            end
+
+            -- 4.10 配置兵种物理
+            PhysicsManager.ConfigureUnitPhysics(model, "ally")
+
+            -- 4.11 播放展示动画
+            PlayShowAnimation(model, savedData.UnitId)
+
+            print(string.format(
+                "%s [PlacementSystem] 🔥 已恢复单位: %s (%s) 位置 (%d,%d)",
+                GameConfig.LOG_PREFIX,
+                instanceId,
+                savedData.UnitId,
+                savedData.GridX,
+                savedData.GridZ
+            ))
+
+            return true
+        end)
+
+        if success and error ~= false then
+            restoredCount = restoredCount + 1
+        else
+            errorCount = errorCount + 1
+        end
+    end
+
+    -- 5. 刷新客户端背包显示
+    InventorySystem.RefreshClientInventory(player)
+
+    -- 6. 返回恢复结果
+    local message = string.format("成功恢复 %d 个，失败 %d 个", restoredCount, errorCount)
+    print(string.format(
+        "%s [PlacementSystem] 🔥 玩家 %s 放置单位恢复完成：%s",
+        GameConfig.LOG_PREFIX,
+        player.Name,
+        message
+    ))
+
+    -- 如果有失败的恢复，保存一次数据以清理无效数据
+    if errorCount > 0 then
+        DataManager.SavePlayerDataThrottled(player, true)  -- 强制立即保存
+    end
+
+    return true, message
 end
 
 -- ==================== 远程事件处理 ====================

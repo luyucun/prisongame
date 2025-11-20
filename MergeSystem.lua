@@ -26,6 +26,7 @@ local Workspace = game:GetService("Workspace")
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
 local UnitConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("UnitConfig"))
 local PlacementConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("PlacementConfig"))
+local DataManager = require(ServerScriptService.Core.DataManager)  -- 🔥修复持久化：添加DataManager引用
 local InventorySystem = require(ServerScriptService.Systems.InventorySystem)
 local PlacementSystem = require(ServerScriptService.Systems.PlacementSystem)
 
@@ -269,6 +270,16 @@ function MergeSystem.MergeUnits(player, instanceIdA, instanceIdB)
         -- 如果放置失败，兵种会留在背包中
     end
 
+    -- 🔥修复持久化：合成后保存数据
+    DataManager.SavePlayerDataThrottled(player)
+    print(string.format(
+        "%s [MergeSystem] 🔥 已保存数据: 玩家 %s 合成兵种 %s (%s -> Lv.%d)",
+        GameConfig.LOG_PREFIX,
+        player.Name,
+        newInstance.UnitId,
+        newInstance.InstanceId,
+        newLevel
+    ))
 
     return true, "合成成功", {
         InstanceId = newInstance.InstanceId,

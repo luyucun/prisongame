@@ -428,13 +428,13 @@ function ProjectileSystem.CreateProjectile(attacker, target, damage, speed)
         for _, part in ipairs(projectileModel:GetDescendants()) do
             if part:IsA("BasePart") then
                 pcall(function()
-                    PhysicsService:SetPartCollisionGroup(part, BattleConfig.PROJECTILE_COLLISION_GROUP)
+                    part.CollisionGroup = BattleConfig.PROJECTILE_COLLISION_GROUP
                 end)
             end
         end
     else
         pcall(function()
-            PhysicsService:SetPartCollisionGroup(projectileModel, BattleConfig.PROJECTILE_COLLISION_GROUP)
+            projectileModel.CollisionGroup = BattleConfig.PROJECTILE_COLLISION_GROUP
         end)
     end
 

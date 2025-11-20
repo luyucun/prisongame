@@ -298,7 +298,15 @@ local function RefreshShopStock(player, shopId)
 
 	-- V2.1库存系统：持久化刷新时间到DataManager
 	if DataManager then
-		DataManager.SetShopRefreshTime(player, shopId, stockData.LastRefreshTime)
+		-- 🔥修复竞态条件：确保玩家数据已加载
+		task.spawn(function()
+			local playerData = DataManager.WaitForPlayerData(player, 10)
+			if playerData then
+				DataManager.SetShopRefreshTime(player, shopId, stockData.LastRefreshTime)
+			else
+				warn(GameConfig.LOG_PREFIX, "RefreshShopStock: 玩家数据加载失败，跳过持久化 -", player.Name)
+			end
+		end)
 	end
 
 	-- 通知客户端库存更新

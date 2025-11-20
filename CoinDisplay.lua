@@ -244,16 +244,56 @@ local function Initialize()
         return false
     end
 
-    -- 向服务端请求当前金币数量(延迟请求以确保服务端已初始化)
-    task.delay(1, function()
-        local requestSuccess, requestError = pcall(function()
-            CurrencyEvents:FireServer()
+    -- 🔥修复金币显示延迟：优化请求逻辑，添加重试机制
+    task.spawn(function()
+        local maxRetries = 3
+        local retryDelay = 2  -- 每次重试间隔2秒
+        local gotResponse = false
+
+        -- 监听服务端响应，设置响应标志
+        local responseConnection
+        responseConnection = CurrencyEvents.OnClientEvent:Connect(function(currencyType, amount)
+            gotResponse = true
+            responseConnection:Disconnect()  -- 只监听第一次响应
         end)
 
-        if not requestSuccess then
-            warn(LOG_PREFIX, "请求货币数据失败:", requestError)
-        elseif DEBUG_MODE then
-            print(LOG_PREFIX, "已向服务端请求货币数据")
+        for attempt = 1, maxRetries do
+            -- 每次尝试前等待一定时间，让服务端有时间初始化
+            local delayTime = attempt == 1 and 1 or retryDelay
+            task.wait(delayTime)
+
+            local requestSuccess, requestError = pcall(function()
+                CurrencyEvents:FireServer()
+            end)
+
+            if not requestSuccess then
+                warn(LOG_PREFIX, "请求货币数据失败 (尝试", attempt .. "):", requestError)
+                if attempt == maxRetries then
+                    responseConnection:Disconnect()
+                end
+                continue
+            end
+
+            if DEBUG_MODE then
+                print(LOG_PREFIX, "已向服务端请求货币数据 (尝试", attempt .. ")")
+            end
+
+            -- 等待服务端响应
+            task.wait(2)
+
+            if gotResponse then
+                if DEBUG_MODE then
+                    print(LOG_PREFIX, "收到服务端响应，停止重试")
+                end
+                break
+            elseif attempt < maxRetries then
+                if DEBUG_MODE then
+                    print(LOG_PREFIX, "未收到响应，准备重试...")
+                end
+            else
+                warn(LOG_PREFIX, "多次请求货币数据失败，客户端可能显示不正确的金币数")
+                responseConnection:Disconnect()
+            end
         end
     end)
 

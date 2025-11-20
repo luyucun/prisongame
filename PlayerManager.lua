@@ -321,6 +321,49 @@ function PlayerManager.OnPlayerAdded(player)
         end
     end)
 
+    -- 🔥修复金币显示延迟：6.7 主动推送初始金币
+    task.spawn(function()
+        -- 等待数据加载完成
+        task.wait(0.3)
+
+        local CurrencySystem = ServerScriptService.Systems:FindFirstChild("CurrencySystem")
+        if CurrencySystem then
+            local currencyModule = require(CurrencySystem)
+            if currencyModule.PushInitialCurrency then
+                currencyModule.PushInitialCurrency(player)
+            end
+        end
+    end)
+
+    -- 🔥修复持久化：6.8 恢复玩家的放置单位（在背包系统初始化后执行）
+    task.spawn(function()
+        -- 等待基地和背包系统完全初始化
+        task.wait(1.0)
+
+        local PlacementSystem = ServerScriptService.Systems:FindFirstChild("PlacementSystem")
+        if PlacementSystem then
+            local placementModule = require(PlacementSystem)
+            if placementModule.RestorePlacedUnits then
+                local success, message = placementModule.RestorePlacedUnits(player)
+                if success then
+                    print(string.format(
+                        "%s [PlayerManager] 🔥 玩家 %s 放置单位恢复成功: %s",
+                        GameConfig.LOG_PREFIX,
+                        player.Name,
+                        message
+                    ))
+                else
+                    warn(string.format(
+                        "%s [PlayerManager] 🔥 玩家 %s 放置单位恢复失败: %s",
+                        GameConfig.LOG_PREFIX,
+                        player.Name,
+                        message
+                    ))
+                end
+            end
+        end
+    end)
+
     -- 7. 处理角色传送 - 使用异步方式避免阻塞
     -- 标记是否应跳过首次传送（用于Studio Play Here模式）
     local shouldSkipFirstTeleport = skipHomeAssignment
@@ -401,8 +444,29 @@ function PlayerManager.OnPlayerRemoving(player)
         HomeSystem.CleanupPlayerHome(homeSlot, player)  -- V2.0.1修复：调用正确的方法并传入homeId
     end
 
-    -- 5. 清除玩家数据
-    DataManager.ClearPlayerData(player)
+    -- 🔥修复服务器关闭时数据保存：检查是否正在关机
+    local isShuttingDown = DataManager.IsShuttingDown and DataManager.IsShuttingDown() or false
+
+    if not isShuttingDown then
+        -- 正常离开：执行完整清理流程
+        -- 🔥修复持久化：4.5 清理放置系统数据（在数据保存之前）
+        local PlacementSystem = require(ServerScriptService.Systems.PlacementSystem)
+        PlacementSystem.OnPlayerLeaving(player)
+
+        -- 5. 清除玩家数据
+        DataManager.ClearPlayerData(player)
+    else
+        -- 服务器关闭：只清理放置系统数据，保留缓存供BindToClose使用
+        local PlacementSystem = require(ServerScriptService.Systems.PlacementSystem)
+        PlacementSystem.OnPlayerLeaving(player)
+
+        -- 注意：不调用 DataManager.ClearPlayerData，让BindToClose能够访问缓存
+        print(string.format(
+            "%s [PlayerManager] 服务器关闭中，跳过玩家 %s 的缓存清理",
+            GameConfig.LOG_PREFIX,
+            player.Name
+        ))
+    end
 end
 
 --[[

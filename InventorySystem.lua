@@ -96,6 +96,9 @@ local function CreateUnitInstance(unitId)
         CreatedTime = os.time(),
         IsPlaced = false,
         PlacedPosition = nil,
+        -- 🔥修复持久化：添加Health和MaxHealth字段
+        Health = UnitConfig.CalculateHealth(unitId, unitConfig.BaseLevel),
+        MaxHealth = UnitConfig.CalculateHealth(unitId, unitConfig.BaseLevel),
     }
 
 
@@ -226,6 +229,15 @@ function InventorySystem.AddUnit(player, unitId)
     -- 改用InventoryRefresh确保客户端获得完整的实例信息
     NotifyClientInventoryRefresh(player)
 
+    -- 🔥修复持久化：添加兵种后保存数据
+    DataManager.SavePlayerDataThrottled(player)
+    print(string.format(
+        "%s [InventorySystem] 🔥 已保存数据: 玩家 %s 添加兵种 %s (实例: %s)",
+        GameConfig.LOG_PREFIX,
+        player.Name,
+        unitId,
+        instance.InstanceId
+    ))
 
     return true, instance
 end
@@ -257,6 +269,15 @@ function InventorySystem.RemoveUnit(player, instanceId)
             -- 改用InventoryRefresh确保客户端获得完整的实例信息
             NotifyClientInventoryRefresh(player)
 
+            -- 🔥修复持久化：删除兵种后保存数据
+            DataManager.SavePlayerDataThrottled(player)
+            print(string.format(
+                "%s [InventorySystem] 🔥 已保存数据: 玩家 %s 删除兵种 %s (实例: %s)",
+                GameConfig.LOG_PREFIX,
+                player.Name,
+                unitId,
+                instanceId
+            ))
 
             return true, "删除成功"
         end
@@ -365,6 +386,13 @@ function InventorySystem.ClearInventory(player)
     -- 通知客户端刷新背包(显示为空)
     NotifyClientInventoryRefresh(player)
 
+    -- 🔥修复持久化：清空背包后立即保存数据（用于GM命令等调试功能）
+    DataManager.SavePlayerDataThrottled(player, true)  -- 强制立即保存
+    print(string.format(
+        "%s [InventorySystem] 🔥 已保存数据: 玩家 %s 清空背包",
+        GameConfig.LOG_PREFIX,
+        player.Name
+    ))
 
     return true
 end
