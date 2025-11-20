@@ -28,6 +28,8 @@ local UnitConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild
 local DataManager = require(ServerScriptService.Core.DataManager)
 local InventorySystem = require(ServerScriptService.Systems.InventorySystem)
 local PhysicsManager = require(ServerScriptService.Systems.PhysicsManager)
+-- V2.2新增：等级显示辅助工具
+local LevelDisplayHelper = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("LevelDisplayHelper"))
 
 -- 远程事件(延迟获取)
 local PlacementEvents = nil
@@ -205,36 +207,19 @@ local function ReleaseGrid(player, gridX, gridZ, gridSize)
 end
 
 --[[
-更新模型等级显示 V1.4
+更新模型等级显示 V2.2 (重构为使用LevelDisplayHelper)
 @param model Model - 兵种模型
 @param level number - 等级
 ]]
 local function UpdateLevelDisplay(model, level)
-    if not model then
+    if not model or not level then
         return
     end
 
-    -- 查找Head下的BillboardGui
-    local head = model:FindFirstChild("Head")
-    if not head then
-        return
-    end
-
-    local billboardGui = head:FindFirstChild("BillboardGui")
-    if not billboardGui then
-        return
-    end
-
-    local textLabel = billboardGui:FindFirstChild("TextLabel")
-    if not textLabel then
-        return
-    end
-
-    -- 更新等级显示
-    if level >= UnitConfig.MAX_LEVEL then
-        textLabel.Text = "Lv.Max"
-    else
-        textLabel.Text = "Lv." .. tostring(level)
+    -- V2.2: 使用统一的LevelDisplayHelper处理等级显示
+    local success = LevelDisplayHelper.UpdateLevelDisplay(model, level)
+    if not success then
+        warn("[PlacementSystem] UpdateLevelDisplay: 更新等级显示失败，model=" .. tostring(model.Name) .. ", level=" .. tostring(level))
     end
 end
 

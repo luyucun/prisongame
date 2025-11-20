@@ -29,6 +29,8 @@ local BattleConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChi
 -- 引用系统
 local CombatSystem = require(ServerScriptService.Systems.CombatSystem)
 local BattleManager = require(ServerScriptService.Systems.BattleManager)
+-- V2.2新增：等级显示辅助工具
+local LevelDisplayHelper = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("LevelDisplayHelper"))
 
 -- ==================== 私有变量 ====================
 
@@ -242,20 +244,10 @@ local function SpawnTestUnit(unitId, level, team, position, battleId)
     -- 设置碰撞组
     SetupUnitCollision(unitModel)
 
-    -- 更新等级显示
-    local head = unitModel:FindFirstChild("Head")
-    if head then
-        local billboard = head:FindFirstChild("BillboardGui")
-        if billboard then
-            local textLabel = billboard:FindFirstChild("TextLabel")
-            if textLabel then
-                if level >= UnitConfig.MAX_LEVEL then
-                    textLabel.Text = "Lv.Max"
-                else
-                    textLabel.Text = "Lv." .. tostring(level)
-                end
-            end
-        end
+    -- V2.2: 使用统一的LevelDisplayHelper更新等级显示
+    local success = LevelDisplayHelper.UpdateLevelDisplay(unitModel, level)
+    if not success then
+        warn("[BattleTestSystem] 更新等级显示失败，unitId=" .. tostring(unitId) .. ", level=" .. tostring(level))
     end
 
     DebugLog(string.format("生成测试兵种: %s Lv.%d [%s]", unitId, level, team))

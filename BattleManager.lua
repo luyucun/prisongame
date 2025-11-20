@@ -62,6 +62,8 @@ BattleInstance = {
     State = string,              -- 战斗状态: "Preparing", "Fighting", "Finished"
     StartTime = number,          -- 战斗开始时间
     Winner = string,             -- 胜利方: "Attack", "Defense", nil
+    IsSettling = boolean,        -- V2.4新增：是否在结算中（防止重复EndBattle）
+    SettlementData = table,      -- V2.4新增：结算数据（用于客户端显示）
 }
 ]]
 
@@ -163,6 +165,46 @@ function BattleManager.Initialize()
                 end
             end)
         end
+
+        -- V2.4新增：连接胜利确认事件
+        local victoryConfirmEvent = battleEventsFolder:FindFirstChild("VictoryConfirm")
+        if victoryConfirmEvent then
+            victoryConfirmEvent.OnServerEvent:Connect(function(player, battleId)
+                local success, err = pcall(function()
+                    -- 验证玩家和战斗合法性
+                    if not player or not battleId then
+                        return
+                    end
+
+                    local battle = battles[battleId]
+                    if not battle then
+                        WarnLog(string.format("VictoryConfirm失败: 战斗 %d 不存在", battleId))
+                        return
+                    end
+
+                    if battle.PlayerId ~= player.UserId then
+                        WarnLog(string.format("VictoryConfirm失败: 玩家 %s 不是战斗 %d 的发起者", player.Name, battleId))
+                        return
+                    end
+
+                    if not battle.IsSettling then
+                        WarnLog(string.format("VictoryConfirm失败: 战斗 %d 未在结算中", battleId))
+                        return
+                    end
+
+                    DebugLog(string.format("收到玩家 %s 的胜利确认: BattleId=%d", player.Name, battleId))
+
+                    -- 完成战斗结算
+                    BattleManager.CompleteBattle(battleId, battle.Winner)
+                end)
+
+                if not success then
+                    WarnLog("VictoryConfirm处理失败:", err)
+                end
+            end)
+        else
+            WarnLog("未找到VictoryConfirm事件，结算界面功能将不可用")
+        end
     end
 
     isInitialized = true
@@ -235,6 +277,9 @@ function BattleManager.CreateBattle(playerId, attackUnits, defenseUnits)
 		-- V2.0新增字段
 		BattleType = config and config.BattleType or "Test",  -- "Test"或"Campaign"
 		OnBattleEnd = config and config.OnBattleEnd or nil,    -- 战斗结束回调
+		-- V2.4新增字段
+		IsSettling = false,              -- 是否在结算中
+		SettlementData = nil,            -- 结算数据
 	}
 
 	battles[battleId] = battle
@@ -389,11 +434,33 @@ function BattleManager.StartBattle(battleId)
         end
     end
 
+    -- V2.3新增: 通知客户端挂载血条
+    local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
+    if eventsFolder then
+        local battleEventsFolder = eventsFolder:FindFirstChild("BattleEvents")
+        if battleEventsFolder then
+            local attachHealthBarsEvent = battleEventsFolder:FindFirstChild("AttachHealthBars")
+            if attachHealthBarsEvent then
+                -- 收集所有战斗单位
+                local allBattleUnits = {}
+                for _, unit in ipairs(finalAttackUnits) do
+                    table.insert(allBattleUnits, unit)
+                end
+                for _, unit in ipairs(finalDefenseUnits) do
+                    table.insert(allBattleUnits, unit)
+                end
+
+                -- 通知所有客户端挂载血条
+                attachHealthBarsEvent:FireAllClients(allBattleUnits)
+            end
+        end
+    end
+
     return true
 end
 
 --[[
-结束战斗(V2.0扩展：触发OnBattleEnd回调)
+结束战斗(V2.4扩展：结算界面支持)
 @param battleId number - 战斗ID
 @param winner string - 胜利方 ("Attack", "Defense", nil)
 @return boolean - 是否成功
@@ -410,9 +477,16 @@ function BattleManager.EndBattle(battleId, winner)
 		return true  -- 已经结束了
 	end
 
+	-- V2.4新增：防止重复调用
+	if battle.IsSettling then
+		DebugLog("EndBattle跳过: 战斗已在结算中")
+		return true
+	end
+
 	-- 更新战斗状态
 	battle.State = BattleConfig.BattleState.FINISHED
 	battle.Winner = winner
+	battle.IsSettling = true  -- V2.4新增：标记为结算中
 
 	-- 停止所有AI
 	UnitAI.ClearBattleAIs(battleId)
@@ -424,6 +498,94 @@ function BattleManager.EndBattle(battleId, winner)
 		DebugLog(string.format("战斗结束: BattleId=%d, Type=%s, 平局",
 			battleId, battle.BattleType or "Test"))
 	end
+
+	-- V2.4新增：准备结算数据
+	local currentStage = 1  -- 默认关卡1
+	local extraRewards = nil  -- 暂时无额外奖励
+
+	-- 如果是战役战斗，尝试获取当前关卡号
+	if battle.BattleType == "Campaign" then
+		local playerId = battle.PlayerId
+		local CampaignManager = require(ServerScriptService.Systems.CampaignManager)
+		local campaignData = CampaignManager.ActiveCampaigns[playerId]
+		if campaignData then
+			currentStage = campaignData.CurrentStage or 1
+		end
+	end
+
+	battle.SettlementData = {
+		BattleId = battleId,
+		Result = winner or "Draw",  -- "Attack", "Defense", "Draw"
+		StageNum = currentStage,
+		ExtraRewards = extraRewards
+	}
+
+	-- V2.4新增：发送结算弹窗到客户端
+	local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
+	if eventsFolder then
+		local battleEventsFolder = eventsFolder:FindFirstChild("BattleEvents")
+		if battleEventsFolder then
+			local victoryPopupEvent = battleEventsFolder:FindFirstChild("VictoryPopup")
+			if victoryPopupEvent then
+				local player = Players:GetPlayerByUserId(battle.PlayerId)
+				if player then
+					victoryPopupEvent:FireClient(player, battleId, winner or "Draw", currentStage, extraRewards)
+					DebugLog(string.format("已发送结算弹窗到客户端: BattleId=%d, Result=%s, Stage=%d",
+						battleId, winner or "Draw", currentStage))
+				end
+			else
+				WarnLog("VictoryPopup事件不存在，将启动自动结算")
+				-- 如果事件不存在，自动完成结算（容错处理）
+				task.delay(0.5, function()
+					BattleManager.CompleteBattle(battleId, winner)
+				end)
+			end
+		end
+	end
+
+	-- V2.4新增：设置超时自动结算（防止客户端卡死）
+	task.delay(5, function()
+		local currentBattle = battles[battleId]
+		if currentBattle and currentBattle.IsSettling then
+			WarnLog(string.format("战斗 %d 结算超时，强制完成", battleId))
+			BattleManager.CompleteBattle(battleId, winner)
+		end
+	end)
+
+	-- 通知客户端战斗状态更新
+	if battleStateUpdateEvent then
+		local player = Players:GetPlayerByUserId(battle.PlayerId)
+		if player then
+			battleStateUpdateEvent:FireClient(player, battleId, BattleConfig.BattleState.FINISHED, winner)
+			DebugLog(string.format("已通知客户端战斗结束: BattleId=%d, 胜利方=%s", battleId, winner or "平局"))
+		end
+	end
+
+	return true
+end
+
+--[[
+完成战斗结算(V2.4新增：客户端确认后调用)
+@param battleId number - 战斗ID
+@param winner string - 胜利方
+]]
+function BattleManager.CompleteBattle(battleId, winner)
+	local battle = battles[battleId]
+
+	if not battle then
+		WarnLog("CompleteBattle失败: 战斗不存在")
+		return false
+	end
+
+	if not battle.IsSettling then
+		WarnLog("CompleteBattle失败: 战斗未在结算中")
+		return false
+	end
+
+	DebugLog(string.format("完成战斗结算: BattleId=%d", battleId))
+
+	-- 取消结算状态
+	battle.IsSettling = false
 
 	-- V2.0: 触发OnBattleEnd回调(战役系统)
 	if battle.OnBattleEnd then
@@ -441,13 +603,44 @@ function BattleManager.EndBattle(battleId, winner)
 		end)
 	end
 
-	-- 通知客户端战斗状态更新
-	if battleStateUpdateEvent then
-		local player = Players:GetPlayerByUserId(battle.PlayerId)
-		if player then
-			battleStateUpdateEvent:FireClient(player, battleId, BattleConfig.BattleState.FINISHED, winner)
-			DebugLog(string.format("已通知客户端战斗结束: BattleId=%d, 胜利方=%s", battleId, winner or "平局"))
+	-- V2.4新增：如果是战役战斗，通知CampaignManager处理确认后的逻辑
+	if battle.BattleType == "Campaign" then
+		local CampaignManager = require(ServerScriptService.Systems.CampaignManager)
+		local playerId = battle.PlayerId
+		local campaignData = CampaignManager.ActiveCampaigns[playerId]
+		if campaignData then
+			DebugLog(string.format("通知CampaignManager处理确认后逻辑: BattleId=%d", battleId))
+			CampaignManager.ProcessPendingBattleResult(campaignData)
 		end
+	end
+
+	-- V2.3新增: 通知客户端移除血条
+	-- V2.3修复: 仅非战役才移除血条（战役内关卡切换保持血条）
+	if battle.BattleType ~= "Campaign" then
+		local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
+		if eventsFolder then
+			local battleEventsFolder = eventsFolder:FindFirstChild("BattleEvents")
+			if battleEventsFolder then
+				local detachHealthBarsEvent = battleEventsFolder:FindFirstChild("DetachHealthBars")
+				if detachHealthBarsEvent then
+					-- 收集所有战斗单位
+					local allBattleUnits = {}
+					for _, unit in ipairs(battle.AttackUnits) do
+						table.insert(allBattleUnits, unit)
+					end
+					for _, unit in ipairs(battle.DefenseUnits) do
+						table.insert(allBattleUnits, unit)
+					end
+
+					-- 通知所有客户端移除血条
+					detachHealthBarsEvent:FireAllClients(allBattleUnits)
+					DebugLog(string.format("⚔️ 非战役战斗结束，移除血条: BattleId=%d", battleId))
+				end
+			end
+		end
+	else
+		-- 战役模式下保持血条，由CampaignManager统一管理
+		DebugLog(string.format("🏰 战役战斗结束，保持血条显示: BattleId=%d", battleId))
 	end
 
 	-- 延迟清理战场

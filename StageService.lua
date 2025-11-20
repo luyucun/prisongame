@@ -21,6 +21,8 @@ local Workspace = game:GetService("Workspace")
 local EnemyConfig = require(ReplicatedStorage.Config.EnemyConfig)
 local UnitConfig = require(ReplicatedStorage.Config.UnitConfig)
 local GridPositionSystem = require(ServerScriptService.Systems.GridPositionSystem)
+-- V2.2新增：等级显示辅助工具
+local LevelDisplayHelper = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("LevelDisplayHelper"))
 
 local StageService = {}
 
@@ -528,17 +530,11 @@ function StageService.LoadEnemyData(stageFolder, stageNum)
 				unitModel.Humanoid.Health = baseHP * levelMultiplier
 			end
 
-			-- 更新等级显示
-			local head = unitModel:FindFirstChild("Head")
-			if head then
-				local billboardGui = head:FindFirstChild("BillboardGui")
-				if billboardGui then
-					local textLabel = billboardGui:FindFirstChild("TextLabel")
-					if textLabel then
-						local level = enemyData.Level or 1
-						textLabel.Text = (level >= 3) and "Lv.Max" or ("Lv." .. level)
-					end
-				end
+			-- V2.2: 使用统一的LevelDisplayHelper更新等级显示
+			local level = enemyData.Level or 1
+			local success = LevelDisplayHelper.UpdateLevelDisplay(unitModel, level)
+			if not success then
+				warn("[StageService] 更新等级显示失败，unitId=" .. tostring(enemyData.UnitId) .. ", level=" .. tostring(level))
 			end
 
 			-- V2.0修复：提前生成敌人但关闭碰撞，避免阻挡我方行军

@@ -556,6 +556,19 @@ function CombatSystem.TakeDamage(unitModel, damage, attacker)
 		end
 	end
 
+	-- V2.3新增: 通知所有客户端血量更新
+	local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
+	if eventsFolder then
+		local battleEventsFolder = eventsFolder:FindFirstChild("BattleEvents")
+		if battleEventsFolder then
+			local unitHealthUpdateEvent = battleEventsFolder:FindFirstChild("UnitHealthUpdate")
+			if unitHealthUpdateEvent then
+				-- 发送给所有客户端: 单位模型, 当前血量, 最大血量
+				unitHealthUpdateEvent:FireAllClients(unitModel, state.CurrentHealth, state.MaxHealth)
+			end
+		end
+	end
+
 	-- 检查是否死亡
 	if state.CurrentHealth <= 0 then
 		state.CurrentHealth = 0
@@ -586,6 +599,19 @@ function CombatSystem.Heal(unitModel, amount)
 
 	DebugLog(string.format("%s恢复%d生命值, 当前HP:%d/%d",
 		state.UnitId, amount, state.CurrentHealth, state.MaxHealth))
+
+	-- V2.3新增: 通知所有客户端血量更新
+	local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
+	if eventsFolder then
+		local battleEventsFolder = eventsFolder:FindFirstChild("BattleEvents")
+		if battleEventsFolder then
+			local unitHealthUpdateEvent = battleEventsFolder:FindFirstChild("UnitHealthUpdate")
+			if unitHealthUpdateEvent then
+				-- 发送给所有客户端: 单位模型, 当前血量, 最大血量
+				unitHealthUpdateEvent:FireAllClients(unitModel, state.CurrentHealth, state.MaxHealth)
+			end
+		end
+	end
 
 	return true
 end

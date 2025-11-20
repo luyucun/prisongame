@@ -305,6 +305,42 @@ local function InitializeEvents()
 end
 
 --[[
+V2.3新增：血条事件工具函数
+用于在战役各阶段管理血条显示
+]]
+local function fireAttachHealthBars(units)
+	local events = ReplicatedStorage:FindFirstChild("Events")
+	local battleEvents = events and events:FindFirstChild("BattleEvents")
+	local attach = battleEvents and battleEvents:FindFirstChild("AttachHealthBars")
+	if not attach then return end
+
+	local send = {}
+	for _, u in ipairs(units) do
+		if u and u.Parent then table.insert(send, u) end
+	end
+	if #send > 0 then
+		attach:FireAllClients(send)
+		DebugLog(string.format("🏷️ 广播挂载血条，单位数量: %d", #send))
+	end
+end
+
+local function fireDetachHealthBars(units) -- 可选，用于失败/清理兜底
+	local events = ReplicatedStorage:FindFirstChild("Events")
+	local battleEvents = events and events:FindFirstChild("BattleEvents")
+	local detach = battleEvents and battleEvents:FindFirstChild("DetachHealthBars")
+	if not detach then return end
+
+	local send = {}
+	for _, u in ipairs(units) do
+		if u then table.insert(send, u) end
+	end
+	if #send > 0 then
+		detach:FireAllClients(send)
+		DebugLog(string.format("🏷️ 广播移除血条，单位数量: %d", #send))
+	end
+end
+
+--[[
 获取玩家基地的IdleFloor
 @param homeId number - 基地ID
 @return Part|nil - IdleFloor
@@ -630,6 +666,17 @@ function CampaignManager.MarchToStage(campaignData, stageNum)
 		end
 	end
 
+	-- V2.3新增：行军阶段立即显示血条
+	-- 收集要行军的单位并立即挂载血条，确保点击Attack后立刻切换显示
+	local marchingUnits = {}
+	for unitInstance, unitData in pairs(campaignData.Units) do
+		if not unitData.IsDead and unitInstance and unitInstance.Parent then
+			table.insert(marchingUnits, unitInstance)
+		end
+	end
+	fireAttachHealthBars(marchingUnits)  -- 立即为行军单位挂载血条
+	DebugLog(string.format("🎯 行军开始，已为 %d 个单位挂载血条", #marchingUnits))
+
 	-- 调用PathService批量寻路（使用新的回调API）
 	-- V2.3.1：移除缓存路径传入，让每个单位使用真实起点寻路
 	DebugLog(string.format("[MarchToStage] 开始PathService寻路，共 %d 个目标", #moveTargets))
@@ -835,6 +882,13 @@ function CampaignManager.BeginBattlePrep(campaignData, stageNum, arrivedList, ti
 		return CampaignManager.OnDefeat(campaignData)
 	end
 
+	-- V2.3新增：战斗准备阶段补齐敌我血条
+	-- 确保友军血条（即使行军时已挂载，客户端有去重缓存）
+	fireAttachHealthBars(preparedAllies)
+	-- 为敌军也挂载血条（敌军之前未行军，需要在这里挂载）
+	fireAttachHealthBars(preparedEnemies)
+	DebugLog(string.format("🎯 战斗准备阶段，已补齐友军(%d)和敌军(%d)血条", #preparedAllies, #preparedEnemies))
+
 	-- 进入战斗阶段
 	task.wait(0.2)  -- 给激活操作一点缓冲时间
 	CampaignManager.StartStageBattle(campaignData, stageNum, preparedAllies, preparedEnemies)
@@ -896,7 +950,7 @@ function CampaignManager.StartStageBattle(campaignData, stageNum, preparedAllies
 end
 
 --[[
-战斗结束回调
+战斗结束回调(V2.4扩展：支持结算界面)
 @param campaignData table - 战役数据
 @param stageNum number - 关卡编号
 @param result table - 战斗结果
@@ -925,14 +979,58 @@ function CampaignManager.OnBattleEnd(campaignData, stageNum, result)
 
 	DebugLog(string.format("📊 兵种状态统计: 存活=%d, 死亡=%d", aliveCount, deadCount))
 
-	-- 判定结果
-	if result.Winner == "Attack" then
+	-- V2.4关键修改：暂存战斗结果，不立即处理，等待客户端确认
+	campaignData.PendingBattleResult = {
+		StageNum = stageNum,
+		Winner = result.Winner,
+		AliveCount = aliveCount,
+		DeadCount = deadCount
+	}
+
+	DebugLog(string.format("⏳ OnBattleEnd暂存结果，等待客户端结算确认: Winner=%s", tostring(result.Winner)))
+end
+
+--[[
+处理结算确认后的逻辑(V2.4新增)
+@param campaignData table - 战役数据
+]]
+function CampaignManager.ProcessPendingBattleResult(campaignData)
+	local pendingResult = campaignData.PendingBattleResult
+	if not pendingResult then
+		DebugLog("❌ ProcessPendingBattleResult: 没有待处理的战斗结果")
+		return
+	end
+
+	DebugLog(string.format("🔄 ProcessPendingBattleResult: 开始处理结算确认后的逻辑, Winner=%s", tostring(pendingResult.Winner)))
+
+	local stageNum = pendingResult.StageNum
+	local winner = pendingResult.Winner
+
+	-- 清除待处理结果
+	campaignData.PendingBattleResult = nil
+
+	-- 传送玩家回出生点
+	local player = campaignData.Player
+	if player and player.Character then
+		local homeId = campaignData.HomeId
+		local homeFolder = Workspace.Home:FindFirstChild("PlayerHome" .. homeId)
+		if homeFolder then
+			local spawnLocation = homeFolder:FindFirstChild("SpawnLocation")
+			if spawnLocation and player.Character:FindFirstChild("HumanoidRootPart") then
+				DebugLog(string.format("📍 传送玩家 %s 回出生点", player.Name))
+				player.Character.HumanoidRootPart.CFrame = spawnLocation.CFrame + Vector3.new(0, 5, 0)
+			end
+		end
+	end
+
+	-- 判定结果并继续原有逻辑
+	if winner == "Attack" then
 		-- 我方胜利
 		DebugLog("🎉 我方胜利，推进下一关")
 		CampaignManager.OnStageClear(campaignData, stageNum)
 	else
 		-- 我方失败
-		DebugLog(string.format("💀 我方失败，战役结束 (Winner=%s)", tostring(result.Winner)))
+		DebugLog(string.format("💀 我方失败，战役结束 (Winner=%s)", tostring(winner)))
 		CampaignManager.OnDefeat(campaignData)
 	end
 end
@@ -1070,6 +1168,19 @@ function CampaignManager.OnCampaignEnd(campaignData, isVictory)
 
 	-- V2.3性能优化：清理路径缓存
 	ClearPathCache(campaignData.HomeId)
+
+	-- V2.3新增：兜底血条清理，防止残留血条/隐藏的等级牌
+	-- 如果战斗没创建就失败（OnDefeat/OnCampaignEnd 直接走复活），确保血条被移除
+	local campaignUnits = {}
+	for unitInstance, unitData in pairs(campaignData.Units) do
+		if unitInstance then -- 不检查Parent，因为单位可能已经移动或隐藏
+			table.insert(campaignUnits, unitInstance)
+		end
+	end
+	if #campaignUnits > 0 then
+		fireDetachHealthBars(campaignUnits)
+		DebugLog(string.format("🧹 战役结束兜底清理，已移除 %d 个单位的血条", #campaignUnits))
+	end
 
 	-- 重生兵种
 	DebugLog("🔄 OnCampaignEnd调用RespawnUnits")
@@ -1415,6 +1526,20 @@ function CampaignManager.RespawnUnits(campaignData)
 			if unitInstance:FindFirstChild("Humanoid") then
 				unitInstance.Humanoid.Health = unitData.MaxHP
 				DebugLog(string.format("    ❤️  %s 血量恢复至 %d", unitData.UnitId, unitData.MaxHP))
+			end
+
+			-- V2.3新增: 复活后移除血条，恢复等级显示
+			-- 通知客户端移除该单位的血条
+			local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
+			if eventsFolder then
+				local battleEventsFolder = eventsFolder:FindFirstChild("BattleEvents")
+				if battleEventsFolder then
+					local detachHealthBarsEvent = battleEventsFolder:FindFirstChild("DetachHealthBars")
+					if detachHealthBarsEvent then
+						detachHealthBarsEvent:FireAllClients({unitInstance})
+						DebugLog(string.format("    🏷️  %s 移除血条，恢复等级显示", unitData.UnitId))
+					end
+				end
 			end
 
 			-- 复活标记

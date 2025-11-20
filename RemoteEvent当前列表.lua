@@ -27,7 +27,12 @@ ReplicatedStorage
         ├──BattleTestResponse（RemoteEvent） - 服务端返回战斗测试结果
         ├──BattleStateUpdate（RemoteEvent） - 服务端通知客户端战斗状态更新
         ├──UnitDeath（BindableEvent） - 服务端内部兵种死亡通知
-        └──ShowDamageNumber（RemoteEvent） 【V1.5.1新增】 - 服务端通知客户端显示伤害数字
+        ├──ShowDamageNumber（RemoteEvent） 【V1.5.1新增】 - 服务端通知客户端显示伤害数字
+        ├──UnitHealthUpdate（RemoteEvent） 【V2.3新增】 - 服务器→客户端：单位血量更新(unitModel, currentHP, maxHP)
+        ├──AttachHealthBars（RemoteEvent） 【V2.3新增】 - 服务器→客户端：挂载血条(unitModels)
+        ├──DetachHealthBars（RemoteEvent） 【V2.3新增】 - 服务器→客户端：移除血条(unitModels)
+        ├──VictoryPopup（RemoteEvent） 【V2.4新增】 - 服务器→客户端：显示战斗结算弹窗(battleId, result, stageNum, extraRewards)
+        └──VictoryConfirm（RemoteEvent） 【V2.4新增】 - 客户端→服务器：确认战斗结算(battleId)
     └──CampaignEvents（Folder）/  【V2.0新增】
         ├──RequestStartCampaign（RemoteEvent） - 客户端→服务器：请求开始战役
         ├──RequestRetreat（RemoteEvent） - 客户端→服务器：请求撤退
@@ -58,5 +63,43 @@ ReplicatedStorage
 5. 将新建的 RemoteEvent 重命名为 "StockUpdate"
 6. 重复步骤3-5，创建 "RefreshTimeUpdate"
 7. 保存游戏
+
+
+【V2.3血条系统RemoteEvent创建说明】
+位置：ReplicatedStorage/Events/BattleEvents/
+🔄 UnitHealthUpdate (RemoteEvent) - 需在Studio中手动创建
+🔄 AttachHealthBars (RemoteEvent) - 需在Studio中手动创建
+🔄 DetachHealthBars (RemoteEvent) - 需在Studio中手动创建
+
+创建步骤：
+1. 打开Roblox Studio
+2. 导航到 ReplicatedStorage > Events > BattleEvents
+3. 右键点击 BattleEvents 文件夹
+4. 选择 "Insert Object" > "RemoteEvent"
+5. 将新建的 RemoteEvent 重命名为 "UnitHealthUpdate"
+6. 重复步骤3-5，创建 "AttachHealthBars"
+7. 重复步骤3-5，创建 "DetachHealthBars"
+8. 保存游戏
+
+
+【V2.4战斗结算系统RemoteEvent创建说明】
+位置：ReplicatedStorage/Events/BattleEvents/
+🆕 VictoryPopup (RemoteEvent) - 需在Studio中手动创建
+🆕 VictoryConfirm (RemoteEvent) - 需在Studio中手动创建
+
+创建步骤：
+1. 打开Roblox Studio
+2. 导航到 ReplicatedStorage > Events > BattleEvents
+3. 右键点击 BattleEvents 文件夹
+4. 选择 "Insert Object" > "RemoteEvent"
+5. 将新建的 RemoteEvent 重命名为 "VictoryPopup"
+6. 重复步骤3-5，创建 "VictoryConfirm"
+7. 保存游戏
+
+功能说明：
+- VictoryPopup：服务器在战斗结束时发送给客户端，触发结算界面显示
+  参数：(battleId, result, stageNum, extraRewards)
+- VictoryConfirm：客户端玩家点击确认按钮后发送给服务器，完成战斗结算
+  参数：(battleId)
 
 

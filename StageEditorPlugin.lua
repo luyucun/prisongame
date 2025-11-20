@@ -375,14 +375,46 @@ local function GenerateUnit(unitId, level, gridX, gridY)
 		end
 	end
 
-	-- 更新等级显示
+	-- V2.2: 更新等级显示（包含颜色配置）
 	local head = unit:FindFirstChild("Head")
 	if head then
 		local billboardGui = head:FindFirstChild("BillboardGui")
 		if billboardGui then
 			local textLabel = billboardGui:FindFirstChild("TextLabel")
 			if textLabel then
-				textLabel.Text = (level >= 3) and "Lv.Max" or ("Lv." .. level)
+				-- 设置等级文本
+				if level >= 3 then
+					textLabel.Text = "Lv.Max"
+					-- 最高等级颜色: 黑字红边
+					textLabel.TextColor3 = Color3.fromRGB(0, 0, 0)
+				else
+					textLabel.Text = "Lv." .. level
+					-- 设置字体颜色为白色
+					textLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+				end
+
+				-- 设置描边颜色
+				local levelColors = {
+					[1] = Color3.fromRGB(0, 170, 0),   -- LV.1: 绿边
+					[2] = Color3.fromRGB(0, 80, 255),  -- LV.2: 蓝边
+					[3] = Color3.fromRGB(170, 0, 255), -- LV.3: 紫边
+					[4] = Color3.fromRGB(255, 100, 0), -- LV.4: 橙边
+					[5] = Color3.fromRGB(255, 0, 0),   -- LV.5: 红边
+					Max = Color3.fromRGB(255, 0, 0),   -- Max: 红边
+				}
+
+				local strokeColor = (level >= 3) and levelColors.Max or (levelColors[level] or levelColors[1])
+
+				-- 优先使用UIStroke，兜底使用TextStroke
+				local uiStroke = textLabel:FindFirstChild("UIStroke") or textLabel:FindFirstChild("Stroke")
+				if uiStroke and uiStroke:IsA("UIStroke") then
+					uiStroke.Color = strokeColor
+					uiStroke.Enabled = true
+					uiStroke.Transparency = 0
+				else
+					textLabel.TextStrokeColor3 = strokeColor
+					textLabel.TextStrokeTransparency = 0
+				end
 			end
 		end
 	end
