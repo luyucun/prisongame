@@ -182,19 +182,10 @@ function RemovalController.ExitRemovalMode()
     -- 更新UI显示
     UpdateUIForRemovalMode(false)
 
-    -- V2.0.2修复：调用BackpackDisplay接口而非直接修改Enabled
-    if _G.BackpackDisplay and _G.BackpackDisplay.HideBackpack then
-        _G.BackpackDisplay.HideBackpack()
-    else
-        -- 兜底方案：直接控制BackpackFrame.Visible
-        local backpackGui = playerGui:FindFirstChild("BackpackGui")
-        if backpackGui then
-            local backpackFrame = backpackGui:FindFirstChild("BackpackFrame")
-            if backpackFrame then
-                backpackFrame.Visible = false
-            end
-        end
-    end
+    -- V2.1修复：退出回收模式时不再隐藏背包
+    -- 让背包的显示控制交给原有的 IdleFloor 触发逻辑
+    -- 原来的逻辑：调用 _G.BackpackDisplay.HideBackpack() 或直接设置 Visible = false
+    -- 现在：移除这部分逻辑，只退出移除流程，不触碰背包显示
 end
 
 --[[
@@ -474,10 +465,15 @@ function OnRemoveResponse(success, message, instanceId)
         -- Bug修复：减少计数器
         removalState.placedUnitCount = math.max(0, removalState.placedUnitCount - 1)
 
-        -- 检查场中是否还有兵种
-        if removalState.placedUnitCount == 0 then
-            RemovalController.ExitRemovalMode()
-        end
+        -- V2.1修复：移除自动退出逻辑
+        -- 原逻辑：如果 placedUnitCount == 0 则自动调用 ExitRemovalMode()
+        -- 新逻辑：回收模式只能通过用户点击 Exit 按钮退出，即便场上兵种为0也保持回收模式
+        -- 这样用户可以连续回收多个兵种，不会因为暂时清空而被强制退出回收模式
+
+        -- 删除的逻辑：
+        -- if removalState.placedUnitCount == 0 then
+        --     RemovalController.ExitRemovalMode()
+        -- end
     else
         warn("[RemovalController] 回收失败:", message)
     end
