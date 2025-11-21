@@ -549,8 +549,12 @@ function CombatSystem.TakeDamage(unitModel, damage, attacker)
 			if battleEventsFolder then
 				local showDamageNumberEvent = battleEventsFolder:FindFirstChild("ShowDamageNumber")
 				if showDamageNumberEvent then
-					-- 发送给所有客户端: 单位模型, 伤害值
-					showDamageNumberEvent:FireAllClients(unitModel, damage)
+					-- V2.5新增：扩展事件参数，加入阵营信息
+					-- 获取攻击者的Team属性
+					local attackerTeam = attacker and attacker:GetAttribute("Team") or nil
+					local targetTeam = state.Team
+					-- 发送给所有客户端: 单位模型, 伤害值, 攻击者阵营, 被击中者阵营
+					showDamageNumberEvent:FireAllClients(unitModel, damage, attackerTeam, targetTeam)
 				end
 			end
 		end

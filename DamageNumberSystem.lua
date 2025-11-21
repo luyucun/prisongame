@@ -38,14 +38,19 @@ local DamageNumberConfig = {
 	STROKE_THICKNESS = 2,
 	RANDOM_OFFSET_X = 1,
 	RANDOM_OFFSET_Z = 1,
+	-- V2.5新增：阵营颜色
+	ATTACKER_COLOR = Color3.fromRGB(255, 255, 255),  -- 我方打敌方：白字
+	DEFENDER_COLOR = Color3.fromRGB(255, 0, 0),      -- 敌方打我方：红字
 }
 
 --[[
 创建伤害数字显示
 @param unitModel Model - 受伤的单位模型
 @param damage number - 伤害值
+@param attackerTeam string|nil - 攻击者阵营 (V2.5新增)
+@param targetTeam string|nil - 被击中者阵营 (V2.5新增)
 ]]
-local function ShowDamageNumber(unitModel, damage)
+local function ShowDamageNumber(unitModel, damage, attackerTeam, targetTeam)
 	if not DamageNumberConfig.ENABLE_DAMAGE_NUMBERS then
 		return
 	end
@@ -58,6 +63,22 @@ local function ShowDamageNumber(unitModel, damage)
 	local rootPart = unitModel:FindFirstChild("HumanoidRootPart")
 	if not rootPart then
 		return
+	end
+
+	-- V2.5新增：根据阵营关系确定伤害冒字颜色
+	local damageColor = DamageNumberConfig.COLOR
+	if attackerTeam and targetTeam then
+		-- 如果目标被击中（被动接收伤害）
+		if targetTeam == "Attack" and attackerTeam == "Defense" then
+			-- 敌方(Defense)打我方(Attack)：红字
+			damageColor = DamageNumberConfig.DEFENDER_COLOR
+		elseif targetTeam == "Defense" and attackerTeam == "Attack" then
+			-- 我方(Attack)打敌方(Defense)：白字
+			damageColor = DamageNumberConfig.ATTACKER_COLOR
+		else
+			-- 其他情况使用默认色
+			damageColor = DamageNumberConfig.COLOR
+		end
 	end
 
 	-- 创建BillboardGui
@@ -79,7 +100,7 @@ local function ShowDamageNumber(unitModel, damage)
 	textLabel.Size = UDim2.new(1, 0, 1, 0)
 	textLabel.BackgroundTransparency = 1
 	textLabel.Text = "-" .. tostring(math.floor(damage))
-	textLabel.TextColor3 = DamageNumberConfig.COLOR
+	textLabel.TextColor3 = damageColor  -- 使用根据阵营确定的颜色
 	textLabel.TextSize = DamageNumberConfig.TEXT_SIZE
 	textLabel.Font = Enum.Font.FredokaOne
 	textLabel.TextStrokeTransparency = 0
@@ -147,8 +168,9 @@ local function Initialize()
 	local showDamageNumberEvent = battleEventsFolder:WaitForChild("ShowDamageNumber")
 
 	-- 监听伤害事件
-	showDamageNumberEvent.OnClientEvent:Connect(function(unitModel, damage)
-		ShowDamageNumber(unitModel, damage)
+	-- V2.5新增：支持新的事件参数(attackerTeam, targetTeam)
+	showDamageNumberEvent.OnClientEvent:Connect(function(unitModel, damage, attackerTeam, targetTeam)
+		ShowDamageNumber(unitModel, damage, attackerTeam, targetTeam)
 	end)
 
 	print("[DamageNumberSystem] 伤害冒字系统初始化完成")

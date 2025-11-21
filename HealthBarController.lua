@@ -34,6 +34,49 @@ local function debugLog(message)
 end
 
 --[[
+根据Team属性为血条应用颜色
+@param unitModel: Model - 单位模型
+@param healthBar: BillboardGui - 血条实例
+@return boolean - 是否成功应用颜色
+]]
+local function ApplyTeamColor(unitModel, healthBar)
+    if not healthBar or not healthBar.Parent then
+        return false
+    end
+
+    local team = unitModel:GetAttribute("Team")
+    if not team then
+        -- 还没有设置Team属性，跳过
+        return false
+    end
+
+    -- 查找血条结构
+    local bg = healthBar:FindFirstChild("Bg")
+    if not bg then
+        warn("[HealthBarController] ApplyTeamColor: 血条缺少Bg组件 - " .. unitModel.Name)
+        return false
+    end
+
+    local progressBar = bg:FindFirstChild("Hpprogressbar")
+    if not progressBar then
+        warn("[HealthBarController] ApplyTeamColor: 血条缺少Hpprogressbar组件 - " .. unitModel.Name)
+        return false
+    end
+
+    -- V2.5新增：根据Team属性设置血条颜色
+    if team == "Defense" then
+        -- 敌方血条为红色
+        progressBar.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
+        debugLog("应用敌方血条颜色为红色 - " .. unitModel.Name)
+    else
+        -- 我方保持默认色（可选：显式设置为其他颜色）
+        debugLog("应用我方血条颜色（默认） - " .. unitModel.Name)
+    end
+
+    return true
+end
+
+--[[
 为指定单位模型挂载血条
 @param unitModel: Model - 需要挂载血条的单位模型
 ]]
@@ -52,7 +95,14 @@ function HealthBarController.AttachHealthBar(unitModel)
 
     -- 检查是否已有血条，避免重复挂载
     if healthBarCache[unitModel] then
-        debugLog("血条已存在，跳过挂载 - " .. unitModel.Name)
+        debugLog("血条已存在，尝试重新着色 - " .. unitModel.Name)
+        -- V2.5修复：已存在血条时，尝试重新应用Team颜色（可能Team属性刚设置）
+        local healthBar = healthBarCache[unitModel]
+        if ApplyTeamColor(unitModel, healthBar) then
+            debugLog("血条重着色成功 - " .. unitModel.Name)
+        else
+            debugLog("血条重着色跳过（Team属性未设置） - " .. unitModel.Name)
+        end
         return
     end
 
@@ -71,6 +121,12 @@ function HealthBarController.AttachHealthBar(unitModel)
 
     -- 缓存血条
     healthBarCache[unitModel] = healthBar
+
+    -- V2.5新增：应用Team颜色（如果Team属性已设置）
+    if not ApplyTeamColor(unitModel, healthBar) then
+        -- Team属性还未设置，这是正常的（会在StartBattle前后设置）
+        debugLog("血条已挂载，等待Team属性设置 - " .. unitModel.Name)
+    end
 
     -- 隐藏原等级显示
     local levelGui = head:FindFirstChild("BillboardGui")
@@ -222,6 +278,38 @@ function HealthBarController.ClearAllHealthBars()
 end
 
 --[[
+重新为血条应用Team颜色（战斗开始后Team属性设置完成时调用）
+@param unitModel: Model - 单位模型
+@return boolean - 是否成功应用颜色
+]]
+function HealthBarController.ReapplyTeamColor(unitModel)
+    local healthBar = healthBarCache[unitModel]
+    if not healthBar then
+        debugLog("重新着色失败：血条不存在 - " .. unitModel.Name)
+        return false
+    end
+
+    local success = ApplyTeamColor(unitModel, healthBar)
+    if success then
+        debugLog("✅ V2.5修复：血条重新着色成功 - " .. unitModel.Name)
+    else
+        debugLog("血条重新着色失败（可能Team属性未设置） - " .. unitModel.Name)
+    end
+    return success
+end
+
+--[[
+批量重新着色血条（战斗开始时Team属性设置后调用）
+@param unitModels: table - 单位模型数组
+]]
+function HealthBarController.ReapplyTeamColorsForBattle(unitModels)
+    debugLog("批量重新着色血条，单位数量: " .. #unitModels)
+    for _, unitModel in ipairs(unitModels) do
+        HealthBarController.ReapplyTeamColor(unitModel)
+    end
+end
+
+--[[
 获取当前血条数量（调试用）
 ]]
 function HealthBarController.GetActiveHealthBarCount()
@@ -233,5 +321,28 @@ function HealthBarController.GetActiveHealthBarCount()
 end
 
 debugLog("HealthBarController模块已加载")
+
+-- V2.5修复：初始化ReapplyTeamColors事件监听
+local function InitializeTeamColorEvent()
+    local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
+    if eventsFolder then
+        local battleEventsFolder = eventsFolder:FindFirstChild("BattleEvents")
+        if battleEventsFolder then
+            local reapplyTeamColorsEvent = battleEventsFolder:FindFirstChild("ReapplyTeamColors")
+            if reapplyTeamColorsEvent then
+                reapplyTeamColorsEvent.OnClientEvent:Connect(function(unitModels)
+                    debugLog("✅ 收到重新着色请求，单位数量: " .. #unitModels)
+                    HealthBarController.ReapplyTeamColorsForBattle(unitModels)
+                end)
+                debugLog("✅ ReapplyTeamColors事件监听已初始化")
+            else
+                debugLog("⚠️ ReapplyTeamColors事件不存在，客户端将依赖AttachHealthBar自动着色")
+            end
+        end
+    end
+end
+
+-- 在模块加载时初始化事件监听
+InitializeTeamColorEvent()
 
 return HealthBarController

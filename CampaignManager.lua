@@ -1009,19 +1009,8 @@ function CampaignManager.ProcessPendingBattleResult(campaignData)
 	-- 清除待处理结果
 	campaignData.PendingBattleResult = nil
 
-	-- 传送玩家回出生点
-	local player = campaignData.Player
-	if player and player.Character then
-		local homeId = campaignData.HomeId
-		local homeFolder = Workspace.Home:FindFirstChild("PlayerHome" .. homeId)
-		if homeFolder then
-			local spawnLocation = homeFolder:FindFirstChild("SpawnLocation")
-			if spawnLocation and player.Character:FindFirstChild("HumanoidRootPart") then
-				DebugLog(string.format("📍 传送玩家 %s 回出生点", player.Name))
-				player.Character.HumanoidRootPart.CFrame = spawnLocation.CFrame + Vector3.new(0, 5, 0)
-			end
-		end
-	end
+	-- V2.5修复：单关结束时不传送玩家，等整个战役结束后再传送
+	-- 传送逻辑已移至 CompleteCampaignEnd
 
 	-- 判定结果并继续原有逻辑
 	if winner == "Attack" then
@@ -1161,6 +1150,76 @@ function CampaignManager.OnCampaignEnd(campaignData, isVictory)
 	DebugLog(string.format("🔚 OnCampaignEnd被调用: isVictory=%s", tostring(isVictory)))
 	campaignData.State = CampaignState.CLEANUP
 
+	-- V2.5新增：战役结束时发送结算弹窗
+	-- 标记战役为待确认状态
+	campaignData.IsWaitingForConfirm = true
+	campaignData.IsVictory = isVictory
+
+	-- 获取当前关卡信息
+	local currentStage = campaignData.CurrentStage or 1
+	local result = isVictory and "Attack" or "Defense"
+
+	-- 发送VictoryPopup事件
+	local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
+	if eventsFolder then
+		local battleEventsFolder = eventsFolder:FindFirstChild("BattleEvents")
+		if battleEventsFolder then
+			local victoryPopupEvent = battleEventsFolder:FindFirstChild("VictoryPopup")
+			if victoryPopupEvent then
+				-- 使用0作为battleId表示这是战役结算
+				victoryPopupEvent:FireClient(campaignData.Player, 0, result, currentStage, nil)
+				DebugLog(string.format("✅ 战役结算弹窗已发送: PlayerId=%d, Result=%s, Stage=%d",
+					campaignData.PlayerId, result, currentStage))
+			else
+				warn(GameConfig.LOG_PREFIX, "[CampaignManager] VictoryPopup事件不存在，将在超时后自动完成战役结算")
+				-- V2.5修复：不立即完成，依赖超时机制（10秒后自动完成）
+			end
+		end
+	end
+
+	-- V2.5新增：设置超时自动完成（防止客户端卡死）
+	-- V2.5修复：延长超时时间到15秒，避免玩家看动画时被提前清理
+	task.delay(15, function()
+		if campaignData.IsWaitingForConfirm then
+			warn(GameConfig.LOG_PREFIX, string.format("[CampaignManager] 战役结算超时（15秒），强制完成: PlayerId=%d", campaignData.PlayerId))
+			CampaignManager.CompleteCampaignEnd(campaignData)
+		end
+	end)
+end
+
+--[[
+完成战役结算（玩家确认后调用）
+@param campaignData table - 战役数据
+]]
+function CampaignManager.CompleteCampaignEnd(campaignData)
+	if not campaignData then
+		warn(GameConfig.LOG_PREFIX, "[CampaignManager] CompleteCampaignEnd失败: campaignData无效")
+		return
+	end
+
+	-- 防止重复调用
+	if not campaignData.IsWaitingForConfirm then
+		DebugLog("CompleteCampaignEnd跳过: 已完成或未在等待确认状态")
+		return
+	end
+
+	campaignData.IsWaitingForConfirm = false
+	DebugLog(string.format("🔚 CompleteCampaignEnd开始执行: PlayerId=%d", campaignData.PlayerId))
+
+	-- V2.5新增：战役结束后传送玩家回出生点（从ProcessPendingBattleResult移动到此处）
+	local player = campaignData.Player
+	if player and player.Character then
+		local homeId = campaignData.HomeId
+		local homeFolder = Workspace.Home:FindFirstChild("PlayerHome" .. homeId)
+		if homeFolder then
+			local spawnLocation = homeFolder:FindFirstChild("SpawnLocation")
+			if spawnLocation and player.Character:FindFirstChild("HumanoidRootPart") then
+				DebugLog(string.format("📍 战役结束，传送玩家 %s 回出生点", player.Name))
+				player.Character.HumanoidRootPart.CFrame = spawnLocation.CFrame + Vector3.new(0, 5, 0)
+			end
+		end
+	end
+
 	-- V2.0.1新增：关闭基地大门（确保门总是被关闭）
 	pcall(function()
 		DoorControlService.CloseDoor(campaignData.HomeId)
@@ -1183,7 +1242,7 @@ function CampaignManager.OnCampaignEnd(campaignData, isVictory)
 	end
 
 	-- 重生兵种
-	DebugLog("🔄 OnCampaignEnd调用RespawnUnits")
+	DebugLog("🔄 CompleteCampaignEnd调用RespawnUnits")
 	CampaignManager.RespawnUnits(campaignData)
 
 	-- V2.0.3修复：战役彻底结束后，清除所有单位的CampaignKeepInstance标记
@@ -1213,7 +1272,7 @@ function CampaignManager.OnCampaignEnd(campaignData, isVictory)
 		end
 	end
 
-	campaignData.State = CampaignState.IDLE
+	DebugLog(string.format("✅ 战役结算完成: PlayerId=%d", campaignData.PlayerId))
 end
 
 --[[

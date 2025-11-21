@@ -167,12 +167,41 @@ function BattleManager.Initialize()
         end
 
         -- V2.4新增：连接胜利确认事件
+        -- V2.5扩展：支持战役结算确认（battleId=0表示战役结算）
         local victoryConfirmEvent = battleEventsFolder:FindFirstChild("VictoryConfirm")
         if victoryConfirmEvent then
             victoryConfirmEvent.OnServerEvent:Connect(function(player, battleId)
                 local success, err = pcall(function()
-                    -- 验证玩家和战斗合法性
-                    if not player or not battleId then
+                    -- 验证玩家合法性
+                    if not player then
+                        return
+                    end
+
+                    -- V2.5新增：处理战役结算确认（battleId=0）
+                    if battleId == 0 then
+                        -- 战役结算确认
+                        local CampaignManager = require(ServerScriptService.Systems.CampaignManager)
+                        local campaignData = CampaignManager.ActiveCampaigns[player.UserId]
+
+                        if not campaignData then
+                            WarnLog(string.format("VictoryConfirm失败: 玩家 %s 没有活跃战役", player.Name))
+                            return
+                        end
+
+                        if not campaignData.IsWaitingForConfirm then
+                            WarnLog(string.format("VictoryConfirm失败: 玩家 %s 的战役未在等待确认状态", player.Name))
+                            return
+                        end
+
+                        DebugLog(string.format("收到玩家 %s 的战役结算确认", player.Name))
+
+                        -- 完成战役结算
+                        CampaignManager.CompleteCampaignEnd(campaignData)
+                        return
+                    end
+
+                    -- 普通战斗结算确认
+                    if not battleId then
                         return
                     end
 
@@ -373,6 +402,9 @@ function BattleManager.StartBattle(battleId)
 
     -- 处理攻击方
     for i, unit in ipairs(battle.AttackUnits) do
+        -- V2.5新增：标记阵营
+        unit:SetAttribute("Team", BattleConfig.Team.ATTACK)
+
         UnitManager.RegisterUnit(battleId, BattleConfig.Team.ATTACK, unit)
 
         -- 2. 初始化CombatSystem状态
@@ -392,6 +424,24 @@ function BattleManager.StartBattle(battleId)
 
     -- 处理防守方
     for i, unit in ipairs(battle.DefenseUnits) do
+        -- V2.5新增：标记阵营
+        unit:SetAttribute("Team", BattleConfig.Team.DEFENSE)
+
+        -- V2.5新增：为敌方设置红色Highlight描边
+        -- 注意：只修改描边（OutlineColor/OutlineTransparency）和深度模式，不修改填充
+        local highlight = unit:FindFirstChild("Highlight")
+        if not highlight then
+            highlight = Instance.new("Highlight")
+            highlight.Name = "Highlight"
+            highlight.Parent = unit
+        end
+        -- 只设置描边属性和深度模式，保持填充属性不变
+        highlight.OutlineColor = Color3.fromRGB(255, 0, 0)
+        highlight.OutlineTransparency = 0
+        highlight.DepthMode = Enum.HighlightDepthMode.Occluded  -- 避免总在最上层
+        -- 不设置 FillTransparency / FillColor，保持默认
+        DebugLog(string.format("✅ 敌方高光设置完成: %s (Outline=红色, DepthMode=Occluded)", unit.Name))
+
         UnitManager.RegisterUnit(battleId, BattleConfig.Team.DEFENSE, unit)
 
         -- 2. 初始化CombatSystem状态
@@ -452,6 +502,23 @@ function BattleManager.StartBattle(battleId)
 
                 -- 通知所有客户端挂载血条
                 attachHealthBarsEvent:FireAllClients(allBattleUnits)
+            end
+
+            -- V2.5新增修复：Team属性设置完成后，通知客户端重新着色血条
+            -- 这解决了"血条在Team属性设置前挂载"的时序问题
+            local reapplyTeamColorsEvent = battleEventsFolder:FindFirstChild("ReapplyTeamColors")
+            if reapplyTeamColorsEvent then
+                local allBattleUnits = {}
+                for _, unit in ipairs(finalAttackUnits) do
+                    table.insert(allBattleUnits, unit)
+                end
+                for _, unit in ipairs(finalDefenseUnits) do
+                    table.insert(allBattleUnits, unit)
+                end
+                reapplyTeamColorsEvent:FireAllClients(allBattleUnits)
+                DebugLog("✅ 通知客户端重新着色血条: " .. #allBattleUnits .. " 个单位")
+            else
+                DebugLog("⚠️ ReapplyTeamColors事件不存在，血条着色可能延迟")
             end
         end
     end
@@ -520,37 +587,49 @@ function BattleManager.EndBattle(battleId, winner)
 		ExtraRewards = extraRewards
 	}
 
-	-- V2.4新增：发送结算弹窗到客户端
-	local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
-	if eventsFolder then
-		local battleEventsFolder = eventsFolder:FindFirstChild("BattleEvents")
-		if battleEventsFolder then
-			local victoryPopupEvent = battleEventsFolder:FindFirstChild("VictoryPopup")
-			if victoryPopupEvent then
-				local player = Players:GetPlayerByUserId(battle.PlayerId)
-				if player then
-					victoryPopupEvent:FireClient(player, battleId, winner or "Draw", currentStage, extraRewards)
-					DebugLog(string.format("已发送结算弹窗到客户端: BattleId=%d, Result=%s, Stage=%d",
-						battleId, winner or "Draw", currentStage))
+	-- V2.4/V2.5修改：发送结算弹窗到客户端
+	-- V2.5修复：战役模式下不在单关结束时弹窗，由CampaignManager在整个战役结束时统一弹窗
+	if battle.BattleType ~= "Campaign" then
+		-- 非战役模式（测试战斗等）：立即发送结算弹窗
+		local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
+		if eventsFolder then
+			local battleEventsFolder = eventsFolder:FindFirstChild("BattleEvents")
+			if battleEventsFolder then
+				local victoryPopupEvent = battleEventsFolder:FindFirstChild("VictoryPopup")
+				if victoryPopupEvent then
+					local player = Players:GetPlayerByUserId(battle.PlayerId)
+					if player then
+						victoryPopupEvent:FireClient(player, battleId, winner or "Draw", currentStage, extraRewards)
+						DebugLog(string.format("已发送结算弹窗到客户端: BattleId=%d, Result=%s, Stage=%d",
+							battleId, winner or "Draw", currentStage))
+					end
+				else
+					WarnLog("VictoryPopup事件不存在，将启动自动结算")
+					-- 如果事件不存在，自动完成结算（容错处理）
+					task.delay(0.5, function()
+						BattleManager.CompleteBattle(battleId, winner)
+					end)
 				end
-			else
-				WarnLog("VictoryPopup事件不存在，将启动自动结算")
-				-- 如果事件不存在，自动完成结算（容错处理）
-				task.delay(0.5, function()
-					BattleManager.CompleteBattle(battleId, winner)
-				end)
 			end
 		end
-	end
 
-	-- V2.4新增：设置超时自动结算（防止客户端卡死）
-	task.delay(5, function()
-		local currentBattle = battles[battleId]
-		if currentBattle and currentBattle.IsSettling then
-			WarnLog(string.format("战斗 %d 结算超时，强制完成", battleId))
+		-- V2.4新增：设置超时自动结算（防止客户端卡死）
+		task.delay(5, function()
+			local currentBattle = battles[battleId]
+			if currentBattle and currentBattle.IsSettling then
+				WarnLog(string.format("战斗 %d 结算超时，强制完成", battleId))
+				BattleManager.CompleteBattle(battleId, winner)
+			end
+		end)
+	else
+		-- 战役模式：不弹窗，由CampaignManager控制
+		-- 直接完成战斗结算，让CampaignManager继续处理下一关或战役结束
+		DebugLog(string.format("战役战斗结束，跳过单关弹窗: BattleId=%d, Winner=%s", battleId, winner or "Draw"))
+		-- 延迟一帧后完成战斗，确保状态更新
+		task.defer(function()
 			BattleManager.CompleteBattle(battleId, winner)
-		end
-	end)
+		end)
+	end
 
 	-- 通知客户端战斗状态更新
 	if battleStateUpdateEvent then
