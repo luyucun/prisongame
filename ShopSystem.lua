@@ -185,7 +185,7 @@ end
 -- ==================== 库存系统函数 (V2.1库存功能) ====================
 
 --[[
-初始化玩家库存数据（V2.1库存系统：使用DataManager持久化）
+初始化玩家库存数据（V2.1库存系统：使用DataManager持久化，🔥修复库存售罄：恢复完整库存数据）
 @param player Player - 玩家实例
 @param shopId string - 商店ID
 ]]
@@ -195,14 +195,36 @@ local function InitializePlayerStock(player, shopId)
 	end
 
 	if not PlayerStockData[player][shopId] then
-		-- 从DataManager读取持久化数据
+		-- 🔥修复库存售罄：从DataManager读取持久化数据（包括库存和刷新时间）
 		local shopData = DataManager and DataManager.GetShopData(player, shopId)
 		local lastRefreshTime = shopData and shopData.LastRefreshTime or 0
+		local savedStock = (shopData and shopData.Stock) or {}
 
+		-- 初始化PlayerStockData，包含LastRefreshTime和所有库存数据
 		PlayerStockData[player][shopId] = {
-			LastRefreshTime = lastRefreshTime, -- 从持久化数据恢复
+			LastRefreshTime = lastRefreshTime,
 		}
 
+		-- 🔥修复库存售罄：恢复所有保存的库存数据
+		for unitId, stock in pairs(savedStock) do
+			PlayerStockData[player][shopId][unitId] = stock
+		end
+
+		-- 调试日志
+		if DEBUG_MODE then
+			local itemCount = 0
+			for _ in pairs(savedStock) do
+				itemCount = itemCount + 1
+			end
+			print(string.format(
+				"%s [ShopSystem] 🔥恢复库存 - 玩家:%s 商店:%s 恢复:%d个商品 上次刷新:%s",
+				GameConfig.LOG_PREFIX,
+				player.Name,
+				shopId,
+				itemCount,
+				lastRefreshTime > 0 and os.date("%H:%M:%S", lastRefreshTime) or "首次进入"
+			))
+		end
 	end
 end
 
@@ -296,13 +318,25 @@ local function RefreshShopStock(player, shopId)
 	-- 更新刷新时间
 	stockData.LastRefreshTime = tick()
 
-	-- V2.1库存系统：持久化刷新时间到DataManager
+	-- 🔥修复库存售罄：持久化刷新时间和完整库存数据到DataManager
 	if DataManager then
-		-- 🔥修复竞态条件：确保玩家数据已加载
 		task.spawn(function()
 			local playerData = DataManager.WaitForPlayerData(player, 10)
 			if playerData then
 				DataManager.SetShopRefreshTime(player, shopId, stockData.LastRefreshTime)
+
+				-- 🔥修复库存售罄：同时保存完整的库存数据
+				DataManager.SetShopStock(player, shopId, stockData)
+
+				if DEBUG_MODE then
+					print(string.format(
+						"%s [ShopSystem] 🔥持久化库存 - 玩家:%s 商店:%s 保存:%d个商品",
+						GameConfig.LOG_PREFIX,
+						player.Name,
+						shopId,
+						refreshCount
+					))
+				end
 			else
 				warn(GameConfig.LOG_PREFIX, "RefreshShopStock: 玩家数据加载失败，跳过持久化 -", player.Name)
 			end
@@ -378,6 +412,24 @@ local function DeductStock(player, shopId, unitId, amount)
 
 	PlayerStockData[player][shopId][unitId] = currentStock - amount
 
+	-- 🔥修复库存售罄：立即持久化扣除后的库存数据
+	if DataManager then
+		task.spawn(function()
+			local stockData = GetPlayerStock(player, shopId)
+			DataManager.SetShopStock(player, shopId, stockData)
+
+			if DEBUG_MODE then
+				print(string.format(
+					"%s [ShopSystem] 🔥扣除库存并持久化 - 玩家:%s UnitId:%s 剩余:%d",
+					GameConfig.LOG_PREFIX,
+					player.Name,
+					unitId,
+					currentStock - amount
+				))
+			end
+		end)
+	end
+
 	-- 通知客户端库存更新
 	if StockUpdate then
 		pcall(function()
@@ -415,12 +467,33 @@ local function StartRefreshTimer(player, shopId)
 	local stockData = PlayerStockData[player][shopId]
 	local lastRefreshTime = stockData.LastRefreshTime
 
+	-- 🔥修复库存售罄：检查是否有恢复的库存数据（防止误判首次进入）
+	local hasRestoredStock = false
+	for unitId, stock in pairs(stockData) do
+		if unitId ~= "LastRefreshTime" and type(stock) == "number" then
+			hasRestoredStock = true
+			break
+		end
+	end
+
 	-- 计算下次刷新时间
 	local nextRefreshTime
-	if lastRefreshTime == 0 then
-		-- 首次进入，立即刷新
+	if lastRefreshTime == 0 and not hasRestoredStock then
+		-- 真正的首次进入（无刷新时间且无库存数据），立即刷新
 		RefreshShopStock(player, shopId)
 		nextRefreshTime = tick() + refreshInterval
+	elseif lastRefreshTime == 0 and hasRestoredStock then
+		-- 🔥修复库存售罄：老数据迁移场景（有库存但无时间戳），不刷新，设置时间戳
+		stockData.LastRefreshTime = tick()
+		nextRefreshTime = tick() + refreshInterval
+
+		if DEBUG_MODE then
+			print(string.format(
+				"%s [ShopSystem] 🔥老数据迁移 - 玩家:%s 保留现有库存，设置时间戳",
+				GameConfig.LOG_PREFIX,
+				player.Name
+			))
+		end
 	else
 		-- 计算离线时间
 		local offlineTime = tick() - lastRefreshTime
@@ -620,12 +693,20 @@ local function OnRequestShopList(player)
 			-- V2.1修复：直接使用外层shopId，避免重复定义
 			-- 确保玩家有库存数据（正常情况下在玩家进入游戏时已初始化）
 			if not PlayerStockData[player] or not PlayerStockData[player][shopId] then
-				-- 如果没有初始化，现在初始化（兼容性处理）
+				-- 🔥修复库存售罄：如果没有初始化，现在初始化（兼容性处理）
 				warn(string.format(
-					"[ShopSystem] 玩家 %s 库存未初始化，正在补救性初始化",
+					"[ShopSystem] ⚠️ 玩家 %s 库存未初始化，正在补救性初始化（可能是时序问题）",
 					player.Name
 				))
 				ShopSystem.InitializePlayerShopTimer(player, shopId)
+
+				-- 再次检查是否初始化成功
+				if not PlayerStockData[player] or not PlayerStockData[player][shopId] then
+					warn(string.format(
+						"[ShopSystem] ❌ 玩家 %s 库存初始化失败，将返回空库存",
+						player.Name
+					))
+				end
 			end
 
 			-- 获取库存数据

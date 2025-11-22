@@ -267,6 +267,13 @@ function DataManager.InitializePlayerData(player)
             playerData.ShopData = {}
         end
 
+        -- 🔥修复库存售罄：向后兼容 - 为所有已有商店数据添加Stock字段
+        for shopId, shopData in pairs(playerData.ShopData) do
+            if not shopData.Stock then
+                shopData.Stock = {}
+            end
+        end
+
         -- 🔥修复持久化：确保PlacedUnits字段存在（向后兼容）
         if not playerData.PlacedUnits then
             playerData.PlacedUnits = {}
@@ -438,7 +445,7 @@ end
 V2.1库存系统：获取玩家商店数据
 @param player Player - 玩家对象
 @param shopId string - 商店ID
-@return table|nil - 商店数据 {LastRefreshTime = number}
+@return table|nil - 商店数据 {LastRefreshTime = number, Stock = {[unitId] = number}}
 ]]
 function DataManager.GetShopData(player, shopId)
     local playerData = DataManager.GetPlayerData(player)
@@ -448,7 +455,8 @@ function DataManager.GetShopData(player, shopId)
 
     if not playerData.ShopData[shopId] then
         playerData.ShopData[shopId] = {
-            LastRefreshTime = 0  -- 默认为0表示首次进入
+            LastRefreshTime = 0,  -- 默认为0表示首次进入
+            Stock = {}           -- 🔥修复库存售罄：添加Stock字段存储库存数据
         }
     end
 
@@ -470,13 +478,67 @@ function DataManager.SetShopRefreshTime(player, shopId, refreshTime)
     end
 
     if not playerData.ShopData[shopId] then
-        playerData.ShopData[shopId] = {}
+        playerData.ShopData[shopId] = {
+            Stock = {}  -- 🔥修复库存售罄：确保Stock字段存在
+        }
     end
 
     playerData.ShopData[shopId].LastRefreshTime = refreshTime
 
 
     return true
+end
+
+--[[
+🔥修复库存售罄：保存玩家商店库存数据
+@param player Player - 玩家对象
+@param shopId string - 商店ID
+@param stockData table - 库存数据 {[unitId] = stock}
+@return boolean - 是否设置成功
+]]
+function DataManager.SetShopStock(player, shopId, stockData)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData then
+        warn(GameConfig.LOG_PREFIX, "SetShopStock: 找不到玩家数据")
+        return false
+    end
+
+    if not playerData.ShopData[shopId] then
+        playerData.ShopData[shopId] = {
+            LastRefreshTime = 0
+        }
+    end
+
+    -- 保存库存数据（清洗掉LastRefreshTime等非库存字段）
+    local cleanedStock = {}
+    for unitId, stock in pairs(stockData) do
+        if unitId ~= "LastRefreshTime" and type(stock) == "number" then
+            cleanedStock[unitId] = stock
+        end
+    end
+
+    playerData.ShopData[shopId].Stock = cleanedStock
+
+    return true
+end
+
+--[[
+🔥修复库存售罄：获取玩家商店库存数据
+@param player Player - 玩家对象
+@param shopId string - 商店ID
+@return table - 库存数据 {[unitId] = stock}
+]]
+function DataManager.GetShopStock(player, shopId)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData then
+        return {}
+    end
+
+    if not playerData.ShopData[shopId] then
+        return {}
+    end
+
+    return playerData.ShopData[shopId].Stock or {}
 end
 
 --[[
