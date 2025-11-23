@@ -275,13 +275,14 @@ local function PreloadAllAnimations(unitModel, humanoid, unitId)
 end
 
 --[[
-创建并播放动画
+创建并播放动画（V2.8增强：支持明确指定动画优先级）
 @param humanoid - Humanoid对象
 @param animationId - 动画ID（string或number）
 @param looped - 是否循环
+@param priority - 动画优先级（Enum.AnimationPriority，可选）
 @return AnimationTrack|nil
 ]]
-local function CreateAndPlayAnimation(humanoid: Humanoid, animationId: string | number, looped: boolean): AnimationTrack?
+local function CreateAndPlayAnimation(humanoid: Humanoid, animationId: string | number, looped: boolean, priority: Enum.AnimationPriority?): AnimationTrack?
 	if not humanoid or not animationId or animationId == "" or animationId == "0" then
 		return nil
 	end
@@ -310,6 +311,11 @@ local function CreateAndPlayAnimation(humanoid: Humanoid, animationId: string | 
 	if not success or not animationTrack then
 		animation:Destroy()
 		return nil
+	end
+
+	-- V2.8新增：设置动画优先级，确保攻击覆盖一切
+	if priority then
+		animationTrack.Priority = priority
 	end
 
 	animationTrack.Looped = looped or false
@@ -344,18 +350,21 @@ local function CreateAndPlayAnimation(humanoid: Humanoid, animationId: string | 
 end
 
 --[[
-V2.4新增：从缓存或创建并播放动画
+V2.4新增：从缓存或创建并播放动画（V2.8增强：支持优先级）
 优化：优先从aiData.Tracks缓存中查找已加载的Track，避免重复LoadAnimation
 @param unitModel - 单位模型
 @param aiData - AI数据
 @param animationId - 动画ID（string或number）
 @param trackType - 轨道类型标识（如"Idle", "Move", "Attack"）
 @param looped - 是否循环
+@param priority - 动画优先级（Enum.AnimationPriority，可选）
 @return AnimationTrack|nil - 动画轨道
 ]]
-local function PlayAnimationFromCache(unitModel: Model, aiData: any, animationId: string | number, trackType: string, looped: boolean): AnimationTrack?
+local function PlayAnimationFromCache(unitModel: Model, aiData: any, animationId: string | number, trackType: string, looped: boolean, priority: Enum.AnimationPriority?): AnimationTrack?
 	if not aiData or not aiData.Tracks then
-		return CreateAndPlayAnimation(aiData.Humanoid, animationId, looped)
+		-- V2.8修复：容错处理，避免aiData=nil时崩溃
+		local humanoid = aiData and aiData.Humanoid or (unitModel and unitModel:FindFirstChildOfClass("Humanoid"))
+		return CreateAndPlayAnimation(humanoid, animationId, looped, priority)
 	end
 
 	-- 检查缓存中是否已有此Track
@@ -363,6 +372,10 @@ local function PlayAnimationFromCache(unitModel: Model, aiData: any, animationId
 	if cachedTrack and cachedTrack.Parent then
 		-- 缓存的Track仍有效，直接复用
 		pcall(function()
+			-- V2.8新增：如果指定了优先级，更新Track的优先级
+			if priority then
+				cachedTrack.Priority = priority
+			end
 			cachedTrack:Stop()
 			cachedTrack:Play()
 		end)
@@ -370,7 +383,7 @@ local function PlayAnimationFromCache(unitModel: Model, aiData: any, animationId
 	end
 
 	-- 缓存无效，使用CreateAndPlayAnimation（会自动创建新的）
-	local newTrack = CreateAndPlayAnimation(aiData.Humanoid, animationId, looped)
+	local newTrack = CreateAndPlayAnimation(aiData.Humanoid, animationId, looped, priority)
 	if newTrack then
 		-- 缓存新Track供后续使用
 		aiData.Tracks[trackType] = newTrack
@@ -432,11 +445,11 @@ function AnimationController.SwitchToMove(unitModel, aiData, state)
 		aiData.Tracks.Attack = nil
 	end
 
-	-- 播放移动动画
+	-- 播放移动动画（V2.8：设置Movement优先级）
 	local animId = UnitConfig.GetMoveAnimationId(state.UnitId)
 	if animId and animId ~= "" then
-		-- V2.4优化：使用缓存Track
-		local track = PlayAnimationFromCache(unitModel, aiData, animId, "Move", true)
+		-- V2.4优化：使用缓存Track，V2.8：设置Movement优先级
+		local track = PlayAnimationFromCache(unitModel, aiData, animId, "Move", true, Enum.AnimationPriority.Movement)
 		if track then
 			aiData.Tracks.Move = track
 			aiData.CurrentState = AnimationState.MOVE
@@ -475,12 +488,12 @@ function AnimationController.SwitchToIdle(unitModel, aiData, state)
 		aiData.Tracks.Move = nil
 	end
 
-	-- 播放待机动画
+	-- 播放待机动画（V2.8：设置Idle优先级）
 	local animId = UnitConfig.GetIdleAnimationId(state.UnitId)
 	if animId and animId ~= "" then
 		-- 只有在Idle动画不存在或已停止时才重新播放
 		if not aiData.Tracks.Idle or not aiData.Tracks.Idle.IsPlaying then
-			local track = PlayAnimationFromCache(unitModel, aiData, animId, "Idle", true)
+			local track = PlayAnimationFromCache(unitModel, aiData, animId, "Idle", true, Enum.AnimationPriority.Idle)
 			if track then
 				aiData.Tracks.Idle = track
 				aiData.CurrentState = AnimationState.IDLE
@@ -526,9 +539,9 @@ function AnimationController.PlayAttack(unitModel, aiData, state, target, onDama
 	local prevMove = aiData.Tracks.Move
 	local prevIdle = aiData.Tracks.Idle
 
-	-- 播放攻击动画
+	-- 播放攻击动画（V2.8：设置Action优先级）
 	if animationId and animationId ~= "" and combatProfile.UseAnimationEvent then
-		local animTrack = PlayAnimationFromCache(unitModel, aiData, animationId, "Attack", false)
+		local animTrack = PlayAnimationFromCache(unitModel, aiData, animationId, "Attack", false, Enum.AnimationPriority.Action)
 
 		if animTrack then
 			-- 攻击动画成功加载并播放后，再停止旧动画
@@ -799,6 +812,32 @@ function UnitAIRangePolicy.ShouldExitAttack(distance, unitState)
 end
 
 -- ==================== 工具函数 ====================
+
+--[[
+V2.8新增：攻击状态专用停止函数
+只在进入攻击时调用一次，避免每帧重复MoveTo导致前后倾
+@param aiData AIData - AI数据
+]]
+local function StopMovementForAttack(aiData)
+	if not aiData or not aiData.Humanoid or not aiData.HumanoidRootPart then
+		return
+	end
+
+	local h = aiData.Humanoid
+	local root = aiData.HumanoidRootPart
+
+	-- 清零移动向量
+	h:Move(Vector3.zero, true)
+
+	-- 设置WalkToPoint为当前位置
+	h.WalkToPoint = root.Position
+
+	-- 清零速度
+	pcall(function()
+		root.AssemblyLinearVelocity = Vector3.zero
+		root.AssemblyAngularVelocity = Vector3.zero
+	end)
+end
 
 local function GetDistance(model1, model2)
 	local part1 = model1:FindFirstChild("HumanoidRootPart") or model1.PrimaryPart
@@ -1156,7 +1195,8 @@ local function HandleMoving(unitModel, aiData, state)
 		if distance <= dockingDistance + 4 then
 			DebugLog(string.format("%s (远程) 接近停靠距离(%.1f <= %.1f+4)，提前停止",
 				state.UnitId, distance, dockingDistance))
-			SoftStop(aiData)  -- V2.8: 使用SoftStop避免重复MoveTo
+			-- V2.8修复：使用StopMovementForAttack替代SoftStop
+			StopMovementForAttack(aiData)
 			PathService.ClearPath(unitModel)
 
 			if UnitAIRangePolicy.ShouldEnterAttack(distance, state) then
@@ -1173,6 +1213,9 @@ local function HandleMoving(unitModel, aiData, state)
 				AnimationController.SwitchToIdle(unitModel, aiData, state)
 				-- V2.1.3修正：不断开MoveConnection，保持事件连接
 				aiData.PathRequested = false
+
+				-- V2.8新增：标记已经停止
+				aiData.StoppedForAttack = tick()
 				return
 			end
 		end
@@ -1180,7 +1223,8 @@ local function HandleMoving(unitModel, aiData, state)
 
 	-- 判断是否应该进入攻击
 	if UnitAIRangePolicy.ShouldEnterAttack(distance, state) then
-		SoftStop(aiData)  -- V2.8: 进入攻击前停止一次即可
+		-- V2.8修复：使用StopMovementForAttack替代SoftStop，只停一次
+		StopMovementForAttack(aiData)
 		PathService.ClearPath(unitModel)
 
 		CombatSystem.SetAIState(unitModel, BattleConfig.AIState.ATTACKING)
@@ -1196,6 +1240,9 @@ local function HandleMoving(unitModel, aiData, state)
 		AnimationController.SwitchToIdle(unitModel, aiData, state)
 		-- V2.1.3修正：不断开MoveConnection，保持事件连接
 		aiData.PathRequested = false
+
+		-- V2.8新增：标记已经停止，防止HandleAttacking重复停止
+		aiData.StoppedForAttack = tick()
 		return
 	end
 
@@ -1317,7 +1364,7 @@ local function HandleMoving(unitModel, aiData, state)
 end
 
 --[[
-处理ATTACKING状态：攻击目标（重构版 - 使用PathService）
+处理ATTACKING状态：攻击目标（V2.8优化 - 减少重复停止命令）
 ]]
 local function HandleAttacking(unitModel, aiData, state)
 	-- 验证目标
@@ -1329,6 +1376,8 @@ local function HandleAttacking(unitModel, aiData, state)
 		-- 切换到Idle并清理路径
 		PathService.ClearPath(unitModel)  -- ⭐使用PathService
 		AnimationController.SwitchToIdle(unitModel, aiData, state)
+		-- 清除停止标记
+		aiData.StoppedForAttack = nil
 		return
 	end
 
@@ -1343,12 +1392,29 @@ local function HandleAttacking(unitModel, aiData, state)
 		-- 关键修复：脱离攻击状态，清理路径后切换到Move
 		PathService.ClearPath(unitModel)  -- ⭐使用PathService
 		AnimationController.SwitchToMove(unitModel, aiData, state)
+		-- 清除停止标记
+		aiData.StoppedForAttack = nil
 		return
 	end
 
-	-- 🔥V2.8修复：使用SoftStop替代EnsureStopped，避免每帧MoveTo导致前后倾
-	-- 只在真正需要时停止一次，不会重复触发Humanoid的开始走→停止循环
-	SoftStop(aiData)
+	-- V2.8修复：智能停止策略，避免每帧重复MoveTo
+	-- 只在以下情况补充停止：
+	-- 1. 超过0.5秒未停止过
+	-- 2. 且Humanoid的MoveDirection有速度（说明在移动）
+	local now = tick()
+	local lastStopTime = aiData.StoppedForAttack or 0
+	local timeSinceLastStop = now - lastStopTime
+
+	if timeSinceLastStop > 0.5 then
+		local humanoid = aiData.Humanoid
+		if humanoid and humanoid.MoveDirection.Magnitude > 0.05 then
+			-- Humanoid还在移动，需要停止
+			StopMovementForAttack(aiData)
+			aiData.StoppedForAttack = now
+		end
+	end
+
+	-- 朝向目标
 	OrientTowardsTarget(aiData, target)
 
 	-- 核心修复：攻击逻辑
@@ -1574,6 +1640,9 @@ function UnitAI.StartAI(unitModel)
 
 	-- ⭐⭐⭐ 预加载所有战斗动画,避免首次战斗时动画资源未缓存导致卡顿 ⭐⭐⭐
 	PreloadAllAnimations(unitModel, humanoid, unitId)
+
+	-- ⭐⭐⭐ V2.8修复：彻底停掉默认Animate，避免和自定义动画混播 ⭐⭐⭐
+	DisableAllAnimateScripts(unitModel, unitId)
 
 	-- ⭐⭐⭐ 设置网络所有权为服务器，防止客户端物理干扰导致抖动 ⭐⭐⭐
 	if rootPart then
