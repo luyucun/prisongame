@@ -585,14 +585,6 @@ function DataManager.ClearPlayerData(player)
 
 end
 
---[[
-获取所有在线玩家数据(调试用)
-@return table - 所有玩家数据
-]]
-function DataManager.GetAllPlayerData()
-    return playerDataCache
-end
-
 -- ==================== 🔥修复持久化：放置单位数据管理 ====================
 
 --[[
@@ -918,24 +910,6 @@ function DataManager.AddPlacedUnit(player, instanceId, unitData)
         GridSize = unitData.GridSize,
         PlacedTime = unitData.PlacedTime or os.time(),
     }
-
-    return true
-end
-
---[[
-🔥修复服务器关闭时数据保存：移除放置单位
-@param player Player - 玩家对象
-@param instanceId string - 实例ID
-]]
-function DataManager.RemovePlacedUnit(player, instanceId)
-    local playerData = DataManager.GetPlayerData(player)
-    if not playerData then
-        return false
-    end
-
-    if playerData.PlacedUnits then
-        playerData.PlacedUnits[instanceId] = nil
-    end
 
     return true
 end

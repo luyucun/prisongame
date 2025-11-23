@@ -427,9 +427,12 @@ function InventorySystem.PrintInventory(player)
 
     -- 构建显示文本
     for unitId, count in pairs(unitCounts) do
-        local unitConfig = UnitConfig.GetUnitById(unitId)
-        local unitName = unitConfig and unitConfig.Name or unitId
-        result = result .. string.format("  - %s x%d\n", unitName, count)
+        -- 修复：确保unitId是字符串类型
+        local unitIdStr = tostring(unitId)
+        local unitConfig = UnitConfig.GetUnitById(unitIdStr)
+        local unitName = unitConfig and unitConfig.Name or unitIdStr
+        -- 修复：确保unitName是字符串类型
+        result = result .. string.format("  - %s x%d\n", tostring(unitName), count)
     end
 
     return result

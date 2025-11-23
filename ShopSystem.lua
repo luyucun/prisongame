@@ -462,6 +462,12 @@ local function StartRefreshTimer(player, shopId)
 	end
 
 	local refreshInterval = ShopConfig.GetRefreshInterval(shopId)
+	-- 修复：确保refreshInterval是有效的数字
+	if not refreshInterval or type(refreshInterval) ~= "number" or refreshInterval <= 0 then
+		warn(string.format("%s [ShopSystem] 无效的刷新间隔，使用默认值300秒", GameConfig.LOG_PREFIX))
+		refreshInterval = 300  -- 默认5分钟
+	end
+
 	InitializePlayerStock(player, shopId)
 
 	local stockData = PlayerStockData[player][shopId]

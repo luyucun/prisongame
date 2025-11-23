@@ -339,8 +339,8 @@ local function CreateUnitModel(unitId, position, instanceId, level, gridSize)
 		return nil
 	end
 
-	-- 解析路径
-	local pathParts = string.split(modelPath, "/")
+	-- 解析路径（修复：确保modelPath是字符串）
+	local pathParts = string.split(tostring(modelPath), "/")
 
 	-- 从ReplicatedStorage开始遍历路径
 	local currentFolder = ReplicatedStorage
@@ -392,9 +392,9 @@ local function CreateUnitModel(unitId, position, instanceId, level, gridSize)
     -- V1.4: 更新等级显示
     UpdateLevelDisplay(model, level)
 
-    -- 设置位置
+    -- 设置位置（修复：使用PivotTo替代已弃用的SetPrimaryPartCFrame）
     if model.PrimaryPart then
-        model:SetPrimaryPartCFrame(CFrame.new(position))
+        model:PivotTo(CFrame.new(position))
     elseif model:FindFirstChild("HumanoidRootPart") then
         model.HumanoidRootPart.CFrame = CFrame.new(position)
     end
@@ -562,15 +562,18 @@ function PlacementSystem.PlaceUnit(player, instanceId, position)
     DataManager.AddPlacedUnit(player, instanceId, placedUnits[userId][instanceId])
 
     -- V2.0新增: 保存GridPos到模型（用于战役系统）
-    local GridPositionSystem = require(ServerScriptService.Systems.GridPositionSystem)
-    local gridPos = GridPositionSystem.SaveUnitGridPosition(model, idleFloor)
+    local gridModule = ServerScriptService:WaitForChild("Systems"):FindFirstChild("GridPositionSystem")
+    if gridModule then
+        local GridPositionSystem = require(gridModule :: ModuleScript)
+        local gridPos = GridPositionSystem.SaveUnitGridPosition(model, idleFloor)
 
-    -- 同时保存到placedUnits表中
-    if gridPos then
-        placedUnits[userId][instanceId].GridPos = gridPos
-    else
-        warn(GameConfig.LOG_PREFIX, "保存GridPos失败，使用默认值")
-        placedUnits[userId][instanceId].GridPos = {X = gridX, Y = gridZ}
+        -- 同时保存到placedUnits表中
+        if gridPos then
+            placedUnits[userId][instanceId].GridPos = gridPos
+        else
+            warn(GameConfig.LOG_PREFIX, "保存GridPos失败，使用默认值")
+            placedUnits[userId][instanceId].GridPos = {X = gridX, Y = gridZ}
+        end
     end
 
     -- 配置兵种物理（禁用与玩家的碰撞）
@@ -743,10 +746,10 @@ function PlacementSystem.UpdateUnitPosition(player, instanceId, newPosition)
     -- 7. 计算新的精确位置（传入gridSize以正确计算多格兵种的中心）
     local finalPosition = PlacementConfig.GridToWorld(newGridX, newGridZ, floorCenter, unitInstance.GridSize)
 
-    -- 8. 更新模型位置
+    -- 8. 更新模型位置（修复：使用PivotTo替代已弃用的SetPrimaryPartCFrame）
     if placedData.Model and placedData.Model.Parent then
         if placedData.Model.PrimaryPart then
-            placedData.Model:SetPrimaryPartCFrame(CFrame.new(finalPosition))
+            placedData.Model:PivotTo(CFrame.new(finalPosition))
         elseif placedData.Model:FindFirstChild("HumanoidRootPart") then
             placedData.Model.HumanoidRootPart.CFrame = CFrame.new(finalPosition)
         end
@@ -943,7 +946,10 @@ function PlacementSystem.RestorePlacedUnits(player)
     end
 
     -- 4. 遍历保存的放置单位数据，逐一恢复
-    for instanceId, savedData in pairs(savedPlacedUnits) do
+    for instanceIdRaw, savedData in pairs(savedPlacedUnits) do
+        -- 修复：确保instanceId是字符串类型
+        local instanceId = tostring(instanceIdRaw)
+
         local success, error = pcall(function()
             -- 4.1 验证InventorySystem中是否仍有对应的兵种实例
             local unitInstance = InventorySystem.GetUnitByInstanceId(player, instanceId)
@@ -1062,12 +1068,15 @@ function PlacementSystem.RestorePlacedUnits(player)
             }
 
             -- 4.9.5 保存GridPos到模型（用于战役系统）
-            local GridPositionSystem = require(ServerScriptService.Systems.GridPositionSystem)
-            local gridPos = GridPositionSystem.SaveUnitGridPosition(model, idleFloor)
-            if gridPos then
-                placedUnits[userId][instanceId].GridPos = gridPos
-            else
-                placedUnits[userId][instanceId].GridPos = {X = savedData.GridX, Y = savedData.GridZ}
+            local gridModule2 = ServerScriptService:WaitForChild("Systems"):FindFirstChild("GridPositionSystem")
+            if gridModule2 then
+                local GridPositionSystem = require(gridModule2 :: ModuleScript)
+                local gridPos = GridPositionSystem.SaveUnitGridPosition(model, idleFloor)
+                if gridPos then
+                    placedUnits[userId][instanceId].GridPos = gridPos
+                else
+                    placedUnits[userId][instanceId].GridPos = {X = savedData.GridX, Y = savedData.GridZ}
+                end
             end
 
             -- 4.10 配置兵种物理
@@ -1123,9 +1132,13 @@ end
 @return boolean - 是否在战役中
 ]]
 local function IsPlayerInCampaign(player)
-	-- 懒加载CampaignManager避免循环依赖
+	-- 懒加载CampaignManager避免循环依赖（修复：添加类型断言）
 	local success, CampaignManager = pcall(function()
-		return require(ServerScriptService.Systems.CampaignManager)
+		local campaignModule = ServerScriptService:WaitForChild("Systems"):FindFirstChild("CampaignManager")
+		if campaignModule then
+			return require(campaignModule :: ModuleScript)
+		end
+		return nil
 	end)
 
 	if success and CampaignManager and CampaignManager.ActiveCampaigns then

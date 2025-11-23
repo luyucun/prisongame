@@ -315,7 +315,8 @@ local function CreateItemCard(itemData, index)
 
     local price = cardFrame:FindFirstChild("Price")
     if price and price:IsA("TextLabel") then
-        price.Text = FormatCoins(itemData.Price or 0)
+        local priceValue = tonumber(itemData.Price) or 0
+        price.Text = FormatCoins(priceValue)
 
         -- V2.1调试：验证UI显示价格与ShopConfig一致性
         if DEBUG_MODE and itemData.Price then
@@ -323,7 +324,7 @@ local function CreateItemCard(itemData, index)
                 "%s UI显示价格 - UnitId:%s 价格:%d 显示:%s",
                 LOG_PREFIX,
                 itemData.UnitId,
-                itemData.Price,
+                priceValue,
                 price.Text
             ))
         end

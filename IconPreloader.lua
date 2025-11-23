@@ -71,8 +71,8 @@ local function CollectIconAssets()
 	local unitCount = 0
 	for unitId, unitData in pairs(UnitConfig.Units) do
 		if unitData.Icon and unitData.Icon ~= "" then
-			-- 提取资源ID
-			local iconAssetId = unitData.Icon
+			-- 提取资源ID，确保是字符串类型
+			local iconAssetId = tostring(unitData.Icon)
 
 			-- 确保格式为 rbxassetid://数字
 			if string.match(iconAssetId, "rbxassetid://") then

@@ -54,7 +54,8 @@ local function PreloadAllUnitAnimations()
 	local unitCount = 0
 
 	-- 遍历所有兵种配置
-	for unitId, unitData in pairs(UnitConfig.Units) do
+	for unitIdRaw, unitData in pairs(UnitConfig.Units) do
+		local unitId = tostring(unitIdRaw)
 		unitCount = unitCount + 1
 
 		-- 收集该兵种的所有动画ID
@@ -68,13 +69,17 @@ local function PreloadAllUnitAnimations()
 		for _, animData in ipairs(animIds) do
 			local animId = animData.id
 			if animId and animId ~= "" and animId ~= "0" then
+				-- 确保类型正确
+				local animName = tostring(animData.name)
+				local animIdStr = tostring(animId)
+
 				-- 创建Animation实例
 				local animation = Instance.new("Animation")
-				animation.AnimationId = "rbxassetid://" .. animId
-				animation.Name = string.format("%s_%s", unitId, animData.name)
+				animation.AnimationId = "rbxassetid://" .. animIdStr
+				animation.Name = string.format("%s_%s", unitId, animName)
 
 				table.insert(animationsToPreload, animation)
-				DebugLog(string.format("收集动画: %s - %s (ID: %s)", unitId, animData.name, animId))
+				DebugLog(string.format("收集动画: %s - %s (ID: %s)", unitId, animName, animIdStr))
 			end
 		end
 	end

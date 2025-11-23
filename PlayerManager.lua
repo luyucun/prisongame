@@ -22,8 +22,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 -- 引用模块
-local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
-local DataManager = require(ServerScriptService.Core.DataManager)
+local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig") :: ModuleScript)
+local DataManager = require(ServerScriptService:WaitForChild("Core"):WaitForChild("DataManager") :: ModuleScript)
 
 -- 基地占用状态表 [homeSlot] = player 或 nil
 local homeOccupancy = {}
@@ -291,8 +291,11 @@ function PlayerManager.OnPlayerAdded(player)
     player:SetAttribute("HomeSlot", homeSlot)
 
     -- 6. 初始化玩家基地(HomeSystem)
-    local HomeSystem = require(ServerScriptService.Systems.HomeSystem)
-    HomeSystem.InitializePlayerHome(homeSlot, player)  -- V2.0.1修复：传入正确的参数 (homeId, player)
+    local homeModule = ServerScriptService:WaitForChild("Systems"):FindFirstChild("HomeSystem")
+    if homeModule then
+        local HomeSystem = require(homeModule :: ModuleScript)
+        HomeSystem.InitializePlayerHome(homeSlot, player)  -- V2.0.1修复：传入正确的参数 (homeId, player)
+    end
 
     -- 6.5 V2.0.1新增：生成Stage001（如果不存在）
     -- 注意：必须在HomeSystem初始化后执行，确保Stage文件夹存在
@@ -300,10 +303,14 @@ function PlayerManager.OnPlayerAdded(player)
         -- 短暂延迟，确保HomeSystem初始化完成
         task.wait(0.1)
 
-        local StageService = require(ServerScriptService.Systems.StageService)
-        local stage001 = StageService.GetOrCreateStage(player.UserId, 1)
-        if not stage001 and GameConfig.DEBUG_MODE then
-            warn(GameConfig.LOG_PREFIX, "Stage001生成失败:", player.Name, "HomeSlot:", homeSlot)
+        -- 修复：使用安全的require方式避免类型警告
+        local stageModule = ServerScriptService:WaitForChild("Systems"):FindFirstChild("StageService")
+        if stageModule then
+            local StageService = require(stageModule :: ModuleScript)
+            local stage001 = StageService.GetOrCreateStage(player.UserId, 1)
+            if not stage001 and GameConfig.DEBUG_MODE then
+                warn(GameConfig.LOG_PREFIX, "Stage001生成失败:", player.Name, "HomeSlot:", homeSlot)
+            end
         end
     end)
 
@@ -312,9 +319,10 @@ function PlayerManager.OnPlayerAdded(player)
         -- 短暂延迟，确保其他系统初始化完成
         task.wait(0.5)
 
-        local ShopSystem = ServerScriptService.Systems:FindFirstChild("ShopSystem")
+        -- 修复：使用安全的require方式避免类型警告
+        local ShopSystem = ServerScriptService:WaitForChild("Systems"):FindFirstChild("ShopSystem")
         if ShopSystem then
-            local shopModule = require(ShopSystem)
+            local shopModule = require(ShopSystem :: ModuleScript)
             if shopModule.InitializePlayerShopTimer then
                 shopModule.InitializePlayerShopTimer(player, "UnitShop")
             end
@@ -439,26 +447,38 @@ function PlayerManager.OnPlayerRemoving(player)
     end
 
     -- 4. 清除基地系统数据
-    local HomeSystem = require(ServerScriptService.Systems.HomeSystem)
-    if homeSlot and homeSlot > 0 then
-        HomeSystem.CleanupPlayerHome(homeSlot, player)  -- V2.0.1修复：调用正确的方法并传入homeId
+    local homeModule = ServerScriptService:WaitForChild("Systems"):FindFirstChild("HomeSystem")
+    if homeModule then
+        local HomeSystem = require(homeModule :: ModuleScript)
+        if homeSlot and homeSlot > 0 then
+            HomeSystem.CleanupPlayerHome(homeSlot, player)  -- V2.0.1修复：调用正确的方法并传入homeId
+        end
     end
 
     -- 🔥修复服务器关闭时数据保存：检查是否正在关机
     local isShuttingDown = DataManager.IsShuttingDown and DataManager.IsShuttingDown() or false
 
+    -- 延迟加载PlacementSystem避免重复require
+    local placementModule = ServerScriptService:WaitForChild("Systems"):FindFirstChild("PlacementSystem")
+    local PlacementSystem = nil
+    if placementModule then
+        PlacementSystem = require(placementModule :: ModuleScript)
+    end
+
     if not isShuttingDown then
         -- 正常离开：执行完整清理流程
         -- 🔥修复持久化：4.5 清理放置系统数据（在数据保存之前）
-        local PlacementSystem = require(ServerScriptService.Systems.PlacementSystem)
-        PlacementSystem.OnPlayerLeaving(player)
+        if PlacementSystem then
+            PlacementSystem.OnPlayerLeaving(player)
+        end
 
         -- 5. 清除玩家数据
         DataManager.ClearPlayerData(player)
     else
         -- 服务器关闭：只清理放置系统数据，保留缓存供BindToClose使用
-        local PlacementSystem = require(ServerScriptService.Systems.PlacementSystem)
-        PlacementSystem.OnPlayerLeaving(player)
+        if PlacementSystem then
+            PlacementSystem.OnPlayerLeaving(player)
+        end
 
         -- 注意：不调用 DataManager.ClearPlayerData，让BindToClose能够访问缓存
         print(string.format(

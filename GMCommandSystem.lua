@@ -127,7 +127,7 @@ local function CMD_AddUnit(player, args)
         return
     end
 
-    local unitId = args[1]
+    local unitId = tostring(args[1])
     local count = tonumber(args[2]) or 1
 
     -- 验证兵种ID
@@ -193,9 +193,11 @@ local function CMD_UnitList(player, args)
     local message = "可用的兵种列表:\n"
 
     for unitId, unitData in pairs(allUnits) do
+        -- 修复：确保unitId是字符串类型
+        local unitIdStr = tostring(unitId)
         message = message .. string.format(
             "  - %s (等级%d, %s, %d金币)\n",
-            unitId,
+            unitIdStr,
             unitData.BaseLevel,
             unitData.Type,
             unitData.Price
@@ -395,13 +397,19 @@ local function CMD_SpawnUnit(player, args)
         return
     end
 
-    -- 延迟加载BattleTestSystem
+    -- 延迟加载BattleTestSystem（使用类型断言）
     if not BattleTestSystem then
-        BattleTestSystem = require(ServerScriptService.Systems.BattleTestSystem)
+        local battleTestModule = ServerScriptService:WaitForChild("Systems"):FindFirstChild("BattleTestSystem")
+        if battleTestModule then
+            BattleTestSystem = require(battleTestModule :: ModuleScript)
+        else
+            SendMessage(player, "错误: 无法加载BattleTestSystem模块")
+            return
+        end
     end
 
-    local teamStr = string.lower(args[1])
-    local unitId = args[2]
+    local teamStr = string.lower(tostring(args[1]))
+    local unitId = tostring(args[2])
     local level = tonumber(args[3])
     local positionIndex = tonumber(args[4])
 

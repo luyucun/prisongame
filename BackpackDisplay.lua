@@ -313,7 +313,8 @@ local function CreateItemButton(unitId, unitName, count, iconId)
 							local clickedUnitId = child:GetAttribute("UnitId")
 							if clickedUnitId then
 								-- 找到unitName
-								for id, data in pairs(inventoryDataCache) do
+								for idRaw, data in pairs(inventoryDataCache) do
+									local id = tostring(idRaw)
 									if id == clickedUnitId then
 										OnUnitItemClicked(clickedUnitId, data.Name)
 										break
@@ -367,11 +368,16 @@ end
 @param count number - 数量（服务端发来的总数）
 ]]
 local function UpdateItemDisplay(unitId, unitName, count)
+	-- 类型转换：确保参数类型正确
+	unitId = tostring(unitId)
+	unitName = tostring(unitName)
+	count = tonumber(count) or 0
+
 	-- ✅ V2.0.2兜底检查：检测数据不一致并主动刷新
 	-- 如果收到的count与缓存不一致，说明可能是旧的UnitUpdated事件，需要刷新完整数据
 	local cachedData = inventoryDataCache[unitId]
 	if cachedData then
-		local cachedTotalCount = cachedData.Count or 0
+		local cachedTotalCount = tonumber(cachedData.Count) or 0
 
 		-- 如果服务端发来的count与缓存中的总数不一致，触发刷新
 		if count ~= cachedTotalCount then
@@ -435,7 +441,8 @@ local function RefreshInventory(inventoryData)
 
 	-- 重新创建所有条目
 	if inventoryData then
-		for unitId, data in pairs(inventoryData) do
+		for unitIdRaw, data in pairs(inventoryData) do
+			local unitId = tostring(unitIdRaw)
 			-- 只显示未放置的兵种数量
 			local availableCount = 0
 			if data.Instances then

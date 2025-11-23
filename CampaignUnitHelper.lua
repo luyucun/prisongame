@@ -8,10 +8,13 @@ local CampaignUnitHelper = {}
 local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local GameConfig = require(ReplicatedStorage.Config.GameConfig)
-local PhysicsManager = require(ServerScriptService.Systems.PhysicsManager)
-local UnitAI = require(ServerScriptService.Systems.UnitAI)
-local PathService = require(ServerScriptService.Systems.PathService)
+-- 引用模块（使用类型断言避免类型检查警告）
+local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig") :: ModuleScript)
+
+local SystemsFolder = ServerScriptService:WaitForChild("Systems")
+local PhysicsManager = require(SystemsFolder:WaitForChild("PhysicsManager") :: ModuleScript)
+local UnitAI = require(SystemsFolder:WaitForChild("UnitAI") :: ModuleScript)
+local PathService = require(SystemsFolder:WaitForChild("PathService") :: ModuleScript)
 
 local function DebugLog(...)
 	if GameConfig.DEBUG_MODE then

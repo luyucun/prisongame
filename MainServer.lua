@@ -464,36 +464,42 @@ game:BindToClose(function()
 
 	-- 第三步：兜底保存缓存中的数据（防止Roblox已删除Player对象）
 	local allPlayerData = DataManager.GetAllPlayerData()
-	for userId, playerData in pairs(allPlayerData) do
-		local isAlreadySaved = false
-		-- 检查这个用户是否在在线玩家快照中
-		for _, activePlayer in pairs(activePlayersSnapshot) do
-			if activePlayer.UserId == userId then
-				isAlreadySaved = true
-				break
-			end
-		end
-
-		-- 如果不在在线快照中，需要兜底保存
-		if not isAlreadySaved then
-			task.spawn(function()
-				local success = DataManager.SaveCachedPlayerData(userId)
-				if success then
-					savedCount = savedCount + 1
-					print(string.format(
-						"%s [MainServer] ✅ 缓存玩家 UserId_%d 数据已保存",
-						GameConfig.LOG_PREFIX,
-						userId
-					))
-				else
-					errorCount = errorCount + 1
-					warn(string.format(
-						"%s [MainServer] ❌ 缓存玩家 UserId_%d 数据保存失败",
-						GameConfig.LOG_PREFIX,
-						userId
-					))
+	for userIdRaw, playerData in pairs(allPlayerData) do
+		-- 修复：确保userId是数字类型
+		local userId = tonumber(userIdRaw)
+		if userId then
+			local isAlreadySaved = false
+			-- 检查这个用户是否在在线玩家快照中
+			for _, activePlayer in pairs(activePlayersSnapshot) do
+				if activePlayer.UserId == userId then
+					isAlreadySaved = true
+					break
 				end
-			end)
+			end
+
+			-- 如果不在在线快照中，需要兜底保存
+			if not isAlreadySaved then
+				task.spawn(function()
+					local success = DataManager.SaveCachedPlayerData(userId)
+					if success then
+						savedCount = savedCount + 1
+						print(string.format(
+							"%s [MainServer] ✅ 缓存玩家 UserId_%d 数据已保存",
+							GameConfig.LOG_PREFIX,
+							userId
+						))
+					else
+						errorCount = errorCount + 1
+						warn(string.format(
+							"%s [MainServer] ❌ 缓存玩家 UserId_%d 数据保存失败",
+							GameConfig.LOG_PREFIX,
+							userId
+						))
+					end
+				end)
+			end
+		else
+			warn(string.format("%s [MainServer] ⚠️ 无效的UserId: %s", GameConfig.LOG_PREFIX, tostring(userIdRaw)))
 		end
 	end
 

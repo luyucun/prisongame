@@ -468,8 +468,8 @@ function StageService.LoadEnemyData(stageFolder, stageNum)
 				return nil
 			end
 
-			-- 解析路径
-			local pathParts = string.split(modelPath, "/")
+			-- 解析路径（修复：确保modelPath是字符串）
+			local pathParts = string.split(tostring(modelPath), "/")
 
 			-- 从ReplicatedStorage开始遍历路径
 			local currentFolder = ReplicatedStorage
@@ -487,7 +487,8 @@ function StageService.LoadEnemyData(stageFolder, stageNum)
 			modelTemplate = currentFolder:FindFirstChild(modelName)
 
 			if not modelTemplate then
-				warn(string.format("[StageService] 找不到模型: %s (路径: %s)", modelName, modelPath))
+				-- 修复：确保参数都是字符串类型
+				warn(string.format("[StageService] 找不到模型: %s (路径: %s)", tostring(modelName), tostring(modelPath)))
 				return nil
 			end
 
@@ -510,9 +511,9 @@ function StageService.LoadEnemyData(stageFolder, stageNum)
 				enemyData.GridPos
 			)
 
-			-- 设置位置
+			-- 设置位置（修复：使用PivotTo替代已弃用的SetPrimaryPartCFrame）
 			if unitModel.PrimaryPart then
-				unitModel:SetPrimaryPartCFrame(targetCFrame)
+				unitModel:PivotTo(targetCFrame)
 			elseif unitModel:FindFirstChild("HumanoidRootPart") then
 				unitModel.HumanoidRootPart.CFrame = targetCFrame
 			end
@@ -600,9 +601,14 @@ end
 ]]
 function StageService.GetPlayerHomeId(playerId)
     -- 这里需要从PlayerManager获取
-    -- 临时实现：遍历查找
-    local PlayerManager = require(game.ServerScriptService.Core.PlayerManager)
-    return PlayerManager.GetPlayerHomeId(game.Players:GetPlayerByUserId(playerId))
+    -- 临时实现：遍历查找（修复：添加类型断言）
+    local ServerScriptService = game:GetService("ServerScriptService")
+    local playerManagerModule = ServerScriptService:WaitForChild("Core"):FindFirstChild("PlayerManager")
+    if playerManagerModule then
+        local PlayerManager = require(playerManagerModule :: ModuleScript)
+        return PlayerManager.GetPlayerHomeId(game.Players:GetPlayerByUserId(playerId))
+    end
+    return nil
 end
 
 --[[

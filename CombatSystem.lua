@@ -156,9 +156,10 @@ function CombatSystem.Initialize()
 		return false
 	end
 
-	-- 获取HitboxService和UnitManager引用
-	HitboxService = require(ServerScriptService.Systems.HitboxService)
-	UnitManager = require(ServerScriptService.Systems.UnitManager)
+	-- 获取HitboxService和UnitManager引用（使用类型断言）
+	local SystemsFolder = ServerScriptService:WaitForChild("Systems")
+	HitboxService = require(SystemsFolder:WaitForChild("HitboxService") :: ModuleScript)
+	UnitManager = require(SystemsFolder:WaitForChild("UnitManager") :: ModuleScript)
 
 	-- 启动Update循环(处理攻击阶段切换)
 	updateConnection = RunService.Heartbeat:Connect(UpdateAttackPhases)
@@ -435,15 +436,21 @@ function CombatSystem.OnRangedDamageEvent(unitModel, target)
 		return false
 	end
 
-	-- 引用ProjectileSystem（延迟加载）
+	-- 引用ProjectileSystem（延迟加载，使用类型断言）
 	if not ProjectileSystem then
-		ProjectileSystem = require(ServerScriptService.Systems.ProjectileSystem)
+		local projectileModule = ServerScriptService:WaitForChild("Systems"):FindFirstChild("ProjectileSystem")
+		if projectileModule then
+			ProjectileSystem = require(projectileModule :: ModuleScript)
+		end
 	end
 
 	-- ⭐⭐⭐ V1.5.4 播放远程武器特效 ⭐⭐⭐
 	-- 在发射子弹前播放枪口特效（Beam、PointLight、ParticleEmitter）
 	if not WeaponEffectSystem then
-		WeaponEffectSystem = require(ServerScriptService.Systems.WeaponEffectSystem)
+		local effectModule = ServerScriptService:WaitForChild("Systems"):FindFirstChild("WeaponEffectSystem")
+		if effectModule then
+			WeaponEffectSystem = require(effectModule :: ModuleScript)
+		end
 	end
 
 	local weaponName = UnitConfig.GetWeaponName(state.UnitId)
@@ -674,7 +681,12 @@ function CombatSystem.KillUnit(unitModel, killer)
 	end
 
 	-- ===== V1.5.10 无缝死亡动画版本 =====
-	local UnitAI = require(ServerScriptService.Systems.UnitAI)
+	local unitAIModule = ServerScriptService:WaitForChild("Systems"):FindFirstChild("UnitAI")
+	if not unitAIModule then
+		WarnLog("无法加载UnitAI模块，跳过死亡动画")
+		return
+	end
+	local UnitAI = require(unitAIModule :: ModuleScript)
 	local deathAnimationId = UnitConfig.GetDeathAnimationId(unitId)
 
 	-- 关键步骤顺序：先播死亡动画再停AI
@@ -701,7 +713,6 @@ function CombatSystem.KillUnit(unitModel, killer)
 			if isCampaignUnit then
 				-- V2.0.2修复：战役单位隐藏前确保已软冻结
 				-- 调用UnitAI的软冻结确保状态稳定
-				local UnitAI = require(ServerScriptService.Systems.UnitAI)
 				local humanoid = unitModel:FindFirstChildOfClass("Humanoid")
 				local rootPart = unitModel:FindFirstChild("HumanoidRootPart")
 				if humanoid and rootPart then

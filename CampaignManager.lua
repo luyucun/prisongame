@@ -26,17 +26,22 @@ local Workspace = game:GetService("Workspace")
 local Players = game:GetService("Players")
 
 -- 引用模块
-local GameConfig = require(ReplicatedStorage.Config.GameConfig)
-local StageConfig = require(ReplicatedStorage.Config.StageConfig)
-local PlayerManager = require(ServerScriptService.Core.PlayerManager)
-local GridPositionSystem = require(ServerScriptService.Systems.GridPositionSystem)
-local StageService = require(ServerScriptService.Systems.StageService)
-local PathService = require(ServerScriptService.Systems.PathService)
-local BattleManager = require(ServerScriptService.Systems.BattleManager)
-local CurrencySystem = require(ServerScriptService.Systems.CurrencySystem)
-local UnitAI = require(ServerScriptService.Systems.UnitAI)  -- V2.0新增：用于控制行军动画
-local CampaignUnitHelper = require(ServerScriptService.Systems.CampaignUnitHelper)  -- V2.0新增：单位激活/复位
-local DoorControlService = require(ServerScriptService.Systems.DoorControlService)  -- V2.0.1新增：门控制
+local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig") :: ModuleScript)
+local StageConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("StageConfig") :: ModuleScript)
+
+-- 引用核心服务（使用类型断言避免类型检查警告）
+local PlayerManager = require(ServerScriptService:WaitForChild("Core"):WaitForChild("PlayerManager") :: ModuleScript)
+
+-- 引用系统模块
+local SystemsFolder = ServerScriptService:WaitForChild("Systems")
+local GridPositionSystem = require(SystemsFolder:WaitForChild("GridPositionSystem") :: ModuleScript)
+local StageService = require(SystemsFolder:WaitForChild("StageService") :: ModuleScript)
+local PathService = require(SystemsFolder:WaitForChild("PathService") :: ModuleScript)
+local BattleManager = require(SystemsFolder:WaitForChild("BattleManager") :: ModuleScript)
+local CurrencySystem = require(SystemsFolder:WaitForChild("CurrencySystem") :: ModuleScript)
+local UnitAI = require(SystemsFolder:WaitForChild("UnitAI") :: ModuleScript)  -- V2.0新增：用于控制行军动画
+local CampaignUnitHelper = require(SystemsFolder:WaitForChild("CampaignUnitHelper") :: ModuleScript)  -- V2.0新增：单位激活/复位
+local DoorControlService = require(SystemsFolder:WaitForChild("DoorControlService") :: ModuleScript)  -- V2.0.1新增：门控制
 
 -- 远程事件
 local CampaignEvents = nil
@@ -442,7 +447,13 @@ function CampaignManager.StartCampaign(player)
 	end
 
 	-- 收集兵种（从PlacementSystem获取）
-	local PlacementSystem = require(ServerScriptService.Systems.PlacementSystem)
+	local placementModule = SystemsFolder:FindFirstChild("PlacementSystem")
+	if not placementModule then
+		warn("[CampaignManager] 无法找到PlacementSystem模块")
+		return false
+	end
+	-- 修复：添加类型断言避免类型检查警告
+	local PlacementSystem = require(placementModule :: ModuleScript)
 	local placedUnits = PlacementSystem.GetPlacedUnitModels(player)
 
 	if not placedUnits or #placedUnits == 0 then
@@ -1426,7 +1437,8 @@ local function PlayShowAnimation(unitModel, unitId)
 
 		track:Play(0.1) -- 0.1秒淡入
 
-		DebugLog(string.format("   [CampaignManager] 已为 %s 重新播放展示动画 (Priority=Action4, Looped=true)", unitId))
+		-- 修复：确保unitId不为nil
+		DebugLog(string.format("   [CampaignManager] 已为 %s 重新播放展示动画 (Priority=Action4, Looped=true)", tostring(unitId)))
 	else
 		warn("复生动画加载失败:", unitId)
 		if animation then

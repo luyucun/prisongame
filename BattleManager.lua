@@ -28,11 +28,11 @@ local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild
 local BattleConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("BattleConfig"))
 
 -- 引用系统
-local CombatSystem = require(ServerScriptService.Systems.CombatSystem)
-local UnitAI = require(ServerScriptService.Systems.UnitAI)
-local UnitManager = require(ServerScriptService.Systems.UnitManager)  -- V1.5.1新增
-local PhysicsManager = require(ServerScriptService.Systems.PhysicsManager)  -- V2.2新增
-local HitboxService = require(ServerScriptService.Systems.HitboxService)  -- V1.5.1新增
+local CombatSystem = require(ServerScriptService:WaitForChild("Systems"):WaitForChild("CombatSystem") :: ModuleScript)
+local UnitAI = require(ServerScriptService:WaitForChild("Systems"):WaitForChild("UnitAI") :: ModuleScript)
+local UnitManager = require(ServerScriptService:WaitForChild("Systems"):WaitForChild("UnitManager") :: ModuleScript)  -- V1.5.1新增
+local PhysicsManager = require(ServerScriptService:WaitForChild("Systems"):WaitForChild("PhysicsManager") :: ModuleScript)  -- V2.2新增
+local HitboxService = require(ServerScriptService:WaitForChild("Systems"):WaitForChild("HitboxService") :: ModuleScript)  -- V1.5.1新增
 
 -- ==================== 私有变量 ====================
 
@@ -180,7 +180,7 @@ function BattleManager.Initialize()
                     -- V2.5新增：处理战役结算确认（battleId=0）
                     if battleId == 0 then
                         -- 战役结算确认
-                        local CampaignManager = require(ServerScriptService.Systems.CampaignManager)
+                        local CampaignManager = require(ServerScriptService:WaitForChild("Systems"):WaitForChild("CampaignManager") :: ModuleScript)
                         local campaignData = CampaignManager.ActiveCampaigns[player.UserId]
 
                         if not campaignData then
@@ -205,26 +205,33 @@ function BattleManager.Initialize()
                         return
                     end
 
-                    local battle = battles[battleId]
+                    -- 确保battleId是数字类型
+                    local battleIdNum = tonumber(battleId)
+                    if not battleIdNum then
+                        WarnLog("VictoryConfirm失败: battleId类型无效")
+                        return
+                    end
+
+                    local battle = battles[battleIdNum]
                     if not battle then
-                        WarnLog(string.format("VictoryConfirm失败: 战斗 %d 不存在", battleId))
+                        WarnLog(string.format("VictoryConfirm失败: 战斗 %d 不存在", battleIdNum))
                         return
                     end
 
                     if battle.PlayerId ~= player.UserId then
-                        WarnLog(string.format("VictoryConfirm失败: 玩家 %s 不是战斗 %d 的发起者", player.Name, battleId))
+                        WarnLog(string.format("VictoryConfirm失败: 玩家 %s 不是战斗 %d 的发起者", player.Name, battleIdNum))
                         return
                     end
 
                     if not battle.IsSettling then
-                        WarnLog(string.format("VictoryConfirm失败: 战斗 %d 未在结算中", battleId))
+                        WarnLog(string.format("VictoryConfirm失败: 战斗 %d 未在结算中", battleIdNum))
                         return
                     end
 
-                    DebugLog(string.format("收到玩家 %s 的胜利确认: BattleId=%d", player.Name, battleId))
+                    DebugLog(string.format("收到玩家 %s 的胜利确认: BattleId=%d", player.Name, battleIdNum))
 
                     -- 完成战斗结算
-                    BattleManager.CompleteBattle(battleId, battle.Winner)
+                    BattleManager.CompleteBattle(battleIdNum, battle.Winner)
                 end)
 
                 if not success then
@@ -558,12 +565,15 @@ function BattleManager.EndBattle(battleId, winner)
 	-- 停止所有AI
 	UnitAI.ClearBattleAIs(battleId)
 
+	local battleType = tostring(battle.BattleType or "Test")
+	local winnerStr = tostring(winner or "平局")
+
 	if winner then
 		DebugLog(string.format("战斗结束: BattleId=%d, Type=%s, 胜利方=%s",
-			battleId, battle.BattleType or "Test", winner))
+			battleId, battleType, winnerStr))
 	else
 		DebugLog(string.format("战斗结束: BattleId=%d, Type=%s, 平局",
-			battleId, battle.BattleType or "Test"))
+			battleId, battleType))
 	end
 
 	-- V2.4新增：准备结算数据
@@ -573,7 +583,7 @@ function BattleManager.EndBattle(battleId, winner)
 	-- 如果是战役战斗，尝试获取当前关卡号
 	if battle.BattleType == "Campaign" then
 		local playerId = battle.PlayerId
-		local CampaignManager = require(ServerScriptService.Systems.CampaignManager)
+		local CampaignManager = require(ServerScriptService:WaitForChild("Systems"):WaitForChild("CampaignManager") :: ModuleScript)
 		local campaignData = CampaignManager.ActiveCampaigns[playerId]
 		if campaignData then
 			currentStage = campaignData.CurrentStage or 1
@@ -684,7 +694,7 @@ function BattleManager.CompleteBattle(battleId, winner)
 
 	-- V2.4新增：如果是战役战斗，通知CampaignManager处理确认后的逻辑
 	if battle.BattleType == "Campaign" then
-		local CampaignManager = require(ServerScriptService.Systems.CampaignManager)
+		local CampaignManager = require(ServerScriptService:WaitForChild("Systems"):WaitForChild("CampaignManager") :: ModuleScript)
 		local playerId = battle.PlayerId
 		local campaignData = CampaignManager.ActiveCampaigns[playerId]
 		if campaignData then

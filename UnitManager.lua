@@ -29,6 +29,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
 local BattleConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("BattleConfig"))
 
+-- 引用系统模块 (延迟加载，避免循环依赖)
+local PlacementSystem = nil
+
 -- ==================== 私有变量 ====================
 
 -- 战斗单位索引 [battleId][team] = {unitModel1, unitModel2, ...}
@@ -156,8 +159,9 @@ function UnitManager.RegisterUnit(battleId, team, unitModel)
 	-- 初始化位置缓存
 	GetUnitPosition(unitModel, true)
 
-	DebugLog(string.format("注册单位: BattleId=%d, Team=%s, Unit=%s",
-		battleId, team, unitModel.Name))
+	-- 修复：确保所有参数不为nil
+	DebugLog(string.format("注册单位: BattleId=%s, Team=%s, Unit=%s",
+		tostring(battleId), tostring(team), tostring(unitModel.Name)))
 
 	return true
 end
@@ -196,8 +200,9 @@ function UnitManager.UnregisterUnit(unitModel)
 	unitBattleInfo[unitModel] = nil
 	unitPositionCache[unitModel] = nil
 
-	DebugLog(string.format("注销单位: BattleId=%d, Team=%s, Unit=%s",
-		battleId, team, unitModel.Name))
+	-- 修复：确保所有参数不为nil
+	DebugLog(string.format("注销单位: BattleId=%s, Team=%s, Unit=%s",
+		tostring(battleId), tostring(team), tostring(unitModel.Name)))
 
 	return true
 end
@@ -420,7 +425,9 @@ function UnitManager.DebugPrintBattleStats(battleId)
 
 	print(string.format("=== UnitManager Battle Stats: BattleId=%d ===", battleId))
 	for team, units in pairs(battleUnits[battleId]) do
-		print(string.format("  Team=%s: %d units", team, #units))
+		-- 修复：确保team不为nil
+		local teamName = team or "Unknown"
+		print(string.format("  Team=%s: %d units", teamName, #units))
 		for i, unit in ipairs(units) do
 			print(string.format("    [%d] %s", i, unit.Name))
 		end
@@ -436,8 +443,22 @@ end
 @return table - 兵种Model实例列表
 ]]
 function UnitManager.GetHomeUnits(player)
-	-- V2.0实现: 使用PlacementSystem获取玩家基地已放置的兵种
-	local PlacementSystem = require(ServerScriptService.Systems.PlacementSystem)
+	-- V2.0实现: 延迟加载PlacementSystem以避免循环依赖
+	if not PlacementSystem then
+		local placementModule = ServerScriptService:FindFirstChild("Systems")
+		if placementModule then
+			placementModule = placementModule:FindFirstChild("PlacementSystem")
+			if placementModule then
+				PlacementSystem = require(placementModule)
+			end
+		end
+	end
+
+	if not PlacementSystem then
+		warn("[UnitManager] 无法加载PlacementSystem模块")
+		return {}
+	end
+
 	return PlacementSystem.GetPlacedUnitModels(player)
 end
 

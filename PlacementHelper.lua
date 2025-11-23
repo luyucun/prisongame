@@ -295,6 +295,9 @@ function PlacementHelper.GetUnitModelTemplate(unitId)
         return nil
     end
 
+    -- 确保modelPath是字符串类型
+    modelPath = tostring(modelPath)
+
     -- 解析路径
     local pathParts = string.split(modelPath, "/")
 
@@ -310,7 +313,7 @@ function PlacementHelper.GetUnitModelTemplate(unitId)
     end
 
     -- 最后一个部分是模型名称
-    local modelName = pathParts[#pathParts]
+    local modelName = tostring(pathParts[#pathParts])
     local model = currentFolder:FindFirstChild(modelName)
 
     if not model then

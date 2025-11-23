@@ -40,9 +40,9 @@ local UnitConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild
 local BattleConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("BattleConfig"))
 
 -- 引用系统
-local CombatSystem = require(ServerScriptService.Systems.CombatSystem)
-local UnitManager = require(ServerScriptService.Systems.UnitManager)
-local PathService = require(ServerScriptService.Systems.PathService)  -- ⭐新增
+local CombatSystem = require(ServerScriptService:WaitForChild("Systems"):WaitForChild("CombatSystem")) :: any
+local UnitManager = require(ServerScriptService:WaitForChild("Systems"):WaitForChild("UnitManager")) :: any
+local PathService = require(ServerScriptService:WaitForChild("Systems"):WaitForChild("PathService")) :: any  -- ⭐新增
 
 -- ==================== 调试日志 ====================
 
@@ -188,20 +188,21 @@ end
 --[[
 预加载单个动画（不播放，仅加载到缓存）
 @param animator - Animator对象
-@param animationId - 动画ID
+@param animationId - 动画ID（string或number）
 @return AnimationTrack|nil - 返回已加载的Track（但未播放）
 ]]
-local function PreloadAnimation(animator, animationId)
+local function PreloadAnimation(animator: Animator, animationId: string | number): AnimationTrack?
 	if not animator or not animationId or animationId == "" or animationId == "0" then
 		return nil
 	end
 
-	if not tonumber(animationId) then
+	local animIdStr = tostring(animationId)
+	if not tonumber(animIdStr) then
 		return nil
 	end
 
 	local animation = Instance.new("Animation")
-	animation.AnimationId = "rbxassetid://" .. animationId
+	animation.AnimationId = "rbxassetid://" .. animIdStr
 
 	local success, animationTrack = pcall(function()
 		return animator:LoadAnimation(animation)
@@ -276,17 +277,18 @@ end
 --[[
 创建并播放动画
 @param humanoid - Humanoid对象
-@param animationId - 动画ID
+@param animationId - 动画ID（string或number）
 @param looped - 是否循环
 @return AnimationTrack|nil
 ]]
-local function CreateAndPlayAnimation(humanoid, animationId, looped)
+local function CreateAndPlayAnimation(humanoid: Humanoid, animationId: string | number, looped: boolean): AnimationTrack?
 	if not humanoid or not animationId or animationId == "" or animationId == "0" then
 		return nil
 	end
 
-	if not tonumber(animationId) then
-		WarnLog(string.format("无效的动画ID格式: %s", animationId))
+	local animIdStr = tostring(animationId)
+	if not tonumber(animIdStr) then
+		WarnLog(string.format("无效的动画ID格式: %s", animIdStr))
 		return nil
 	end
 
@@ -299,7 +301,7 @@ local function CreateAndPlayAnimation(humanoid, animationId, looped)
 	end
 
 	local animation = Instance.new("Animation")
-	animation.AnimationId = "rbxassetid://" .. animationId
+	animation.AnimationId = "rbxassetid://" .. animIdStr
 
 	local success, animationTrack = pcall(function()
 		return animator:LoadAnimation(animation)
@@ -346,12 +348,12 @@ V2.4新增：从缓存或创建并播放动画
 优化：优先从aiData.Tracks缓存中查找已加载的Track，避免重复LoadAnimation
 @param unitModel - 单位模型
 @param aiData - AI数据
-@param animationId - 动画ID
+@param animationId - 动画ID（string或number）
 @param trackType - 轨道类型标识（如"Idle", "Move", "Attack"）
 @param looped - 是否循环
 @return AnimationTrack|nil - 动画轨道
 ]]
-local function PlayAnimationFromCache(unitModel, aiData, animationId, trackType, looped)
+local function PlayAnimationFromCache(unitModel: Model, aiData: any, animationId: string | number, trackType: string, looped: boolean): AnimationTrack?
 	if not aiData or not aiData.Tracks then
 		return CreateAndPlayAnimation(aiData.Humanoid, animationId, looped)
 	end
@@ -817,6 +819,60 @@ local function EnsureStopped(unitModel, aiData)
 	aiData.Humanoid:MoveTo(aiData.HumanoidRootPart.Position)
 end
 
+--[[
+软停止函数（V2.8新增）- 避免攻击/停靠阶段重复MoveTo导致前后倾
+只在真正需要停止时执行一次，不会每帧重复MoveTo当前位置
+
+@param aiData AIData - AI数据
+@return boolean - 是否执行了停止操作
+]]
+local function SoftStop(aiData)
+	if not aiData or not aiData.Humanoid or not aiData.HumanoidRootPart then
+		return false
+	end
+
+	local humanoid = aiData.Humanoid
+	local rootPart = aiData.HumanoidRootPart
+
+	-- 检查是否已经静止：MoveDirection接近0且WalkToPoint离当前位置很近
+	local moveDirection = humanoid.MoveDirection
+	local walkToPoint = humanoid.WalkToPoint
+	local currentPos = rootPart.Position
+
+	local isAlreadyStopped = moveDirection.Magnitude < 0.05 and (walkToPoint - currentPos).Magnitude < 0.5
+
+	if isAlreadyStopped then
+		-- 已经静止，无需操作
+		return false
+	end
+
+	-- 节流检查：避免频繁停止命令
+	local now = tick()
+	if aiData.LastStopTick and (now - aiData.LastStopTick) < 0.25 then
+		return false
+	end
+
+	-- 执行停止：优先使用Move(Vector3.zero)，如果WalkToPoint距离太远才用MoveTo
+	local distanceToWalkPoint = (walkToPoint - currentPos).Magnitude
+	if distanceToWalkPoint > 1.0 then
+		-- WalkToPoint距离太远，用MoveTo当前位置停止
+		humanoid:MoveTo(currentPos)
+	else
+		-- 使用Move(Vector3.zero)软停止
+		humanoid:Move(Vector3.zero, true)
+	end
+
+	aiData.LastStopTick = now
+	return true
+end
+
+--[[
+朝向目标（修复版：增加角度容差，避免每帧微调导致抖动）
+只有当角度偏差超过5度时才旋转，且只看水平面防止模型歪斜
+@param aiData AIData - AI数据
+@param target Model - 目标
+@return boolean - 是否成功旋转
+]]
 local function OrientTowardsTarget(aiData, target)
 	if not aiData or not aiData.HumanoidRootPart then
 		return false
@@ -827,17 +883,26 @@ local function OrientTowardsTarget(aiData, target)
 		return false
 	end
 
-	local lookVector = (targetPart.Position - aiData.HumanoidRootPart.Position)
-	local lookDistance = lookVector.Magnitude
+	local myPos = aiData.HumanoidRootPart.Position
+	local targetPos = targetPart.Position
 
-	if lookDistance > 0.01 then
-		lookVector = lookVector.Unit
-		aiData.HumanoidRootPart.CFrame = CFrame.new(
-			aiData.HumanoidRootPart.Position,
-			aiData.HumanoidRootPart.Position + lookVector
-		)
-		aiData.LastDesiredDirection = lookVector
-		return true
+	-- 修复：忽略高度差，只看水平面，防止模型歪斜
+	local lookVector = (Vector3.new(targetPos.X, myPos.Y, targetPos.Z) - myPos)
+
+	if lookVector.Magnitude > 0.1 then
+		-- 计算当前朝向和目标朝向的角度差
+		local currentLook = aiData.HumanoidRootPart.CFrame.LookVector
+		local dot = currentLook:Dot(lookVector.Unit)
+
+		-- 修复：只有当角度偏差超过 5度 (dot < 0.996) 时才旋转
+		-- 避免每帧微调导致的抖动
+		if dot < 0.996 then
+			local newCFrame = CFrame.lookAt(myPos, myPos + lookVector)
+			-- 使用 CFrame 设置 (服务端瞬移旋转是RTS常态，但加上阈值后就不会抖了)
+			aiData.HumanoidRootPart.CFrame = newCFrame
+			aiData.LastDesiredDirection = lookVector.Unit
+			return true
+		end
 	end
 
 	return false
@@ -859,6 +924,8 @@ end
 
 --[[
 节流的MoveTo：避免重复下发相同位置的移动命令
+修复方案：增强节流机制，根据目标位置变化量和时间间隔决定是否执行MoveTo
+核心原理：如果目标位置变化很小（<0.5 studs）且时间间隔很短（<1秒），则跳过
 @param aiData AIData - AI数据
 @param targetPos Vector3 - 目标位置
 @return boolean - 是否执行了MoveTo
@@ -870,14 +937,15 @@ local function ThrottledMoveTo(aiData, targetPos)
 
 	local now = tick()
 
-	-- V2.4优化：节流检查，收紧阈值避免waypoint附近卡顿
-	-- 距离小于1.5 studs且时间间隔小于0.25秒则跳过
-	if aiData.LastMoveToPos and aiData.LastMoveToTick then
-		local posDiff = (targetPos - aiData.LastMoveToPos).Magnitude
-		local timeDiff = now - aiData.LastMoveToTick
+	-- 修复：检查上次目标与当前目标的距离
+	if aiData.LastMoveToPos then
+		local distDiff = (targetPos - aiData.LastMoveToPos).Magnitude
+		local timeDiff = now - (aiData.LastMoveToTick or 0)
 
-		if posDiff < 1.5 and timeDiff < 0.25 then
-			-- 跳过：目标位置变化太小且时间间隔太短
+		-- 修复逻辑：
+		-- 1. 如果目标位置变化很小 (< 0.5 studs)，且上次命令在 1秒内，则完全忽略（让Humanoid继续走原来的指令）
+		-- 2. 除非目标发生了显著位移，否则不要打断当前的 MoveTo
+		if distDiff < 0.5 and timeDiff < 1.0 then
 			return false
 		end
 	end
@@ -1088,7 +1156,7 @@ local function HandleMoving(unitModel, aiData, state)
 		if distance <= dockingDistance + 4 then
 			DebugLog(string.format("%s (远程) 接近停靠距离(%.1f <= %.1f+4)，提前停止",
 				state.UnitId, distance, dockingDistance))
-			EnsureStopped(unitModel, aiData)
+			SoftStop(aiData)  -- V2.8: 使用SoftStop避免重复MoveTo
 			PathService.ClearPath(unitModel)
 
 			if UnitAIRangePolicy.ShouldEnterAttack(distance, state) then
@@ -1112,7 +1180,7 @@ local function HandleMoving(unitModel, aiData, state)
 
 	-- 判断是否应该进入攻击
 	if UnitAIRangePolicy.ShouldEnterAttack(distance, state) then
-		EnsureStopped(unitModel, aiData)
+		SoftStop(aiData)  -- V2.8: 进入攻击前停止一次即可
 		PathService.ClearPath(unitModel)
 
 		CombatSystem.SetAIState(unitModel, BattleConfig.AIState.ATTACKING)
@@ -1160,10 +1228,32 @@ local function HandleMoving(unitModel, aiData, state)
 
 	-- 策略2：优先直线移动（简单场景，无寻路开销）
 	if HasLineOfSight(unitModel, target, aiData) then
-		-- 直线可达，直接移动
-		local targetPos = target:FindFirstChild("HumanoidRootPart") or target.PrimaryPart
-		if targetPos then
-			ThrottledMoveTo(aiData, targetPos.Position)
+		-- 直线可达，但要计算停靠距离避免转圈
+		local targetPart = target:FindFirstChild("HumanoidRootPart") or target.PrimaryPart
+		if targetPart then
+			-- 🔥修复原地转圈：计算停靠位置而不是直接移动到目标
+			local targetState = CombatSystem.GetUnitState(target)
+			local dockingDistance = UnitAIRangePolicy.GetDockingDistance(state, targetState)
+
+			-- 计算方向和停靠位置
+			local myPos = aiData.HumanoidRootPart.Position
+			local targetPos = targetPart.Position
+			local direction = (targetPos - myPos).Unit
+			local moveTarget = targetPos - direction * dockingDistance
+
+			-- 检查是否已足够接近停靠点
+			-- 修复：增加容差，不要在临界值处急停
+			-- 只有当距离非常近（< 0.5）才强制停止，否则让 Humanoid 自己走到终点
+			local distanceToMoveTarget = (moveTarget - myPos).Magnitude
+			if distanceToMoveTarget > 0.5 then
+				-- 还需要移动，移动到停靠位置
+				ThrottledMoveTo(aiData, moveTarget)
+				DebugLog(string.format("%s 直线移动到停靠点，距离=%.1f", state.UnitId, distanceToMoveTarget))
+			else
+				-- 已经很接近了，只有真的到了才停止
+				SoftStop(aiData)
+				DebugLog(string.format("%s 已接近停靠点，停止移动", state.UnitId))
+			end
 		end
 
 		-- 清理旧路径
@@ -1187,21 +1277,41 @@ local function HandleMoving(unitModel, aiData, state)
 
 			if success and newPathState and newPathState.Waypoints and #newPathState.Waypoints > 0 then
 				DebugLog(string.format("%s 寻路成功，路径点数: %d", state.UnitId, #newPathState.Waypoints))
+				-- 🔥修复：寻路成功后立即开始移动第一个路径点
+				local nextWaypoint = PathService.GetNextWaypoint(unitModel)
+				if nextWaypoint then
+					ThrottledMoveTo(aiData, nextWaypoint)
+				end
 			else
 				DebugLog(string.format("%s 寻路失败，继续直线移动", state.UnitId))
 			end
 		end)
 
-		-- 等待寻路期间，先尝试直线靠近
-		local targetPos = target:FindFirstChild("HumanoidRootPart") or target.PrimaryPart
-		if targetPos then
-			ThrottledMoveTo(aiData, targetPos.Position)
-		end
+		-- 🔥修复原地转圈：等待寻路期间原地待命，不要MoveTo目标
+		-- 避免触发Humanoid的默认寻路导致原地转圈
+		DebugLog(string.format("%s 路径计算中，原地等待", state.UnitId))
+		SoftStop(aiData)
 	else
-		-- 已经在排队中，继续直线移动
-		local targetPos = target:FindFirstChild("HumanoidRootPart") or target.PrimaryPart
-		if targetPos then
-			ThrottledMoveTo(aiData, targetPos.Position)
+		-- 🔥修复：已经在排队中，检查路径状态
+		local pathStatus = PathService.GetPathStatus(unitModel)
+		if pathStatus == "Computing" or pathStatus == "Queued" then
+			-- 路径还在计算中，原地等待
+			DebugLog(string.format("%s 路径计算中(%s)，原地等待", state.UnitId, pathStatus))
+			SoftStop(aiData)
+		else
+			-- 路径计算失败或已完成，可以尝试直线移动（但保持停靠距离）
+			local targetPart = target:FindFirstChild("HumanoidRootPart") or target.PrimaryPart
+			if targetPart then
+				local targetState = CombatSystem.GetUnitState(target)
+				local dockingDistance = UnitAIRangePolicy.GetDockingDistance(state, targetState)
+
+				local myPos = aiData.HumanoidRootPart.Position
+				local targetPos = targetPart.Position
+				local direction = (targetPos - myPos).Unit
+				local moveTarget = targetPos - direction * dockingDistance
+
+				ThrottledMoveTo(aiData, moveTarget)
+			end
 		end
 	end
 end
@@ -1236,8 +1346,9 @@ local function HandleAttacking(unitModel, aiData, state)
 		return
 	end
 
-	-- 保持静止，面向目标
-	EnsureStopped(unitModel, aiData)
+	-- 🔥V2.8修复：使用SoftStop替代EnsureStopped，避免每帧MoveTo导致前后倾
+	-- 只在真正需要时停止一次，不会重复触发Humanoid的开始走→停止循环
+	SoftStop(aiData)
 	OrientTowardsTarget(aiData, target)
 
 	-- 核心修复：攻击逻辑
@@ -1464,6 +1575,13 @@ function UnitAI.StartAI(unitModel)
 	-- ⭐⭐⭐ 预加载所有战斗动画,避免首次战斗时动画资源未缓存导致卡顿 ⭐⭐⭐
 	PreloadAllAnimations(unitModel, humanoid, unitId)
 
+	-- ⭐⭐⭐ 设置网络所有权为服务器，防止客户端物理干扰导致抖动 ⭐⭐⭐
+	if rootPart then
+		pcall(function()
+			rootPart:SetNetworkOwner(nil)  -- 强制服务器拥有物理权，防止客户端干扰
+		end)
+	end
+
 	-- V2.1.3优化：在StartAI时就注册MoveToFinished事件，只在StopAI时断开
 	-- 这样避免因状态切换导致的连接断开，配合节流机制不会有延迟
 	aiData.MoveConnection = humanoid.MoveToFinished:Connect(function(reached)
@@ -1501,25 +1619,99 @@ function UnitAI.StartAI(unitModel)
 					if nextWaypoint then
 						ThrottledMoveTo(aiData, nextWaypoint)
 					else
-						-- 路径走完，直线移动到目标
+						-- 🔥修复：路径走完，检查是否可以直线到达
 						local targetPos = currentTarget:FindFirstChild("HumanoidRootPart") or currentTarget.PrimaryPart
 						if targetPos then
-							ThrottledMoveTo(aiData, targetPos.Position)
+							if HasLineOfSight(unitModel, currentTarget, aiData) then
+								-- 可以直线到达，移动到停靠位置
+								local targetState = CombatSystem.GetUnitState(currentTarget)
+								local dockingDistance = UnitAIRangePolicy.GetDockingDistance(currentState, targetState)
+
+								local rootPart = unitModel:FindFirstChild("HumanoidRootPart")
+								if rootPart then
+									local myPos = rootPart.Position
+									local direction = (targetPos.Position - myPos).Unit
+									local moveTarget = targetPos.Position - direction * dockingDistance
+
+									ThrottledMoveTo(aiData, moveTarget)
+								end
+							else
+								-- 不可直线到达，请求新路径
+								DebugLog(string.format("%s 路径走完但无直线视野，请求新路径", currentState.UnitId))
+								PathService.ForceRepath(unitModel)
+								aiData.PathRequested = false  -- 允许重新请求
+							end
 						end
 					end
 				else
-					-- 路径走完，直线移动到目标
+					-- 🔥修复：路径走完，检查是否可以直线到达
 					local targetPos = currentTarget:FindFirstChild("HumanoidRootPart") or currentTarget.PrimaryPart
 					if targetPos then
-						ThrottledMoveTo(aiData, targetPos.Position)
+						if HasLineOfSight(unitModel, currentTarget, aiData) then
+							-- 可以直线到达，移动到停靠位置
+							local targetState = CombatSystem.GetUnitState(currentTarget)
+							local dockingDistance = UnitAIRangePolicy.GetDockingDistance(currentState, targetState)
+
+							local rootPart = unitModel:FindFirstChild("HumanoidRootPart")
+							if rootPart then
+								local myPos = rootPart.Position
+								local direction = (targetPos.Position - myPos).Unit
+								local moveTarget = targetPos.Position - direction * dockingDistance
+
+								ThrottledMoveTo(aiData, moveTarget)
+							end
+						else
+							-- 不可直线到达，请求新路径
+							DebugLog(string.format("%s 路径走完但无直线视野，请求新路径", currentState.UnitId))
+							PathService.ForceRepath(unitModel)
+							aiData.PathRequested = false  -- 允许重新请求
+						end
 					end
 				end
 			else
-				-- V2.7修复：没有路径时也要继续移动，直奔目标
+				-- 🔥修复：没有路径时检查是否真的可以直线到达
 				-- 这种情况发生在：直线可达、寻路失败、或寻路未完成
+				local pathStatus = PathService.GetPathStatus(unitModel)
+
+				-- 如果路径正在计算，原地等待
+				if pathStatus == "Computing" or pathStatus == "Queued" then
+					DebugLog(string.format("%s 路径计算中(%s)，原地等待", currentState.UnitId, pathStatus))
+					SoftStop(aiData)
+					return
+				end
+
+				-- 检查是否可以直线到达
 				local targetPos = currentTarget:FindFirstChild("HumanoidRootPart") or currentTarget.PrimaryPart
 				if targetPos then
-					ThrottledMoveTo(aiData, targetPos.Position)
+					if HasLineOfSight(unitModel, currentTarget, aiData) then
+						-- 可以直线到达，移动到停靠位置
+						local targetState = CombatSystem.GetUnitState(currentTarget)
+						local dockingDistance = UnitAIRangePolicy.GetDockingDistance(currentState, targetState)
+
+						local rootPart = unitModel:FindFirstChild("HumanoidRootPart")
+						if rootPart then
+							local myPos = rootPart.Position
+							local direction = (targetPos.Position - myPos).Unit
+							local moveTarget = targetPos.Position - direction * dockingDistance
+
+							local distanceToMoveTarget = (moveTarget - myPos).Magnitude
+							if distanceToMoveTarget > 1.5 then
+								ThrottledMoveTo(aiData, moveTarget)
+							else
+								SoftStop(aiData)
+							end
+						end
+					else
+						-- 不可直线到达且没有路径，请求寻路
+						if not aiData.PathRequested then
+							DebugLog(string.format("%s 无路径且无直线视野，请求寻路", currentState.UnitId))
+							PathService.ForceRepath(unitModel)
+							aiData.PathRequested = false  -- 允许重新请求
+						else
+							-- 路径请求中，原地等待
+							SoftStop(aiData)
+						end
+					end
 				end
 			end
 		else
@@ -1532,10 +1724,29 @@ function UnitAI.StartAI(unitModel)
 			if rootPart and targetRootPart then
 				local dist = (targetRootPart.Position - rootPart.Position).Magnitude
 				if dist < 5 then
-					-- 距离很近被挡住，大概率是友军，直接尝试直线 MoveTo 挤过去，或者什么都不做等待下一帧
-					DebugLog(string.format("%s 距离很近(%.1f)被阻挡，可能是友军拥挤，尝试直线移动", currentState.UnitId, dist))
-					local targetPos = targetRootPart.Position
-					ThrottledMoveTo(aiData, targetPos)
+					-- 🔥修复：距离很近被挡住，检查是否可以直线到达
+					if HasLineOfSight(unitModel, currentTarget, aiData) then
+						-- 可以直线到达，计算停靠位置移动
+						local targetState = CombatSystem.GetUnitState(currentTarget)
+						local dockingDistance = UnitAIRangePolicy.GetDockingDistance(currentState, targetState)
+
+						local myPos = rootPart.Position
+						local targetPos = targetRootPart.Position
+						local direction = (targetPos - myPos).Unit
+						local moveTarget = targetPos - direction * dockingDistance
+
+						local distanceToMoveTarget = (moveTarget - myPos).Magnitude
+						if distanceToMoveTarget > 1.5 then
+							ThrottledMoveTo(aiData, moveTarget)
+							DebugLog(string.format("%s 距离很近(%.1f)被阻挡，直线移动到停靠点", currentState.UnitId, dist))
+						else
+							SoftStop(aiData)
+						end
+					else
+						-- 不可直线到达，不要MoveTo，等待路径
+						DebugLog(string.format("%s 距离很近(%.1f)被阻挡但无直线视野，原地等待", currentState.UnitId, dist))
+						SoftStop(aiData)
+					end
 					return
 				end
 			end
@@ -1566,9 +1777,28 @@ function UnitAI.StartAI(unitModel)
 						aiData.PathRequested = false
 						-- 直线能到就别寻路了
 						DebugLog(string.format("%s 延迟后发现直线可达，取消寻路请求", currentState.UnitId))
+
+						-- 🔥修复倾倒卡顿：直线可达时使用停靠点而非目标原点
 						local tPos = delayedTarget:FindFirstChild("HumanoidRootPart") or delayedTarget.PrimaryPart
 						if tPos then
-							ThrottledMoveTo(aiData, tPos.Position)
+							local delayedTargetState = CombatSystem.GetUnitState(delayedTarget)
+							local dockingDistance = UnitAIRangePolicy.GetDockingDistance(currentState, delayedTargetState)
+
+							local rootPart = unitModel:FindFirstChild("HumanoidRootPart")
+							if rootPart then
+								local myPos = rootPart.Position
+								local targetPos = tPos.Position
+								local direction = (targetPos - myPos).Unit
+								local moveTarget = targetPos - direction * dockingDistance
+
+								local distanceToMoveTarget = (moveTarget - myPos).Magnitude
+								if distanceToMoveTarget > 1.5 then
+									ThrottledMoveTo(aiData, moveTarget)
+									DebugLog(string.format("%s 延迟后直线移动到停靠点，距离=%.1f", currentState.UnitId, distanceToMoveTarget))
+								else
+									SoftStop(aiData)
+								end
+							end
 						end
 						return
 					end
@@ -1746,7 +1976,7 @@ function UnitAI.MoveToTarget(unitModel, target, aiData, state)
 
 	if currentDistance < 0.1 then
 		DebugLog(string.format("%s 距离过近(%.3f)，停止移动避免零向量", state.UnitId, currentDistance))
-		EnsureStopped(unitModel, aiData)
+		SoftStop(aiData)
 
 		if aiData.LastDesiredDirection then
 			aiData.HumanoidRootPart.CFrame = CFrame.new(
@@ -1765,7 +1995,7 @@ function UnitAI.MoveToTarget(unitModel, target, aiData, state)
 	if moveDistance <= 0.5 then
 		DebugLog(string.format("%s 已到达停靠范围，当前距离=%.1f，停靠距离=%.1f",
 			state.UnitId, currentDistance, dockingDistance))
-		EnsureStopped(unitModel, aiData)
+		SoftStop(aiData)
 		return
 	end
 
@@ -1778,7 +2008,7 @@ function UnitAI.MoveToTarget(unitModel, target, aiData, state)
 	local distanceToMoveTarget = (moveTarget - myPos).Magnitude
 	if distanceToMoveTarget < 0.5 then
 		DebugLog(string.format("%s 移动距离过小(%.2f)，停止避免抖动", state.UnitId, distanceToMoveTarget))
-		EnsureStopped(unitModel, aiData)
+		SoftStop(aiData)
 		return
 	end
 
@@ -1886,7 +2116,7 @@ end
 --[[
 播放死亡动画（供CombatSystem调用）- 兼容旧版接口
 ]]
-function UnitAI.PlayDeathAnimation(unitModel, animationId)
+function UnitAI.PlayDeathAnimation(unitModel: Model, animationId: string | number): AnimationTrack?
 	if not unitModel or not unitModel:IsA("Model") then
 		return nil
 	end
@@ -1908,7 +2138,7 @@ end
 4. 等死亡轨道开始后再停止旧轨道（无缝覆盖）
 5. 动画结束时冻结尸体
 ]]
-function UnitAI.BeginDeathAnimation(unitModel, animationId, unitId)
+function UnitAI.BeginDeathAnimation(unitModel: Model, animationId: string | number, unitId: string?)
 	if not unitModel or not unitModel:IsA("Model") then
 		WarnLog("BeginDeathAnimation失败: unitModel无效")
 		return
@@ -1948,12 +2178,13 @@ function UnitAI.BeginDeathAnimation(unitModel, animationId, unitId)
 
 	-- ============ 步骤4: 创建并立刻播放死亡动画 ============
 	if animationId and animationId ~= "" and animationId ~= "0" then
-		DebugLog(string.format("[%s] 正在加载死亡动画... (ID: %s)", unitName, animationId))
+		local animIdStr = tostring(animationId)
+		DebugLog(string.format("[%s] 正在加载死亡动画... (ID: %s)", unitName, animIdStr))
 
 		-- 手动创建动画轨道
 		if animator then
 			local animation = Instance.new("Animation")
-			animation.AnimationId = "rbxassetid://" .. animationId
+			animation.AnimationId = "rbxassetid://" .. animIdStr
 
 			local success, animTrack = pcall(function()
 				return animator:LoadAnimation(animation)
@@ -2003,7 +2234,7 @@ function UnitAI.BeginDeathAnimation(unitModel, animationId, unitId)
 					end
 				end)
 			else
-				WarnLog(string.format("[%s] ❌ 死亡动画加载失败! 动画ID可能无效: %s", unitName, animationId))
+				WarnLog(string.format("[%s] ❌ 死亡动画加载失败! 动画ID可能无效: %s", unitName, animIdStr))
 				animation:Destroy()
 				-- 动画加载失败，直接冻结尸体（V2.0.1修复：战役单位使用软冻结）
 				local isCampaignUnit = unitModel:GetAttribute("CampaignKeepInstance")

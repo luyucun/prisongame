@@ -50,11 +50,11 @@ local Workspace = game:GetService("Workspace")
 local PhysicsService = game:GetService("PhysicsService")
 
 -- 引用配置（从ReplicatedStorage获取共享配置）
-local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
-local BattleConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("BattleConfig"))
+local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig") :: ModuleScript)
+local BattleConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("BattleConfig") :: ModuleScript)
 
--- 引用系统
-local CombatSystem = require(ServerScriptService.Systems.CombatSystem)
+-- 引用系统（使用类型断言）
+local CombatSystem = require(ServerScriptService:WaitForChild("Systems"):WaitForChild("CombatSystem") :: ModuleScript)
 
 -- ==================== 私有变量 ====================
 
@@ -135,7 +135,8 @@ local function CreateProjectileModel(unitId, startPosition, targetPosition)
 
             -- 设置位置和朝向
             if projectileModel:IsA("Model") then
-                projectileModel:SetPrimaryPartCFrame(CFrame.new(startPosition, targetPosition))
+                -- 修复：使用PivotTo替代已弃用的SetPrimaryPartCFrame
+                projectileModel:PivotTo(CFrame.new(startPosition, targetPosition))
             else
                 projectileModel.CFrame = CFrame.new(startPosition, targetPosition)
             end
@@ -283,7 +284,8 @@ local function UpdateProjectiles(dt)
 
         -- 更新弹道位置（支持Model和Part）
         if projectile.ProjectileModel:IsA("Model") then
-            projectile.ProjectileModel:SetPrimaryPartCFrame(CFrame.new(newPos, targetPos))
+            -- 修复：使用PivotTo替代已弃用的SetPrimaryPartCFrame
+            projectile.ProjectileModel:PivotTo(CFrame.new(newPos, targetPos))
         else
             projectile.ProjectileModel.CFrame = CFrame.new(newPos, targetPos)
         end
