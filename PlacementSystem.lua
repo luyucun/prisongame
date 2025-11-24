@@ -392,11 +392,26 @@ local function CreateUnitModel(unitId, position, instanceId, level, gridSize)
     -- V1.4: 更新等级显示
     UpdateLevelDisplay(model, level)
 
-    -- 设置位置（修复：使用PivotTo替代已弃用的SetPrimaryPartCFrame）
+    -- V2.7修复：先将模型放置到workspace，使用初始位置（后续会校准Y）
+    model.Parent = Workspace
+
+    -- V2.7修复：第一次放置到目标XZ位置（使用传入的position作为初值）
     if model.PrimaryPart then
         model:PivotTo(CFrame.new(position))
     elseif model:FindFirstChild("HumanoidRootPart") then
         model.HumanoidRootPart.CFrame = CFrame.new(position)
+    end
+
+    -- V2.7修复：获取放置后的包围盒，根据底部对齐地板顶面
+    do
+        local bboxCf, bboxSize = model:GetBoundingBox()
+        local bottomY = bboxCf.Position.Y - bboxSize.Y / 2  -- 模型底部Y坐标
+        local floorTopY = position.Y - PlacementConfig.PLACEMENT_Y_OFFSET  -- 反推地板顶面
+        local padding = 0.05
+        local deltaY = (floorTopY + padding) - bottomY  -- 需要向上/下移动的距离
+
+        -- 二次PivotTo，将模型底部对齐地板顶面
+        model:PivotTo(model:GetPivot() * CFrame.new(0, deltaY, 0))
     end
 
     -- V1.5.2修复：IdleFloor上的单位需要播放动画
@@ -433,8 +448,6 @@ local function CreateUnitModel(unitId, position, instanceId, level, gridSize)
             end
         end)
     end
-
-    model.Parent = Workspace
 
     return model
 end
@@ -533,9 +546,17 @@ function PlacementSystem.PlaceUnit(player, instanceId, position)
         return false, "创建模型失败"
     end
 
+    -- V2.7修复：获取模型实际放置后的位置（Y已被CreateUnitModel校准）
+    local actualPosition = finalPosition
+    if model.PrimaryPart then
+        actualPosition = model:GetPivot().Position
+    elseif model:FindFirstChild("HumanoidRootPart") then
+        actualPosition = model.HumanoidRootPart.Position
+    end
+
     -- 更新InventorySystem中的实例状态
     unitInstance.IsPlaced = true
-    unitInstance.PlacedPosition = finalPosition
+    unitInstance.PlacedPosition = actualPosition
 
     -- 占据网格
     OccupyGrid(player, gridX, gridZ, unitInstance.GridSize, instanceId)
@@ -550,7 +571,7 @@ function PlacementSystem.PlaceUnit(player, instanceId, position)
         InstanceId = instanceId,
         UnitId = unitInstance.UnitId,
         Level = unitInstance.Level,  -- 🔥修复：确保包含等级信息
-        Position = finalPosition,
+        Position = actualPosition,  -- V2.7修复：使用校准后的实际位置
         GridX = gridX,
         GridZ = gridZ,
         GridSize = unitInstance.GridSize,
@@ -746,13 +767,27 @@ function PlacementSystem.UpdateUnitPosition(player, instanceId, newPosition)
     -- 7. 计算新的精确位置（传入gridSize以正确计算多格兵种的中心）
     local finalPosition = PlacementConfig.GridToWorld(newGridX, newGridZ, floorCenter, unitInstance.GridSize)
 
-    -- 8. 更新模型位置（修复：使用PivotTo替代已弃用的SetPrimaryPartCFrame）
+    -- 8. 更新模型位置（V2.7修复：先放再调，使用包围盒底部对齐地板顶面）
     if placedData.Model and placedData.Model.Parent then
+        -- V2.7修复：第一次PivotTo到新的XZ位置（使用finalPosition作为初值）
         if placedData.Model.PrimaryPart then
             placedData.Model:PivotTo(CFrame.new(finalPosition))
         elseif placedData.Model:FindFirstChild("HumanoidRootPart") then
             placedData.Model.HumanoidRootPart.CFrame = CFrame.new(finalPosition)
         end
+
+        -- V2.7修复：获取放置后的包围盒，根据底部对齐地板顶面
+        local bboxCf, bboxSize = placedData.Model:GetBoundingBox()
+        local bottomY = bboxCf.Position.Y - bboxSize.Y / 2  -- 模型底部Y坐标
+        local floorTopY = finalPosition.Y - PlacementConfig.PLACEMENT_Y_OFFSET  -- 反推地板顶面
+        local padding = 0.05
+        local deltaY = (floorTopY + padding) - bottomY  -- 需要向上/下移动的距离
+
+        -- 二次PivotTo，将模型底部对齐地板顶面
+        placedData.Model:PivotTo(placedData.Model:GetPivot() * CFrame.new(0, deltaY, 0))
+
+        -- V2.7修复：更新finalPosition为校准后的实际Y坐标
+        finalPosition = Vector3.new(finalPosition.X, finalPosition.Y + deltaY, finalPosition.Z)
     end
 
     -- 9. 占据新位置的网格
@@ -1041,9 +1076,17 @@ function PlacementSystem.RestorePlacedUnits(player)
                 return false
             end
 
+            -- V2.7修复：获取模型实际放置后的位置（Y已被CreateUnitModel校准）
+            local actualPosition = worldPosition
+            if model.PrimaryPart then
+                actualPosition = model:GetPivot().Position
+            elseif model:FindFirstChild("HumanoidRootPart") then
+                actualPosition = model.HumanoidRootPart.Position
+            end
+
             -- 4.7 更新InventorySystem中的兵种状态
             unitInstance.IsPlaced = true
-            unitInstance.PlacedPosition = worldPosition
+            unitInstance.PlacedPosition = actualPosition
             -- 如果有保存的生命值，恢复它
             if savedData.Health then
                 unitInstance.Health = savedData.Health
@@ -1059,7 +1102,7 @@ function PlacementSystem.RestorePlacedUnits(player)
             placedUnits[userId][instanceId] = {
                 InstanceId = instanceId,
                 UnitId = savedData.UnitId,
-                Position = worldPosition,
+                Position = actualPosition,  -- V2.7修复：使用校准后的实际位置
                 GridX = savedData.GridX,
                 GridZ = savedData.GridZ,
                 GridSize = savedData.GridSize,

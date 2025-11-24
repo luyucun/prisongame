@@ -34,13 +34,17 @@ end
 -- 缓存: [playerId] = {[stageNum] = stageFolderRef}
 StageService.StageCache = {}
 
--- 配置（V2.0修复：从GameConfig读取，支持策划动态配置）
-local STAGE_OFFSET_Z = 169  -- 关卡Z轴间距
+-- V2.7修复：统一从GameConfig读取配置，避免硬编码
+local GameConfigModule = require(ReplicatedStorage.Config.GameConfig)
 
 -- 获取模板风格（支持配置）
 local function GetTemplateStyle()
-	local GameConfig = require(ReplicatedStorage.Config.GameConfig)
-	return GameConfig.Campaign.StageTemplateStyle or "Style01"  -- 默认Style01
+	return GameConfigModule.Campaign.StageTemplateStyle or "Style01"  -- 默认Style01
+end
+
+-- V2.7新增：获取关卡Z轴间距（从GameConfig读取）
+local function GetStageOffsetZ()
+	return GameConfigModule.Campaign.StageGenerateOffset or 169  -- 默认169
 end
 
 --[[
@@ -365,8 +369,10 @@ function StageService.GenerateStage(playerId, stageNum)
             return nil
         end
 
-        -- V2.0修复：计算新关卡位置（沿世界Z轴负方向偏移-169，不受Base旋转影响）
-        local newBaseCFrame = CFrame.new(previousBase.Position - Vector3.new(0, 0, STAGE_OFFSET_Z)) * (previousBase.CFrame - previousBase.Position)
+        -- V2.0修复：计算新关卡位置（沿世界Z轴负方向偏移，不受Base旋转影响）
+        -- V2.7修复：使用GetStageOffsetZ()从GameConfig动态读取间距
+        local stageOffsetZ = GetStageOffsetZ()
+        local newBaseCFrame = CFrame.new(previousBase.Position - Vector3.new(0, 0, stageOffsetZ)) * (previousBase.CFrame - previousBase.Position)
 
         -- 克隆模板
         local newStage = template:Clone()

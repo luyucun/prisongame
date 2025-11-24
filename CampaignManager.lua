@@ -576,6 +576,18 @@ function CampaignManager.MarchToStage(campaignData, stageNum)
 		end
 	end
 
+	-- V2.7修复：行军前禁用默认Animate脚本，避免与自定义MoveAnimation冲突
+	for unitInstance, unitData in pairs(campaignData.Units) do
+		if unitInstance and unitInstance.Parent then
+			for _, descendant in ipairs(unitInstance:GetDescendants()) do
+				if descendant:IsA("BaseScript") and descendant.Name == "Animate" then
+					descendant.Enabled = false
+					DebugLog(string.format("🔇 %s 禁用默认Animate脚本", unitData.UnitId))
+				end
+			end
+		end
+	end
+
 	-- V2.4新增：行军前禁用所有单位的AI（避免100个单位的AI轮询开销）
 	for unitInstance, unitData in pairs(campaignData.Units) do
 		if unitInstance and unitInstance.Parent and unitInstance:FindFirstChild("Humanoid") then
@@ -657,8 +669,34 @@ function CampaignManager.MarchToStage(campaignData, stageNum)
 			moveTargets[unitInstance] = targetCFrame
 			moveCount = moveCount + 1
 
-			-- V2.0修复：开始行军前，确保停止Show动画
+			-- V2.7修复：行军前设置WalkSpeed为配置速度，避免速度与动画不匹配导致抖动
+			local unitId = unitInstance:GetAttribute("UnitId") or unitData.UnitId or unitInstance.Name
+			-- V2.7修复：确保unitId为字符串类型，避免Luau类型警告
+			if unitId and type(unitId) ~= "string" then
+				unitId = tostring(unitId)
+			end
 			local humanoid = unitInstance:FindFirstChild("Humanoid")
+			if humanoid and unitId then
+				-- V2.7修复：使用pcall保护GetMoveSpeed调用，避免Luau类型警告
+				local UnitConfigModule = require(ReplicatedStorage.Config.UnitConfig)
+				local success, configSpeed = pcall(function()
+					return UnitConfigModule.GetMoveSpeed(unitId)
+				end)
+				if success and configSpeed and type(configSpeed) == "number" and configSpeed > 0 then
+					humanoid.WalkSpeed = configSpeed
+					DebugLog(string.format("⚡ %s 设置移动速度: %.1f", tostring(unitInstance.Name), configSpeed))
+				else
+					-- 如果无法获取配置速度，使用默认值
+					local defaultSpeed = humanoid.WalkSpeed
+					if defaultSpeed <= 0 then
+						defaultSpeed = 16
+					end
+					humanoid.WalkSpeed = defaultSpeed
+					DebugLog(string.format("⚡ %s 使用默认速度: %.1f", tostring(unitInstance.Name), defaultSpeed))
+				end
+			end
+
+			-- V2.0修复：开始行军前，确保停止Show动画
 			if humanoid then
 				local animator = humanoid:FindFirstChild("Animator")
 				if animator then
@@ -671,9 +709,6 @@ function CampaignManager.MarchToStage(campaignData, stageNum)
 					end
 				end
 			end
-
-			-- V2.0修复：开始行军时播放移动动画
-			UnitAI.PlayMoveAnimation(unitInstance)
 		end
 	end
 
@@ -721,6 +756,17 @@ function CampaignManager.MarchToStage(campaignData, stageNum)
 		end
 	})  -- V2.3.1：移除第三个参数cachedWaypoints
 
+	-- V2.7修复：PathService启动后播放移动动画，避免循环依赖
+	-- 延迟0.1秒确保路径请求已入队，避免动画先于路径计算播放导致卡顿
+	task.delay(0.1, function()
+		for unitInstance, unitData in pairs(campaignData.Units) do
+			if not unitData.IsDead and unitInstance and unitInstance.Parent then
+				UnitAI.PlayMoveAnimation(unitInstance)
+			end
+		end
+		DebugLog(string.format("🎬 已为 %d 个单位播放移动动画", moveCount))
+	end)
+
 	-- 存储moveId以便后续可以取消
 	if moveId then
 		campaignData.CurrentMoveId = moveId
@@ -755,14 +801,25 @@ function CampaignManager.BeginBattlePrep(campaignData, stageNum, arrivedList, ti
 		end
 	end
 
-	-- 合并所有到达的单位（包括正常和超时）
+	-- V2.7修复：超时单位也视为失败，不应进入战斗（避免位置异常）
+	for _, unitInstance in ipairs(timedOutList) do
+		local unitData = campaignData.Units[unitInstance]
+		if unitData then
+			unitData.IsDead = true
+			DebugLog(string.format("⏰ %s 超时未到达，标记为失败不参与战斗", unitData.UnitId or unitInstance.Name))
+		end
+	end
+
+	-- 只使用正常到达的单位
 	local allArrivedUnits = {}
 	for _, unit in ipairs(arrivedList) do
 		table.insert(allArrivedUnits, unit)
 	end
-	for _, unit in ipairs(timedOutList) do
-		table.insert(allArrivedUnits, unit)
-	end
+	-- V2.7修复：不再添加超时单位到战斗列表
+	-- 原代码：
+	-- for _, unit in ipairs(timedOutList) do
+	--     table.insert(allArrivedUnits, unit)
+	-- end
 
 	-- 记录到达的单位，更新 campaignData
 	for _, unitInstance in ipairs(allArrivedUnits) do

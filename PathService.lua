@@ -1599,9 +1599,9 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)  -- V2.3.1：�
 		local humanoid = unitInstance:FindFirstChild("Humanoid")
 		local rootPart = unitInstance:FindFirstChild("HumanoidRootPart")
 
-		-- 停止移动
-		if humanoid and rootPart then
-			humanoid:MoveTo(rootPart.Position)
+		-- V2.7修复：使用软停代替MoveTo(当前位置)，避免前倾抖动
+		if humanoid then
+			humanoid:Move(Vector3.zero, true)
 		end
 
 		-- 断开事件连接
@@ -1801,11 +1801,9 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)  -- V2.3.1：�
 							end
 						end, "Campaign")  -- V2.0.5：标记为战役路径
 					else
-						-- V2.4修复：已经在排队中，不要直线移动到目标，等待路径
-						-- 原地待命，避免原地转圈
-						local rootPart = unitInstance:FindFirstChild("HumanoidRootPart")
-						if humanoid and rootPart then
-							humanoid:MoveTo(rootPart.Position)  -- 原地待命
+						-- V2.7修复：使用软停代替MoveTo(当前位置)，避免前倾抖动
+						if humanoid then
+							humanoid:Move(Vector3.zero, true)
 						end
 						DebugLog(string.format("⏳ %s 正在寻路队列中，原地待命", unitId))
 					end
@@ -1842,6 +1840,7 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)  -- V2.3.1：�
 		-- V2.3.1：移除缓存路径逻辑，所有单位使用真实起点per-unit寻路
 		if not data.PathRequested then
 			data.PathRequested = true
+
 			QueuePathCompute(unitInstance, data.TargetPart, unitId, function(success, pathState)
 				-- 🔑 关键：回调结束时无论成功失败都要重置
 				data.PathRequested = false
@@ -2042,11 +2041,10 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)  -- V2.3.1：�
 									end
 								end, "Campaign", "high")
 							end
-							-- 暂时停止移动，等待路径计算完成，不要直线冲向目标
+							-- V2.7修复：使用软停代替MoveTo(当前位置)，避免前倾抖动
 							local humanoid = unitInstance:FindFirstChild("Humanoid")
-							local rootPart = unitInstance:FindFirstChild("HumanoidRootPart")
-							if humanoid and rootPart then
-								humanoid:MoveTo(rootPart.Position)  -- 原地待命
+							if humanoid then
+								humanoid:Move(Vector3.zero, true)  -- 软停，停止移动但不触发前倾动画
 							end
 							-- V2.3.3保险：本单位未到达，防止allArrived被误判为true
 							allArrived = false
@@ -2055,11 +2053,13 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)  -- V2.3.1：�
 							-- V2.4修复：路径计算中(COMPUTING/QUEUED)时，不要设置targetPos
 							-- 等待路径计算完成，避免Humanoid自行寻路导致原地转圈
 							if pathStatus == PathStatus.COMPUTING or pathStatus == PathStatus.QUEUED then
-								-- 路径正在计算中，原地待命
+								-- V2.7修复：路径计算中，保持等待即可（不再需要软停，因为没有提前播放动画）
 								if CONFIG.DEBUG_WAIT_PATH_LOGS then
 									DebugLog(string.format("⏳ %s 路径计算中(%s)，等待完成", unitInstance.Name, tostring(pathStatus)))
 								end
 								targetPos = nil  -- 设为nil，跳过本次MoveTo
+								allArrived = false
+								continue
 							else
 								-- 其他未知状态，且已设置强制直线移动标志时才允许直线移动
 								if data.ForceStraightMove then
@@ -2077,22 +2077,26 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)  -- V2.3.1：�
 
 						-- 只有在距离超过阈值时才发送MoveTo
 						if distance > CONFIG.WAYPOINT_REACH_THRESHOLD then
-						-- V2.3优化：增强WalkToPoint节流，避免频繁覆盖MoveToFinished
-						-- 参数调优：2.0 studs / 0.6s（根据实测微调）
-						local humanoid = unitInstance:FindFirstChild("Humanoid")
-						if humanoid then
-							local walkToPoint = humanoid.WalkToPoint
-							local walkToDist = (walkToPoint - targetPos).Magnitude
-							local timeSinceLastMove = now - (data.LastMoveCommand or 0)
+							-- V2.7增强：更严格的MoveTo节流，避免抖动
+							local humanoid = unitInstance:FindFirstChild("Humanoid")
+							if humanoid then
+								local walkToPoint = humanoid.WalkToPoint
+								local walkToDist = (walkToPoint - targetPos).Magnitude
+								local timeSinceLastMove = now - (data.LastMoveCommand or 0)
+								local isMoving = humanoid.MoveDirection.Magnitude > 0.05
 
-							-- 跳过条件：已在移动到相同目标且时间窗口内
-							if walkToDist < 2.0 and timeSinceLastMove < 0.6 then
-								-- 已经在移动到这个路径点，跳过
-								allArrived = false  -- V2.3.4修复：continue分支必须确保allArrived=false
-								continue
+								-- V2.7修复：已在向几乎相同的点移动且正在走，不重发
+								if walkToDist < 0.8 and isMoving then
+									allArrived = false
+									continue
+								end
+
+								-- V2.7修复：同点重复发指令的时间防抖
+								if walkToDist < 2.0 and timeSinceLastMove < 0.3 then
+									allArrived = false
+									continue
+								end
 							end
-						end
-						
 
 							-- 更新LastMoveCommand时间
 							data.LastMoveCommand = now
@@ -2177,42 +2181,76 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)  -- V2.3.1：�
 					-- 排队等待的单位 StartTime = 0，不应被视为超时
 					if data.StartTime > 0 and now - data.StartTime > GameConfig.Campaign.MoveTimeout then
 
-						-- V2.1.3新增：停止单位移动（在传送前）
-						StopUnitMovement(unitInstance, "超时")
+						-- V2.7修复：超时不再瞬移，改为重试机制
+						local timeoutRetryCount = data.TimeoutRetryCount or 0
 
-						-- V2.3.2新增：支持HumanoidRootPart或PrimaryPart的兜底查找
-						local rootPart = unitInstance:FindFirstChild("HumanoidRootPart") or unitInstance.PrimaryPart
-						if rootPart then
-							rootPart.CFrame = data.TargetCFrame
+						if timeoutRetryCount < 2 then
+							-- 重试寻路（最多2次）
+							data.TimeoutRetryCount = timeoutRetryCount + 1
+							data.StartTime = now  -- 重置超时计时器
+							data.PathRequested = true
+
+							DebugLog(string.format("⏰ %s 移动超时，尝试重新寻路 (第%d次重试)",
+								unitInstance.Name, data.TimeoutRetryCount))
+
+							-- 清理旧路径
+							PathService.ClearPath(unitInstance)
+
+							-- 高优先级重新寻路
+							QueuePathCompute(unitInstance, data.TargetPart, unitInstance.Name,
+								function(success)
+									data.PathRequested = false
+									if success then
+										local humanoid = unitInstance:FindFirstChild("Humanoid")
+										if humanoid then
+											local nextWaypoint = PathService.GetNextWaypoint(unitInstance)
+											if nextWaypoint then
+												humanoid:MoveTo(nextWaypoint)
+												DebugLog(string.format("✅ %s 超时重寻成功，恢复移动", unitInstance.Name))
+												-- 重寻成功，重置到达状态
+												data.Arrived = false
+												return
+											end
+										end
+									end
+									-- 重寻失败，继续计时等待下次重试
+									DebugLog(string.format("❌ %s 超时重寻失败", unitInstance.Name))
+								end, "Campaign", "high")
+						else
+							-- 重试次数用尽，标记为超时失败（不瞬移）
+							DebugLog(string.format("🚫 %s 超时重试次数用尽，停止移动", unitInstance.Name))
+
+							-- V2.7修改：只停止移动，不改变位置
+							StopUnitMovement(unitInstance, "超时")
+							PathService.ClearPath(unitInstance)
+
+							-- 标记为到达（实际是超时失败）
+							data.Arrived = true
+							data.ForceTeleported = false  -- V2.7：不再瞬移
+							arrivedCount = arrivedCount + 1
+
+							-- 清理
+							if data.MoveToConnection then
+								data.MoveToConnection:Disconnect()
+								data.MoveToConnection = nil
+							end
+							if data.TargetPart and data.TargetPart.Parent then
+								data.TargetPart:Destroy()
+							end
+
+							table.insert(timedOutList, unitInstance)
+
+							-- 触发回调
+							if onUnitArrived then
+								pcall(function()
+									onUnitArrived(unitInstance, "TimedOut")
+								end)
+							end
+
+							-- V2.1.3新增：减少行军计数，尝试启动下一批
+							marchingCount = marchingCount - 1
+							TryStartNextBatch()
 						end
-
-						data.Arrived = true
-						data.ForceTeleported = true
-						arrivedCount = arrivedCount + 1
-
-						-- 清理
-						if data.MoveToConnection then
-							data.MoveToConnection:Disconnect()
-							data.MoveToConnection = nil
-						end
-						-- V2.3优化：移除HeartbeatConn断开（已不存在）
-						PathService.ClearPath(unitInstance)
-						if data.TargetPart and data.TargetPart.Parent then
-							data.TargetPart:Destroy()
-						end
-
-						table.insert(timedOutList, unitInstance)
-
-						-- 触发回调
-						if onUnitArrived then
-							pcall(function()
-								onUnitArrived(unitInstance, "TimedOut")
-							end)
-						end
-
-						-- V2.1.3新增：减少行军计数，尝试启动下一批
-						marchingCount = marchingCount - 1
-						TryStartNextBatch()
 					else
 						allArrived = false
 					end
@@ -2357,12 +2395,10 @@ function PathService.CancelGroupMove(moveId)
 		end
 
 		-- 停止移动
+		-- V2.7修复：使用软停代替MoveTo(当前位置)，避免前倾抖动
 		local humanoid = unitInstance and unitInstance:FindFirstChild("Humanoid")
 		if humanoid then
-			local rootPart = unitInstance:FindFirstChild("HumanoidRootPart")
-			if rootPart then
-				humanoid:MoveTo(rootPart.Position)
-			end
+			humanoid:Move(Vector3.zero, true)
 		end
 	end
 
