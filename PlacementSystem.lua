@@ -311,6 +311,57 @@ local function PlayShowAnimation(model, unitId)
 end
 
 --[[
+计算模型脚底到HumanoidRootPart的高度差（V2.8.1修复）
+使用Humanoid.HipHeight来精确计算，避免武器等附件影响计算结果
+@param model Model - 兵种模型
+@return number - HumanoidRootPart到脚底的高度差
+]]
+local function CalculateModelBottomOffset(model)
+    if not model then
+        return PlacementConfig.PLACEMENT_Y_OFFSET  -- 默认值
+    end
+
+    local humanoid = model:FindFirstChildOfClass("Humanoid")
+    local hrp = model:FindFirstChild("HumanoidRootPart")
+
+    if not humanoid or not hrp then
+        return PlacementConfig.PLACEMENT_Y_OFFSET
+    end
+
+    -- V2.8.1修复：使用Humanoid.HipHeight计算脚底位置
+    -- HipHeight = HumanoidRootPart底部到脚底的距离
+    -- 对于R15人物，这个值是精确的
+    -- 对于R6人物，这个值也是可靠的
+    local hipHeight = humanoid.HipHeight
+
+    -- HumanoidRootPart的中心到脚底的距离 = HipHeight + HumanoidRootPart高度的一半
+    -- 但实际上Roblox的HipHeight已经是从HumanoidRootPart中心到脚底的距离
+    -- 所以直接使用HipHeight即可
+    local bottomOffset = hipHeight
+
+    -- 如果HipHeight太小（可能是自定义模型），使用备用方案
+    if bottomOffset < 1 then
+        -- 尝试查找腿部来计算
+        local leftLeg = model:FindFirstChild("Left Leg") or model:FindFirstChild("LeftLowerLeg") or model:FindFirstChild("LeftFoot")
+        local rightLeg = model:FindFirstChild("Right Leg") or model:FindFirstChild("RightLowerLeg") or model:FindFirstChild("RightFoot")
+
+        if leftLeg and leftLeg:IsA("BasePart") then
+            -- 计算腿底部到HumanoidRootPart的距离
+            local legBottom = leftLeg.Position.Y - leftLeg.Size.Y / 2
+            bottomOffset = hrp.Position.Y - legBottom
+        elseif rightLeg and rightLeg:IsA("BasePart") then
+            local legBottom = rightLeg.Position.Y - rightLeg.Size.Y / 2
+            bottomOffset = hrp.Position.Y - legBottom
+        else
+            -- 最后的备用方案：使用默认值
+            bottomOffset = PlacementConfig.PLACEMENT_Y_OFFSET
+        end
+    end
+
+    return bottomOffset
+end
+
+--[[
 创建兵种模型到世界
 @param unitId string
 @param position Vector3
@@ -389,29 +440,33 @@ local function CreateUnitModel(unitId, position, instanceId, level, gridSize)
     -- V2.1补充：添加只读属性用于调试兵种类型（可选）
     model:SetAttribute("UnitType", UnitConfig.IsRangedUnit(unitId) and "Ranged" or "Melee")
 
-    -- V1.4: 更新等级显示
-    UpdateLevelDisplay(model, level)
-
-    -- V2.7修复：先将模型放置到workspace，使用初始位置（后续会校准Y）
+    -- V2.8修复：先将模型放置到workspace（暂时放到高处避免碰撞干扰）
     model.Parent = Workspace
 
-    -- V2.7修复：第一次放置到目标XZ位置（使用传入的position作为初值）
+    -- V2.8.1修复：等级显示必须在模型放到Workspace之后才能正确更新
+    -- 因为BillboardGui需要在Workspace中才能正确渲染
+    UpdateLevelDisplay(model, level)
+
+    -- V2.8修复：计算该模型实际的底部偏移量（HumanoidRootPart到脚底的距离）
+    local bottomOffset = CalculateModelBottomOffset(model)
+
+    -- V2.8修复：保存底部偏移量到模型属性，供拖动系统使用
+    model:SetAttribute("BottomOffset", bottomOffset)
+
+    -- V2.8修复：计算精确的放置Y坐标
+    -- position.Y 已经是 floorTopY + PLACEMENT_Y_OFFSET (由GridToWorld计算)
+    -- 我们需要的是: floorTopY + bottomOffset + 小间隙
+    local floorTopY = position.Y - PlacementConfig.PLACEMENT_Y_OFFSET
+    local padding = 0.05  -- 小间隙防止穿模
+    local correctY = floorTopY + bottomOffset + padding
+
+    -- 使用正确的Y坐标放置模型
+    local correctPosition = Vector3.new(position.X, correctY, position.Z)
+
     if model.PrimaryPart then
-        model:PivotTo(CFrame.new(position))
+        model:PivotTo(CFrame.new(correctPosition))
     elseif model:FindFirstChild("HumanoidRootPart") then
-        model.HumanoidRootPart.CFrame = CFrame.new(position)
-    end
-
-    -- V2.7修复：获取放置后的包围盒，根据底部对齐地板顶面
-    do
-        local bboxCf, bboxSize = model:GetBoundingBox()
-        local bottomY = bboxCf.Position.Y - bboxSize.Y / 2  -- 模型底部Y坐标
-        local floorTopY = position.Y - PlacementConfig.PLACEMENT_Y_OFFSET  -- 反推地板顶面
-        local padding = 0.05
-        local deltaY = (floorTopY + padding) - bottomY  -- 需要向上/下移动的距离
-
-        -- 二次PivotTo，将模型底部对齐地板顶面
-        model:PivotTo(model:GetPivot() * CFrame.new(0, deltaY, 0))
+        model.HumanoidRootPart.CFrame = CFrame.new(correctPosition)
     end
 
     -- V1.5.2修复：IdleFloor上的单位需要播放动画
@@ -767,27 +822,23 @@ function PlacementSystem.UpdateUnitPosition(player, instanceId, newPosition)
     -- 7. 计算新的精确位置（传入gridSize以正确计算多格兵种的中心）
     local finalPosition = PlacementConfig.GridToWorld(newGridX, newGridZ, floorCenter, unitInstance.GridSize)
 
-    -- 8. 更新模型位置（V2.7修复：先放再调，使用包围盒底部对齐地板顶面）
+    -- V2.8修复：使用模型保存的底部偏移量计算正确的Y坐标
     if placedData.Model and placedData.Model.Parent then
-        -- V2.7修复：第一次PivotTo到新的XZ位置（使用finalPosition作为初值）
+        local bottomOffset = placedData.Model:GetAttribute("BottomOffset") or PlacementConfig.PLACEMENT_Y_OFFSET
+        local floorTopY = finalPosition.Y - PlacementConfig.PLACEMENT_Y_OFFSET
+        local padding = 0.05
+        local correctY = floorTopY + bottomOffset + padding
+
+        local correctPosition = Vector3.new(finalPosition.X, correctY, finalPosition.Z)
+
         if placedData.Model.PrimaryPart then
-            placedData.Model:PivotTo(CFrame.new(finalPosition))
+            placedData.Model:PivotTo(CFrame.new(correctPosition))
         elseif placedData.Model:FindFirstChild("HumanoidRootPart") then
-            placedData.Model.HumanoidRootPart.CFrame = CFrame.new(finalPosition)
+            placedData.Model.HumanoidRootPart.CFrame = CFrame.new(correctPosition)
         end
 
-        -- V2.7修复：获取放置后的包围盒，根据底部对齐地板顶面
-        local bboxCf, bboxSize = placedData.Model:GetBoundingBox()
-        local bottomY = bboxCf.Position.Y - bboxSize.Y / 2  -- 模型底部Y坐标
-        local floorTopY = finalPosition.Y - PlacementConfig.PLACEMENT_Y_OFFSET  -- 反推地板顶面
-        local padding = 0.05
-        local deltaY = (floorTopY + padding) - bottomY  -- 需要向上/下移动的距离
-
-        -- 二次PivotTo，将模型底部对齐地板顶面
-        placedData.Model:PivotTo(placedData.Model:GetPivot() * CFrame.new(0, deltaY, 0))
-
-        -- V2.7修复：更新finalPosition为校准后的实际Y坐标
-        finalPosition = Vector3.new(finalPosition.X, finalPosition.Y + deltaY, finalPosition.Z)
+        -- 更新finalPosition为实际放置的位置
+        finalPosition = correctPosition
     end
 
     -- 9. 占据新位置的网格

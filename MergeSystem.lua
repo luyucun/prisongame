@@ -252,6 +252,8 @@ function MergeSystem.MergeUnits(player, instanceIdA, instanceIdB)
 
     -- 5. 更新新兵种的等级
     newInstance.Level = newLevel
+    -- V2.8.2修复: 同步更新GridSize（确保数据一致性）
+    newInstance.GridSize = gridSize
 
     -- 6. 移除两个旧兵种（从背包和场地移除）
     PlacementSystem.RemovePlacedUnit(player, instanceIdA)
@@ -269,6 +271,9 @@ function MergeSystem.MergeUnits(player, instanceIdA, instanceIdB)
         warn(GameConfig.LOG_PREFIX, "放置合成兵种失败:", placeMessage)
         -- 如果放置失败，兵种会留在背包中
     end
+
+    -- V2.8.2修复: 合成后强制刷新客户端背包数据，确保等级信息同步
+    InventorySystem.RefreshClientInventory(player)
 
     -- 🔥修复持久化：合成后保存数据
     DataManager.SavePlayerDataThrottled(player)

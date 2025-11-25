@@ -581,6 +581,27 @@ function AnimationController.PlayAttack(unitModel, aiData, state, target, onDama
 
 			table.insert(aiData.AnimationConnections, damageConnection)
 
+			-- V2.8新增：兜底伤害定时器（防止动画标记未触发或触发太晚）
+			local fallbackDelay = state.AttackSpeed * BattleConfig.ANIMATION_FALLBACK_RATIO
+			task.delay(fallbackDelay, function()
+				if damageEventFired then return end
+				if not aiData.IsActive or not unitModel.Parent or not CombatSystem.IsUnitAlive(unitModel) then return end
+				if CombatSystem.GetAttackPhase(unitModel) ~= BattleConfig.AttackPhase.ATTACKING then return end
+
+				damageEventFired = true
+				DebugLog(string.format("%s 动画标记超时，兜底伤害触发", state.UnitId))
+
+				if onDamageCallback then
+					onDamageCallback(unitModel, target, isRangedUnit)
+				end
+
+				-- 兜底伤害触发后立即切换到Idle
+				local latestState = CombatSystem.GetUnitState(unitModel)
+				if latestState then
+					AnimationController.SwitchToIdle(unitModel, aiData, latestState)
+				end
+			end)
+
 			-- 关键修复：攻击动画结束时立即切换到Idle，不等下一帧
 			local stoppedConnection = animTrack.Stopped:Connect(function()
 				-- 断开所有连接

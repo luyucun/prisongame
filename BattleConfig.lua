@@ -180,7 +180,7 @@ BattleConfig.UNIT_POSITION_UPDATE_THRESHOLD = 3  -- 单位位置更新阈值(stu
 BattleConfig.HITBOX_SAME_FRAME_COOLDOWN = 0.05   -- 同帧命中冷却(秒)
 
 -- 攻击超时配置
-BattleConfig.ATTACK_TIMEOUT = 5              -- 攻击阶段超时时间(秒,防止动画失败卡死)
+BattleConfig.ATTACK_TIMEOUT = 8              -- 攻击阶段超时时间(秒,防止动画失败卡死,从5调至8秒以适应较长的攻击动画或网络波动)
 BattleConfig.ANIMATION_FALLBACK_RATIO = 0.5  -- 动画回退延迟系数(BaseAttackSpeed * 此值)
 
 -- 动画事件配置

@@ -38,26 +38,32 @@ function LevelDisplayHelper.UpdateLevelDisplay(unitModel, level, maxLevel)
     local head = unitModel:FindFirstChild("Head")
     if not head then
         -- 容错：没有Head则安全返回
+        warn("[LevelDisplayHelper] UpdateLevelDisplay: 找不到Head，model=" .. tostring(unitModel.Name))
         return false
     end
 
     local billboardGui = head:FindFirstChild("BillboardGui")
     if not billboardGui then
         -- 容错：没有BillboardGui则安全返回
+        warn("[LevelDisplayHelper] UpdateLevelDisplay: 找不到BillboardGui，model=" .. tostring(unitModel.Name))
         return false
     end
 
     local textLabel = billboardGui:FindFirstChild("TextLabel")
     if not textLabel then
         -- 容错：没有TextLabel则安全返回
+        warn("[LevelDisplayHelper] UpdateLevelDisplay: 找不到TextLabel，model=" .. tostring(unitModel.Name))
         return false
     end
 
     -- 获取等级显示配置
-    local success = pcall(function()
+    local success, errorMsg = pcall(function()
         -- 获取等级文本和颜色
         local levelText = LevelColorConfig.GetLevelText(level, maxLevel)
         local levelColors = LevelColorConfig.GetLevelColors(level, maxLevel)
+
+        -- V2.8.1调试：打印更新信息
+        print("[LevelDisplayHelper] 更新等级显示: model=" .. unitModel.Name .. ", level=" .. tostring(level) .. ", text=" .. levelText)
 
         -- 设置等级文本
         textLabel.Text = levelText
@@ -80,7 +86,7 @@ function LevelDisplayHelper.UpdateLevelDisplay(unitModel, level, maxLevel)
     end)
 
     if not success then
-        warn("[LevelDisplayHelper] UpdateLevelDisplay: 更新等级显示时发生错误，unitModel=" .. tostring(unitModel.Name) .. ", level=" .. tostring(level))
+        warn("[LevelDisplayHelper] UpdateLevelDisplay: 更新等级显示时发生错误，unitModel=" .. tostring(unitModel.Name) .. ", level=" .. tostring(level) .. ", error=" .. tostring(errorMsg))
         return false
     end
 

@@ -50,6 +50,10 @@ local dragState = {
     isRelocating = false,      -- V1.4.1: 是否为换位模式
     isMobile = false,          -- V1.4: 是否为移动设备
     currentTouch = nil,        -- V1.4: 当前触摸输入对象
+    -- V2.8.2新增: 合成请求时保存的状态，用于合成失败后恢复
+    pendingMergeModel = nil,
+    pendingMergeStartPos = nil,
+    pendingMergeOriginalCanCollide = nil,
 }
 
 -- 远程事件
@@ -645,6 +649,11 @@ function StopDragging()
 
         print("[DragSystem] 请求合成:", dragState.draggedInstanceId, "->", targetInstanceId)
 
+        -- V2.8.2修复: 保存模型状态，用于合成失败后恢复
+        dragState.pendingMergeModel = model
+        dragState.pendingMergeStartPos = dragState.dragStartPos
+        dragState.pendingMergeOriginalCanCollide = dragState.originalCanCollide
+
         -- 发送合成请求到服务端
         local requestEvent = mergeEvents:FindFirstChild("RequestMerge")
         if requestEvent then
@@ -654,6 +663,11 @@ function StopDragging()
         -- 隐藏Grid，等待服务端响应
         GridHelper.HideGrid()
         -- 注意：不在这里恢复模型状态，等待服务端合成响应
+
+    elseif dragState.targetModel and not dragState.canMerge then
+        -- ==================== V2.8.2修复: 合成条件不满足，回到原位 ====================
+        print("[DragSystem] 合成条件不满足，回到原位")
+        ReturnToOriginalPosition(model)
 
     elseif dragState.isRelocating and placementEvents then
         -- ==================== 换位模式 ====================
@@ -845,19 +859,34 @@ function GetModelPosition(model)
 end
 
 --[[
-设置模型位置
+设置模型位置（V2.8修复：使用模型保存的BottomOffset计算正确Y坐标）
 @param model Model
-@param position Vector3
+@param position Vector3 - XZ使用传入值，Y会根据BottomOffset重新计算
 ]]
 function SetModelPosition(model, position)
     if not model or not position then
         return
     end
 
+    -- V2.8修复：从模型属性读取底部偏移量
+    local bottomOffset = model:GetAttribute("BottomOffset")
+    local correctY = position.Y
+
+    -- 如果有保存的BottomOffset，计算正确的Y坐标
+    if bottomOffset and dragState.idleFloor then
+        local floorCenter = dragState.idleFloor.Position
+        local floorSize = dragState.idleFloor.Size
+        local floorTopY = floorCenter.Y + floorSize.Y / 2
+        local padding = 0.05
+        correctY = floorTopY + bottomOffset + padding
+    end
+
+    local correctPosition = Vector3.new(position.X, correctY, position.Z)
+
     if model.PrimaryPart then
-        model:SetPrimaryPartCFrame(CFrame.new(position))
+        model:SetPrimaryPartCFrame(CFrame.new(correctPosition))
     elseif model:FindFirstChild("HumanoidRootPart") then
-        model.HumanoidRootPart.CFrame = CFrame.new(position)
+        model.HumanoidRootPart.CFrame = CFrame.new(correctPosition)
     end
 end
 
@@ -875,10 +904,34 @@ function OnMergeResponse(success, message, newUnitData)
     if success then
         print("[DragSystem] 合成成功! 新等级:", newUnitData and newUnitData.Level or "?")
         -- 服务端已经处理了模型的移除和新建，客户端不需要额外操作
-        -- 等待新模型自动同步
+        -- 清理pending状态
+        dragState.pendingMergeModel = nil
+        dragState.pendingMergeStartPos = nil
+        dragState.pendingMergeOriginalCanCollide = nil
     else
         warn("[DragSystem] 合成失败:", message)
-        -- 可以在这里添加UI提示
+        -- V2.8.2修复: 合成失败，恢复模型到原位
+        if dragState.pendingMergeModel and dragState.pendingMergeModel.Parent then
+            print("[DragSystem] 合成失败，恢复模型到原位")
+
+            -- 临时保存状态用于恢复
+            local tempModel = dragState.pendingMergeModel
+            local tempStartPos = dragState.pendingMergeStartPos
+            local tempCanCollide = dragState.pendingMergeOriginalCanCollide
+
+            -- 设置dragState以便ReturnToOriginalPosition正常工作
+            dragState.draggedModel = tempModel
+            dragState.dragStartPos = tempStartPos
+            dragState.originalCanCollide = tempCanCollide
+
+            -- 恢复到原位
+            ReturnToOriginalPosition(tempModel)
+        end
+
+        -- 清理pending状态
+        dragState.pendingMergeModel = nil
+        dragState.pendingMergeStartPos = nil
+        dragState.pendingMergeOriginalCanCollide = nil
     end
 end
 
