@@ -184,12 +184,12 @@ function BattleManager.Initialize()
                         local campaignData = CampaignManager.ActiveCampaigns[player.UserId]
 
                         if not campaignData then
-                            WarnLog(string.format("VictoryConfirm失败: 玩家 %s 没有活跃战役", player.Name))
+                            DebugLog(string.format("忽略VictoryConfirm: 玩家 %s 无活跃战役(battleId=0)", player.Name))
                             return
                         end
 
                         if not campaignData.IsWaitingForConfirm then
-                            WarnLog(string.format("VictoryConfirm失败: 玩家 %s 的战役未在等待确认状态", player.Name))
+                            DebugLog(string.format("忽略VictoryConfirm: 玩家 %s 的战役未在等待确认状态", player.Name))
                             return
                         end
 
@@ -200,8 +200,9 @@ function BattleManager.Initialize()
                         return
                     end
 
-                    -- 普通战斗结算确认
-                    if not battleId then
+                    -- 战役结算(battleId==0) 已在CampaignManager处理，普通战斗需>0
+                    if not battleId or battleId == 0 then
+                        DebugLog(string.format("忽略VictoryConfirm: battleId无效(%s)", tostring(battleId)))
                         return
                     end
 
@@ -214,17 +215,17 @@ function BattleManager.Initialize()
 
                     local battle = battles[battleIdNum]
                     if not battle then
-                        WarnLog(string.format("VictoryConfirm失败: 战斗 %d 不存在", battleIdNum))
+                        DebugLog(string.format("忽略VictoryConfirm: 战斗 %d 不存在或已结算", battleIdNum))
                         return
                     end
 
                     if battle.PlayerId ~= player.UserId then
-                        WarnLog(string.format("VictoryConfirm失败: 玩家 %s 不是战斗 %d 的发起者", player.Name, battleIdNum))
+                        DebugLog(string.format("忽略VictoryConfirm: 玩家 %s 不是战斗 %d 的发起者", player.Name, battleIdNum))
                         return
                     end
 
                     if not battle.IsSettling then
-                        WarnLog(string.format("VictoryConfirm失败: 战斗 %d 未在结算中", battleIdNum))
+                        DebugLog(string.format("忽略VictoryConfirm: 战斗 %d 未在结算中", battleIdNum))
                         return
                     end
 
@@ -700,6 +701,21 @@ function BattleManager.CompleteBattle(battleId, winner)
 		if campaignData then
 			DebugLog(string.format("通知CampaignManager处理确认后逻辑: BattleId=%d", battleId))
 			CampaignManager.ProcessPendingBattleResult(campaignData)
+
+			-- 兜底：确保战役结算弹窗必达（battleId=0）
+			local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
+			local battleEventsFolder = eventsFolder and eventsFolder:FindFirstChild("BattleEvents")
+			local victoryPopupEvent = battleEventsFolder and battleEventsFolder:FindFirstChild("VictoryPopup")
+			if victoryPopupEvent then
+				-- 记录等待确认状态
+				campaignData.IsWaitingForConfirm = true
+				campaignData.IsVictory = (winner == "Attack")
+
+				-- 当前关卡号兜底
+				local stageNum = campaignData.CurrentStage or (campaignData.PendingBattleResult and campaignData.PendingBattleResult.StageNum) or 1
+				victoryPopupEvent:FireClient(campaignData.Player, 0, winner, stageNum, nil)
+				DebugLog(string.format("战役兜底结算弹窗已发送: PlayerId=%d, Result=%s, Stage=%d", playerId, tostring(winner), stageNum))
+			end
 		end
 	end
 

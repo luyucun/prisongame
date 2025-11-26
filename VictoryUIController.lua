@@ -231,15 +231,23 @@ end
 @param extraRewards table - 额外奖励（可选）
 ]]
 local function ShowVictoryUI(battleId, result, stageNum, extraRewards)
-    if isVictoryShowing then
-        DebugLog("胜利界面已在显示中，忽略重复请求")
-        return
-    end
+	if isVictoryShowing then
+		DebugLog("胜利界面已在显示中，忽略重复请求")
+		return
+	end
 
-    -- 检查UI是否已初始化
-    if not uiInitialized then
-        DebugLog("UI未初始化，尝试重新初始化...")
-        if not InitializeUI() then
+	-- 确保battleId有效（客户端防呆）
+	-- V2.5修复：battleId=0 表示战役结算，也是有效的
+	local isCampaign = (battleId == 0)
+	if type(battleId) ~= "number" or (battleId < 0) or (not isCampaign and battleId <= 0) then
+		DebugLog(string.format("收到无效的BattleId(%s)，忽略结算界面", tostring(battleId)))
+		return
+	end
+
+	-- 检查UI是否已初始化
+	if not uiInitialized then
+		DebugLog("UI未初始化，尝试重新初始化...")
+		if not InitializeUI() then
             DebugLog("❌ UI初始化失败，无法显示结算界面")
             return
         end
@@ -307,12 +315,15 @@ end
 处理确认按钮点击
 ]]
 local function OnConfirmButtonClick()
-    if not currentBattleId then
-        DebugLog("确认按钮点击失败：没有当前战斗ID")
-        return
-    end
+	-- V2.5修复：battleId=0 表示战役结算，也是有效的，需要发送确认事件
+	local isCampaign = (currentBattleId == 0)
+	if currentBattleId == nil or (not isCampaign and currentBattleId <= 0) then
+		DebugLog(string.format("确认按钮点击失败：BattleId无效(%s)，直接隐藏UI", tostring(currentBattleId)))
+		HideVictoryUI()
+		return
+	end
 
-    DebugLog(string.format("玩家点击确认按钮，BattleId: %d", currentBattleId))
+    DebugLog(string.format("玩家点击确认按钮，BattleId: %d (isCampaign: %s)", currentBattleId, tostring(isCampaign)))
 
     -- 播放按钮点击效果
     PlayButtonClickEffect(confirmButton)
@@ -355,10 +366,17 @@ local function Initialize()
     end
 
     -- 连接服务器VictoryPopup事件
-    victoryPopupEvent.OnClientEvent:Connect(function(battleId, result, stageNum, extraRewards)
+victoryPopupEvent.OnClientEvent:Connect(function(battleId, result, stageNum, extraRewards)
         local success, err = pcall(function()
-            DebugLog(string.format("收到VictoryPopup事件: BattleId=%s, Result=%s, Stage=%s",
-                tostring(battleId), tostring(result), tostring(stageNum)))
+            -- 战役结算用 battleId=0，允许显示；普通战斗需>0
+            local isCampaign = (battleId == 0)
+            DebugLog(string.format("收到VictoryPopup事件: BattleId=%s, Result=%s, Stage=%s (isCampaign=%s)",
+                tostring(battleId), tostring(result), tostring(stageNum), tostring(isCampaign)))
+
+            if not isCampaign and (type(battleId) ~= "number" or battleId <= 0) then
+                DebugLog(string.format("无效的BattleId(%s)，忽略结算界面", tostring(battleId)))
+                return
+            end
 
             ShowVictoryUI(battleId, result, stageNum, extraRewards)
         end)
