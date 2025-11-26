@@ -63,17 +63,17 @@ local gridOccupancy = {}
 @return boolean - 是否成功
 ]]
 local function InitializeEvents()
-    if not PlacementEvents then
-        local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
-        if eventsFolder then
-            PlacementEvents = eventsFolder:FindFirstChild("PlacementEvents")
-        end
+	if not PlacementEvents then
+		local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
+		if eventsFolder then
+			PlacementEvents = eventsFolder:FindFirstChild("PlacementEvents")
+		end
 
-        if not PlacementEvents and GameConfig.DEBUG_MODE then
-            warn(GameConfig.LOG_PREFIX, "PlacementEvents未找到!")
-        end
-    end
-    return PlacementEvents ~= nil
+		if not PlacementEvents and GameConfig.DEBUG_MODE then
+			warn(GameConfig.LOG_PREFIX, "PlacementEvents未找到!")
+		end
+	end
+	return PlacementEvents ~= nil
 end
 
 --[[
@@ -83,7 +83,7 @@ end
 @return string - 格式: "x_z"
 ]]
 local function GetGridKey(gridX, gridZ)
-    return string.format("%d_%d", gridX, gridZ)
+	return string.format("%d_%d", gridX, gridZ)
 end
 
 --[[
@@ -92,12 +92,12 @@ end
 @return number - 表中的元素数量
 ]]
 local function GetTableCount(tbl)
-    if not tbl then return 0 end
-    local count = 0
-    for _ in pairs(tbl) do
-        count = count + 1
-    end
-    return count
+	if not tbl then return 0 end
+	local count = 0
+	for _ in pairs(tbl) do
+		count = count + 1
+	end
+	return count
 end
 
 --[[
@@ -106,23 +106,23 @@ end
 @return Part|nil - IdleFloor对象
 ]]
 local function GetPlayerIdleFloor(player)
-    local playerData = DataManager.GetPlayerData(player)
-    if not playerData then
-        return nil
-    end
+	local playerData = DataManager.GetPlayerData(player)
+	if not playerData then
+		return nil
+	end
 
-    local homeSlot = playerData.HomeSlot
-    local homeFolder = Workspace:FindFirstChild(GameConfig.HOME_FOLDER_NAME)
-    if not homeFolder then
-        return nil
-    end
+	local homeSlot = playerData.HomeSlot
+	local homeFolder = Workspace:FindFirstChild(GameConfig.HOME_FOLDER_NAME)
+	if not homeFolder then
+		return nil
+	end
 
-    local playerHome = homeFolder:FindFirstChild(GameConfig.HOME_PREFIX .. homeSlot)
-    if not playerHome then
-        return nil
-    end
+	local playerHome = homeFolder:FindFirstChild(GameConfig.HOME_PREFIX .. homeSlot)
+	if not playerHome then
+		return nil
+	end
 
-    return playerHome:FindFirstChild(GameConfig.IDLE_FLOOR_NAME)
+	return playerHome:FindFirstChild(GameConfig.IDLE_FLOOR_NAME)
 end
 
 --[[
@@ -135,29 +135,29 @@ end
 @return boolean, string - 是否占用, 占用的instanceId
 ]]
 local function IsGridOccupied(player, gridX, gridZ, gridWidth, gridDepth)
-    local userId = player.UserId
-    if not gridOccupancy[userId] then
-        gridOccupancy[userId] = {}
-    end
+	local userId = player.UserId
+	if not gridOccupancy[userId] then
+		gridOccupancy[userId] = {}
+	end
 
-    -- 处理默认参数
-    gridWidth = gridWidth or 1
-    gridDepth = gridDepth or gridWidth
+	-- 处理默认参数
+	gridWidth = gridWidth or 1
+	gridDepth = gridDepth or gridWidth
 
-    -- 检查所有需要占据的格子
-    for i = 0, gridWidth - 1 do
-        for j = 0, gridDepth - 1 do
-            local checkX = gridX + i
-            local checkZ = gridZ + j
-            local gridKey = GetGridKey(checkX, checkZ)
+	-- 检查所有需要占据的格子
+	for i = 0, gridWidth - 1 do
+		for j = 0, gridDepth - 1 do
+			local checkX = gridX + i
+			local checkZ = gridZ + j
+			local gridKey = GetGridKey(checkX, checkZ)
 
-            if gridOccupancy[userId][gridKey] then
-                return true, gridOccupancy[userId][gridKey]
-            end
-        end
-    end
+			if gridOccupancy[userId][gridKey] then
+				return true, gridOccupancy[userId][gridKey]
+			end
+		end
+	end
 
-    return false, nil
+	return false, nil
 end
 
 --[[
@@ -170,23 +170,23 @@ end
 @param instanceId string
 ]]
 local function OccupyGrid(player, gridX, gridZ, gridWidth, gridDepth, instanceId)
-    local userId = player.UserId
-    if not gridOccupancy[userId] then
-        gridOccupancy[userId] = {}
-    end
+	local userId = player.UserId
+	if not gridOccupancy[userId] then
+		gridOccupancy[userId] = {}
+	end
 
-    -- 处理默认参数
-    gridWidth = gridWidth or 1
-    gridDepth = gridDepth or gridWidth
+	-- 处理默认参数
+	gridWidth = gridWidth or 1
+	gridDepth = gridDepth or gridWidth
 
-    for i = 0, gridWidth - 1 do
-        for j = 0, gridDepth - 1 do
-            local occupyX = gridX + i
-            local occupyZ = gridZ + j
-            local gridKey = GetGridKey(occupyX, occupyZ)
-            gridOccupancy[userId][gridKey] = instanceId
-        end
-    end
+	for i = 0, gridWidth - 1 do
+		for j = 0, gridDepth - 1 do
+			local occupyX = gridX + i
+			local occupyZ = gridZ + j
+			local gridKey = GetGridKey(occupyX, occupyZ)
+			gridOccupancy[userId][gridKey] = instanceId
+		end
+	end
 end
 
 --[[
@@ -198,23 +198,23 @@ end
 @param gridDepth number - Z轴方向占用格子数 (可选,默认等于gridWidth)
 ]]
 local function ReleaseGrid(player, gridX, gridZ, gridWidth, gridDepth)
-    local userId = player.UserId
-    if not gridOccupancy[userId] then
-        return
-    end
+	local userId = player.UserId
+	if not gridOccupancy[userId] then
+		return
+	end
 
-    -- 处理默认参数
-    gridWidth = gridWidth or 1
-    gridDepth = gridDepth or gridWidth
+	-- 处理默认参数
+	gridWidth = gridWidth or 1
+	gridDepth = gridDepth or gridWidth
 
-    for i = 0, gridWidth - 1 do
-        for j = 0, gridDepth - 1 do
-            local releaseX = gridX + i
-            local releaseZ = gridZ + j
-            local gridKey = GetGridKey(releaseX, releaseZ)
-            gridOccupancy[userId][gridKey] = nil
-        end
-    end
+	for i = 0, gridWidth - 1 do
+		for j = 0, gridDepth - 1 do
+			local releaseX = gridX + i
+			local releaseZ = gridZ + j
+			local gridKey = GetGridKey(releaseX, releaseZ)
+			gridOccupancy[userId][gridKey] = nil
+		end
+	end
 end
 
 --[[
@@ -223,15 +223,15 @@ end
 @param level number - 等级
 ]]
 local function UpdateLevelDisplay(model, level)
-    if not model or not level then
-        return
-    end
+	if not model or not level then
+		return
+	end
 
-    -- V2.2: 使用统一的LevelDisplayHelper处理等级显示
-    local success = LevelDisplayHelper.UpdateLevelDisplay(model, level)
-    if not success then
-        warn("[PlacementSystem] UpdateLevelDisplay: 更新等级显示失败，model=" .. tostring(model.Name) .. ", level=" .. tostring(level))
-    end
+	-- V2.2: 使用统一的LevelDisplayHelper处理等级显示
+	local success = LevelDisplayHelper.UpdateLevelDisplay(model, level)
+	if not success then
+		warn("[PlacementSystem] UpdateLevelDisplay: 更新等级显示失败，model=" .. tostring(model.Name) .. ", level=" .. tostring(level))
+	end
 end
 
 --[[
@@ -332,15 +332,15 @@ end
 @return Model|nil
 ]]
 local function CreateUnitModel(unitId, position, instanceId, level, gridWidth, gridDepth)
-    -- V2.0: 处理默认参数
-    level = level or 1
-    gridWidth = gridWidth or 1
-    gridDepth = gridDepth or gridWidth
+	-- V2.0: 处理默认参数
+	level = level or 1
+	gridWidth = gridWidth or 1
+	gridDepth = gridDepth or gridWidth
 
-    local unitConfig = UnitConfig.GetUnitById(unitId)
-    if not unitConfig then
-        return nil
-    end
+	local unitConfig = UnitConfig.GetUnitById(unitId)
+	if not unitConfig then
+		return nil
+	end
 
 	-- V2.3.3修复：使用ModelPath配置查找模型（与PlacementHelper保持一致）
 	local modelTemplate = nil
@@ -381,95 +381,95 @@ local function CreateUnitModel(unitId, position, instanceId, level, gridWidth, g
 	end
 
 
-    -- 第三步：验证模型包含Humanoid（防止使用错误的展示模型）
-    if not modelTemplate:FindFirstChildOfClass("Humanoid") then
-        warn(GameConfig.LOG_PREFIX, "模板缺少Humanoid:", unitId, modelTemplate:GetFullName())
-        return nil
-    end
+	-- 第三步：验证模型包含Humanoid（防止使用错误的展示模型）
+	if not modelTemplate:FindFirstChildOfClass("Humanoid") then
+		warn(GameConfig.LOG_PREFIX, "模板缺少Humanoid:", unitId, modelTemplate:GetFullName())
+		return nil
+	end
 
-    -- 克隆模型
-    local model = modelTemplate:Clone()
+	-- 克隆模型
+	local model = modelTemplate:Clone()
 
-    -- V1.3: 设置InstanceId属性，用于回收时识别
-    if instanceId then
-        model:SetAttribute("InstanceId", instanceId)
-    end
+	-- V1.3: 设置InstanceId属性，用于回收时识别
+	if instanceId then
+		model:SetAttribute("InstanceId", instanceId)
+	end
 
-    -- 统一主部件，后续移动/拖动以HRP为基准
-    local hrp = model:FindFirstChild("HumanoidRootPart")
-    if hrp then
-        model.PrimaryPart = hrp
-    end
+	-- 统一主部件，后续移动/拖动以HRP为基准
+	local hrp = model:FindFirstChild("HumanoidRootPart")
+	if hrp then
+		model.PrimaryPart = hrp
+	end
 
-    -- V2.0重构: 设置等级、UnitId和占地尺寸属性
-    model:SetAttribute("Level", level)
-    model:SetAttribute("UnitId", unitId)
-    model:SetAttribute("GridWidth", gridWidth)
-    model:SetAttribute("GridDepth", gridDepth)
-    -- V2.1补充：添加只读属性用于调试兵种类型（可选）
-    model:SetAttribute("UnitType", UnitConfig.IsRangedUnit(unitId) and "Ranged" or "Melee")
+	-- V2.0重构: 设置等级、UnitId和占地尺寸属性
+	model:SetAttribute("Level", level)
+	model:SetAttribute("UnitId", unitId)
+	model:SetAttribute("GridWidth", gridWidth)
+	model:SetAttribute("GridDepth", gridDepth)
+	-- V2.1补充：添加只读属性用于调试兵种类型（可选）
+	model:SetAttribute("UnitType", UnitConfig.IsRangedUnit(unitId) and "Ranged" or "Melee")
 
-    -- V1.4: 更新等级显示
-    UpdateLevelDisplay(model, level)
+	-- V1.4: 更新等级显示
+	UpdateLevelDisplay(model, level)
 
-    -- V2.7修复：先将模型放置到workspace，使用初始位置（后续会校准Y）
-    model.Parent = Workspace
+	-- V2.7修复：先将模型放置到workspace，使用初始位置（后续会校准Y）
+	model.Parent = Workspace
 
-    -- V2.7修复：第一次放置到目标XZ位置（使用传入的position作为初值）
-    if model.PrimaryPart then
-        model:PivotTo(CFrame.new(position))
-    elseif model:FindFirstChild("HumanoidRootPart") then
-        model.HumanoidRootPart.CFrame = CFrame.new(position)
-    end
+	-- V2.7修复：第一次放置到目标XZ位置（使用传入的position作为初值）
+	if model.PrimaryPart then
+		model:PivotTo(CFrame.new(position))
+	elseif model:FindFirstChild("HumanoidRootPart") then
+		model.HumanoidRootPart.CFrame = CFrame.new(position)
+	end
 
-    -- V2.7修复：获取放置后的包围盒，根据底部对齐地板顶面
-    do
-        local bboxCf, bboxSize = model:GetBoundingBox()
-        local bottomY = bboxCf.Position.Y - bboxSize.Y / 2  -- 模型底部Y坐标
-        local floorTopY = position.Y - PlacementConfig.PLACEMENT_Y_OFFSET  -- 反推地板顶面
-        local padding = 0.05
-        local deltaY = (floorTopY + padding) - bottomY  -- 需要向上/下移动的距离
+	-- V2.7修复：获取放置后的包围盒，根据底部对齐地板顶面
+	do
+		local bboxCf, bboxSize = model:GetBoundingBox()
+		local bottomY = bboxCf.Position.Y - bboxSize.Y / 2  -- 模型底部Y坐标
+		local floorTopY = position.Y - PlacementConfig.PLACEMENT_Y_OFFSET  -- 反推地板顶面
+		local padding = 0.05
+		local deltaY = (floorTopY + padding) - bottomY  -- 需要向上/下移动的距离
 
-        -- 二次PivotTo，将模型底部对齐地板顶面
-        model:PivotTo(model:GetPivot() * CFrame.new(0, deltaY, 0))
-    end
+		-- 二次PivotTo，将模型底部对齐地板顶面
+		model:PivotTo(model:GetPivot() * CFrame.new(0, deltaY, 0))
+	end
 
-    -- V1.5.2修复：IdleFloor上的单位需要播放动画
-    -- 只锚定根部件防止移动/下沉，其他部件保持可动以支持动画
-    local rootPart = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
+	-- V1.5.2修复：IdleFloor上的单位需要播放动画
+	-- 只锚定根部件防止移动/下沉，其他部件保持可动以支持动画
+	local rootPart = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
 
-    if rootPart then
-        -- 锚定根部件，防止模型移动和下沉
-        rootPart.Anchored = true
-        rootPart.CanCollide = true
+	if rootPart then
+		-- 锚定根部件，防止模型移动和下沉
+		rootPart.Anchored = true
+		rootPart.CanCollide = true
 
-    else
-        warn(GameConfig.LOG_PREFIX, "CreateUnitModel: 找不到根部件，模型可能会下沉:", model.Name)
-    end
+	else
+		warn(GameConfig.LOG_PREFIX, "CreateUnitModel: 找不到根部件，模型可能会下沉:", model.Name)
+	end
 
-    -- 其他部件不锚定，允许动画播放，但禁用碰撞避免干扰
-    for _, descendant in ipairs(model:GetDescendants()) do
-        if descendant:IsA("BasePart") and descendant ~= rootPart then
-            descendant.Anchored = false      -- 不锚定，允许动画移动
-            descendant.CanCollide = false    -- 禁用碰撞，避免肢体碰撞干扰
-        end
-    end
+	-- 其他部件不锚定，允许动画播放，但禁用碰撞避免干扰
+	for _, descendant in ipairs(model:GetDescendants()) do
+		if descendant:IsA("BasePart") and descendant ~= rootPart then
+			descendant.Anchored = false      -- 不锚定，允许动画移动
+			descendant.CanCollide = false    -- 禁用碰撞，避免肢体碰撞干扰
+		end
+	end
 
-    -- V2.5寻路优化：设置兵种碰撞组，关闭兵种间碰撞
-    local CollisionSystem = ServerScriptService.Systems:FindFirstChild("CollisionSystem")
-    if CollisionSystem then
-        local CollisionModule = require(CollisionSystem)
-        pcall(function()
-            CollisionModule.SetUnitCollision(model)
-            -- 同时优化Humanoid性能
-            local humanoid = model:FindFirstChildOfClass("Humanoid")
-            if humanoid then
-                CollisionModule.OptimizeHumanoid(humanoid)
-            end
-        end)
-    end
+	-- V2.5寻路优化：设置兵种碰撞组，关闭兵种间碰撞
+	local CollisionSystem = ServerScriptService.Systems:FindFirstChild("CollisionSystem")
+	if CollisionSystem then
+		local CollisionModule = require(CollisionSystem)
+		pcall(function()
+			CollisionModule.SetUnitCollision(model)
+			-- 同时优化Humanoid性能
+			local humanoid = model:FindFirstChildOfClass("Humanoid")
+			if humanoid then
+				CollisionModule.OptimizeHumanoid(humanoid)
+			end
+		end)
+	end
 
-    return model
+	return model
 end
 
 -- ==================== 公共接口 ====================
@@ -482,63 +482,63 @@ end
 @return boolean, string - 是否合法, 错误信息
 ]]
 function PlacementSystem.ValidatePlacement(player, instanceId, position)
-    -- 1. 检查玩家数据
-    local playerData = DataManager.GetPlayerData(player)
-    if not playerData then
-        return false, "玩家数据不存在"
-    end
+	-- 1. 检查玩家数据
+	local playerData = DataManager.GetPlayerData(player)
+	if not playerData then
+		return false, "玩家数据不存在"
+	end
 
-    -- 2. 检查兵种实例是否存在
-    local unitInstance = InventorySystem.GetUnitByInstanceId(player, instanceId)
-    if not unitInstance then
-        return false, "兵种实例不存在"
-    end
+	-- 2. 检查兵种实例是否存在
+	local unitInstance = InventorySystem.GetUnitByInstanceId(player, instanceId)
+	if not unitInstance then
+		return false, "兵种实例不存在"
+	end
 
-    -- 3. 检查兵种是否已经放置
-    if unitInstance.IsPlaced then
-        return false, "兵种已经被放置"
-    end
+	-- 3. 检查兵种是否已经放置
+	if unitInstance.IsPlaced then
+		return false, "兵种已经被放置"
+	end
 
-    -- 4. 获取玩家的IdleFloor
-    local idleFloor = GetPlayerIdleFloor(player)
-    if not idleFloor then
-        return false, "找不到放置地板"
-    end
+	-- 4. 获取玩家的IdleFloor
+	local idleFloor = GetPlayerIdleFloor(player)
+	if not idleFloor then
+		return false, "找不到放置地板"
+	end
 
-    -- 5. 转换为网格坐标
-    local floorCenter = idleFloor.Position
-    local gridX, gridZ = PlacementConfig.WorldToGrid(position, floorCenter)
+	-- 5. 转换为网格坐标
+	local floorCenter = idleFloor.Position
+	local gridX, gridZ = PlacementConfig.WorldToGrid(position, floorCenter)
 
-    -- V2.0: 获取兵种占地尺寸
-    local gridWidth = UnitConfig.GetGridWidth(unitInstance.UnitId)
-    local gridDepth = UnitConfig.GetGridDepth(unitInstance.UnitId)
-    -- 回写实例占地，向后兼容老数据
-    unitInstance.GridWidth = gridWidth
-    unitInstance.GridDepth = gridDepth
-    -- 回写实例占地，向后兼容老数据
-    unitInstance.GridWidth = gridWidth
-    unitInstance.GridDepth = gridDepth
+	-- V2.0: 获取兵种占地尺寸
+	local gridWidth = UnitConfig.GetGridWidth(unitInstance.UnitId)
+	local gridDepth = UnitConfig.GetGridDepth(unitInstance.UnitId)
+	-- 回写实例占地，向后兼容老数据
+	unitInstance.GridWidth = gridWidth
+	unitInstance.GridDepth = gridDepth
+	-- 回写实例占地，向后兼容老数据
+	unitInstance.GridWidth = gridWidth
+	unitInstance.GridDepth = gridDepth
 
-    -- 6. 检查边界
-    if not PlacementConfig.IsGridInBounds(gridX, gridZ, gridWidth, gridDepth) then
-        return false, "超出放置范围"
-    end
+	-- 6. 检查边界
+	if not PlacementConfig.IsGridInBounds(gridX, gridZ, gridWidth, gridDepth) then
+		return false, "超出放置范围"
+	end
 
-    -- 7. 检查碰撞
-    if PlacementConfig.ENABLE_COLLISION_CHECK then
-        local isOccupied, occupyingId = IsGridOccupied(player, gridX, gridZ, gridWidth, gridDepth)
-        if isOccupied then
-            return false, "位置已被占用"
-        end
-    end
+	-- 7. 检查碰撞
+	if PlacementConfig.ENABLE_COLLISION_CHECK then
+		local isOccupied, occupyingId = IsGridOccupied(player, gridX, gridZ, gridWidth, gridDepth)
+		if isOccupied then
+			return false, "位置已被占用"
+		end
+	end
 
-    -- 8. 检查放置数量限制
-    local userId = player.UserId
-    if placedUnits[userId] and #placedUnits[userId] >= PlacementConfig.MAX_PLACED_UNITS then
-        return false, "已达到最大放置数量"
-    end
+	-- 8. 检查放置数量限制
+	local userId = player.UserId
+	if placedUnits[userId] and #placedUnits[userId] >= PlacementConfig.MAX_PLACED_UNITS then
+		return false, "已达到最大放置数量"
+	end
 
-    return true, "验证通过"
+	return true, "验证通过"
 end
 
 --[[
@@ -549,134 +549,134 @@ end
 @return boolean, string - 是否成功, 错误/成功信息
 ]]
 function PlacementSystem.PlaceUnit(player, instanceId, position)
-    -- 验证放置
-    local valid, message = PlacementSystem.ValidatePlacement(player, instanceId, position)
-    if not valid then
-        return false, message
-    end
+	-- 验证放置
+	local valid, message = PlacementSystem.ValidatePlacement(player, instanceId, position)
+	if not valid then
+		return false, message
+	end
 
-    -- 获取兵种实例
-    local unitInstance = InventorySystem.GetUnitByInstanceId(player, instanceId)
-    local idleFloor = GetPlayerIdleFloor(player)
-    local floorCenter = idleFloor.Position
+	-- 获取兵种实例
+	local unitInstance = InventorySystem.GetUnitByInstanceId(player, instanceId)
+	local idleFloor = GetPlayerIdleFloor(player)
+	local floorCenter = idleFloor.Position
 
-    -- 转换为网格坐标
-    local gridX, gridZ = PlacementConfig.WorldToGrid(position, floorCenter)
+	-- 转换为网格坐标
+	local gridX, gridZ = PlacementConfig.WorldToGrid(position, floorCenter)
 
-    -- V2.0: 获取兵种占地尺寸
-    local gridWidth = UnitConfig.GetGridWidth(unitInstance.UnitId)
-    local gridDepth = UnitConfig.GetGridDepth(unitInstance.UnitId)
-    -- 回写实例占地，向后兼容老数据
-    unitInstance.GridWidth = gridWidth
-    unitInstance.GridDepth = gridDepth
+	-- V2.0: 获取兵种占地尺寸
+	local gridWidth = UnitConfig.GetGridWidth(unitInstance.UnitId)
+	local gridDepth = UnitConfig.GetGridDepth(unitInstance.UnitId)
+	-- 回写实例占地，向后兼容老数据
+	unitInstance.GridWidth = gridWidth
+	unitInstance.GridDepth = gridDepth
 
-    -- 计算精确的放置位置 (对齐到网格中心)
-    local finalPosition = PlacementConfig.GridToWorld(gridX, gridZ, floorCenter, gridWidth, gridDepth)
+	-- 计算精确的放置位置 (对齐到网格中心)
+	local finalPosition = PlacementConfig.GridToWorld(gridX, gridZ, floorCenter, gridWidth, gridDepth)
 
-    -- V2.0: 传递gridWidth和gridDepth到CreateUnitModel
-    local model = CreateUnitModel(unitInstance.UnitId, finalPosition, instanceId, unitInstance.Level, gridWidth, gridDepth)
-    if not model then
-        return false, "创建模型失败"
-    end
+	-- V2.0: 传递gridWidth和gridDepth到CreateUnitModel
+	local model = CreateUnitModel(unitInstance.UnitId, finalPosition, instanceId, unitInstance.Level, gridWidth, gridDepth)
+	if not model then
+		return false, "创建模型失败"
+	end
 
-    -- V2.7修复：获取模型实际放置后的位置（Y已被CreateUnitModel校准）
-    local actualPosition = finalPosition
-    if model.PrimaryPart then
-        actualPosition = model:GetPivot().Position
-    elseif model:FindFirstChild("HumanoidRootPart") then
-        actualPosition = model.HumanoidRootPart.Position
-    end
+	-- V2.7修复：获取模型实际放置后的位置（Y已被CreateUnitModel校准）
+	local actualPosition = finalPosition
+	if model.PrimaryPart then
+		actualPosition = model:GetPivot().Position
+	elseif model:FindFirstChild("HumanoidRootPart") then
+		actualPosition = model.HumanoidRootPart.Position
+	end
 
-    -- 更新InventorySystem中的实例状态
-    unitInstance.IsPlaced = true
-    unitInstance.PlacedPosition = actualPosition
+	-- 更新InventorySystem中的实例状态
+	unitInstance.IsPlaced = true
+	unitInstance.PlacedPosition = actualPosition
 
-    -- V2.0: 占据网格 (使用gridWidth和gridDepth)
-    OccupyGrid(player, gridX, gridZ, gridWidth, gridDepth, instanceId)
+	-- V2.0: 占据网格 (使用gridWidth和gridDepth)
+	OccupyGrid(player, gridX, gridZ, gridWidth, gridDepth, instanceId)
 
-    -- 保存放置数据
-    local userId = player.UserId
-    if not placedUnits[userId] then
-        placedUnits[userId] = {}
-    end
+	-- 保存放置数据
+	local userId = player.UserId
+	if not placedUnits[userId] then
+		placedUnits[userId] = {}
+	end
 
-    -- V2.0重构: 使用GridWidth和GridDepth替代GridSize
-    placedUnits[userId][instanceId] = {
-        InstanceId = instanceId,
-        UnitId = unitInstance.UnitId,
-        Level = unitInstance.Level,
-        Position = actualPosition,
-        GridX = gridX,
-        GridZ = gridZ,
-        GridWidth = gridWidth,
-        GridDepth = gridDepth,
-        Model = model,
-        PlacedTime = os.time(),
-    }
+	-- V2.0重构: 使用GridWidth和GridDepth替代GridSize
+	placedUnits[userId][instanceId] = {
+		InstanceId = instanceId,
+		UnitId = unitInstance.UnitId,
+		Level = unitInstance.Level,
+		Position = actualPosition,
+		GridX = gridX,
+		GridZ = gridZ,
+		GridWidth = gridWidth,
+		GridDepth = gridDepth,
+		Model = model,
+		PlacedTime = os.time(),
+	}
 
-    -- 🔥修复服务器关闭时数据保存：同步到DataManager
-    DataManager.AddPlacedUnit(player, instanceId, placedUnits[userId][instanceId])
+	-- 🔥修复服务器关闭时数据保存：同步到DataManager
+	DataManager.AddPlacedUnit(player, instanceId, placedUnits[userId][instanceId])
 
-    -- V2.0新增: 保存GridPos到模型（用于战役系统）
-    local gridModule = ServerScriptService:WaitForChild("Systems"):FindFirstChild("GridPositionSystem")
-    if gridModule then
-        local GridPositionSystem = require(gridModule :: ModuleScript)
-        local gridPos = GridPositionSystem.SaveUnitGridPosition(model, idleFloor)
+	-- V2.0新增: 保存GridPos到模型（用于战役系统）
+	local gridModule = ServerScriptService:WaitForChild("Systems"):FindFirstChild("GridPositionSystem")
+	if gridModule then
+		local GridPositionSystem = require(gridModule :: ModuleScript)
+		local gridPos = GridPositionSystem.SaveUnitGridPosition(model, idleFloor)
 
-        -- 同时保存到placedUnits表中
-        if gridPos then
-            placedUnits[userId][instanceId].GridPos = gridPos
-        else
-            warn(GameConfig.LOG_PREFIX, "保存GridPos失败，使用默认值")
-            placedUnits[userId][instanceId].GridPos = {X = gridX, Y = gridZ}
-        end
-    end
+		-- 同时保存到placedUnits表中
+		if gridPos then
+			placedUnits[userId][instanceId].GridPos = gridPos
+		else
+			warn(GameConfig.LOG_PREFIX, "保存GridPos失败，使用默认值")
+			placedUnits[userId][instanceId].GridPos = {X = gridX, Y = gridZ}
+		end
+	end
 
-    -- 配置兵种物理（禁用与玩家的碰撞）
-    PhysicsManager.ConfigureUnitPhysics(model, "ally")  -- 玩家的兵种为友军
+	-- 配置兵种物理（禁用与玩家的碰撞）
+	PhysicsManager.ConfigureUnitPhysics(model, "ally")  -- 玩家的兵种为友军
 
-    -- V1.5.2新增: 播放show动画（展示动画）
-    PlayShowAnimation(model, unitInstance.UnitId)
+	-- V1.5.2新增: 播放show动画（展示动画）
+	PlayShowAnimation(model, unitInstance.UnitId)
 
-    -- 通知InventorySystem刷新客户端背包显示
-    InventorySystem.RefreshClientInventory(player)
+	-- 通知InventorySystem刷新客户端背包显示
+	InventorySystem.RefreshClientInventory(player)
 
-    -- 🔥修复持久化：保存放置数据到DataManager
-    -- V2.0重构: 使用GridWidth和GridDepth替代GridSize
-    local placedData = {
-        UnitId = unitInstance.UnitId,
-        Level = unitInstance.Level,
-        GridX = gridX,
-        GridZ = gridZ,
-        GridWidth = gridWidth,
-        GridDepth = gridDepth,
-        IsActivated = false,  -- 新放置的单位未激活
-        Health = unitInstance.Health or UnitConfig.CalculateHealth(unitInstance.UnitId, unitInstance.Level),
-        MaxHealth = unitInstance.MaxHealth or UnitConfig.CalculateHealth(unitInstance.UnitId, unitInstance.Level),
-    }
+	-- 🔥修复持久化：保存放置数据到DataManager
+	-- V2.0重构: 使用GridWidth和GridDepth替代GridSize
+	local placedData = {
+		UnitId = unitInstance.UnitId,
+		Level = unitInstance.Level,
+		GridX = gridX,
+		GridZ = gridZ,
+		GridWidth = gridWidth,
+		GridDepth = gridDepth,
+		IsActivated = false,  -- 新放置的单位未激活
+		Health = unitInstance.Health or UnitConfig.CalculateHealth(unitInstance.UnitId, unitInstance.Level),
+		MaxHealth = unitInstance.MaxHealth or UnitConfig.CalculateHealth(unitInstance.UnitId, unitInstance.Level),
+	}
 
-    local saveSuccess = DataManager.SavePlacedUnit(player, instanceId, placedData)
-    if saveSuccess then
-        -- 节流式保存整个玩家数据
-        DataManager.SavePlayerDataThrottled(player)
-        print(string.format(
-            "%s [PlacementSystem] 🔥 已保存放置数据: 玩家 %s, 兵种 %s, 位置 (%d,%d)",
-            GameConfig.LOG_PREFIX,
-            player.Name,
-            unitInstance.UnitId,
-            gridX,
-            gridZ
-        ))
-    else
-        warn(string.format(
-            "%s [PlacementSystem] 🔥 保存放置数据失败: 玩家 %s, 兵种 %s",
-            GameConfig.LOG_PREFIX,
-            player.Name,
-            instanceId
-        ))
-    end
+	local saveSuccess = DataManager.SavePlacedUnit(player, instanceId, placedData)
+	if saveSuccess then
+		-- 节流式保存整个玩家数据
+		DataManager.SavePlayerDataThrottled(player)
+		print(string.format(
+			"%s [PlacementSystem] 🔥 已保存放置数据: 玩家 %s, 兵种 %s, 位置 (%d,%d)",
+			GameConfig.LOG_PREFIX,
+			player.Name,
+			unitInstance.UnitId,
+			gridX,
+			gridZ
+			))
+	else
+		warn(string.format(
+			"%s [PlacementSystem] 🔥 保存放置数据失败: 玩家 %s, 兵种 %s",
+			GameConfig.LOG_PREFIX,
+			player.Name,
+			instanceId
+			))
+	end
 
-    return true, "放置成功"
+	return true, "放置成功"
 end
 
 --[[
@@ -686,54 +686,54 @@ end
 @return boolean, string
 ]]
 function PlacementSystem.RemovePlacedUnit(player, instanceId)
-    local userId = player.UserId
-    if not placedUnits[userId] or not placedUnits[userId][instanceId] then
-        return false, "兵种未放置"
-    end
+	local userId = player.UserId
+	if not placedUnits[userId] or not placedUnits[userId][instanceId] then
+		return false, "兵种未放置"
+	end
 
-    local placedData = placedUnits[userId][instanceId]
+	local placedData = placedUnits[userId][instanceId]
 
-    -- V2.0: 释放网格 (使用GridWidth和GridDepth,向后兼容GridSize)
-    local gridWidth = placedData.GridWidth or placedData.GridSize or 1
-    local gridDepth = placedData.GridDepth or placedData.GridSize or gridWidth
-    ReleaseGrid(player, placedData.GridX, placedData.GridZ, gridWidth, gridDepth)
+	-- V2.0: 释放网格 (使用GridWidth和GridDepth,向后兼容GridSize)
+	local gridWidth = placedData.GridWidth or placedData.GridSize or 1
+	local gridDepth = placedData.GridDepth or placedData.GridSize or gridWidth
+	ReleaseGrid(player, placedData.GridX, placedData.GridZ, gridWidth, gridDepth)
 
-    -- 移除模型
-    if placedData.Model and placedData.Model.Parent then
-        placedData.Model:Destroy()
-    end
+	-- 移除模型
+	if placedData.Model and placedData.Model.Parent then
+		placedData.Model:Destroy()
+	end
 
-    -- 更新InventorySystem状态
-    local unitInstance = InventorySystem.GetUnitByInstanceId(player, instanceId)
-    if unitInstance then
-        unitInstance.IsPlaced = false
-        unitInstance.PlacedPosition = nil
-    end
+	-- 更新InventorySystem状态
+	local unitInstance = InventorySystem.GetUnitByInstanceId(player, instanceId)
+	if unitInstance then
+		unitInstance.IsPlaced = false
+		unitInstance.PlacedPosition = nil
+	end
 
-    -- 移除放置数据
-    placedUnits[userId][instanceId] = nil
+	-- 移除放置数据
+	placedUnits[userId][instanceId] = nil
 
-    -- 🔥修复持久化：从DataManager移除放置数据
-    local removeSuccess = DataManager.RemovePlacedUnit(player, instanceId)
-    if removeSuccess then
-        -- 节流式保存整个玩家数据
-        DataManager.SavePlayerDataThrottled(player)
-        print(string.format(
-            "%s [PlacementSystem] 🔥 已移除放置数据: 玩家 %s, 兵种 %s",
-            GameConfig.LOG_PREFIX,
-            player.Name,
-            instanceId
-        ))
-    else
-        warn(string.format(
-            "%s [PlacementSystem] 🔥 移除放置数据失败: 玩家 %s, 兵种 %s",
-            GameConfig.LOG_PREFIX,
-            player.Name,
-            instanceId
-        ))
-    end
+	-- 🔥修复持久化：从DataManager移除放置数据
+	local removeSuccess = DataManager.RemovePlacedUnit(player, instanceId)
+	if removeSuccess then
+		-- 节流式保存整个玩家数据
+		DataManager.SavePlayerDataThrottled(player)
+		print(string.format(
+			"%s [PlacementSystem] 🔥 已移除放置数据: 玩家 %s, 兵种 %s",
+			GameConfig.LOG_PREFIX,
+			player.Name,
+			instanceId
+			))
+	else
+		warn(string.format(
+			"%s [PlacementSystem] 🔥 移除放置数据失败: 玩家 %s, 兵种 %s",
+			GameConfig.LOG_PREFIX,
+			player.Name,
+			instanceId
+			))
+	end
 
-    return true, "移除成功"
+	return true, "移除成功"
 end
 
 --[[
@@ -743,17 +743,17 @@ end
 @return boolean, string
 ]]
 function PlacementSystem.RemoveUnit(player, instanceId)
-    -- 1. 移除放置的兵种
-    local success, message = PlacementSystem.RemovePlacedUnit(player, instanceId)
-    if not success then
-        return false, message
-    end
+	-- 1. 移除放置的兵种
+	local success, message = PlacementSystem.RemovePlacedUnit(player, instanceId)
+	if not success then
+		return false, message
+	end
 
-    -- 2. 刷新客户端背包显示（兵种已经存在于InventorySystem中，只是IsPlaced变为false）
-    InventorySystem.RefreshClientInventory(player)
+	-- 2. 刷新客户端背包显示（兵种已经存在于InventorySystem中，只是IsPlaced变为false）
+	InventorySystem.RefreshClientInventory(player)
 
 
-    return true, "回收成功"
+	return true, "回收成功"
 end
 
 --[[
@@ -764,122 +764,122 @@ end
 @return boolean, string - 是否成功, 消息
 ]]
 function PlacementSystem.UpdateUnitPosition(player, instanceId, newPosition)
-    local userId = player.UserId
+	local userId = player.UserId
 
-    -- 1. 检查兵种是否已放置
-    if not placedUnits[userId] or not placedUnits[userId][instanceId] then
-        return false, "兵种未放置"
-    end
+	-- 1. 检查兵种是否已放置
+	if not placedUnits[userId] or not placedUnits[userId][instanceId] then
+		return false, "兵种未放置"
+	end
 
-    local placedData = placedUnits[userId][instanceId]
-    local unitInstance = InventorySystem.GetUnitByInstanceId(player, instanceId)
-    if not unitInstance then
-        return false, "兵种实例不存在"
-    end
+	local placedData = placedUnits[userId][instanceId]
+	local unitInstance = InventorySystem.GetUnitByInstanceId(player, instanceId)
+	if not unitInstance then
+		return false, "兵种实例不存在"
+	end
 
-    -- 2. 获取IdleFloor
-    local idleFloor = GetPlayerIdleFloor(player)
-    if not idleFloor then
-        return false, "找不到放置地板"
-    end
+	-- 2. 获取IdleFloor
+	local idleFloor = GetPlayerIdleFloor(player)
+	if not idleFloor then
+		return false, "找不到放置地板"
+	end
 
-    -- 3. 转换为网格坐标
-    local floorCenter = idleFloor.Position
-    local newGridX, newGridZ = PlacementConfig.WorldToGrid(newPosition, floorCenter)
+	-- 3. 转换为网格坐标
+	local floorCenter = idleFloor.Position
+	local newGridX, newGridZ = PlacementConfig.WorldToGrid(newPosition, floorCenter)
 
-    -- V2.0: 获取占地尺寸 (优先从placedData,然后从unitInstance,最后从UnitConfig)
-    local gridWidth = UnitConfig.GetGridWidth(unitInstance.UnitId)
-    local gridDepth = UnitConfig.GetGridDepth(unitInstance.UnitId)
-    placedData.GridWidth = gridWidth
-    placedData.GridDepth = gridDepth
+	-- V2.0: 获取占地尺寸 (优先从placedData,然后从unitInstance,最后从UnitConfig)
+	local gridWidth = UnitConfig.GetGridWidth(unitInstance.UnitId)
+	local gridDepth = UnitConfig.GetGridDepth(unitInstance.UnitId)
+	placedData.GridWidth = gridWidth
+	placedData.GridDepth = gridDepth
 
-    -- 4. 检查边界
-    if not PlacementConfig.IsGridInBounds(newGridX, newGridZ, gridWidth, gridDepth) then
-        return false, "超出放置范围"
-    end
+	-- 4. 检查边界
+	if not PlacementConfig.IsGridInBounds(newGridX, newGridZ, gridWidth, gridDepth) then
+		return false, "超出放置范围"
+	end
 
-    -- 5. 检查新位置是否与其他兵种冲突（排除自己）
-    if PlacementConfig.ENABLE_COLLISION_CHECK then
-        -- 先释放自己占据的网格,再检查冲突
-        local oldGridWidth = placedData.GridWidth or placedData.GridSize or 1
-        local oldGridDepth = placedData.GridDepth or placedData.GridSize or oldGridWidth
-        ReleaseGrid(player, placedData.GridX, placedData.GridZ, oldGridWidth, oldGridDepth)
+	-- 5. 检查新位置是否与其他兵种冲突（排除自己）
+	if PlacementConfig.ENABLE_COLLISION_CHECK then
+		-- 先释放自己占据的网格,再检查冲突
+		local oldGridWidth = placedData.GridWidth or placedData.GridSize or 1
+		local oldGridDepth = placedData.GridDepth or placedData.GridSize or oldGridWidth
+		ReleaseGrid(player, placedData.GridX, placedData.GridZ, oldGridWidth, oldGridDepth)
 
-        local isOccupied, occupyingId = IsGridOccupied(player, newGridX, newGridZ, gridWidth, gridDepth)
-        if isOccupied then
-            -- 恢复原来的网格占用
-            OccupyGrid(player, placedData.GridX, placedData.GridZ, oldGridWidth, oldGridDepth, instanceId)
-            return false, "位置已被占用"
-        end
-    else
-        -- 不检查碰撞时也需要释放旧网格
-        local oldGridWidth = placedData.GridWidth or placedData.GridSize or 1
-        local oldGridDepth = placedData.GridDepth or placedData.GridSize or oldGridWidth
-        ReleaseGrid(player, placedData.GridX, placedData.GridZ, oldGridWidth, oldGridDepth)
-    end
+		local isOccupied, occupyingId = IsGridOccupied(player, newGridX, newGridZ, gridWidth, gridDepth)
+		if isOccupied then
+			-- 恢复原来的网格占用
+			OccupyGrid(player, placedData.GridX, placedData.GridZ, oldGridWidth, oldGridDepth, instanceId)
+			return false, "位置已被占用"
+		end
+	else
+		-- 不检查碰撞时也需要释放旧网格
+		local oldGridWidth = placedData.GridWidth or placedData.GridSize or 1
+		local oldGridDepth = placedData.GridDepth or placedData.GridSize or oldGridWidth
+		ReleaseGrid(player, placedData.GridX, placedData.GridZ, oldGridWidth, oldGridDepth)
+	end
 
-    -- 7. 计算新的精确位置
-    local finalPosition = PlacementConfig.GridToWorld(newGridX, newGridZ, floorCenter, gridWidth, gridDepth)
+	-- 7. 计算新的精确位置
+	local finalPosition = PlacementConfig.GridToWorld(newGridX, newGridZ, floorCenter, gridWidth, gridDepth)
 
-    -- 8. 更新模型位置（V2.7修复：先放再调，使用包围盒底部对齐地板顶面）
-    if placedData.Model and placedData.Model.Parent then
-        -- V2.7修复：第一次PivotTo到新的XZ位置（使用finalPosition作为初值）
-        if placedData.Model.PrimaryPart then
-            placedData.Model:PivotTo(CFrame.new(finalPosition))
-        elseif placedData.Model:FindFirstChild("HumanoidRootPart") then
-            placedData.Model.HumanoidRootPart.CFrame = CFrame.new(finalPosition)
-        end
+	-- 8. 更新模型位置（V2.7修复：先放再调，使用包围盒底部对齐地板顶面）
+	if placedData.Model and placedData.Model.Parent then
+		-- V2.7修复：第一次PivotTo到新的XZ位置（使用finalPosition作为初值）
+		if placedData.Model.PrimaryPart then
+			placedData.Model:PivotTo(CFrame.new(finalPosition))
+		elseif placedData.Model:FindFirstChild("HumanoidRootPart") then
+			placedData.Model.HumanoidRootPart.CFrame = CFrame.new(finalPosition)
+		end
 
-        -- V2.7修复：获取放置后的包围盒，根据底部对齐地板顶面
-        local bboxCf, bboxSize = placedData.Model:GetBoundingBox()
-        local bottomY = bboxCf.Position.Y - bboxSize.Y / 2  -- 模型底部Y坐标
-        local floorTopY = finalPosition.Y - PlacementConfig.PLACEMENT_Y_OFFSET  -- 反推地板顶面
-        local padding = 0.05
-        local deltaY = (floorTopY + padding) - bottomY  -- 需要向上/下移动的距离
+		-- V2.7修复：获取放置后的包围盒，根据底部对齐地板顶面
+		local bboxCf, bboxSize = placedData.Model:GetBoundingBox()
+		local bottomY = bboxCf.Position.Y - bboxSize.Y / 2  -- 模型底部Y坐标
+		local floorTopY = finalPosition.Y - PlacementConfig.PLACEMENT_Y_OFFSET  -- 反推地板顶面
+		local padding = 0.05
+		local deltaY = (floorTopY + padding) - bottomY  -- 需要向上/下移动的距离
 
-        -- 二次PivotTo，将模型底部对齐地板顶面
-        placedData.Model:PivotTo(placedData.Model:GetPivot() * CFrame.new(0, deltaY, 0))
+		-- 二次PivotTo，将模型底部对齐地板顶面
+		placedData.Model:PivotTo(placedData.Model:GetPivot() * CFrame.new(0, deltaY, 0))
 
-        -- V2.7修复：更新finalPosition为校准后的实际Y坐标
-        finalPosition = Vector3.new(finalPosition.X, finalPosition.Y + deltaY, finalPosition.Z)
-    end
+		-- V2.7修复：更新finalPosition为校准后的实际Y坐标
+		finalPosition = Vector3.new(finalPosition.X, finalPosition.Y + deltaY, finalPosition.Z)
+	end
 
-    -- 9. 占据新位置的网格
-    OccupyGrid(player, newGridX, newGridZ, gridWidth, gridDepth, instanceId)
+	-- 9. 占据新位置的网格
+	OccupyGrid(player, newGridX, newGridZ, gridWidth, gridDepth, instanceId)
 
-    -- 10. 更新placedData (V2.0: 使用GridWidth和GridDepth)
-    placedData.Position = finalPosition
-    placedData.GridX = newGridX
-    placedData.GridZ = newGridZ
-    placedData.GridWidth = gridWidth
-    placedData.GridDepth = gridDepth
+	-- 10. 更新placedData (V2.0: 使用GridWidth和GridDepth)
+	placedData.Position = finalPosition
+	placedData.GridX = newGridX
+	placedData.GridZ = newGridZ
+	placedData.GridWidth = gridWidth
+	placedData.GridDepth = gridDepth
 
-    -- 11. 更新InventorySystem中的位置
-    unitInstance.PlacedPosition = finalPosition
+	-- 11. 更新InventorySystem中的位置
+	unitInstance.PlacedPosition = finalPosition
 
-    -- 🔥修复持久化：更新DataManager中的位置数据
-    local updateSuccess = DataManager.UpdatePlacedUnitPosition(player, instanceId, newGridX, newGridZ)
-    if updateSuccess then
-        -- 节流式保存整个玩家数据
-        DataManager.SavePlayerDataThrottled(player)
-        print(string.format(
-            "%s [PlacementSystem] 🔥 已更新位置数据: 玩家 %s, 兵种 %s, 新位置 (%d,%d)",
-            GameConfig.LOG_PREFIX,
-            player.Name,
-            instanceId,
-            newGridX,
-            newGridZ
-        ))
-    else
-        warn(string.format(
-            "%s [PlacementSystem] 🔥 更新位置数据失败: 玩家 %s, 兵种 %s",
-            GameConfig.LOG_PREFIX,
-            player.Name,
-            instanceId
-        ))
-    end
+	-- 🔥修复持久化：更新DataManager中的位置数据
+	local updateSuccess = DataManager.UpdatePlacedUnitPosition(player, instanceId, newGridX, newGridZ)
+	if updateSuccess then
+		-- 节流式保存整个玩家数据
+		DataManager.SavePlayerDataThrottled(player)
+		print(string.format(
+			"%s [PlacementSystem] 🔥 已更新位置数据: 玩家 %s, 兵种 %s, 新位置 (%d,%d)",
+			GameConfig.LOG_PREFIX,
+			player.Name,
+			instanceId,
+			newGridX,
+			newGridZ
+			))
+	else
+		warn(string.format(
+			"%s [PlacementSystem] 🔥 更新位置数据失败: 玩家 %s, 兵种 %s",
+			GameConfig.LOG_PREFIX,
+			player.Name,
+			instanceId
+			))
+	end
 
-    return true, "位置更新成功"
+	return true, "位置更新成功"
 end
 
 --[[
@@ -888,17 +888,17 @@ end
 @return table - 已放置兵种数据数组
 ]]
 function PlacementSystem.GetPlacedUnits(player)
-    local userId = player.UserId
-    if not placedUnits[userId] then
-        return {}
-    end
+	local userId = player.UserId
+	if not placedUnits[userId] then
+		return {}
+	end
 
-    local result = {}
-    for _, placedData in pairs(placedUnits[userId]) do
-        table.insert(result, placedData)
-    end
+	local result = {}
+	for _, placedData in pairs(placedUnits[userId]) do
+		table.insert(result, placedData)
+	end
 
-    return result
+	return result
 end
 
 --[[
@@ -907,18 +907,18 @@ end
 @return number - 清除的数量
 ]]
 function PlacementSystem.ClearAllPlacedUnits(player)
-    local userId = player.UserId
-    if not placedUnits[userId] then
-        return 0
-    end
+	local userId = player.UserId
+	if not placedUnits[userId] then
+		return 0
+	end
 
-    local count = 0
-    for instanceId, _ in pairs(placedUnits[userId]) do
-        PlacementSystem.RemovePlacedUnit(player, instanceId)
-        count = count + 1
-    end
+	local count = 0
+	for instanceId, _ in pairs(placedUnits[userId]) do
+		PlacementSystem.RemovePlacedUnit(player, instanceId)
+		count = count + 1
+	end
 
-    return count
+	return count
 end
 
 --[[
@@ -926,68 +926,68 @@ end
 @param player Player
 ]]
 function PlacementSystem.OnPlayerLeaving(player)
-    local userId = player.UserId
+	local userId = player.UserId
 
-    -- 🔥修复持久化：在清理模型前先同步所有数据到DataManager
-    if placedUnits[userId] then
-        print(string.format(
-            "%s [PlacementSystem] 🔥 玩家 %s 离开，同步 %d 个放置单位的数据",
-            GameConfig.LOG_PREFIX,
-            player.Name,
-            GetTableCount(placedUnits[userId])
-        ))
+	-- 🔥修复持久化：在清理模型前先同步所有数据到DataManager
+	if placedUnits[userId] then
+		print(string.format(
+			"%s [PlacementSystem] 🔥 玩家 %s 离开，同步 %d 个放置单位的数据",
+			GameConfig.LOG_PREFIX,
+			player.Name,
+			GetTableCount(placedUnits[userId])
+			))
 
-        -- 🔥关键修复：同步内存中的放置数据到DataManager
-        local syncSuccess = DataManager.SyncPlacedUnits(player, placedUnits[userId])
-        if syncSuccess then
-            print(string.format(
-                "%s [PlacementSystem] ✅ 玩家 %s 的放置数据已同步到DataManager",
-                GameConfig.LOG_PREFIX,
-                player.Name
-            ))
-        else
-            warn(string.format(
-                "%s [PlacementSystem] ❌ 玩家 %s 的放置数据同步失败",
-                GameConfig.LOG_PREFIX,
-                player.Name
-            ))
-        end
+		-- 🔥关键修复：同步内存中的放置数据到DataManager
+		local syncSuccess = DataManager.SyncPlacedUnits(player, placedUnits[userId])
+		if syncSuccess then
+			print(string.format(
+				"%s [PlacementSystem] ✅ 玩家 %s 的放置数据已同步到DataManager",
+				GameConfig.LOG_PREFIX,
+				player.Name
+				))
+		else
+			warn(string.format(
+				"%s [PlacementSystem] ❌ 玩家 %s 的放置数据同步失败",
+				GameConfig.LOG_PREFIX,
+				player.Name
+				))
+		end
 
-        -- 强制保存一次玩家数据（包含所有已放置的单位）
-        local saveSuccess, saveError = pcall(function()
-            DataManager.SavePlayerData(player)
-        end)
+		-- 强制保存一次玩家数据（包含所有已放置的单位）
+		local saveSuccess, saveError = pcall(function()
+			DataManager.SavePlayerData(player)
+		end)
 
-        if not saveSuccess then
-            warn(string.format(
-                "%s [PlacementSystem] 🔥 玩家 %s 离开时保存数据失败: %s",
-                GameConfig.LOG_PREFIX,
-                player.Name,
-                tostring(saveError)
-            ))
-        end
-    end
+		if not saveSuccess then
+			warn(string.format(
+				"%s [PlacementSystem] 🔥 玩家 %s 离开时保存数据失败: %s",
+				GameConfig.LOG_PREFIX,
+				player.Name,
+				tostring(saveError)
+				))
+		end
+	end
 
-    -- 清除所有已放置的兵种模型（注意：不再清除DataManager中的数据）
-    if placedUnits[userId] then
-        for instanceId, placedData in pairs(placedUnits[userId]) do
-            if placedData.Model and placedData.Model.Parent then
-                placedData.Model:Destroy()
-            end
-        end
-        placedUnits[userId] = nil  -- 只清除内存中的引用
-    end
+	-- 清除所有已放置的兵种模型（注意：不再清除DataManager中的数据）
+	if placedUnits[userId] then
+		for instanceId, placedData in pairs(placedUnits[userId]) do
+			if placedData.Model and placedData.Model.Parent then
+				placedData.Model:Destroy()
+			end
+		end
+		placedUnits[userId] = nil  -- 只清除内存中的引用
+	end
 
-    -- 清除网格占用数据
-    if gridOccupancy[userId] then
-        gridOccupancy[userId] = nil
-    end
+	-- 清除网格占用数据
+	if gridOccupancy[userId] then
+		gridOccupancy[userId] = nil
+	end
 
-    print(string.format(
-        "%s [PlacementSystem] 🔥 玩家 %s 的放置数据已清理（保留持久化数据）",
-        GameConfig.LOG_PREFIX,
-        player.Name
-    ))
+	print(string.format(
+		"%s [PlacementSystem] 🔥 玩家 %s 的放置数据已清理（保留持久化数据）",
+		GameConfig.LOG_PREFIX,
+		player.Name
+		))
 end
 
 -- ==================== 🔥修复持久化：放置单位恢复功能 ====================
@@ -998,240 +998,240 @@ end
 @return boolean, string - 是否成功, 恢复的单位数量或错误信息
 ]]
 function PlacementSystem.RestorePlacedUnits(player)
-    local userId = player.UserId
+	local userId = player.UserId
 
-    -- 1. 获取玩家的IdleFloor
-    local idleFloor = GetPlayerIdleFloor(player)
-    if not idleFloor then
-        return false, "找不到玩家基地的IdleFloor"
-    end
+	-- 1. 获取玩家的IdleFloor
+	local idleFloor = GetPlayerIdleFloor(player)
+	if not idleFloor then
+		return false, "找不到玩家基地的IdleFloor"
+	end
 
-    -- 2. 从DataManager获取已保存的放置单位数据
-    local savedPlacedUnits = DataManager.GetPlacedUnits(player)
-    if not savedPlacedUnits or next(savedPlacedUnits) == nil then
-        print(string.format(
-            "%s [PlacementSystem] 🔥 玩家 %s 没有需要恢复的放置单位",
-            GameConfig.LOG_PREFIX,
-            player.Name
-        ))
-        return true, "0"
-    end
+	-- 2. 从DataManager获取已保存的放置单位数据
+	local savedPlacedUnits = DataManager.GetPlacedUnits(player)
+	if not savedPlacedUnits or next(savedPlacedUnits) == nil then
+		print(string.format(
+			"%s [PlacementSystem] 🔥 玩家 %s 没有需要恢复的放置单位",
+			GameConfig.LOG_PREFIX,
+			player.Name
+			))
+		return true, "0"
+	end
 
-    print(string.format(
-        "%s [PlacementSystem] 🔥 开始恢复玩家 %s 的 %d 个放置单位...",
-        GameConfig.LOG_PREFIX,
-        player.Name,
-        GetTableCount(savedPlacedUnits)
-    ))
+	print(string.format(
+		"%s [PlacementSystem] 🔥 开始恢复玩家 %s 的 %d 个放置单位...",
+		GameConfig.LOG_PREFIX,
+		player.Name,
+		GetTableCount(savedPlacedUnits)
+		))
 
-    local floorCenter = idleFloor.Position
-    local restoredCount = 0
-    local errorCount = 0
+	local floorCenter = idleFloor.Position
+	local restoredCount = 0
+	local errorCount = 0
 
-    -- 3. 初始化玩家的数据结构
-    if not placedUnits[userId] then
-        placedUnits[userId] = {}
-    end
-    if not gridOccupancy[userId] then
-        gridOccupancy[userId] = {}
-    end
+	-- 3. 初始化玩家的数据结构
+	if not placedUnits[userId] then
+		placedUnits[userId] = {}
+	end
+	if not gridOccupancy[userId] then
+		gridOccupancy[userId] = {}
+	end
 
-    -- 4. 遍历保存的放置单位数据，逐一恢复
-    for instanceIdRaw, savedData in pairs(savedPlacedUnits) do
-        -- 修复：确保instanceId是字符串类型
-        local instanceId = tostring(instanceIdRaw)
+	-- 4. 遍历保存的放置单位数据，逐一恢复
+	for instanceIdRaw, savedData in pairs(savedPlacedUnits) do
+		-- 修复：确保instanceId是字符串类型
+		local instanceId = tostring(instanceIdRaw)
 
-        local success, error = pcall(function()
-            -- 4.1 验证InventorySystem中是否仍有对应的兵种实例
-            local unitInstance = InventorySystem.GetUnitByInstanceId(player, instanceId)
-            if not unitInstance then
-                warn(string.format(
-                    "%s [PlacementSystem] 🔥 恢复失败：背包中找不到实例 %s，从放置数据中移除",
-                    GameConfig.LOG_PREFIX,
-                    instanceId
-                ))
-                -- 从DataManager中删除无效的放置数据
-                DataManager.RemovePlacedUnit(player, instanceId)
-                return false
-            end
+		local success, error = pcall(function()
+			-- 4.1 验证InventorySystem中是否仍有对应的兵种实例
+			local unitInstance = InventorySystem.GetUnitByInstanceId(player, instanceId)
+			if not unitInstance then
+				warn(string.format(
+					"%s [PlacementSystem] 🔥 恢复失败：背包中找不到实例 %s，从放置数据中移除",
+					GameConfig.LOG_PREFIX,
+					instanceId
+					))
+				-- 从DataManager中删除无效的放置数据
+				DataManager.RemovePlacedUnit(player, instanceId)
+				return false
+			end
 
-            -- 4.2 验证UnitId是否匹配
-            if unitInstance.UnitId ~= savedData.UnitId then
-                warn(string.format(
-                    "%s [PlacementSystem] 🔥 恢复失败：实例 %s UnitId不匹配 (%s != %s)",
-                    GameConfig.LOG_PREFIX,
-                    instanceId,
-                    unitInstance.UnitId,
-                    savedData.UnitId
-                ))
-                return false
-            end
+			-- 4.2 验证UnitId是否匹配
+			if unitInstance.UnitId ~= savedData.UnitId then
+				warn(string.format(
+					"%s [PlacementSystem] 🔥 恢复失败：实例 %s UnitId不匹配 (%s != %s)",
+					GameConfig.LOG_PREFIX,
+					instanceId,
+					unitInstance.UnitId,
+					savedData.UnitId
+					))
+				return false
+			end
 
-            -- 占地尺寸：优先使用保存的宽/深，向后兼容GridSize/配置表
-            local gridWidth = UnitConfig.GetGridWidth(unitInstance.UnitId)
-            local gridDepth = UnitConfig.GetGridDepth(unitInstance.UnitId)
-            -- 回写实例占地，保持与当前配置一致
-            unitInstance.GridWidth = gridWidth
-            unitInstance.GridDepth = gridDepth
+			-- 占地尺寸：优先使用保存的宽/深，向后兼容GridSize/配置表
+			local gridWidth = UnitConfig.GetGridWidth(unitInstance.UnitId)
+			local gridDepth = UnitConfig.GetGridDepth(unitInstance.UnitId)
+			-- 回写实例占地，保持与当前配置一致
+			unitInstance.GridWidth = gridWidth
+			unitInstance.GridDepth = gridDepth
 
-            -- 4.3 验证网格位置是否在边界内
-            if not PlacementConfig.IsGridInBounds(savedData.GridX, savedData.GridZ, gridWidth, gridDepth) then
-                warn(string.format(
-                    "%s [PlacementSystem] 🔥 恢复失败：实例 %s 网格位置 (%d,%d) 超出边界",
-                    GameConfig.LOG_PREFIX,
-                    instanceId,
-                    savedData.GridX,
-                    savedData.GridZ
-                ))
-                return false
-            end
+			-- 4.3 验证网格位置是否在边界内
+			if not PlacementConfig.IsGridInBounds(savedData.GridX, savedData.GridZ, gridWidth, gridDepth) then
+				warn(string.format(
+					"%s [PlacementSystem] 🔥 恢复失败：实例 %s 网格位置 (%d,%d) 超出边界",
+					GameConfig.LOG_PREFIX,
+					instanceId,
+					savedData.GridX,
+					savedData.GridZ
+					))
+				return false
+			end
 
-            -- 4.4 检查网格位置是否被占用（跳过自己占用的情况）
-            local gridOccupied = false
-            for x = savedData.GridX, savedData.GridX + gridWidth - 1 do
-                for z = savedData.GridZ, savedData.GridZ + gridDepth - 1 do
-                    local gridKey = GetGridKey(x, z)
-                    local occupiedBy = gridOccupancy[userId][gridKey]
-                    if occupiedBy and occupiedBy ~= instanceId then
-                        gridOccupied = true
-                        break
-                    end
-                end
-                if gridOccupied then
-                    break
-                end
-            end
+			-- 4.4 检查网格位置是否被占用（跳过自己占用的情况）
+			local gridOccupied = false
+			for x = savedData.GridX, savedData.GridX + gridWidth - 1 do
+				for z = savedData.GridZ, savedData.GridZ + gridDepth - 1 do
+					local gridKey = GetGridKey(x, z)
+					local occupiedBy = gridOccupancy[userId][gridKey]
+					if occupiedBy and occupiedBy ~= instanceId then
+						gridOccupied = true
+						break
+					end
+				end
+				if gridOccupied then
+					break
+				end
+			end
 
-            if gridOccupied then
-                warn(string.format(
-                    "%s [PlacementSystem] 🔥 恢复失败：实例 %s 网格位置 (%d,%d) 已被占用",
-                    GameConfig.LOG_PREFIX,
-                    instanceId,
-                    savedData.GridX,
-                    savedData.GridZ
-                ))
-                return false
-            end
+			if gridOccupied then
+				warn(string.format(
+					"%s [PlacementSystem] 🔥 恢复失败：实例 %s 网格位置 (%d,%d) 已被占用",
+					GameConfig.LOG_PREFIX,
+					instanceId,
+					savedData.GridX,
+					savedData.GridZ
+					))
+				return false
+			end
 
-            -- 4.5 计算世界坐标位置
-            local worldPosition = PlacementConfig.GridToWorld(
-                savedData.GridX,
-                savedData.GridZ,
-                floorCenter,
-                gridWidth,
-                gridDepth
-            )
+			-- 4.5 计算世界坐标位置
+			local worldPosition = PlacementConfig.GridToWorld(
+				savedData.GridX,
+				savedData.GridZ,
+				floorCenter,
+				gridWidth,
+				gridDepth
+			)
 
-            -- 4.6 创建兵种模型
-            local model = CreateUnitModel(
-                savedData.UnitId,
-                worldPosition,
-                instanceId,
-                savedData.Level or 1,
-                gridWidth,
-                gridDepth
-            )
+			-- 4.6 创建兵种模型
+			local model = CreateUnitModel(
+				savedData.UnitId,
+				worldPosition,
+				instanceId,
+				savedData.Level or 1,
+				gridWidth,
+				gridDepth
+			)
 
-            if not model then
-                warn(string.format(
-                    "%s [PlacementSystem] 🔥 恢复失败：实例 %s 创建模型失败",
-                    GameConfig.LOG_PREFIX,
-                    instanceId
-                ))
-                return false
-            end
+			if not model then
+				warn(string.format(
+					"%s [PlacementSystem] 🔥 恢复失败：实例 %s 创建模型失败",
+					GameConfig.LOG_PREFIX,
+					instanceId
+					))
+				return false
+			end
 
-            -- V2.7修复：获取模型实际放置后的位置（Y已被CreateUnitModel校准）
-            local actualPosition = worldPosition
-            if model.PrimaryPart then
-                actualPosition = model:GetPivot().Position
-            elseif model:FindFirstChild("HumanoidRootPart") then
-                actualPosition = model.HumanoidRootPart.Position
-            end
+			-- V2.7修复：获取模型实际放置后的位置（Y已被CreateUnitModel校准）
+			local actualPosition = worldPosition
+			if model.PrimaryPart then
+				actualPosition = model:GetPivot().Position
+			elseif model:FindFirstChild("HumanoidRootPart") then
+				actualPosition = model.HumanoidRootPart.Position
+			end
 
-            -- 4.7 更新InventorySystem中的兵种状态
-            unitInstance.IsPlaced = true
-            unitInstance.PlacedPosition = actualPosition
-            -- 如果有保存的生命值，恢复它
-            if savedData.Health then
-                unitInstance.Health = savedData.Health
-            end
-            if savedData.MaxHealth then
-                unitInstance.MaxHealth = savedData.MaxHealth
-            end
+			-- 4.7 更新InventorySystem中的兵种状态
+			unitInstance.IsPlaced = true
+			unitInstance.PlacedPosition = actualPosition
+			-- 如果有保存的生命值，恢复它
+			if savedData.Health then
+				unitInstance.Health = savedData.Health
+			end
+			if savedData.MaxHealth then
+				unitInstance.MaxHealth = savedData.MaxHealth
+			end
 
-            -- 4.8 占据网格
-            OccupyGrid(player, savedData.GridX, savedData.GridZ, gridWidth, gridDepth, instanceId)
+			-- 4.8 占据网格
+			OccupyGrid(player, savedData.GridX, savedData.GridZ, gridWidth, gridDepth, instanceId)
 
-            -- 4.9 保存放置数据到内存
-            placedUnits[userId][instanceId] = {
-                InstanceId = instanceId,
-                UnitId = savedData.UnitId,
-                Position = actualPosition,  -- V2.7修复：使用校准后的实际位置
-                GridX = savedData.GridX,
-                GridZ = savedData.GridZ,
-                GridSize = savedData.GridSize,
-                GridWidth = gridWidth,
-                GridDepth = gridDepth,
-                Model = model,
-                PlacedTime = os.time(),
-            }
+			-- 4.9 保存放置数据到内存
+			placedUnits[userId][instanceId] = {
+				InstanceId = instanceId,
+				UnitId = savedData.UnitId,
+				Position = actualPosition,  -- V2.7修复：使用校准后的实际位置
+				GridX = savedData.GridX,
+				GridZ = savedData.GridZ,
+				GridSize = savedData.GridSize,
+				GridWidth = gridWidth,
+				GridDepth = gridDepth,
+				Model = model,
+				PlacedTime = os.time(),
+			}
 
-            -- 4.9.5 保存GridPos到模型（用于战役系统）
-            local gridModule2 = ServerScriptService:WaitForChild("Systems"):FindFirstChild("GridPositionSystem")
-            if gridModule2 then
-                local GridPositionSystem = require(gridModule2 :: ModuleScript)
-                local gridPos = GridPositionSystem.SaveUnitGridPosition(model, idleFloor)
-                if gridPos then
-                    placedUnits[userId][instanceId].GridPos = gridPos
-                else
-                    placedUnits[userId][instanceId].GridPos = {X = savedData.GridX, Y = savedData.GridZ}
-                end
-            end
+			-- 4.9.5 保存GridPos到模型（用于战役系统）
+			local gridModule2 = ServerScriptService:WaitForChild("Systems"):FindFirstChild("GridPositionSystem")
+			if gridModule2 then
+				local GridPositionSystem = require(gridModule2 :: ModuleScript)
+				local gridPos = GridPositionSystem.SaveUnitGridPosition(model, idleFloor)
+				if gridPos then
+					placedUnits[userId][instanceId].GridPos = gridPos
+				else
+					placedUnits[userId][instanceId].GridPos = {X = savedData.GridX, Y = savedData.GridZ}
+				end
+			end
 
-            -- 4.10 配置兵种物理
-            PhysicsManager.ConfigureUnitPhysics(model, "ally")
+			-- 4.10 配置兵种物理
+			PhysicsManager.ConfigureUnitPhysics(model, "ally")
 
-            -- 4.11 播放展示动画
-            PlayShowAnimation(model, savedData.UnitId)
+			-- 4.11 播放展示动画
+			PlayShowAnimation(model, savedData.UnitId)
 
-            print(string.format(
-                "%s [PlacementSystem] 🔥 已恢复单位: %s (%s) 位置 (%d,%d)",
-                GameConfig.LOG_PREFIX,
-                instanceId,
-                savedData.UnitId,
-                savedData.GridX,
-                savedData.GridZ
-            ))
+			print(string.format(
+				"%s [PlacementSystem] 🔥 已恢复单位: %s (%s) 位置 (%d,%d)",
+				GameConfig.LOG_PREFIX,
+				instanceId,
+				savedData.UnitId,
+				savedData.GridX,
+				savedData.GridZ
+				))
 
-            return true
-        end)
+			return true
+		end)
 
-        if success and error ~= false then
-            restoredCount = restoredCount + 1
-        else
-            errorCount = errorCount + 1
-        end
-    end
+		if success and error ~= false then
+			restoredCount = restoredCount + 1
+		else
+			errorCount = errorCount + 1
+		end
+	end
 
-    -- 5. 刷新客户端背包显示
-    InventorySystem.RefreshClientInventory(player)
+	-- 5. 刷新客户端背包显示
+	InventorySystem.RefreshClientInventory(player)
 
-    -- 6. 返回恢复结果
-    local message = string.format("成功恢复 %d 个，失败 %d 个", restoredCount, errorCount)
-    print(string.format(
-        "%s [PlacementSystem] 🔥 玩家 %s 放置单位恢复完成：%s",
-        GameConfig.LOG_PREFIX,
-        player.Name,
-        message
-    ))
+	-- 6. 返回恢复结果
+	local message = string.format("成功恢复 %d 个，失败 %d 个", restoredCount, errorCount)
+	print(string.format(
+		"%s [PlacementSystem] 🔥 玩家 %s 放置单位恢复完成：%s",
+		GameConfig.LOG_PREFIX,
+		player.Name,
+		message
+		))
 
-    -- 如果有失败的恢复，保存一次数据以清理无效数据
-    if errorCount > 0 then
-        DataManager.SavePlayerDataThrottled(player, true)  -- 强制立即保存
-    end
+	-- 如果有失败的恢复，保存一次数据以清理无效数据
+	if errorCount > 0 then
+		DataManager.SavePlayerDataThrottled(player, true)  -- 强制立即保存
+	end
 
-    return true, message
+	return true, message
 end
 
 -- ==================== 远程事件处理 ====================
@@ -1276,32 +1276,32 @@ local function OnStartPlacement(player, instanceId)
 		return
 	end
 
-    -- 验证兵种实例
-    local unitInstance = InventorySystem.GetUnitByInstanceId(player, instanceId)
-    if not unitInstance then
-        -- 通知客户端失败
-        if InitializeEvents() then
-            local responseEvent = PlacementEvents:FindFirstChild("PlacementResponse")
-            if responseEvent then
-                responseEvent:FireClient(player, false, "兵种实例不存在")
-            end
-        end
-        return
-    end
+	-- 验证兵种实例
+	local unitInstance = InventorySystem.GetUnitByInstanceId(player, instanceId)
+	if not unitInstance then
+		-- 通知客户端失败
+		if InitializeEvents() then
+			local responseEvent = PlacementEvents:FindFirstChild("PlacementResponse")
+			if responseEvent then
+				responseEvent:FireClient(player, false, "兵种实例不存在")
+			end
+		end
+		return
+	end
 
-    -- 返回兵种配置信息给客户端
-    local unitConfig = UnitConfig.GetUnitById(unitInstance.UnitId)
-    if InitializeEvents() then
-        local responseEvent = PlacementEvents:FindFirstChild("PlacementResponse")
-        if responseEvent then
-            responseEvent:FireClient(player, true, "可以开始放置", {
-                UnitId = unitInstance.UnitId,
-                InstanceId = instanceId,
-                GridSize = unitInstance.GridSize,
-                ModelPath = unitConfig.ModelPath,
-            })
-        end
-    end
+	-- 返回兵种配置信息给客户端
+	local unitConfig = UnitConfig.GetUnitById(unitInstance.UnitId)
+	if InitializeEvents() then
+		local responseEvent = PlacementEvents:FindFirstChild("PlacementResponse")
+		if responseEvent then
+			responseEvent:FireClient(player, true, "可以开始放置", {
+				UnitId = unitInstance.UnitId,
+				InstanceId = instanceId,
+				GridSize = unitInstance.GridSize,
+				ModelPath = unitConfig.ModelPath,
+			})
+		end
+	end
 end
 
 --[[
@@ -1322,15 +1322,15 @@ local function OnConfirmPlacement(player, instanceId, position)
 		return
 	end
 
-    local success, message = PlacementSystem.PlaceUnit(player, instanceId, position)
+	local success, message = PlacementSystem.PlaceUnit(player, instanceId, position)
 
-    -- 通知客户端结果
-    if InitializeEvents() then
-        local responseEvent = PlacementEvents:FindFirstChild("PlacementResponse")
-        if responseEvent then
-            responseEvent:FireClient(player, success, message)
-        end
-    end
+	-- 通知客户端结果
+	if InitializeEvents() then
+		local responseEvent = PlacementEvents:FindFirstChild("PlacementResponse")
+		if responseEvent then
+			responseEvent:FireClient(player, success, message)
+		end
+	end
 end
 
 --[[
@@ -1339,7 +1339,7 @@ end
 @param instanceId string
 ]]
 local function OnCancelPlacement(player, instanceId)
-    -- 客户端取消，不需要特殊处理
+	-- 客户端取消，不需要特殊处理
 end
 
 --[[
@@ -1360,16 +1360,16 @@ local function OnRemoveUnit(player, instanceId)
 	end
 
 
-    -- 调用RemoveUnit移除兵种
-    local success, message = PlacementSystem.RemoveUnit(player, instanceId)
+	-- 调用RemoveUnit移除兵种
+	local success, message = PlacementSystem.RemoveUnit(player, instanceId)
 
-    -- 通知客户端结果
-    if InitializeEvents() then
-        local responseEvent = PlacementEvents:FindFirstChild("RemoveResponse")
-        if responseEvent then
-            responseEvent:FireClient(player, success, message, instanceId)
-        end
-    end
+	-- 通知客户端结果
+	if InitializeEvents() then
+		local responseEvent = PlacementEvents:FindFirstChild("RemoveResponse")
+		if responseEvent then
+			responseEvent:FireClient(player, success, message, instanceId)
+		end
+	end
 end
 
 --[[
@@ -1391,60 +1391,60 @@ local function OnUpdatePosition(player, instanceId, newPosition)
 	end
 
 
-    -- 调用UpdateUnitPosition更新位置
-    local success, message = PlacementSystem.UpdateUnitPosition(player, instanceId, newPosition)
+	-- 调用UpdateUnitPosition更新位置
+	local success, message = PlacementSystem.UpdateUnitPosition(player, instanceId, newPosition)
 
-    -- 通知客户端结果
-    if InitializeEvents() then
-        local responseEvent = PlacementEvents:FindFirstChild("UpdateResponse")
-        if responseEvent then
-            responseEvent:FireClient(player, success, message, instanceId)
-        end
-    end
+	-- 通知客户端结果
+	if InitializeEvents() then
+		local responseEvent = PlacementEvents:FindFirstChild("UpdateResponse")
+		if responseEvent then
+			responseEvent:FireClient(player, success, message, instanceId)
+		end
+	end
 end
 
 --[[
 初始化放置系统
 ]]
 function PlacementSystem.Initialize()
-    -- 初始化事件
-    if not InitializeEvents() then
-        warn(GameConfig.LOG_PREFIX, "PlacementEvents未找到，放置系统将不可用!")
-        return false
-    end
+	-- 初始化事件
+	if not InitializeEvents() then
+		warn(GameConfig.LOG_PREFIX, "PlacementEvents未找到，放置系统将不可用!")
+		return false
+	end
 
-    -- 连接远程事件
-    local startEvent = PlacementEvents:FindFirstChild("StartPlacement")
-    if startEvent then
-        startEvent.OnServerEvent:Connect(OnStartPlacement)
-    end
+	-- 连接远程事件
+	local startEvent = PlacementEvents:FindFirstChild("StartPlacement")
+	if startEvent then
+		startEvent.OnServerEvent:Connect(OnStartPlacement)
+	end
 
-    local confirmEvent = PlacementEvents:FindFirstChild("ConfirmPlacement")
-    if confirmEvent then
-        confirmEvent.OnServerEvent:Connect(OnConfirmPlacement)
-    end
+	local confirmEvent = PlacementEvents:FindFirstChild("ConfirmPlacement")
+	if confirmEvent then
+		confirmEvent.OnServerEvent:Connect(OnConfirmPlacement)
+	end
 
-    local cancelEvent = PlacementEvents:FindFirstChild("CancelPlacement")
-    if cancelEvent then
-        cancelEvent.OnServerEvent:Connect(OnCancelPlacement)
-    end
+	local cancelEvent = PlacementEvents:FindFirstChild("CancelPlacement")
+	if cancelEvent then
+		cancelEvent.OnServerEvent:Connect(OnCancelPlacement)
+	end
 
-    -- V1.3: 连接回收事件
-    local removeEvent = PlacementEvents:FindFirstChild("RemoveUnit")
-    if removeEvent then
-        removeEvent.OnServerEvent:Connect(OnRemoveUnit)
-    end
+	-- V1.3: 连接回收事件
+	local removeEvent = PlacementEvents:FindFirstChild("RemoveUnit")
+	if removeEvent then
+		removeEvent.OnServerEvent:Connect(OnRemoveUnit)
+	end
 
-    -- V1.4.1: 连接位置更新事件
-    local updateEvent = PlacementEvents:FindFirstChild("UpdatePosition")
-    if updateEvent then
-        updateEvent.OnServerEvent:Connect(OnUpdatePosition)
-    end
+	-- V1.4.1: 连接位置更新事件
+	local updateEvent = PlacementEvents:FindFirstChild("UpdatePosition")
+	if updateEvent then
+		updateEvent.OnServerEvent:Connect(OnUpdatePosition)
+	end
 
-    -- 连接玩家离开事件
-    game.Players.PlayerRemoving:Connect(PlacementSystem.OnPlayerLeaving)
+	-- 连接玩家离开事件
+	game.Players.PlayerRemoving:Connect(PlacementSystem.OnPlayerLeaving)
 
-    return true
+	return true
 end
 
 --[[
