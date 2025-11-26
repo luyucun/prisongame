@@ -125,6 +125,9 @@ function PlacementController.Initialize()
 		placementState.idleFloor = FindPlayerIdleFloor()
 		if not placementState.idleFloor then
 			warn("[PlacementController] 找不到IdleFloor!")
+		else
+			-- V2.0.4: 设置GridHelper的IdleFloor引用，用于精确计算Grid的Y坐标
+			GridHelper.SetIdleFloor(placementState.idleFloor)
 		end
 	end)
 
@@ -279,6 +282,9 @@ function PlacementController.StartPlacement(instanceId, unitId, gridWidth, gridD
 		warn("[PlacementController] IdleFloor不存在，无法放置")
 		return
 	end
+
+	-- V2.0.4: 更新GridHelper的IdleFloor引用
+	GridHelper.SetIdleFloor(placementState.idleFloor)
 
 	-- V2.0: 更新状态
 	placementState.isPlacing = true
@@ -462,7 +468,7 @@ local function IsPositionValid(gridX, gridZ)
 end
 
 --[[
-更新预览模型位置 (V2.0重构: 支持矩形占地)
+更新预览模型位置 (V2.0.4修复: WorldToGrid传入占地尺寸)
 @param worldPos Vector3 - 原始世界坐标
 ]]
 function UpdatePreviewPosition(worldPos)
@@ -472,8 +478,8 @@ function UpdatePreviewPosition(worldPos)
 
 	local floorCenter = placementState.idleFloor.Position
 
-	-- 转换为网格索引
-	local gridX, gridZ = PlacementHelper.WorldToGrid(worldPos, floorCenter)
+	-- V2.0.4修复: WorldToGrid需要传入占地尺寸，才能正确计算左下角格子索引
+	local gridX, gridZ = PlacementHelper.WorldToGrid(worldPos, floorCenter, placementState.currentGridWidth, placementState.currentGridDepth)
 
 	-- 检查是否需要更新 (只有网格变化时才更新，实现吸附效果)
 	if gridX == placementState.lastGridX and gridZ == placementState.lastGridZ then

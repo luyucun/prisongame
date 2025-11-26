@@ -47,26 +47,33 @@ if not idleFloorEnemy then
 	return
 end
 
--- 辅助函数：计算GridPos
-local function WorldToGrid(idleFloor, worldPos)
+-- 辅助函数：计算GridPos (V2.0.4修复: 支持占地尺寸)
+local function WorldToGrid(idleFloor, worldPos, gridWidth, gridDepth)
 	local floorSize = idleFloor.Size
 	local floorPos = idleFloor.Position
 
-	local gridWidth = 14
-	local gridHeight = 14
+	local gridCount = 14
 	local cellSize = 4
+
+	-- 处理默认参数
+	gridWidth = gridWidth or 1
+	gridDepth = gridDepth or gridWidth
+
+	-- V2.0.4: 计算占地的半宽/半深（studs）
+	local halfSpanX = (gridWidth * cellSize) / 2
+	local halfSpanZ = (gridDepth * cellSize) / 2
 
 	-- 计算相对位置
 	local relX = worldPos.X - (floorPos.X - floorSize.X / 2)
 	local relZ = worldPos.Z - (floorPos.Z - floorSize.Z / 2)
 
-	-- 转换为格子坐标
-	local gridX = math.floor(relX / cellSize) + 1
-	local gridY = math.floor(relZ / cellSize) + 1
+	-- V2.0.4修正: 减去半跨度，得到左下角坐标，再加半格使其对齐到格子
+	local gridX = math.floor((relX - halfSpanX + cellSize / 2) / cellSize) + 1
+	local gridY = math.floor((relZ - halfSpanZ + cellSize / 2) / cellSize) + 1
 
 	-- 限制范围
-	gridX = math.clamp(gridX, 1, gridWidth)
-	gridY = math.clamp(gridY, 1, gridHeight)
+	gridX = math.clamp(gridX, 1, gridCount)
+	gridY = math.clamp(gridY, 1, gridCount)
 
 	return {X = gridX, Y = gridY}
 end

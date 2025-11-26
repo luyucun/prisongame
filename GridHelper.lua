@@ -42,6 +42,9 @@ local gridTemplates = {}
 -- 当前显示的Grid Part
 local currentGridPart = nil
 
+-- V2.0.4新增: IdleFloor引用（用于精确计算Grid的Y坐标）
+local cachedIdleFloor = nil
+
 -- V2.0: Grid状态缓存（使用GridWidth和GridDepth）
 local gridStateCache = {
     gridWidth = nil,
@@ -106,6 +109,22 @@ function GridHelper.Initialize()
     end)
 
     return true
+end
+
+--[[
+V2.0.4新增: 设置IdleFloor引用（用于精确计算Grid的Y坐标）
+@param idleFloor Part - IdleFloor对象
+]]
+function GridHelper.SetIdleFloor(idleFloor)
+    cachedIdleFloor = idleFloor
+end
+
+--[[
+V2.0.4新增: 获取当前缓存的IdleFloor
+@return Part|nil
+]]
+function GridHelper.GetIdleFloor()
+    return cachedIdleFloor
 end
 
 -- ==================== Grid管理 ====================
@@ -205,10 +224,17 @@ function GridHelper.ShowGrid(gridWidth, position, isValid, gridDepth)
         gridStateCache.isValid = isValid
     end
 
-    -- V2.0: 无论是否切换模板，都更新位置（如果位置改变）
+    -- V2.0.4修复: 无论是否切换模板，都更新位置（如果位置改变）
     if currentGridPart and currentGridPart.Parent then
-        -- Grid 的 Y 坐标计算：贴在地板上
-        local gridY = position.Y - PLACEMENT_Y_OFFSET + GRID_Y_OFFSET
+        -- V2.0.4修复: Grid的Y坐标直接使用IdleFloor顶面，不依赖模型位置
+        local gridY
+        if cachedIdleFloor and cachedIdleFloor.Parent then
+            -- 使用IdleFloor顶面 + 微小偏移
+            gridY = cachedIdleFloor.Position.Y + cachedIdleFloor.Size.Y / 2 + GRID_Y_OFFSET
+        else
+            -- 回退到旧逻辑（兼容性）
+            gridY = position.Y - PLACEMENT_Y_OFFSET + GRID_Y_OFFSET
+        end
         local newPos = Vector3.new(position.X, gridY, position.Z)
 
         -- 只在位置真正改变时才更新

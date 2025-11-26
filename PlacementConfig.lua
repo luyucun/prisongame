@@ -121,13 +121,24 @@ function PlacementConfig.ParseGridSize(gridSizeData)
 end
 
 --[[
-将世界坐标转换为网格索引
-@param worldPos Vector3 - 世界坐标
+将世界坐标转换为网格索引 (V2.0.4修复: 支持矩形占地，修正中心点偏移问题)
+@param worldPos Vector3 - 世界坐标（模型中心点）
 @param floorCenter Vector3 - 地板中心坐标
-@return number, number - 网格索引 (gridX, gridZ)
+@param gridWidth number - X轴方向占用格子数 (可选，默认1)
+@param gridDepth number - Z轴方向占用格子数 (可选，默认等于gridWidth)
+@return number, number - 网格索引 (gridX, gridZ)，表示占地区域左下角的格子
 注意: 返回的网格索引可能超出边界,调用方应使用ClampGridToBounds进行边界处理
 ]]
-function PlacementConfig.WorldToGrid(worldPos, floorCenter)
+function PlacementConfig.WorldToGrid(worldPos, floorCenter, gridWidth, gridDepth)
+    -- 处理默认参数
+    gridWidth = gridWidth or 1
+    gridDepth = gridDepth or gridWidth
+
+    -- V2.0.4: 计算占地的半宽/半深（studs）
+    -- 模型中心点需要减去半个占地宽度才能得到左下角的格子索引
+    local halfSpanX = (gridWidth * PlacementConfig.GRID_UNIT_SIZE) / 2
+    local halfSpanZ = (gridDepth * PlacementConfig.GRID_UNIT_SIZE) / 2
+
     -- 计算相对于地板中心的偏移
     local offsetX = worldPos.X - floorCenter.X
     local offsetZ = worldPos.Z - floorCenter.Z
@@ -135,10 +146,10 @@ function PlacementConfig.WorldToGrid(worldPos, floorCenter)
     -- 转换为网格索引 (从地板左下角开始,0-based)
     -- 地板范围: [-28, 28] studs (相对于中心，56/2=28)
     -- 网格范围: [0, 13] (14个格子，每格4 studs)
-    local gridX = math.floor((offsetX + PlacementConfig.IDLE_FLOOR_SIZE.X / 2) / PlacementConfig.GRID_UNIT_SIZE)
-    local gridZ = math.floor((offsetZ + PlacementConfig.IDLE_FLOOR_SIZE.Z / 2) / PlacementConfig.GRID_UNIT_SIZE)
+    -- V2.0.4修正: 从模型中心坐标减去半跨度，得到左下角坐标，再计算格子索引
+    local gridX = math.floor((offsetX + PlacementConfig.IDLE_FLOOR_SIZE.X / 2 - halfSpanX + PlacementConfig.GRID_UNIT_SIZE / 2) / PlacementConfig.GRID_UNIT_SIZE)
+    local gridZ = math.floor((offsetZ + PlacementConfig.IDLE_FLOOR_SIZE.Z / 2 - halfSpanZ + PlacementConfig.GRID_UNIT_SIZE / 2) / PlacementConfig.GRID_UNIT_SIZE)
 
-    -- V2.0.3: 不在这里限制边界,让调用方根据单位大小进行正确的边界处理
     -- 只做基本的非负限制,防止负索引
     gridX = math.max(0, gridX)
     gridZ = math.max(0, gridZ)

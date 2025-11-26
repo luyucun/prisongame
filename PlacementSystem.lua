@@ -505,19 +505,16 @@ function PlacementSystem.ValidatePlacement(player, instanceId, position)
 		return false, "找不到放置地板"
 	end
 
-	-- 5. 转换为网格坐标
-	local floorCenter = idleFloor.Position
-	local gridX, gridZ = PlacementConfig.WorldToGrid(position, floorCenter)
-
-	-- V2.0: 获取兵种占地尺寸
+	-- V2.0: 获取兵种占地尺寸 (必须在WorldToGrid之前获取)
 	local gridWidth = UnitConfig.GetGridWidth(unitInstance.UnitId)
 	local gridDepth = UnitConfig.GetGridDepth(unitInstance.UnitId)
 	-- 回写实例占地，向后兼容老数据
 	unitInstance.GridWidth = gridWidth
 	unitInstance.GridDepth = gridDepth
-	-- 回写实例占地，向后兼容老数据
-	unitInstance.GridWidth = gridWidth
-	unitInstance.GridDepth = gridDepth
+
+	-- 5. 转换为网格坐标 (V2.0.4修复: 传入占地尺寸)
+	local floorCenter = idleFloor.Position
+	local gridX, gridZ = PlacementConfig.WorldToGrid(position, floorCenter, gridWidth, gridDepth)
 
 	-- 6. 检查边界
 	if not PlacementConfig.IsGridInBounds(gridX, gridZ, gridWidth, gridDepth) then
@@ -560,15 +557,15 @@ function PlacementSystem.PlaceUnit(player, instanceId, position)
 	local idleFloor = GetPlayerIdleFloor(player)
 	local floorCenter = idleFloor.Position
 
-	-- 转换为网格坐标
-	local gridX, gridZ = PlacementConfig.WorldToGrid(position, floorCenter)
-
-	-- V2.0: 获取兵种占地尺寸
+	-- V2.0: 获取兵种占地尺寸 (必须在WorldToGrid之前获取)
 	local gridWidth = UnitConfig.GetGridWidth(unitInstance.UnitId)
 	local gridDepth = UnitConfig.GetGridDepth(unitInstance.UnitId)
 	-- 回写实例占地，向后兼容老数据
 	unitInstance.GridWidth = gridWidth
 	unitInstance.GridDepth = gridDepth
+
+	-- 转换为网格坐标 (V2.0.4修复: 传入占地尺寸)
+	local gridX, gridZ = PlacementConfig.WorldToGrid(position, floorCenter, gridWidth, gridDepth)
 
 	-- 计算精确的放置位置 (对齐到网格中心)
 	local finalPosition = PlacementConfig.GridToWorld(gridX, gridZ, floorCenter, gridWidth, gridDepth)
@@ -783,15 +780,15 @@ function PlacementSystem.UpdateUnitPosition(player, instanceId, newPosition)
 		return false, "找不到放置地板"
 	end
 
-	-- 3. 转换为网格坐标
-	local floorCenter = idleFloor.Position
-	local newGridX, newGridZ = PlacementConfig.WorldToGrid(newPosition, floorCenter)
-
-	-- V2.0: 获取占地尺寸 (优先从placedData,然后从unitInstance,最后从UnitConfig)
+	-- V2.0: 获取占地尺寸 (必须在WorldToGrid之前获取)
 	local gridWidth = UnitConfig.GetGridWidth(unitInstance.UnitId)
 	local gridDepth = UnitConfig.GetGridDepth(unitInstance.UnitId)
 	placedData.GridWidth = gridWidth
 	placedData.GridDepth = gridDepth
+
+	-- 3. 转换为网格坐标 (V2.0.4修复: 传入占地尺寸)
+	local floorCenter = idleFloor.Position
+	local newGridX, newGridZ = PlacementConfig.WorldToGrid(newPosition, floorCenter, gridWidth, gridDepth)
 
 	-- 4. 检查边界
 	if not PlacementConfig.IsGridInBounds(newGridX, newGridZ, gridWidth, gridDepth) then

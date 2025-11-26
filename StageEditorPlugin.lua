@@ -192,16 +192,26 @@ local function GridToWorld(floor, gridX, gridY)
 end
 
 --[[
-计算世界坐标转GridPos
+计算世界坐标转GridPos (V2.0.4修复: 支持占地尺寸)
 @param floor Part - 地板
 @param worldPos Vector3 - 世界坐标
+@param gridWidth number - X轴方向占用格子数 (可选，默认1)
+@param gridDepth number - Z轴方向占用格子数 (可选，默认等于gridWidth)
 @return table - {X = gridX, Y = gridY} (1-14，用户可读)
 注意：此算法必须与PlacementHelper.WorldToGrid完全一致
 ]]
-local function WorldToGrid(floor, worldPos)
+local function WorldToGrid(floor, worldPos, gridWidth, gridDepth)
 	local GRID_UNIT_SIZE = 4
 	local GRID_COUNT = 14
 	local IDLE_FLOOR_SIZE = Vector3.new(56, 1, 56)
+
+	-- 处理默认参数
+	gridWidth = gridWidth or 1
+	gridDepth = gridDepth or gridWidth
+
+	-- V2.0.4: 计算占地的半宽/半深（studs）
+	local halfSpanX = (gridWidth * GRID_UNIT_SIZE) / 2
+	local halfSpanZ = (gridDepth * GRID_UNIT_SIZE) / 2
 
 	-- 获取地板中心
 	local floorCenter = floor.CFrame.Position
@@ -211,9 +221,9 @@ local function WorldToGrid(floor, worldPos)
 	local offsetZ = worldPos.Z - floorCenter.Z
 
 	-- 转换为网格索引（0-13）
-	-- 公式：(offset + floorSize/2) / cellSize
-	local gridIndexX = math.floor((offsetX + IDLE_FLOOR_SIZE.X / 2) / GRID_UNIT_SIZE)
-	local gridIndexZ = math.floor((offsetZ + IDLE_FLOOR_SIZE.Z / 2) / GRID_UNIT_SIZE)
+	-- V2.0.4修正: 从模型中心坐标减去半跨度，得到左下角坐标，再计算格子索引
+	local gridIndexX = math.floor((offsetX + IDLE_FLOOR_SIZE.X / 2 - halfSpanX + GRID_UNIT_SIZE / 2) / GRID_UNIT_SIZE)
+	local gridIndexZ = math.floor((offsetZ + IDLE_FLOOR_SIZE.Z / 2 - halfSpanZ + GRID_UNIT_SIZE / 2) / GRID_UNIT_SIZE)
 
 	-- 限制范围在0-13
 	gridIndexX = math.clamp(gridIndexX, 0, GRID_COUNT - 1)

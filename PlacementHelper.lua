@@ -36,22 +36,33 @@ local GRID_COUNT = 14  -- 56 / 4 = 14格
 -- ==================== 坐标转换函数 ====================
 
 --[[
-世界坐标转网格索引
-@param worldPos Vector3 - 世界坐标
+世界坐标转网格索引 (V2.0.4修复: 支持矩形占地，修正中心点偏移问题)
+@param worldPos Vector3 - 世界坐标（模型中心点）
 @param floorCenter Vector3 - 地板中心
-@return number, number - 网格X, 网格Z
+@param gridWidth number - X轴方向占用格子数 (可选，默认1)
+@param gridDepth number - Z轴方向占用格子数 (可选，默认等于gridWidth)
+@return number, number - 网格X, 网格Z (左下角格子索引)
 注意: 返回的网格索引可能超出边界,调用方应使用ClampGridToBounds进行边界处理
 ]]
-function PlacementHelper.WorldToGrid(worldPos, floorCenter)
+function PlacementHelper.WorldToGrid(worldPos, floorCenter, gridWidth, gridDepth)
+    -- 处理默认参数
+    gridWidth = gridWidth or 1
+    gridDepth = gridDepth or gridWidth
+
+    -- V2.0.4: 计算占地的半宽/半深（studs）
+    -- 模型中心点需要减去半个占地宽度才能得到左下角的格子索引
+    local halfSpanX = (gridWidth * GRID_UNIT_SIZE) / 2
+    local halfSpanZ = (gridDepth * GRID_UNIT_SIZE) / 2
+
     local offsetX = worldPos.X - floorCenter.X
     local offsetZ = worldPos.Z - floorCenter.Z
 
-    -- 计算网格索引
+    -- 计算网格索引（以占地区域的左下角为基准）
     -- 地板范围: [-28, 28]，网格范围: [0, 13]
-    local gridX = math.floor((offsetX + IDLE_FLOOR_SIZE.X / 2) / GRID_UNIT_SIZE)
-    local gridZ = math.floor((offsetZ + IDLE_FLOOR_SIZE.Z / 2) / GRID_UNIT_SIZE)
+    -- V2.0.4修正: 从模型中心坐标减去半跨度，得到左下角坐标，再计算格子索引
+    local gridX = math.floor((offsetX + IDLE_FLOOR_SIZE.X / 2 - halfSpanX + GRID_UNIT_SIZE / 2) / GRID_UNIT_SIZE)
+    local gridZ = math.floor((offsetZ + IDLE_FLOOR_SIZE.Z / 2 - halfSpanZ + GRID_UNIT_SIZE / 2) / GRID_UNIT_SIZE)
 
-    -- V2.0.3: 不在这里限制边界,让调用方根据单位大小进行正确的边界处理
     -- 只做基本的非负限制,防止负索引
     gridX = math.max(0, gridX)
     gridZ = math.max(0, gridZ)
@@ -87,7 +98,7 @@ function PlacementHelper.GridToWorld(gridX, gridZ, floorCenter, gridWidth, gridD
 end
 
 --[[
-获取最近的网格中心位置 (V2.0重构: 支持矩形占地)
+获取最近的网格中心位置 (V2.0.4修复: WorldToGrid传入占地尺寸)
 @param worldPos Vector3 - 原始世界坐标
 @param floorCenter Vector3 - 地板中心
 @param gridWidth number - X轴方向占用格子数
@@ -99,8 +110,8 @@ function PlacementHelper.GetNearestGridPosition(worldPos, floorCenter, gridWidth
     gridWidth = gridWidth or 1
     gridDepth = gridDepth or gridWidth
 
-    -- 转换为网格索引
-    local gridX, gridZ = PlacementHelper.WorldToGrid(worldPos, floorCenter)
+    -- V2.0.4修复: WorldToGrid需要传入占地尺寸
+    local gridX, gridZ = PlacementHelper.WorldToGrid(worldPos, floorCenter, gridWidth, gridDepth)
 
     -- 处理边界限制
     gridX, gridZ = PlacementHelper.ClampGridToBounds(gridX, gridZ, gridWidth, gridDepth)

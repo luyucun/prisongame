@@ -33,6 +33,9 @@ local PlacementHelper = require(script.Parent.Parent.Utils.PlacementHelper)
 local GridHelper = require(script.Parent.Parent.Utils.GridHelper)
 local HighlightHelper = require(script.Parent.Parent.Utils.HighlightHelper)
 
+-- V2.0.4: 引入UnitConfig用于获取占地尺寸（当模型属性缺失时）
+local UnitConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("UnitConfig"))
+
 -- 玩家引用
 local player = Players.LocalPlayer
 local mouse = player:GetMouse()
@@ -89,6 +92,8 @@ function DragSystem.Initialize()
 	dragState.idleFloor = FindPlayerIdleFloor()
 	if dragState.idleFloor then
 		print("[DragSystem] 找到IdleFloor:", dragState.idleFloor:GetFullName())
+		-- V2.0.4: 设置GridHelper的IdleFloor引用，用于精确计算Grid的Y坐标
+		GridHelper.SetIdleFloor(dragState.idleFloor)
 	else
 		warn("[DragSystem] 找不到IdleFloor")
 		return false
@@ -392,11 +397,26 @@ function StartDragging(model)
 
 	local unitId = model:GetAttribute("UnitId")
 	local level = model:GetAttribute("Level") or 1
-	-- V2.0: 使用GridWidth和GridDepth (向后兼容GridSize)
-	local gridWidth = model:GetAttribute("GridWidth") or model:GetAttribute("GridSize") or 1
-	local gridDepth = model:GetAttribute("GridDepth") or gridWidth
 
-	print("[DragSystem] 开始拖动:", model:GetFullName(), "Level:", level)
+	-- V2.0.4修复: 优先从模型属性读取，如果没有则从UnitConfig获取
+	local gridWidth = model:GetAttribute("GridWidth")
+	local gridDepth = model:GetAttribute("GridDepth")
+
+	-- 如果模型属性缺失，从UnitConfig获取（兼容旧数据）
+	if not gridWidth or not gridDepth then
+		if unitId then
+			gridWidth = gridWidth or UnitConfig.GetGridWidth(unitId)
+			gridDepth = gridDepth or UnitConfig.GetGridDepth(unitId)
+		else
+			-- 回退到GridSize属性或默认值1
+			local gridSize = model:GetAttribute("GridSize") or 1
+			gridWidth = gridWidth or gridSize
+			gridDepth = gridDepth or gridSize
+		end
+	end
+
+	-- V2.0.4调试：打印占地尺寸，确认属性是否正确读取
+	print(string.format("[DragSystem] 开始拖动: %s Level: %d GridSize: %dx%d", model:GetFullName(), level, gridWidth, gridDepth))
 
 	dragState.isDragging = true
 	dragState.draggedModel = model
@@ -546,9 +566,20 @@ function ProcessDragUpdate(raycastResult)
 		local targetInstanceId = hitModel:GetAttribute("InstanceId")
 		local targetUnitId = hitModel:GetAttribute("UnitId")
 		local targetLevel = hitModel:GetAttribute("Level") or 1
-		-- V2.0: 获取目标的GridWidth和GridDepth
-		local targetGridWidth = hitModel:GetAttribute("GridWidth") or hitModel:GetAttribute("GridSize") or 1
-		local targetGridDepth = hitModel:GetAttribute("GridDepth") or targetGridWidth
+
+		-- V2.0.4修复: 获取目标的GridWidth和GridDepth（从属性或UnitConfig）
+		local targetGridWidth = hitModel:GetAttribute("GridWidth")
+		local targetGridDepth = hitModel:GetAttribute("GridDepth")
+		if not targetGridWidth or not targetGridDepth then
+			if targetUnitId then
+				targetGridWidth = targetGridWidth or UnitConfig.GetGridWidth(targetUnitId)
+				targetGridDepth = targetGridDepth or UnitConfig.GetGridDepth(targetUnitId)
+			else
+				local targetGridSize = hitModel:GetAttribute("GridSize") or 1
+				targetGridWidth = targetGridWidth or targetGridSize
+				targetGridDepth = targetGridDepth or targetGridSize
+			end
+		end
 
 		-- 检查是否可以合成
 		local canMerge = (targetUnitId == dragState.draggedUnitId) and
@@ -811,7 +842,7 @@ function IsModelOnIdleFloor(model)
 end
 
 --[[
-检查换位时的位置是否有效 (V2.0重构: 支持矩形占地)
+检查换位时的位置是否有效 (V2.0.4修复: WorldToGrid传入占地尺寸)
 @param worldPos Vector3 - 世界坐标
 @return boolean, Model|nil - 第一个返回值表示是否有效，第二个返回值是占用的模型（如果有冲突）
 ]]
@@ -822,12 +853,12 @@ function IsPositionValidForRelocate(worldPos)
 
 	local floorCenter = dragState.idleFloor.Position
 
-	-- 转换为网格坐标
-	local gridX, gridZ = PlacementHelper.WorldToGrid(worldPos, floorCenter)
-
 	-- V2.0: 获取当前兵种占地尺寸
 	local currentGridWidth = dragState.draggedGridWidth or 1
 	local currentGridDepth = dragState.draggedGridDepth or currentGridWidth
+
+	-- V2.0.4修复: WorldToGrid需要传入占地尺寸，才能正确计算左下角格子索引
+	local gridX, gridZ = PlacementHelper.WorldToGrid(worldPos, floorCenter, currentGridWidth, currentGridDepth)
 
 	-- 检查与已放置的模型是否重叠（需要排除自己）
 	for _, obj in ipairs(Workspace:GetChildren()) do
@@ -837,10 +868,22 @@ function IsPositionValidForRelocate(worldPos)
 				-- 这是另一个已放置的兵种
 				local objPos = GetModelPosition(obj)
 				if objPos then
-					local objGridX, objGridZ = PlacementHelper.WorldToGrid(objPos, floorCenter)
-					-- V2.0: 获取对象的GridWidth和GridDepth (向后兼容GridSize)
-					local objGridWidth = obj:GetAttribute("GridWidth") or obj:GetAttribute("GridSize") or 1
-					local objGridDepth = obj:GetAttribute("GridDepth") or objGridWidth
+					-- V2.0.4修复: 获取对象的GridWidth和GridDepth（从属性或UnitConfig）
+					local objUnitId = obj:GetAttribute("UnitId")
+					local objGridWidth = obj:GetAttribute("GridWidth")
+					local objGridDepth = obj:GetAttribute("GridDepth")
+					if not objGridWidth or not objGridDepth then
+						if objUnitId then
+							objGridWidth = objGridWidth or UnitConfig.GetGridWidth(objUnitId)
+							objGridDepth = objGridDepth or UnitConfig.GetGridDepth(objUnitId)
+						else
+							local objGridSize = obj:GetAttribute("GridSize") or 1
+							objGridWidth = objGridWidth or objGridSize
+							objGridDepth = objGridDepth or objGridSize
+						end
+					end
+					-- V2.0.4修复: WorldToGrid需要传入该对象的占地尺寸
+					local objGridX, objGridZ = PlacementHelper.WorldToGrid(objPos, floorCenter, objGridWidth, objGridDepth)
 
 					-- 检查矩形网格是否重叠
 					local overlapX = not (gridX + currentGridWidth <= objGridX or gridX >= objGridX + objGridWidth)
@@ -858,7 +901,7 @@ function IsPositionValidForRelocate(worldPos)
 end
 
 --[[
-获取模型位置
+获取模型位置 (V2.0.4修复: 统一使用GetPivot避免偏移累积)
 @param model Model
 @return Vector3|nil
 ]]
@@ -867,17 +910,12 @@ function GetModelPosition(model)
 		return nil
 	end
 
-	if model.PrimaryPart then
-		return model.PrimaryPart.Position
-	elseif model:FindFirstChild("HumanoidRootPart") then
-		return model.HumanoidRootPart.Position
-	end
-
-	return nil
+	-- V2.0.4: 统一使用PlacementHelper.GetModelPosition，确保读写一致
+	return PlacementHelper.GetModelPosition(model)
 end
 
 --[[
-设置模型位置
+设置模型位置 (V2.0.4修复: 统一使用PivotTo避免偏移累积)
 @param model Model
 @param position Vector3
 ]]
@@ -886,11 +924,9 @@ function SetModelPosition(model, position)
 		return
 	end
 
-	if model.PrimaryPart then
-		model:SetPrimaryPartCFrame(CFrame.new(position))
-	elseif model:FindFirstChild("HumanoidRootPart") then
-		model.HumanoidRootPart.CFrame = CFrame.new(position)
-	end
+	-- V2.0.4: 统一使用PlacementHelper.SetModelPosition，确保读写一致
+	-- 这样可以避免因PrimaryPart和Pivot不一致导致的偏移累积问题
+	PlacementHelper.SetModelPosition(model, position)
 end
 
 -- ==================== V1.4: 合成响应处理 ====================
