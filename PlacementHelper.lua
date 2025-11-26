@@ -5,12 +5,17 @@
 ]]
 
 --[[
-放置辅助工具模块
+放置辅助工具模块 (V2.0重构: 支持任意矩形占地)
 职责:
 1. 提供网格吸附计算
 2. 边界检测和碰撞处理
 3. 鼠标位置转换为世界坐标
-版本: V1.2
+版本: V2.0
+
+占地尺寸约定:
+- GridWidth: X轴方向占用的格子数
+- GridDepth: Z轴方向占用的格子数
+- 支持任意矩形: 1x1, 1x2, 2x2, 2x3, 3x3, 4x7 等
 ]]
 
 local PlacementHelper = {}
@@ -21,11 +26,10 @@ local Workspace = game:GetService("Workspace")
 local UserInputService = game:GetService("UserInputService")
 
 -- 常量配置
--- 说明: 1格兵种占据4x4 studs，2格兵种(2x2格)占据8x8 studs，3格兵种(3x3格)占据12x12 studs
+-- 说明: 1格兵种占据4x4 studs
 local GRID_UNIT_SIZE = 4
 local IDLE_FLOOR_SIZE = Vector3.new(56, 1, 56)  -- IdleFloor实际大小
 -- 兵种脚底距离地板上表面的距离(studs)
--- 标准Roblox人物腰部到脚底约3-3.5 studs,这里用3确保站立在地板上
 local PLACEMENT_Y_OFFSET = 3
 local GRID_COUNT = 14  -- 56 / 4 = 14格
 
@@ -36,117 +40,118 @@ local GRID_COUNT = 14  -- 56 / 4 = 14格
 @param worldPos Vector3 - 世界坐标
 @param floorCenter Vector3 - 地板中心
 @return number, number - 网格X, 网格Z
+注意: 返回的网格索引可能超出边界,调用方应使用ClampGridToBounds进行边界处理
 ]]
 function PlacementHelper.WorldToGrid(worldPos, floorCenter)
     local offsetX = worldPos.X - floorCenter.X
     local offsetZ = worldPos.Z - floorCenter.Z
 
     -- 计算网格索引
-    -- 地板范围: [-60, 60]，网格范围: [0, 29]
+    -- 地板范围: [-28, 28]，网格范围: [0, 13]
     local gridX = math.floor((offsetX + IDLE_FLOOR_SIZE.X / 2) / GRID_UNIT_SIZE)
     local gridZ = math.floor((offsetZ + IDLE_FLOOR_SIZE.Z / 2) / GRID_UNIT_SIZE)
 
-    -- 限制在有效网格范围内（0 到 GRID_COUNT-1）
-    gridX = math.clamp(gridX, 0, GRID_COUNT - 1)
-    gridZ = math.clamp(gridZ, 0, GRID_COUNT - 1)
+    -- V2.0.3: 不在这里限制边界,让调用方根据单位大小进行正确的边界处理
+    -- 只做基本的非负限制,防止负索引
+    gridX = math.max(0, gridX)
+    gridZ = math.max(0, gridZ)
 
     return gridX, gridZ
 end
 
 --[[
-网格索引转世界坐标
+网格索引转世界坐标 (V2.0重构: 支持矩形占地)
 @param gridX number - 网格X索引
 @param gridZ number - 网格Z索引
 @param floorCenter Vector3 - 地板中心
-@param gridSize number - 兵种占地大小 (1, 4, 9)，默认为1
-@return Vector3 - 世界坐标
+@param gridWidth number - X轴方向占用格子数 (默认1)
+@param gridDepth number - Z轴方向占用格子数 (默认等于gridWidth)
+@return Vector3 - 世界坐标 (兵种中心位置)
 ]]
-function PlacementHelper.GridToWorld(gridX, gridZ, floorCenter, gridSize)
+function PlacementHelper.GridToWorld(gridX, gridZ, floorCenter, gridWidth, gridDepth)
     -- 处理默认参数
-    gridSize = gridSize or 1
+    gridWidth = gridWidth or 1
+    gridDepth = gridDepth or gridWidth
 
-    -- 计算兵种的实际宽度（格子数）
-    local gridWidth = math.sqrt(gridSize)  -- 1格=1, 4格=2, 9格=3
+    -- 计算兵种中心的偏移量
+    local halfSpanX = (gridWidth * GRID_UNIT_SIZE) / 2
+    local halfSpanZ = (gridDepth * GRID_UNIT_SIZE) / 2
 
-    -- 计算兵种中心的偏移量（不是格子中心，而是整个兵种的中心）
-    local halfSpan = (gridWidth * GRID_UNIT_SIZE) / 2
-
-    local worldX = floorCenter.X - IDLE_FLOOR_SIZE.X / 2 + gridX * GRID_UNIT_SIZE + halfSpan
-    local worldZ = floorCenter.Z - IDLE_FLOOR_SIZE.Z / 2 + gridZ * GRID_UNIT_SIZE + halfSpan
+    local worldX = floorCenter.X - IDLE_FLOOR_SIZE.X / 2 + gridX * GRID_UNIT_SIZE + halfSpanX
+    local worldZ = floorCenter.Z - IDLE_FLOOR_SIZE.Z / 2 + gridZ * GRID_UNIT_SIZE + halfSpanZ
 
     -- 正确计算Y坐标：地板上表面 + 兵种脚底到地板的距离
-    -- floorCenter.Y - IDLE_FLOOR_SIZE.Y / 2 是地板下表面
-    -- floorCenter.Y + IDLE_FLOOR_SIZE.Y / 2 是地板上表面
-    -- 兵种应该站在地板上表面 + 偏移量
     local worldY = floorCenter.Y + IDLE_FLOOR_SIZE.Y / 2 + PLACEMENT_Y_OFFSET
 
     return Vector3.new(worldX, worldY, worldZ)
 end
 
 --[[
-获取最近的网格中心位置
+获取最近的网格中心位置 (V2.0重构: 支持矩形占地)
 @param worldPos Vector3 - 原始世界坐标
 @param floorCenter Vector3 - 地板中心
-@param gridSize number - 兵种占地大小 (1, 4, 9)
+@param gridWidth number - X轴方向占用格子数
+@param gridDepth number - Z轴方向占用格子数 (默认等于gridWidth)
 @return Vector3 - 吸附后的世界坐标
 ]]
-function PlacementHelper.GetNearestGridPosition(worldPos, floorCenter, gridSize)
+function PlacementHelper.GetNearestGridPosition(worldPos, floorCenter, gridWidth, gridDepth)
+    -- 处理默认参数
+    gridWidth = gridWidth or 1
+    gridDepth = gridDepth or gridWidth
+
     -- 转换为网格索引
     local gridX, gridZ = PlacementHelper.WorldToGrid(worldPos, floorCenter)
 
     -- 处理边界限制
-    gridX, gridZ = PlacementHelper.ClampGridToBounds(gridX, gridZ, gridSize)
+    gridX, gridZ = PlacementHelper.ClampGridToBounds(gridX, gridZ, gridWidth, gridDepth)
 
-    -- 转换回世界坐标（传入gridSize以正确计算中心偏移）
-    return PlacementHelper.GridToWorld(gridX, gridZ, floorCenter, gridSize)
+    -- 转换回世界坐标
+    return PlacementHelper.GridToWorld(gridX, gridZ, floorCenter, gridWidth, gridDepth)
 end
 
 --[[
-限制网格索引在边界内
+限制网格索引在边界内 (V2.0重构: 支持矩形占地)
 @param gridX number
 @param gridZ number
-@param gridSize number - 兵种占地大小 (1, 4, 9)
+@param gridWidth number - X轴方向占用格子数
+@param gridDepth number - Z轴方向占用格子数 (默认等于gridWidth)
 @return number, number - 限制后的网格X, Z
 ]]
-function PlacementHelper.ClampGridToBounds(gridX, gridZ, gridSize)
-    local gridWidth = math.sqrt(gridSize)  -- 1格=1, 4格=2, 9格=3
+function PlacementHelper.ClampGridToBounds(gridX, gridZ, gridWidth, gridDepth)
+    -- 处理默认参数
+    gridWidth = gridWidth or 1
+    gridDepth = gridDepth or gridWidth
 
-    -- V1.5.1修复: 边界计算
-    -- 地板是30x30格(索引0-29)
-    -- 1x1兵种: 可以放在0-29格(占据1格)
-    -- 2x2兵种: 可以放在0-28格(占据2格,范围0-29)
-    -- 3x3兵种: 可以放在0-27格(占据3格,范围0-29)
-    -- 所以最大索引 = GRID_COUNT - gridWidth
-    local maxGridIndex = GRID_COUNT - gridWidth
+    -- 边界计算
+    -- 地板是14x14格(索引0-13)
+    -- 例如: 2x3兵种可以放在X方向0-12, Z方向0-11
+    local maxGridX = GRID_COUNT - gridWidth
+    local maxGridZ = GRID_COUNT - gridDepth
 
-    gridX = math.clamp(gridX, 0, maxGridIndex)
-    gridZ = math.clamp(gridZ, 0, maxGridIndex)
+    gridX = math.clamp(gridX, 0, maxGridX)
+    gridZ = math.clamp(gridZ, 0, maxGridZ)
 
     return gridX, gridZ
 end
 
 --[[
-检查网格是否在边界内
+检查网格是否在边界内 (V2.0重构: 支持矩形占地)
 @param gridX number
 @param gridZ number
-@param gridSize number - 兵种占地大小 (1, 4, 9)
+@param gridWidth number - X轴方向占用格子数
+@param gridDepth number - Z轴方向占用格子数 (默认等于gridWidth)
 @return boolean - 是否在边界内
 ]]
-function PlacementHelper.IsGridInBounds(gridX, gridZ, gridSize)
+function PlacementHelper.IsGridInBounds(gridX, gridZ, gridWidth, gridDepth)
+    -- 处理默认参数
+    gridWidth = gridWidth or 1
+    gridDepth = gridDepth or gridWidth
+
     if gridX < 0 or gridZ < 0 then
         return false
     end
 
-    local gridWidth = math.sqrt(gridSize)  -- 1格=1, 4格=2, 9格=3
-
-    -- V1.5.1修复: 边界检查
-    -- 兵种占据 gridWidth 个格子
-    -- 起始索引是 gridX, 结束索引是 gridX + gridWidth - 1
-    -- 所以 gridX + gridWidth - 1 < GRID_COUNT
-    -- 即 gridX + gridWidth <= GRID_COUNT
-    -- 即 gridX < GRID_COUNT - gridWidth + 1
-    -- 但为了统一，我们用 gridX + gridWidth > GRID_COUNT 作为越界条件
-    if gridX + gridWidth > GRID_COUNT or gridZ + gridWidth > GRID_COUNT then
+    if gridX + gridWidth > GRID_COUNT or gridZ + gridDepth > GRID_COUNT then
         return false
     end
 
@@ -236,11 +241,13 @@ function PlacementHelper.SetModelPosition(model, position)
         return
     end
 
-    if model.PrimaryPart then
-        model:SetPrimaryPartCFrame(CFrame.new(position))
-    elseif model:FindFirstChild("HumanoidRootPart") then
-        model.HumanoidRootPart.CFrame = CFrame.new(position)
+    -- 统一使用PivotTo，避免不同PrimaryPart导致的偏移累积
+    local hrp = model:FindFirstChild("HumanoidRootPart")
+    if hrp and model.PrimaryPart ~= hrp then
+        model.PrimaryPart = hrp
     end
+
+    model:PivotTo(CFrame.new(position))
 end
 
 --[[
@@ -253,13 +260,9 @@ function PlacementHelper.GetModelPosition(model)
         return nil
     end
 
-    if model.PrimaryPart then
-        return model.PrimaryPart.Position
-    elseif model:FindFirstChild("HumanoidRootPart") then
-        return model.HumanoidRootPart.Position
-    end
-
-    return nil
+    -- 统一使用Pivot，避免因不同主部件导致的读写偏差
+    local cf = model:GetPivot()
+    return cf and cf.Position or nil
 end
 
 --[[

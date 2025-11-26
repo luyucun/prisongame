@@ -11,6 +11,9 @@
 
 local UnitConfig = {}
 
+-- 内部缓存：从模型推导出的占地尺寸
+UnitConfig._DerivedGridCache = {}
+
 -- ==================== 兵种类型枚举 ====================
 UnitConfig.UnitType = {
 	MELEE = "Melee",      -- 近战单位
@@ -36,7 +39,22 @@ UnitData = {
     Type = string,             -- 兵种类型(Melee/Ranged)
     BaseLevel = number,        -- 基础等级(1-6)
     Price = number,            -- 购买价格(金币)
-    GridSize = number,         -- 占地面积(格子数:1或4)
+    -- V2.0占地尺寸配置 (支持任意矩形):
+    -- 方式1: GridWidth + GridDepth (推荐,支持非正方形如1x2, 2x3, 4x7)
+    -- 方式2: GridSize (向后兼容,表示正方形边长,如GridSize=2表示2x2)
+    --
+    -- 坐标轴说明 (俯视IdleFloor):
+    --   GridWidth = X轴方向(水平)占用格子数
+    --   GridDepth = Z轴方向(垂直)占用格子数
+    --
+    -- 示例配置:
+    --   GridWidth=2, GridDepth=1 → 横向2格,纵向1格 (水平长条)
+    --   GridWidth=1, GridDepth=2 → 横向1格,纵向2格 (垂直长条)
+    --   GridWidth=2, GridDepth=3 → 横向2格,纵向3格 (2x3矩形)
+    --
+    GridWidth = number,        -- X轴方向(水平)占用格子数 (可选,默认1)
+    GridDepth = number,        -- Z轴方向(垂直)占用格子数 (可选,默认GridWidth)
+    GridSize = number,         -- [向后兼容] 正方形边长 (如果没有GridWidth/GridDepth则使用此值)
     Description = string,      -- 描述
     -- V2.0.2新增UI配置
     Icon = string,             -- 兵种图标资源ID (格式: "rbxassetid://数字" 或留空使用默认图标)
@@ -765,7 +783,9 @@ UnitConfig.Units = {
 		Type = UnitConfig.UnitType.MELEE,
 		BaseLevel = 1,
 		Price = 600,
-		GridSize = 4,
+		GridSize = 2,
+		GridWidth = 2,
+		GridDepth = 1,
 		Description = "坦克型近战单位",
 		Icon = "rbxassetid://74819350235405",
 		Quality = "Common",
@@ -804,7 +824,9 @@ UnitConfig.Units = {
 		Type = UnitConfig.UnitType.MELEE,
 		BaseLevel = 1,
 		Price = 600,
-		GridSize = 4,
+		GridSize = 2,
+		GridWidth = 2,
+		GridDepth = 1,
 		Description = "坦克型近战单位",
 		Icon = "rbxassetid://75652304417710",
 		Quality = "Common",
@@ -843,7 +865,9 @@ UnitConfig.Units = {
 		Type = UnitConfig.UnitType.MELEE,
 		BaseLevel = 1,
 		Price = 600,
-		GridSize = 4,
+		GridSize = 2,
+		GridWidth = 2,
+		GridDepth = 1,
 		Description = "坦克型近战单位",
 		Icon = "rbxassetid://107612488818992",
 		Quality = "Common",
@@ -882,7 +906,9 @@ UnitConfig.Units = {
 		Type = UnitConfig.UnitType.MELEE,
 		BaseLevel = 1,
 		Price = 600,
-		GridSize = 4,
+		GridSize = 2,
+		GridWidth = 2,
+		GridDepth = 1,
 		Description = "坦克型近战单位",
 		Icon = "rbxassetid://105156254180465",
 		Quality = "Common",
@@ -1080,6 +1106,131 @@ UnitConfig.Units = {
 function UnitConfig.GetUnitById(unitId)
 	return UnitConfig.Units[unitId]
 end
+
+-- ==================== V2.0新增: 占地尺寸接口 ====================
+
+--[[
+获取兵种的占地宽度(X轴方向格子数)
+V2.0新增: 支持任意矩形占地
+@param unitId string - 兵种ID
+@return number - 占地宽度(格子数),默认1
+]]
+function UnitConfig.GetGridWidth(unitId)
+	local unitData = UnitConfig.GetUnitById(unitId)
+	if not unitData then
+		return 1
+	end
+	-- 新规则：显式配置优先；未配置宽度时默认1（单列），仅在宽/深/GridSize都缺失时尝试模型推导
+	if unitData.GridWidth then
+		return unitData.GridWidth
+	end
+
+	local derivedW = nil
+	if not unitData.GridSize and not unitData.GridDepth then
+		derivedW = UnitConfig._GetDerivedGrid(unitData, "Width")
+	end
+
+	return derivedW or 1
+end
+
+--[[
+获取兵种的占地深度(Z轴方向格子数)
+V2.0新增: 支持任意矩形占地
+@param unitId string - 兵种ID
+@return number - 占地深度(格子数),默认等于宽度
+]]
+function UnitConfig.GetGridDepth(unitId)
+	local unitData = UnitConfig.GetUnitById(unitId)
+	if not unitData then
+		return 1
+	end
+	-- 新规则：显式配置优先；否则使用GridSize作为深度(默认1xN竖排)；否则尝试模型推导；最后默认1
+	if unitData.GridDepth then
+		return unitData.GridDepth
+	end
+
+	local derivedD = nil
+	if not unitData.GridWidth and not unitData.GridSize then
+		derivedD = UnitConfig._GetDerivedGrid(unitData, "Depth")
+	end
+
+	return unitData.GridSize or derivedD or 1
+end
+
+--[[
+获取兵种的占地尺寸(宽度和深度)
+V2.0新增: 返回两个值,支持任意矩形
+@param unitId string - 兵种ID
+@return number, number - GridWidth, GridDepth
+]]
+function UnitConfig.GetGridDimensions(unitId)
+	return UnitConfig.GetGridWidth(unitId), UnitConfig.GetGridDepth(unitId)
+end
+
+--[[
+获取兵种的占地总格子数(用于显示/排序等)
+V2.0新增
+@param unitId string - 兵种ID
+@return number - 总格子数 (GridWidth * GridDepth)
+]]
+function UnitConfig.GetGridArea(unitId)
+	local w, d = UnitConfig.GetGridDimensions(unitId)
+	return w * d
+end
+
+--[[
+检查兵种是否为正方形占地
+V2.0新增
+@param unitId string - 兵种ID
+@return boolean - 是否为正方形
+]]
+function UnitConfig.IsSquareGrid(unitId)
+	local w, d = UnitConfig.GetGridDimensions(unitId)
+	return w == d
+end
+
+--[[
+内部工具: 从模型推导占地尺寸(仅在未配置宽/深时使用)
+@param unitData table
+@param key string "Width"|"Depth"
+@return number|nil
+]]
+function UnitConfig._GetDerivedGrid(unitData, key)
+	if not unitData or not unitData.ModelPath then
+		return nil
+	end
+
+	if UnitConfig._DerivedGridCache[unitData.UnitId] then
+		return UnitConfig._DerivedGridCache[unitData.UnitId][key]
+	end
+
+	local ReplicatedStorage = game:GetService("ReplicatedStorage")
+	local PlacementConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("PlacementConfig"))
+
+	local pathParts = string.split(tostring(unitData.ModelPath), "/")
+	local current = ReplicatedStorage
+	for i = 1, #pathParts - 1 do
+		current = current:FindFirstChild(pathParts[i])
+		if not current then
+			return nil
+		end
+	end
+
+	local model = current and current:FindFirstChild(pathParts[#pathParts])
+	if not model or not model:IsA("Model") then
+		return nil
+	end
+
+	local _, size = model:GetBoundingBox()
+	local cell = PlacementConfig.GRID_UNIT_SIZE or 4
+	local width = math.max(1, math.ceil(size.X / cell))
+	local depth = math.max(1, math.ceil(size.Z / cell))
+
+	UnitConfig._DerivedGridCache[unitData.UnitId] = {Width = width, Depth = depth}
+	return UnitConfig._DerivedGridCache[unitData.UnitId][key]
+end
+
+-- ==================== 基础信息接口 ====================
 
 --[[
 检查兵种是否存在

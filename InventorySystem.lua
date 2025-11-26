@@ -34,6 +34,8 @@ UnitInstance = {
     UnitId = string,           -- 兵种ID(对应UnitConfig中的配置)
     Level = number,            -- 当前等级(初始为BaseLevel)
     GridSize = number,         -- 占地面积
+    GridWidth = number,        -- 占地宽度(格子数, 支持矩形)
+    GridDepth = number,        -- 占地深度(格子数, 支持矩形)
     CreatedTime = number,      -- 创建时间戳
     IsPlaced = boolean,        -- 是否已放置在场地上
     PlacedPosition = Vector3,  -- 放置位置(如果已放置)
@@ -56,6 +58,14 @@ local function GetPlayerUnits(player)
     -- 确保Units数组存在
     if not playerData.Units then
         playerData.Units = {}
+    end
+
+    -- 迁移：每次读取都用当前配置覆盖占地宽/深，确保新配置生效
+    for _, unit in ipairs(playerData.Units) do
+        if unit then
+            unit.GridWidth = UnitConfig.GetGridWidth(unit.UnitId)
+            unit.GridDepth = UnitConfig.GetGridDepth(unit.UnitId)
+        end
     end
 
     return playerData.Units
@@ -88,11 +98,17 @@ local function CreateUnitInstance(unitId)
     end
 
     -- 创建实例
+    -- 占地尺寸：优先使用UnitConfig的宽/深，向后兼容GridSize
+    local gridWidth = UnitConfig.GetGridWidth(unitId)
+    local gridDepth = UnitConfig.GetGridDepth(unitId)
+
     local instance = {
         InstanceId = GenerateInstanceId(),
         UnitId = unitId,
         Level = unitConfig.BaseLevel,
         GridSize = unitConfig.GridSize,
+        GridWidth = gridWidth,
+        GridDepth = gridDepth,
         CreatedTime = os.time(),
         IsPlaced = false,
         PlacedPosition = nil,
@@ -176,10 +192,18 @@ local function NotifyClientInventoryRefresh(player)
         end
         inventoryData[unitId].Count = inventoryData[unitId].Count + 1
         -- 只传递必要的实例信息给客户端
+        -- 统一补全占地宽深，向后兼容历史数据
+        local gridWidth = UnitConfig.GetGridWidth(unitId)
+        local gridDepth = UnitConfig.GetGridDepth(unitId)
+        instance.GridWidth = gridWidth
+        instance.GridDepth = gridDepth
+
         table.insert(inventoryData[unitId].Instances, {
             InstanceId = instance.InstanceId,
             IsPlaced = instance.IsPlaced or false,
             GridSize = instance.GridSize,
+            GridWidth = gridWidth,
+            GridDepth = gridDepth,
         })
     end
 
@@ -475,6 +499,8 @@ local function OnClientRequestUnitInstance(player, unitId)
                                     InstanceId = instance.InstanceId,
                                     UnitId = unitId,
                                     GridSize = instance.GridSize,
+                                    GridWidth = instance.GridWidth or UnitConfig.GetGridWidth(unitId),
+                                    GridDepth = instance.GridDepth or UnitConfig.GetGridDepth(unitId),
                                 })
                                 return
                             end

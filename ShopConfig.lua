@@ -691,7 +691,7 @@ end
 @return table - 错误列表
 ]]
 function ShopConfig.ValidateShopConfig()
-	local errors = {}
+	local errors = {} :: {string}
 	local success = true
 
 	for shopId, shopData in pairs(ShopConfig.Shops) do

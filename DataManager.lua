@@ -48,7 +48,9 @@ PlayerData = {
             Level = number,        -- 等级
             GridX = number,        -- 网格X坐标
             GridZ = number,        -- 网格Z坐标
-            GridSize = number,     -- 占地大小(1或4)
+            GridSize = number,     -- 占地大小(向后兼容)
+            GridWidth = number,    -- 占地宽度(格数)
+            GridDepth = number,    -- 占地深度(格数)
             IsActivated = boolean, -- 是否已激活(用于战役系统)
             Health = number,       -- 当前生命值
             MaxHealth = number,    -- 最大生命值
@@ -867,6 +869,9 @@ function DataManager.SyncPlacedUnits(player, placedUnitsData)
     -- 清洗数据，移除不可序列化的字段（如Model引用）
     local cleanedData = {}
     for instanceId, unitData in pairs(placedUnitsData) do
+        local gridWidth = unitData.GridWidth or unitData.GridSize or 1
+        local gridDepth = unitData.GridDepth or unitData.GridSize or gridWidth
+
         cleanedData[instanceId] = {
             InstanceId = unitData.InstanceId,
             UnitId = unitData.UnitId,
@@ -874,6 +879,8 @@ function DataManager.SyncPlacedUnits(player, placedUnitsData)
             GridX = unitData.GridX,
             GridZ = unitData.GridZ,
             GridSize = unitData.GridSize,
+            GridWidth = gridWidth,
+            GridDepth = gridDepth,
             PlacedTime = unitData.PlacedTime,
             -- 注意：不包含Position和Model，因为这些可以通过其他数据重建
         }
@@ -901,6 +908,9 @@ function DataManager.AddPlacedUnit(player, instanceId, unitData)
     end
 
     -- 清洗数据
+    local gridWidth = unitData.GridWidth or unitData.GridSize or 1
+    local gridDepth = unitData.GridDepth or unitData.GridSize or gridWidth
+
     playerData.PlacedUnits[instanceId] = {
         InstanceId = unitData.InstanceId,
         UnitId = unitData.UnitId,
@@ -908,6 +918,8 @@ function DataManager.AddPlacedUnit(player, instanceId, unitData)
         GridX = unitData.GridX,
         GridZ = unitData.GridZ,
         GridSize = unitData.GridSize,
+        GridWidth = gridWidth,
+        GridDepth = gridDepth,
         PlacedTime = unitData.PlacedTime or os.time(),
     }
 

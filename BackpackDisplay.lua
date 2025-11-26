@@ -173,12 +173,16 @@ local function OnUnitItemClicked(unitId, unitName)
 	if unitData and unitData.Instances then
 		for _, instanceInfo in ipairs(unitData.Instances) do
 			if not instanceInfo.IsPlaced then
+				local gridWidth = instanceInfo.GridWidth or instanceInfo.GridSize or UnitConfig.GetGridWidth(unitId)
+				local gridDepth = instanceInfo.GridDepth or instanceInfo.GridSize or UnitConfig.GetGridDepth(unitId)
+
 				-- 调用PlacementController开始放置
 				if _G.PlacementController then
 					_G.PlacementController.StartPlacement(
 						instanceInfo.InstanceId,
 						unitId,
-						instanceInfo.GridSize
+						gridWidth,
+						gridDepth
 					)
 				else
 					warn("[BackpackDisplay] PlacementController未找到!")
@@ -202,11 +206,15 @@ local function OnUnitItemClicked(unitId, unitName)
 					if updatedUnitData and updatedUnitData.Instances then
 						for _, instanceInfo in ipairs(updatedUnitData.Instances) do
 							if not instanceInfo.IsPlaced then
+								local gridWidth = instanceInfo.GridWidth or instanceInfo.GridSize or UnitConfig.GetGridWidth(unitId)
+								local gridDepth = instanceInfo.GridDepth or instanceInfo.GridSize or UnitConfig.GetGridDepth(unitId)
+
 								if _G.PlacementController then
 									_G.PlacementController.StartPlacement(
 										instanceInfo.InstanceId,
 										unitId,
-										instanceInfo.GridSize
+										gridWidth,
+										gridDepth
 									)
 								end
 								return

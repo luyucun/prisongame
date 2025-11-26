@@ -40,9 +40,11 @@ PlacedUnitData = {
     InstanceId = string,       -- 兵种实例ID
     UnitId = string,           -- 兵种配置ID
     Position = Vector3,        -- 放置位置
-    GridX = number,            -- 网格X坐标
-    GridZ = number,            -- 网格Z坐标
-    GridSize = number,         -- 占地大小
+    GridX = number,            -- 网格X坐标 (左下角)
+    GridZ = number,            -- 网格Z坐标 (左下角)
+    -- V2.0重构: 支持矩形占地
+    GridWidth = number,        -- X轴方向占用格子数
+    GridDepth = number,        -- Z轴方向占用格子数
     Model = Model,             -- 放置的模型引用
     PlacedTime = number,       -- 放置时间戳
 }
@@ -124,24 +126,27 @@ local function GetPlayerIdleFloor(player)
 end
 
 --[[
-检查网格是否被占用
+检查网格是否被占用 (V2.0重构: 支持矩形占地)
 @param player Player
-@param gridX number
-@param gridZ number
-@param gridSize number - 兵种占地大小 (1, 4, 9)
+@param gridX number - 左下角网格X坐标
+@param gridZ number - 左下角网格Z坐标
+@param gridWidth number - X轴方向占用格子数
+@param gridDepth number - Z轴方向占用格子数 (可选,默认等于gridWidth)
 @return boolean, string - 是否占用, 占用的instanceId
 ]]
-local function IsGridOccupied(player, gridX, gridZ, gridSize)
+local function IsGridOccupied(player, gridX, gridZ, gridWidth, gridDepth)
     local userId = player.UserId
     if not gridOccupancy[userId] then
         gridOccupancy[userId] = {}
     end
 
-    local gridWidth = math.sqrt(gridSize)
+    -- 处理默认参数
+    gridWidth = gridWidth or 1
+    gridDepth = gridDepth or gridWidth
 
     -- 检查所有需要占据的格子
     for i = 0, gridWidth - 1 do
-        for j = 0, gridWidth - 1 do
+        for j = 0, gridDepth - 1 do
             local checkX = gridX + i
             local checkZ = gridZ + j
             local gridKey = GetGridKey(checkX, checkZ)
@@ -156,23 +161,26 @@ local function IsGridOccupied(player, gridX, gridZ, gridSize)
 end
 
 --[[
-占据网格
+占据网格 (V2.0重构: 支持矩形占地)
 @param player Player
-@param gridX number
-@param gridZ number
-@param gridSize number
+@param gridX number - 左下角网格X坐标
+@param gridZ number - 左下角网格Z坐标
+@param gridWidth number - X轴方向占用格子数
+@param gridDepth number - Z轴方向占用格子数 (可选,默认等于gridWidth)
 @param instanceId string
 ]]
-local function OccupyGrid(player, gridX, gridZ, gridSize, instanceId)
+local function OccupyGrid(player, gridX, gridZ, gridWidth, gridDepth, instanceId)
     local userId = player.UserId
     if not gridOccupancy[userId] then
         gridOccupancy[userId] = {}
     end
 
-    local gridWidth = math.sqrt(gridSize)
+    -- 处理默认参数
+    gridWidth = gridWidth or 1
+    gridDepth = gridDepth or gridWidth
 
     for i = 0, gridWidth - 1 do
-        for j = 0, gridWidth - 1 do
+        for j = 0, gridDepth - 1 do
             local occupyX = gridX + i
             local occupyZ = gridZ + j
             local gridKey = GetGridKey(occupyX, occupyZ)
@@ -182,22 +190,25 @@ local function OccupyGrid(player, gridX, gridZ, gridSize, instanceId)
 end
 
 --[[
-释放网格
+释放网格 (V2.0重构: 支持矩形占地)
 @param player Player
-@param gridX number
-@param gridZ number
-@param gridSize number
+@param gridX number - 左下角网格X坐标
+@param gridZ number - 左下角网格Z坐标
+@param gridWidth number - X轴方向占用格子数
+@param gridDepth number - Z轴方向占用格子数 (可选,默认等于gridWidth)
 ]]
-local function ReleaseGrid(player, gridX, gridZ, gridSize)
+local function ReleaseGrid(player, gridX, gridZ, gridWidth, gridDepth)
     local userId = player.UserId
     if not gridOccupancy[userId] then
         return
     end
 
-    local gridWidth = math.sqrt(gridSize)
+    -- 处理默认参数
+    gridWidth = gridWidth or 1
+    gridDepth = gridDepth or gridWidth
 
     for i = 0, gridWidth - 1 do
-        for j = 0, gridWidth - 1 do
+        for j = 0, gridDepth - 1 do
             local releaseX = gridX + i
             local releaseZ = gridZ + j
             local gridKey = GetGridKey(releaseX, releaseZ)
@@ -311,69 +322,20 @@ local function PlayShowAnimation(model, unitId)
 end
 
 --[[
-计算模型脚底到HumanoidRootPart的高度差（V2.8.1修复）
-使用Humanoid.HipHeight来精确计算，避免武器等附件影响计算结果
-@param model Model - 兵种模型
-@return number - HumanoidRootPart到脚底的高度差
-]]
-local function CalculateModelBottomOffset(model)
-    if not model then
-        return PlacementConfig.PLACEMENT_Y_OFFSET  -- 默认值
-    end
-
-    local humanoid = model:FindFirstChildOfClass("Humanoid")
-    local hrp = model:FindFirstChild("HumanoidRootPart")
-
-    if not humanoid or not hrp then
-        return PlacementConfig.PLACEMENT_Y_OFFSET
-    end
-
-    -- V2.8.1修复：使用Humanoid.HipHeight计算脚底位置
-    -- HipHeight = HumanoidRootPart底部到脚底的距离
-    -- 对于R15人物，这个值是精确的
-    -- 对于R6人物，这个值也是可靠的
-    local hipHeight = humanoid.HipHeight
-
-    -- HumanoidRootPart的中心到脚底的距离 = HipHeight + HumanoidRootPart高度的一半
-    -- 但实际上Roblox的HipHeight已经是从HumanoidRootPart中心到脚底的距离
-    -- 所以直接使用HipHeight即可
-    local bottomOffset = hipHeight
-
-    -- 如果HipHeight太小（可能是自定义模型），使用备用方案
-    if bottomOffset < 1 then
-        -- 尝试查找腿部来计算
-        local leftLeg = model:FindFirstChild("Left Leg") or model:FindFirstChild("LeftLowerLeg") or model:FindFirstChild("LeftFoot")
-        local rightLeg = model:FindFirstChild("Right Leg") or model:FindFirstChild("RightLowerLeg") or model:FindFirstChild("RightFoot")
-
-        if leftLeg and leftLeg:IsA("BasePart") then
-            -- 计算腿底部到HumanoidRootPart的距离
-            local legBottom = leftLeg.Position.Y - leftLeg.Size.Y / 2
-            bottomOffset = hrp.Position.Y - legBottom
-        elseif rightLeg and rightLeg:IsA("BasePart") then
-            local legBottom = rightLeg.Position.Y - rightLeg.Size.Y / 2
-            bottomOffset = hrp.Position.Y - legBottom
-        else
-            -- 最后的备用方案：使用默认值
-            bottomOffset = PlacementConfig.PLACEMENT_Y_OFFSET
-        end
-    end
-
-    return bottomOffset
-end
-
---[[
-创建兵种模型到世界
+创建兵种模型到世界 (V2.0重构: 支持矩形占地)
 @param unitId string
 @param position Vector3
 @param instanceId string - V1.3: 添加instanceId参数用于标记模型
 @param level number - V1.4: 添加等级参数
-@param gridSize number - V1.4: 添加占地大小参数
+@param gridWidth number - V2.0: X轴方向占用格子数
+@param gridDepth number - V2.0: Z轴方向占用格子数 (可选,默认等于gridWidth)
 @return Model|nil
 ]]
-local function CreateUnitModel(unitId, position, instanceId, level, gridSize)
-    -- V1.4: 处理默认参数
+local function CreateUnitModel(unitId, position, instanceId, level, gridWidth, gridDepth)
+    -- V2.0: 处理默认参数
     level = level or 1
-    gridSize = gridSize or 1
+    gridWidth = gridWidth or 1
+    gridDepth = gridDepth or gridWidth
 
     local unitConfig = UnitConfig.GetUnitById(unitId)
     if not unitConfig then
@@ -433,40 +395,43 @@ local function CreateUnitModel(unitId, position, instanceId, level, gridSize)
         model:SetAttribute("InstanceId", instanceId)
     end
 
-    -- V1.4: 设置等级和UnitId属性，用于拖动合成时识别
+    -- 统一主部件，后续移动/拖动以HRP为基准
+    local hrp = model:FindFirstChild("HumanoidRootPart")
+    if hrp then
+        model.PrimaryPart = hrp
+    end
+
+    -- V2.0重构: 设置等级、UnitId和占地尺寸属性
     model:SetAttribute("Level", level)
     model:SetAttribute("UnitId", unitId)
-    model:SetAttribute("GridSize", gridSize)
+    model:SetAttribute("GridWidth", gridWidth)
+    model:SetAttribute("GridDepth", gridDepth)
     -- V2.1补充：添加只读属性用于调试兵种类型（可选）
     model:SetAttribute("UnitType", UnitConfig.IsRangedUnit(unitId) and "Ranged" or "Melee")
 
-    -- V2.8修复：先将模型放置到workspace（暂时放到高处避免碰撞干扰）
-    model.Parent = Workspace
-
-    -- V2.8.1修复：等级显示必须在模型放到Workspace之后才能正确更新
-    -- 因为BillboardGui需要在Workspace中才能正确渲染
+    -- V1.4: 更新等级显示
     UpdateLevelDisplay(model, level)
 
-    -- V2.8修复：计算该模型实际的底部偏移量（HumanoidRootPart到脚底的距离）
-    local bottomOffset = CalculateModelBottomOffset(model)
+    -- V2.7修复：先将模型放置到workspace，使用初始位置（后续会校准Y）
+    model.Parent = Workspace
 
-    -- V2.8修复：保存底部偏移量到模型属性，供拖动系统使用
-    model:SetAttribute("BottomOffset", bottomOffset)
-
-    -- V2.8修复：计算精确的放置Y坐标
-    -- position.Y 已经是 floorTopY + PLACEMENT_Y_OFFSET (由GridToWorld计算)
-    -- 我们需要的是: floorTopY + bottomOffset + 小间隙
-    local floorTopY = position.Y - PlacementConfig.PLACEMENT_Y_OFFSET
-    local padding = 0.05  -- 小间隙防止穿模
-    local correctY = floorTopY + bottomOffset + padding
-
-    -- 使用正确的Y坐标放置模型
-    local correctPosition = Vector3.new(position.X, correctY, position.Z)
-
+    -- V2.7修复：第一次放置到目标XZ位置（使用传入的position作为初值）
     if model.PrimaryPart then
-        model:PivotTo(CFrame.new(correctPosition))
+        model:PivotTo(CFrame.new(position))
     elseif model:FindFirstChild("HumanoidRootPart") then
-        model.HumanoidRootPart.CFrame = CFrame.new(correctPosition)
+        model.HumanoidRootPart.CFrame = CFrame.new(position)
+    end
+
+    -- V2.7修复：获取放置后的包围盒，根据底部对齐地板顶面
+    do
+        local bboxCf, bboxSize = model:GetBoundingBox()
+        local bottomY = bboxCf.Position.Y - bboxSize.Y / 2  -- 模型底部Y坐标
+        local floorTopY = position.Y - PlacementConfig.PLACEMENT_Y_OFFSET  -- 反推地板顶面
+        local padding = 0.05
+        local deltaY = (floorTopY + padding) - bottomY  -- 需要向上/下移动的距离
+
+        -- 二次PivotTo，将模型底部对齐地板顶面
+        model:PivotTo(model:GetPivot() * CFrame.new(0, deltaY, 0))
     end
 
     -- V1.5.2修复：IdleFloor上的单位需要播放动画
@@ -510,7 +475,7 @@ end
 -- ==================== 公共接口 ====================
 
 --[[
-验证放置位置是否合法
+验证放置位置是否合法 (V2.0重构: 支持矩形占地)
 @param player Player
 @param instanceId string - 兵种实例ID
 @param position Vector3 - 世界坐标
@@ -540,21 +505,28 @@ function PlacementSystem.ValidatePlacement(player, instanceId, position)
         return false, "找不到放置地板"
     end
 
-    -- 4.1 调试信息：已移除详细日志
-
     -- 5. 转换为网格坐标
     local floorCenter = idleFloor.Position
     local gridX, gridZ = PlacementConfig.WorldToGrid(position, floorCenter)
 
+    -- V2.0: 获取兵种占地尺寸
+    local gridWidth = UnitConfig.GetGridWidth(unitInstance.UnitId)
+    local gridDepth = UnitConfig.GetGridDepth(unitInstance.UnitId)
+    -- 回写实例占地，向后兼容老数据
+    unitInstance.GridWidth = gridWidth
+    unitInstance.GridDepth = gridDepth
+    -- 回写实例占地，向后兼容老数据
+    unitInstance.GridWidth = gridWidth
+    unitInstance.GridDepth = gridDepth
 
     -- 6. 检查边界
-    if not PlacementConfig.IsGridInBounds(gridX, gridZ, unitInstance.GridSize) then
+    if not PlacementConfig.IsGridInBounds(gridX, gridZ, gridWidth, gridDepth) then
         return false, "超出放置范围"
     end
 
     -- 7. 检查碰撞
     if PlacementConfig.ENABLE_COLLISION_CHECK then
-        local isOccupied, occupyingId = IsGridOccupied(player, gridX, gridZ, unitInstance.GridSize)
+        local isOccupied, occupyingId = IsGridOccupied(player, gridX, gridZ, gridWidth, gridDepth)
         if isOccupied then
             return false, "位置已被占用"
         end
@@ -570,7 +542,7 @@ function PlacementSystem.ValidatePlacement(player, instanceId, position)
 end
 
 --[[
-放置兵种
+放置兵种 (V2.0重构: 支持矩形占地)
 @param player Player
 @param instanceId string
 @param position Vector3
@@ -591,12 +563,18 @@ function PlacementSystem.PlaceUnit(player, instanceId, position)
     -- 转换为网格坐标
     local gridX, gridZ = PlacementConfig.WorldToGrid(position, floorCenter)
 
-    -- 计算精确的放置位置 (对齐到网格中心，传入gridSize以正确计算多格兵种的中心)
-    local finalPosition = PlacementConfig.GridToWorld(gridX, gridZ, floorCenter, unitInstance.GridSize)
+    -- V2.0: 获取兵种占地尺寸
+    local gridWidth = UnitConfig.GetGridWidth(unitInstance.UnitId)
+    local gridDepth = UnitConfig.GetGridDepth(unitInstance.UnitId)
+    -- 回写实例占地，向后兼容老数据
+    unitInstance.GridWidth = gridWidth
+    unitInstance.GridDepth = gridDepth
 
-    -- V1.3: 传递instanceId到CreateUnitModel
-    -- V1.4: 传递level和gridSize到CreateUnitModel
-    local model = CreateUnitModel(unitInstance.UnitId, finalPosition, instanceId, unitInstance.Level, unitInstance.GridSize)
+    -- 计算精确的放置位置 (对齐到网格中心)
+    local finalPosition = PlacementConfig.GridToWorld(gridX, gridZ, floorCenter, gridWidth, gridDepth)
+
+    -- V2.0: 传递gridWidth和gridDepth到CreateUnitModel
+    local model = CreateUnitModel(unitInstance.UnitId, finalPosition, instanceId, unitInstance.Level, gridWidth, gridDepth)
     if not model then
         return false, "创建模型失败"
     end
@@ -613,8 +591,8 @@ function PlacementSystem.PlaceUnit(player, instanceId, position)
     unitInstance.IsPlaced = true
     unitInstance.PlacedPosition = actualPosition
 
-    -- 占据网格
-    OccupyGrid(player, gridX, gridZ, unitInstance.GridSize, instanceId)
+    -- V2.0: 占据网格 (使用gridWidth和gridDepth)
+    OccupyGrid(player, gridX, gridZ, gridWidth, gridDepth, instanceId)
 
     -- 保存放置数据
     local userId = player.UserId
@@ -622,14 +600,16 @@ function PlacementSystem.PlaceUnit(player, instanceId, position)
         placedUnits[userId] = {}
     end
 
+    -- V2.0重构: 使用GridWidth和GridDepth替代GridSize
     placedUnits[userId][instanceId] = {
         InstanceId = instanceId,
         UnitId = unitInstance.UnitId,
-        Level = unitInstance.Level,  -- 🔥修复：确保包含等级信息
-        Position = actualPosition,  -- V2.7修复：使用校准后的实际位置
+        Level = unitInstance.Level,
+        Position = actualPosition,
         GridX = gridX,
         GridZ = gridZ,
-        GridSize = unitInstance.GridSize,
+        GridWidth = gridWidth,
+        GridDepth = gridDepth,
         Model = model,
         PlacedTime = os.time(),
     }
@@ -662,12 +642,14 @@ function PlacementSystem.PlaceUnit(player, instanceId, position)
     InventorySystem.RefreshClientInventory(player)
 
     -- 🔥修复持久化：保存放置数据到DataManager
+    -- V2.0重构: 使用GridWidth和GridDepth替代GridSize
     local placedData = {
         UnitId = unitInstance.UnitId,
         Level = unitInstance.Level,
         GridX = gridX,
         GridZ = gridZ,
-        GridSize = unitInstance.GridSize,
+        GridWidth = gridWidth,
+        GridDepth = gridDepth,
         IsActivated = false,  -- 新放置的单位未激活
         Health = unitInstance.Health or UnitConfig.CalculateHealth(unitInstance.UnitId, unitInstance.Level),
         MaxHealth = unitInstance.MaxHealth or UnitConfig.CalculateHealth(unitInstance.UnitId, unitInstance.Level),
@@ -698,7 +680,7 @@ function PlacementSystem.PlaceUnit(player, instanceId, position)
 end
 
 --[[
-取消放置(移除已放置的兵种)
+取消放置(移除已放置的兵种) (V2.0重构: 支持矩形占地)
 @param player Player
 @param instanceId string
 @return boolean, string
@@ -711,8 +693,10 @@ function PlacementSystem.RemovePlacedUnit(player, instanceId)
 
     local placedData = placedUnits[userId][instanceId]
 
-    -- 释放网格
-    ReleaseGrid(player, placedData.GridX, placedData.GridZ, placedData.GridSize)
+    -- V2.0: 释放网格 (使用GridWidth和GridDepth,向后兼容GridSize)
+    local gridWidth = placedData.GridWidth or placedData.GridSize or 1
+    local gridDepth = placedData.GridDepth or placedData.GridSize or gridWidth
+    ReleaseGrid(player, placedData.GridX, placedData.GridZ, gridWidth, gridDepth)
 
     -- 移除模型
     if placedData.Model and placedData.Model.Parent then
@@ -773,7 +757,7 @@ function PlacementSystem.RemoveUnit(player, instanceId)
 end
 
 --[[
-更新已放置兵种的位置（V1.4.1：拖动换位功能）
+更新已放置兵种的位置 (V2.0重构: 支持矩形占地)
 @param player Player
 @param instanceId string - 兵种实例ID
 @param newPosition Vector3 - 新的世界坐标
@@ -803,51 +787,72 @@ function PlacementSystem.UpdateUnitPosition(player, instanceId, newPosition)
     local floorCenter = idleFloor.Position
     local newGridX, newGridZ = PlacementConfig.WorldToGrid(newPosition, floorCenter)
 
+    -- V2.0: 获取占地尺寸 (优先从placedData,然后从unitInstance,最后从UnitConfig)
+    local gridWidth = UnitConfig.GetGridWidth(unitInstance.UnitId)
+    local gridDepth = UnitConfig.GetGridDepth(unitInstance.UnitId)
+    placedData.GridWidth = gridWidth
+    placedData.GridDepth = gridDepth
+
     -- 4. 检查边界
-    if not PlacementConfig.IsGridInBounds(newGridX, newGridZ, unitInstance.GridSize) then
+    if not PlacementConfig.IsGridInBounds(newGridX, newGridZ, gridWidth, gridDepth) then
         return false, "超出放置范围"
     end
 
     -- 5. 检查新位置是否与其他兵种冲突（排除自己）
     if PlacementConfig.ENABLE_COLLISION_CHECK then
-        local isOccupied, occupyingId = IsGridOccupied(player, newGridX, newGridZ, unitInstance.GridSize)
-        if isOccupied and occupyingId ~= instanceId then
+        -- 先释放自己占据的网格,再检查冲突
+        local oldGridWidth = placedData.GridWidth or placedData.GridSize or 1
+        local oldGridDepth = placedData.GridDepth or placedData.GridSize or oldGridWidth
+        ReleaseGrid(player, placedData.GridX, placedData.GridZ, oldGridWidth, oldGridDepth)
+
+        local isOccupied, occupyingId = IsGridOccupied(player, newGridX, newGridZ, gridWidth, gridDepth)
+        if isOccupied then
+            -- 恢复原来的网格占用
+            OccupyGrid(player, placedData.GridX, placedData.GridZ, oldGridWidth, oldGridDepth, instanceId)
             return false, "位置已被占用"
         end
+    else
+        -- 不检查碰撞时也需要释放旧网格
+        local oldGridWidth = placedData.GridWidth or placedData.GridSize or 1
+        local oldGridDepth = placedData.GridDepth or placedData.GridSize or oldGridWidth
+        ReleaseGrid(player, placedData.GridX, placedData.GridZ, oldGridWidth, oldGridDepth)
     end
 
-    -- 6. 释放旧位置的网格
-    ReleaseGrid(player, placedData.GridX, placedData.GridZ, placedData.GridSize)
+    -- 7. 计算新的精确位置
+    local finalPosition = PlacementConfig.GridToWorld(newGridX, newGridZ, floorCenter, gridWidth, gridDepth)
 
-    -- 7. 计算新的精确位置（传入gridSize以正确计算多格兵种的中心）
-    local finalPosition = PlacementConfig.GridToWorld(newGridX, newGridZ, floorCenter, unitInstance.GridSize)
-
-    -- V2.8修复：使用模型保存的底部偏移量计算正确的Y坐标
+    -- 8. 更新模型位置（V2.7修复：先放再调，使用包围盒底部对齐地板顶面）
     if placedData.Model and placedData.Model.Parent then
-        local bottomOffset = placedData.Model:GetAttribute("BottomOffset") or PlacementConfig.PLACEMENT_Y_OFFSET
-        local floorTopY = finalPosition.Y - PlacementConfig.PLACEMENT_Y_OFFSET
-        local padding = 0.05
-        local correctY = floorTopY + bottomOffset + padding
-
-        local correctPosition = Vector3.new(finalPosition.X, correctY, finalPosition.Z)
-
+        -- V2.7修复：第一次PivotTo到新的XZ位置（使用finalPosition作为初值）
         if placedData.Model.PrimaryPart then
-            placedData.Model:PivotTo(CFrame.new(correctPosition))
+            placedData.Model:PivotTo(CFrame.new(finalPosition))
         elseif placedData.Model:FindFirstChild("HumanoidRootPart") then
-            placedData.Model.HumanoidRootPart.CFrame = CFrame.new(correctPosition)
+            placedData.Model.HumanoidRootPart.CFrame = CFrame.new(finalPosition)
         end
 
-        -- 更新finalPosition为实际放置的位置
-        finalPosition = correctPosition
+        -- V2.7修复：获取放置后的包围盒，根据底部对齐地板顶面
+        local bboxCf, bboxSize = placedData.Model:GetBoundingBox()
+        local bottomY = bboxCf.Position.Y - bboxSize.Y / 2  -- 模型底部Y坐标
+        local floorTopY = finalPosition.Y - PlacementConfig.PLACEMENT_Y_OFFSET  -- 反推地板顶面
+        local padding = 0.05
+        local deltaY = (floorTopY + padding) - bottomY  -- 需要向上/下移动的距离
+
+        -- 二次PivotTo，将模型底部对齐地板顶面
+        placedData.Model:PivotTo(placedData.Model:GetPivot() * CFrame.new(0, deltaY, 0))
+
+        -- V2.7修复：更新finalPosition为校准后的实际Y坐标
+        finalPosition = Vector3.new(finalPosition.X, finalPosition.Y + deltaY, finalPosition.Z)
     end
 
     -- 9. 占据新位置的网格
-    OccupyGrid(player, newGridX, newGridZ, unitInstance.GridSize, instanceId)
+    OccupyGrid(player, newGridX, newGridZ, gridWidth, gridDepth, instanceId)
 
-    -- 10. 更新placedData
+    -- 10. 更新placedData (V2.0: 使用GridWidth和GridDepth)
     placedData.Position = finalPosition
     placedData.GridX = newGridX
     placedData.GridZ = newGridZ
+    placedData.GridWidth = gridWidth
+    placedData.GridDepth = gridDepth
 
     -- 11. 更新InventorySystem中的位置
     unitInstance.PlacedPosition = finalPosition
@@ -1062,8 +1067,15 @@ function PlacementSystem.RestorePlacedUnits(player)
                 return false
             end
 
+            -- 占地尺寸：优先使用保存的宽/深，向后兼容GridSize/配置表
+            local gridWidth = UnitConfig.GetGridWidth(unitInstance.UnitId)
+            local gridDepth = UnitConfig.GetGridDepth(unitInstance.UnitId)
+            -- 回写实例占地，保持与当前配置一致
+            unitInstance.GridWidth = gridWidth
+            unitInstance.GridDepth = gridDepth
+
             -- 4.3 验证网格位置是否在边界内
-            if not PlacementConfig.IsGridInBounds(savedData.GridX, savedData.GridZ, savedData.GridSize) then
+            if not PlacementConfig.IsGridInBounds(savedData.GridX, savedData.GridZ, gridWidth, gridDepth) then
                 warn(string.format(
                     "%s [PlacementSystem] 🔥 恢复失败：实例 %s 网格位置 (%d,%d) 超出边界",
                     GameConfig.LOG_PREFIX,
@@ -1076,8 +1088,8 @@ function PlacementSystem.RestorePlacedUnits(player)
 
             -- 4.4 检查网格位置是否被占用（跳过自己占用的情况）
             local gridOccupied = false
-            for x = savedData.GridX, savedData.GridX + savedData.GridSize - 1 do
-                for z = savedData.GridZ, savedData.GridZ + savedData.GridSize - 1 do
+            for x = savedData.GridX, savedData.GridX + gridWidth - 1 do
+                for z = savedData.GridZ, savedData.GridZ + gridDepth - 1 do
                     local gridKey = GetGridKey(x, z)
                     local occupiedBy = gridOccupancy[userId][gridKey]
                     if occupiedBy and occupiedBy ~= instanceId then
@@ -1106,7 +1118,8 @@ function PlacementSystem.RestorePlacedUnits(player)
                 savedData.GridX,
                 savedData.GridZ,
                 floorCenter,
-                savedData.GridSize
+                gridWidth,
+                gridDepth
             )
 
             -- 4.6 创建兵种模型
@@ -1115,7 +1128,8 @@ function PlacementSystem.RestorePlacedUnits(player)
                 worldPosition,
                 instanceId,
                 savedData.Level or 1,
-                savedData.GridSize
+                gridWidth,
+                gridDepth
             )
 
             if not model then
@@ -1147,7 +1161,7 @@ function PlacementSystem.RestorePlacedUnits(player)
             end
 
             -- 4.8 占据网格
-            OccupyGrid(player, savedData.GridX, savedData.GridZ, savedData.GridSize, instanceId)
+            OccupyGrid(player, savedData.GridX, savedData.GridZ, gridWidth, gridDepth, instanceId)
 
             -- 4.9 保存放置数据到内存
             placedUnits[userId][instanceId] = {
@@ -1157,6 +1171,8 @@ function PlacementSystem.RestorePlacedUnits(player)
                 GridX = savedData.GridX,
                 GridZ = savedData.GridZ,
                 GridSize = savedData.GridSize,
+                GridWidth = gridWidth,
+                GridDepth = gridDepth,
                 Model = model,
                 PlacedTime = os.time(),
             }

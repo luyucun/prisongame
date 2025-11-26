@@ -5,13 +5,18 @@
 ]]
 
 --[[
-Grid脚底提示块辅助工具模块
+Grid脚底提示块辅助工具模块 (V2.0重构: 支持任意矩形占地)
 职责:
 1. 管理放置过程中的Grid脚底提示块
-2. 根据占地大小复制对应的Grid Part
+2. 根据占地尺寸(GridWidth x GridDepth)动态调整Grid大小
 3. 实时跟随模型位置
 4. 根据位置冲突切换绿色/红色Grid
-版本: V1.2.1
+版本: V2.0
+
+占地尺寸约定:
+- GridWidth: X轴方向占用的格子数
+- GridDepth: Z轴方向占用的格子数
+- 支持任意矩形: 1x1, 1x2, 2x2, 2x3, 3x3, 4x7 等
 ]]
 
 local GridHelper = {}
@@ -20,11 +25,15 @@ local GridHelper = {}
 local Workspace = game:GetService("Workspace")
 
 -- 配置常量
--- Grid应该正好贴在IdleFloor表面，所以需要减去兵种的Y偏移量
--- 兵种的Y = floorTop + PLACEMENT_Y_OFFSET (3)
--- Grid的Y应该 = floorTop + 0.01 (略微高于地板防止Z-fighting)
 local PLACEMENT_Y_OFFSET = 3  -- 兵种脚底距离地板上表面的距离
 local GRID_Y_OFFSET = 0.01     -- Grid距离地板上表面的微小偏移
+local GRID_UNIT_SIZE = 4       -- 每个格子的studs大小
+local GRID_THICKNESS = 0.1     -- Grid厚度
+
+-- Grid颜色配置
+local GRID_COLOR_VALID = Color3.fromRGB(0, 255, 0)      -- 绿色
+local GRID_COLOR_INVALID = Color3.fromRGB(255, 0, 0)    -- 红色
+local GRID_TRANSPARENCY = 0.3                            -- 透明度
 
 -- Grid引用
 local gridFolder = nil
@@ -33,11 +42,12 @@ local gridTemplates = {}
 -- 当前显示的Grid Part
 local currentGridPart = nil
 
--- V1.4.1: Grid状态缓存（防止不必要的重建）
+-- V2.0: Grid状态缓存（使用GridWidth和GridDepth）
 local gridStateCache = {
-	gridSize = nil,
-	isValid = nil,
-	position = nil
+    gridWidth = nil,
+    gridDepth = nil,
+    isValid = nil,
+    position = nil
 }
 
 -- ==================== 初始化 ====================
@@ -64,7 +74,7 @@ function GridHelper.Initialize()
         return false
     end
 
-    -- 预定义需要的模板列表
+    -- V2.0: 预定义正方形模板（用于常见尺寸，非正方形会动态创建）
     local requiredTemplates = {"GridGreen1", "GridGreen2", "GridGreen3", "GridRed1", "GridRed2", "GridRed3"}
 
     -- 初始化所有键
@@ -73,20 +83,16 @@ function GridHelper.Initialize()
     end
 
     -- 尝试从Grid文件夹中查找所有模板
-    local foundCount = 0
     for _, name in ipairs(requiredTemplates) do
         local template = gridFolder:FindFirstChild(name)
         if template then
             gridTemplates[name] = template
-            foundCount = foundCount + 1
         else
             -- 异步等待模板出现
             task.spawn(function()
                 local found = gridFolder:WaitForChild(name, 10)
                 if found then
                     gridTemplates[name] = found
-                else
-                    warn(string.format("[GridHelper] 10秒内未找到模板: %s", name))
                 end
             end)
         end
@@ -105,72 +111,107 @@ end
 -- ==================== Grid管理 ====================
 
 --[[
-显示Grid提示块
-@param gridSize number - 占地大小 (1, 4, 9)
+创建动态Grid Part (V2.0新增: 支持任意矩形)
+@param gridWidth number - X轴方向格子数
+@param gridDepth number - Z轴方向格子数
+@param isValid boolean - 是否为有效位置
+@return Part - 创建的Grid Part
+]]
+local function CreateDynamicGrid(gridWidth, gridDepth, isValid)
+    local grid = Instance.new("Part")
+    grid.Name = "ActiveGridIndicator"
+    grid.Anchored = true
+    grid.CanCollide = false
+    grid.CanQuery = false
+    grid.CanTouch = false
+    grid.Material = Enum.Material.Neon
+    grid.Color = isValid and GRID_COLOR_VALID or GRID_COLOR_INVALID
+    grid.Transparency = GRID_TRANSPARENCY
+
+    -- 计算实际大小 (studs)
+    local sizeX = gridWidth * GRID_UNIT_SIZE
+    local sizeZ = gridDepth * GRID_UNIT_SIZE
+    grid.Size = Vector3.new(sizeX, GRID_THICKNESS, sizeZ)
+
+    return grid
+end
+
+--[[
+显示Grid提示块 (V2.0重构: 支持矩形占地)
+@param gridWidth number - X轴方向格子数 (或旧版gridSize用于向后兼容)
 @param position Vector3 - 世界坐标
 @param isValid boolean - 是否为有效位置 (true=绿色, false=红色)
+@param gridDepth number - Z轴方向格子数 (可选,默认等于gridWidth)
 @return Part|nil - 创建的Grid Part
+
+注: 为了向后兼容,如果只传gridWidth(原gridSize),则视为正方形
 ]]
-function GridHelper.ShowGrid(gridSize, position, isValid)
+function GridHelper.ShowGrid(gridWidth, position, isValid, gridDepth)
     -- 如果Grid文件夹不存在，静默失败
     if not gridFolder then
         return nil
     end
 
-    -- 确定要使用的模板名称
-    local gridWidth = math.sqrt(gridSize)  -- 1, 2, 3
-    local templateName = isValid and ("GridGreen" .. gridWidth) or ("GridRed" .. gridWidth)
+    -- 处理默认参数
+    gridWidth = gridWidth or 1
+    gridDepth = gridDepth or gridWidth
 
-    -- V1.4.1: 检查是否需要切换模板（尺寸或颜色改变）
+    -- V2.0: 检查是否需要切换模板（尺寸或颜色改变）
     local needChangeTemplate = false
-    if gridStateCache.gridSize ~= gridSize or gridStateCache.isValid ~= isValid then
+    if gridStateCache.gridWidth ~= gridWidth or
+       gridStateCache.gridDepth ~= gridDepth or
+       gridStateCache.isValid ~= isValid then
         needChangeTemplate = true
     end
 
-    -- V1.4.1: 如果需要切换模板，销毁旧的重建新的
+    -- V2.0: 如果需要切换模板，销毁旧的重建新的
     if needChangeTemplate then
         GridHelper.HideGrid()
 
-        -- 从缓存中获取模板
-        local template = gridTemplates[templateName]
-        if template == nil then
-            template = gridFolder:WaitForChild(templateName, 5)
+        -- 检查是否为正方形且有预设模板
+        if gridWidth == gridDepth and gridWidth <= 3 then
+            -- 使用预设的正方形模板
+            local templateName = isValid and ("GridGreen" .. gridWidth) or ("GridRed" .. gridWidth)
+            local template = gridTemplates[templateName]
+
+            if template == nil then
+                template = gridFolder:WaitForChild(templateName, 2)
+                if template then
+                    gridTemplates[templateName] = template
+                end
+            end
+
             if template then
-                gridTemplates[templateName] = template
+                currentGridPart = template:Clone()
+                currentGridPart.Name = "ActiveGridIndicator"
+                currentGridPart.Anchored = true
+                currentGridPart.CanCollide = false
+                currentGridPart.CanQuery = false
+                currentGridPart.CanTouch = false
+            else
+                -- 预设模板不存在，动态创建
+                currentGridPart = CreateDynamicGrid(gridWidth, gridDepth, isValid)
             end
+        else
+            -- 非正方形或大尺寸，动态创建Grid
+            currentGridPart = CreateDynamicGrid(gridWidth, gridDepth, isValid)
         end
 
-        if not template then
-            if not gridTemplates["_warned_" .. templateName] then
-                warn(string.format("[GridHelper] 模板%s暂未加载", templateName))
-                gridTemplates["_warned_" .. templateName] = true
-            end
-            return nil
-        end
-
-        -- 克隆Grid Part
-        currentGridPart = template:Clone()
-        currentGridPart.Name = "ActiveGridIndicator"
-        currentGridPart.Anchored = true
-        currentGridPart.CanCollide = false
-        currentGridPart.CanQuery = false  -- V1.4.1: 防止射线检测命中指示块导致闪烁
-        currentGridPart.CanTouch = false  -- V1.4.1: 同时禁用触摸检测
         currentGridPart.Parent = Workspace
 
         -- 更新状态缓存
-        gridStateCache.gridSize = gridSize
+        gridStateCache.gridWidth = gridWidth
+        gridStateCache.gridDepth = gridDepth
         gridStateCache.isValid = isValid
     end
 
-    -- V1.4.1: 无论是否切换模板，都更新位置（如果位置改变）
+    -- V2.0: 无论是否切换模板，都更新位置（如果位置改变）
     if currentGridPart and currentGridPart.Parent then
-        -- Grid 的 Y 坐标计算：
-        -- position.Y 是兵种的Y (floorTop + PLACEMENT_Y_OFFSET)
-        -- Grid 应该贴在地板上，所以 Y = position.Y - PLACEMENT_Y_OFFSET + GRID_Y_OFFSET
+        -- Grid 的 Y 坐标计算：贴在地板上
         local gridY = position.Y - PLACEMENT_Y_OFFSET + GRID_Y_OFFSET
         local newPos = Vector3.new(position.X, gridY, position.Z)
 
-        -- 只在位置真正改变时才更新（避免不必要的CFrame操作）
+        -- 只在位置真正改变时才更新
         if not gridStateCache.position or (position - gridStateCache.position).Magnitude > 0.01 then
             currentGridPart.Position = newPos
             gridStateCache.position = position
@@ -186,21 +227,20 @@ end
 ]]
 function GridHelper.UpdateGridPosition(position)
     if currentGridPart and currentGridPart.Parent then
-        -- Grid 的 Y 坐标计算：贴在地板上
         local gridY = position.Y - PLACEMENT_Y_OFFSET + GRID_Y_OFFSET
         currentGridPart.Position = Vector3.new(position.X, gridY, position.Z)
     end
 end
 
 --[[
-更新Grid颜色（切换绿色/红色）
-@param gridSize number - 占地大小
+更新Grid颜色（切换绿色/红色）(V2.0重构)
+@param gridWidth number - X轴方向格子数
 @param isValid boolean - 是否为有效位置
 @param position Vector3 - 当前位置
+@param gridDepth number - Z轴方向格子数 (可选)
 ]]
-function GridHelper.UpdateGridColor(gridSize, isValid, position)
-    -- 简单方法：移除旧的，创建新的
-    GridHelper.ShowGrid(gridSize, position, isValid)
+function GridHelper.UpdateGridColor(gridWidth, isValid, position, gridDepth)
+    GridHelper.ShowGrid(gridWidth, position, isValid, gridDepth)
 end
 
 --[[
@@ -212,8 +252,9 @@ function GridHelper.HideGrid()
         currentGridPart = nil
     end
 
-    -- V1.4.1: 清空状态缓存
-    gridStateCache.gridSize = nil
+    -- V2.0: 清空状态缓存
+    gridStateCache.gridWidth = nil
+    gridStateCache.gridDepth = nil
     gridStateCache.isValid = nil
     gridStateCache.position = nil
 end
@@ -237,15 +278,20 @@ end
 -- ==================== 工具函数 ====================
 
 --[[
-获取Grid的显示名称
-@param gridSize number
+获取Grid的显示名称 (V2.0重构)
+@param gridWidth number - X轴方向格子数
 @param isValid boolean
+@param gridDepth number - Z轴方向格子数 (可选)
 @return string
 ]]
-function GridHelper.GetGridName(gridSize, isValid)
-    local gridWidth = math.sqrt(gridSize)
+function GridHelper.GetGridName(gridWidth, isValid, gridDepth)
+    gridDepth = gridDepth or gridWidth
     local color = isValid and "Green" or "Red"
-    return string.format("Grid%s%d", color, gridWidth)
+    if gridWidth == gridDepth then
+        return string.format("Grid%s%d", color, gridWidth)
+    else
+        return string.format("Grid%s%dx%d", color, gridWidth, gridDepth)
+    end
 end
 
 return GridHelper
