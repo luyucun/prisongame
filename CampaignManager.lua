@@ -399,6 +399,93 @@ local function LockHomeOperations(player, locked)
 end
 
 --[[
+设置基地战斗状态视觉效果
+@param homeId number - 基地ID
+@param isFighting boolean - 是否处于战斗中
+功能说明：
+- 控制IdleFloor下Fighting Part的视觉效果
+- isFighting=true时：启用ParticleEmitter和BillboardGui，复制RedLine覆盖IdleFloor
+- isFighting=false时：禁用这些效果，移除RedLine
+]]
+local function SetHomeFightingEffect(homeId, isFighting)
+	local idleFloor = GetHomeIdleFloor(homeId)
+	if not idleFloor then
+		DebugLog(string.format("SetHomeFightingEffect: 未找到HomeId=%d的IdleFloor", homeId))
+		return
+	end
+
+	-- 查找Fighting Part
+	local fightingPart = idleFloor:FindFirstChild("Fighting")
+	if not fightingPart then
+		DebugLog(string.format("SetHomeFightingEffect: IdleFloor下未找到Fighting Part, HomeId=%d", homeId))
+		return
+	end
+
+	-- 设置ParticleEmitter的Enabled属性
+	local particleEmitter = fightingPart:FindFirstChild("ParticleEmitter")
+	if particleEmitter and particleEmitter:IsA("ParticleEmitter") then
+		particleEmitter.Enabled = isFighting
+		DebugLog(string.format("  ✨ ParticleEmitter.Enabled = %s", tostring(isFighting)))
+	else
+		DebugLog(string.format("  ⚠️ 未找到ParticleEmitter, HomeId=%d", homeId))
+	end
+
+	-- 设置BillboardGui的Enabled属性
+	local billboardGui = fightingPart:FindFirstChild("Fighting")
+	if billboardGui and billboardGui:IsA("BillboardGui") then
+		billboardGui.Enabled = isFighting
+		DebugLog(string.format("  🏷️ BillboardGui.Enabled = %s", tostring(isFighting)))
+	else
+		DebugLog(string.format("  ⚠️ 未找到Fighting BillboardGui, HomeId=%d", homeId))
+	end
+
+	-- V2.6新增：RedLine覆盖层控制
+	local redLineName = "RedLine_Home" .. homeId  -- 唯一命名，便于查找和移除
+
+	if isFighting then
+		-- 战斗开始：复制RedLine并覆盖到IdleFloor上
+		local redLineTemplate = ReplicatedStorage:FindFirstChild("RedLine")
+		if redLineTemplate and redLineTemplate:IsA("BasePart") then
+			-- 检查是否已存在（防止重复创建）
+			local existingRedLine = idleFloor:FindFirstChild(redLineName)
+			if not existingRedLine then
+				local redLineClone = redLineTemplate:Clone()
+				redLineClone.Name = redLineName
+
+				-- 设置位置：覆盖在IdleFloor上方
+				-- RedLine的Size与IdleFloor相同，位置略高于IdleFloor表面
+				redLineClone.Size = Vector3.new(idleFloor.Size.X, redLineTemplate.Size.Y, idleFloor.Size.Z)
+				redLineClone.CFrame = CFrame.new(
+					idleFloor.Position.X,
+					idleFloor.Position.Y + (idleFloor.Size.Y / 2) + (redLineClone.Size.Y / 2) + 0.01,  -- 略高于IdleFloor表面
+					idleFloor.Position.Z
+				)
+
+				-- 确保不影响物理碰撞
+				redLineClone.CanCollide = false
+				redLineClone.Anchored = true
+
+				redLineClone.Parent = idleFloor
+				DebugLog(string.format("  🔴 RedLine已创建并覆盖到IdleFloor, HomeId=%d", homeId))
+			else
+				DebugLog(string.format("  🔴 RedLine已存在，跳过创建, HomeId=%d", homeId))
+			end
+		else
+			DebugLog(string.format("  ⚠️ ReplicatedStorage中未找到RedLine模板, HomeId=%d", homeId))
+		end
+	else
+		-- 战斗结束：移除RedLine
+		local existingRedLine = idleFloor:FindFirstChild(redLineName)
+		if existingRedLine then
+			existingRedLine:Destroy()
+			DebugLog(string.format("  🔴 RedLine已移除, HomeId=%d", homeId))
+		end
+	end
+
+	DebugLog(string.format("🎮 SetHomeFightingEffect完成: HomeId=%d, isFighting=%s", homeId, tostring(isFighting)))
+end
+
+--[[
 播放重生特效
 @param unitInstance Model - 兵种实例
 @param gridSize number - 占地大小(1/2/3)
@@ -529,6 +616,9 @@ function CampaignManager.StartCampaign(player)
 
 	-- 锁定基地操作
 	LockHomeOperations(player, true)
+
+	-- V2.6新增：启用战斗状态视觉效果（粒子特效和战斗中提示）
+	SetHomeFightingEffect(homeId, true)
 
 	-- V2.0.4修复：预生成Stage002，但不重置空气墙(稍后会统一设置)
 	StageService.GetOrCreateStage(playerId, 2, false)
@@ -1325,6 +1415,9 @@ function CampaignManager.CompleteCampaignEnd(campaignData)
 
 	-- 清理关卡
 	StageService.CleanupStages(campaignData.PlayerId)
+
+	-- V2.6新增：禁用战斗状态视觉效果（粒子特效和战斗中提示）
+	SetHomeFightingEffect(campaignData.HomeId, false)
 
 	-- 解锁基地操作
 	LockHomeOperations(campaignData.Player, false)
