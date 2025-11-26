@@ -1605,14 +1605,31 @@ function CampaignManager.RespawnUnits(campaignData)
 				targetCFrame.Position.Y,
 				correctedCFrame.Position.Y))
 
-			-- 传送回去（使用修正后的坐标）
+			-- 根据单位整体包围盒修正Y：使用模型extents高度的一半放置在地板之上，避免大体型插地
+			local extentsY = unitInstance:GetExtentsSize().Y
+			local halfHeight = extentsY * 0.5
+			local floorTopY = homeIdleFloor.Position.Y + (homeIdleFloor.Size.Y / 2)
+			local yLift = math.max(halfHeight, floorTopY + Y_OFFSET - floorTopY)
+
+			-- 将目标Y设置为地板顶面 + yLift
+			local groundedPos = Vector3.new(
+				correctedCFrame.Position.X,
+				floorTopY + yLift,
+				correctedCFrame.Position.Z
+			)
+			local groundedCFrame = CFrame.new(groundedPos) * correctedCFrame.Rotation
+
+			-- 传送回去（使用体型修正后的坐标，优先PivotTo避免PrimaryPart尺度误差）
 			local teleportSuccess = false
 			pcall(function()
-				if unitInstance.PrimaryPart then
-					unitInstance:SetPrimaryPartCFrame(correctedCFrame)
+				if unitInstance.PivotTo then
+					unitInstance:PivotTo(groundedCFrame)
+					teleportSuccess = true
+				elseif unitInstance.PrimaryPart then
+					unitInstance:SetPrimaryPartCFrame(groundedCFrame)
 					teleportSuccess = true
 				elseif unitInstance:FindFirstChild("HumanoidRootPart") then
-					unitInstance.HumanoidRootPart.CFrame = correctedCFrame
+					unitInstance.HumanoidRootPart.CFrame = groundedCFrame
 					teleportSuccess = true
 				end
 			end)
