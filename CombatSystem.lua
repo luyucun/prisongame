@@ -313,6 +313,7 @@ function CombatSystem.OnDamageEvent(unitModel)
 	end
 
 	if not state.IsAlive then
+		WarnLog(string.format("%s OnDamageEvent被调用,但单位已死亡", state.UnitId))
 		return 0
 	end
 
@@ -334,11 +335,102 @@ function CombatSystem.OnDamageEvent(unitModel)
 		combatProfile.HitboxMaxTargets
 	)
 
+	-- 近战命中源定位：优先Attachment，再部件，再HRP
+	local attackerRoot = unitModel:FindFirstChild("HumanoidRootPart")
+	local sourcePart = nil
+
+	if combatProfile.HitboxPartName and combatProfile.HitboxPartName ~= "" then
+		sourcePart = unitModel:FindFirstChild(combatProfile.HitboxPartName, true)
+	end
+
+	if not sourcePart then
+		local weaponName = UnitConfig.GetWeaponName(state.UnitId)
+		if weaponName and weaponName ~= "" then
+			sourcePart = unitModel:FindFirstChild(weaponName, true)
+		end
+	end
+
+	if not sourcePart then
+		sourcePart = unitModel:FindFirstChild("RightHand") or attackerRoot
+	end
+
+	local originCFrame = attackerRoot and attackerRoot.CFrame or unitModel:GetPivot()
+	local sourceCFrame = originCFrame
+
+	-- 如果当前有目标，记录目标根部信息用于前向偏移
+	local currentTarget = state.CurrentTarget
+	local targetRoot = nil
+	if currentTarget and currentTarget.Parent then
+		targetRoot = currentTarget:FindFirstChild("HumanoidRootPart") or currentTarget.PrimaryPart
+	end
+
+	if sourcePart and sourcePart:IsA("BasePart") then
+		sourceCFrame = sourcePart.CFrame
+	end
+
+	if combatProfile.HitboxAttachmentName and combatProfile.HitboxAttachmentName ~= "" and sourcePart then
+		local attach = sourcePart:FindFirstChild(combatProfile.HitboxAttachmentName)
+		if attach and attach:IsA("Attachment") then
+			sourceCFrame = attach.WorldCFrame
+		end
+	end
+
+	-- 稳定命中源：位置扎根于HRP前方，保持源部件的高度差，朝向用HRP
+	if attackerRoot then
+		local heightDiff = sourceCFrame.Position.Y - attackerRoot.Position.Y
+		local forwardOffset = (combatProfile.ContactOffset or 0.5) + 1.0 -- 基础前伸1 + 补偿
+
+		-- 如果有目标且在身前，使用到目标的距离来限定前伸，避免站停过远
+		if targetRoot then
+			local flatDir = targetRoot.Position - attackerRoot.Position
+			flatDir = Vector3.new(flatDir.X, 0, flatDir.Z)
+			local planarDist = flatDir.Magnitude
+			if planarDist > 0 then
+				flatDir = flatDir.Unit
+				-- 让命中中心落在两者之间（靠近敌人一点），并预留半个半径
+				local desired = math.clamp(planarDist - math.min((combatProfile.HitboxRadius or 3), 1.5), 0.5, planarDist)
+				forwardOffset = desired
+				attackerRoot.CFrame = CFrame.lookAt(attackerRoot.Position, attackerRoot.Position + flatDir) -- 再次确保朝向
+			end
+		end
+
+		local basePos = attackerRoot.Position + attackerRoot.CFrame.LookVector * forwardOffset + Vector3.new(0, heightDiff, 0)
+		originCFrame = CFrame.new(basePos, basePos + attackerRoot.CFrame.LookVector)
+	else
+		originCFrame = sourceCFrame
+	end
+
+	if combatProfile.HitboxOffset then
+		local offset = combatProfile.HitboxOffset
+		originCFrame = originCFrame * CFrame.new(offset.X, offset.Y, offset.Z)
+	end
+
+	hitboxConfig.Shape = combatProfile.HitboxShape or "Sphere"
+	hitboxConfig.SourceCFrame = originCFrame
+	-- 角度过滤用角色朝向，避免手部局部朝向导致误过滤
+	hitboxConfig.ForwardVector = attackerRoot and attackerRoot.CFrame.LookVector or originCFrame.LookVector
+	hitboxConfig.Length = combatProfile.HitboxLength
+	hitboxConfig.BoxSize = combatProfile.HitboxBoxSize
+	hitboxConfig.DebugEnabled = BattleConfig.DEBUG_SHOW_MELEE_HITBOX
+	hitboxConfig.DebugDuration = BattleConfig.DEBUG_HITBOX_DURATION
+	hitboxConfig.DebugColor = BattleConfig.DEBUG_HITBOX_COLOR_GOOD
+
+	-- 🔍 调试: 输出Hitbox配置
+	DebugLog(string.format("%s Hitbox配置: Radius=%.1f, Angle=%.1f, Height=%.1f, MaxTargets=%d",
+		state.UnitId, hitboxConfig.Radius, hitboxConfig.Angle, hitboxConfig.Height, hitboxConfig.MaxTargets))
+
 	-- 获取敌方队伍
 	local enemyTeam = UnitManager.GetEnemyTeam(state.Team)
 	if not enemyTeam then
 		WarnLog("OnDamageEvent失败: 无法获取敌方队伍")
 		return 0
+	end
+
+	-- 🔍 调试: 输出敌方队伍信息
+	if BattleConfig.DEBUG_COMBAT_LOGS then
+		local enemyUnits = UnitManager.GetBattleUnits(state.BattleId, enemyTeam)
+		local enemyCount = enemyUnits and #enemyUnits or 0
+		print(GameConfig.LOG_PREFIX, "[CombatSystem]", string.format("%s 敌方队伍[%s]共有%d个单位", state.UnitId, tostring(enemyTeam), enemyCount))
 	end
 
 	-- 执行命中判定
@@ -518,6 +610,32 @@ function CombatSystem.GetAttackPhase(unitModel)
 		return nil
 	end
 	return state.AttackPhase
+end
+
+--[[
+重置攻击阶段到Idle（用于目标死亡等情况）
+@param unitModel Model - 兵种模型
+@return boolean - 是否成功重置
+]]
+function CombatSystem.ResetAttackPhase(unitModel)
+	local state = unitStates[unitModel]
+	if not state then
+		return false
+	end
+
+	if not state.IsAlive then
+		return false
+	end
+
+	-- 重置攻击阶段到Idle，允许立即开始新的攻击
+	local previousPhase = state.AttackPhase
+	state.AttackPhase = BattleConfig.AttackPhase.IDLE
+	state.AttackStartTime = 0
+	state.RecoveryEndTime = 0
+
+	DebugLog(string.format("%s 攻击阶段重置: %s → Idle", state.UnitId, previousPhase or "nil"))
+
+	return true
 end
 
 -- ==================== 伤害与死亡 ====================

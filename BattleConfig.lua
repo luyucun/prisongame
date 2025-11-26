@@ -132,11 +132,17 @@ BattleConfig.DEBUG_SHOW_TARGET_LINE = false
 -- 是否显示攻击范围(调试用)
 BattleConfig.DEBUG_SHOW_ATTACK_RANGE = false
 
+-- 是否显示近战命中体积(调试用)
+BattleConfig.DEBUG_SHOW_MELEE_HITBOX = false
+BattleConfig.DEBUG_HITBOX_DURATION = 0.15
+BattleConfig.DEBUG_HITBOX_COLOR_GOOD = Color3.fromRGB(0, 255, 0)
+BattleConfig.DEBUG_HITBOX_COLOR_BAD = Color3.fromRGB(255, 0, 0)
+
 -- 是否输出AI详细日志
-BattleConfig.DEBUG_AI_LOGS = false
+BattleConfig.DEBUG_AI_LOGS = true
 
 -- 是否输出战斗详细日志
-BattleConfig.DEBUG_COMBAT_LOGS = false
+BattleConfig.DEBUG_COMBAT_LOGS = true
 
 -- ==================== 动画设置 ====================
 -- 默认移动动画速度
@@ -170,9 +176,9 @@ BattleConfig.ATTACK_RANGE_TOLERANCE = 0.5
 -- ==================== V1.5.1新增配置 ====================
 
 -- 碰撞判定默认值
-BattleConfig.HITBOX_DEFAULT_RADIUS = 5       -- 默认碰撞半径
+BattleConfig.HITBOX_DEFAULT_RADIUS = 3       -- 默认碰撞半径(更贴近手/武器厚度)
 BattleConfig.HITBOX_DEFAULT_ANGLE = 90       -- 默认扇形角度
-BattleConfig.HITBOX_DEFAULT_HEIGHT = 8       -- 默认碰撞高度
+BattleConfig.HITBOX_DEFAULT_HEIGHT = 6       -- 默认碰撞高度(身高一半偏下)
 BattleConfig.HITBOX_DEFAULT_MAX_TARGETS = 1  -- 默认最大命中数
 
 -- 性能优化配置
@@ -197,11 +203,15 @@ BattleConfig.AttackPhase = {
 -- 避免隔空挥拳,让单位保持合适的战斗距离
 
 -- 接触缓冲距离(studs) - 让单位之间保持合适间距，既不隔空也不贴太紧
--- 建议值: 1.0-1.5 (可根据实际效果调整)
-BattleConfig.CONTACT_BUFFER = -1.2
+-- 建议值: 0.3-0.8 (越大越远)
+BattleConfig.CONTACT_BUFFER = 0.5
 
 -- 最小停靠距离(studs) - 防止计算结果为负
 BattleConfig.MIN_DOCKING_DISTANCE = 0.5
+
+-- 进入/退出攻击的距离容差(近战专用)
+BattleConfig.ATTACK_ENTER_TOLERANCE = 0.75
+BattleConfig.ATTACK_EXIT_TOLERANCE = 1.25
 
 -- ==================== 伤害冒字配置 ====================
 -- 伤害数字显示相关配置

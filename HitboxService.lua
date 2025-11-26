@@ -28,6 +28,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
+local Debris = game:GetService("Debris")
 
 -- 引用配置
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
@@ -288,6 +289,22 @@ function HitboxService.ResolveMeleeHit(attackerModel, targetTeam, battleId, hitb
 	local attackerPos = attackerRoot.Position
 	local attackerLook = attackerRoot.CFrame.LookVector
 
+	-- 配置命中源/方向/体积
+	local originCFrame = (hitboxConfig and hitboxConfig.SourceCFrame) or attackerRoot.CFrame
+	local forwardVector = (hitboxConfig and hitboxConfig.ForwardVector) or attackerLook or originCFrame.LookVector
+	local shape = (hitboxConfig and hitboxConfig.Shape) or "Sphere"
+	local radius = hitboxConfig.Radius or BattleConfig.HITBOX_DEFAULT_RADIUS
+	local height = hitboxConfig.Height or BattleConfig.HITBOX_DEFAULT_HEIGHT
+	local length = hitboxConfig.Length or radius * 2
+	local boxSize = hitboxConfig.BoxSize
+	if not boxSize and (shape == "Box" or shape == "Capsule") then
+		boxSize = Vector3.new(radius * 2, height, math.max(length, radius * 2))
+	end
+
+	-- 🔍 调试: 输出攻击者位置
+	DebugLog(string.format("ResolveMeleeHit: 攻击者=%s, 位置=(%.1f,%.1f,%.1f), 半径=%.1f",
+		attackerModel.Name, attackerPos.X, attackerPos.Y, attackerPos.Z, hitboxConfig.Radius))
+
 	-- 结果列表
 	local hitTargets = {}
 	local hitCount = 0
@@ -298,8 +315,36 @@ function HitboxService.ResolveMeleeHit(attackerModel, targetTeam, battleId, hitb
 	overlapParams.FilterType = Enum.RaycastFilterType.Exclude
 	overlapParams.FilterDescendantsInstances = {attackerModel}  -- 忽略自己
 
-	-- 使用半径初选
-	local candidateParts = Workspace:GetPartBoundsInRadius(attackerPos, hitboxConfig.Radius, overlapParams)
+	-- 使用体积初选
+	local candidateParts = {}
+	if shape == "Box" or shape == "Capsule" then
+		if boxSize then
+			candidateParts = Workspace:GetPartBoundsInBox(originCFrame, boxSize, overlapParams)
+		end
+	else
+		candidateParts = Workspace:GetPartBoundsInRadius(originCFrame.Position, radius, overlapParams)
+	end
+
+	-- 可视化命中体积(调试)
+	if hitboxConfig.DebugEnabled then
+		local debugPart = Instance.new("Part")
+		debugPart.Anchored = true
+		debugPart.CanCollide = false
+		debugPart.Material = Enum.Material.Neon
+		debugPart.Transparency = 0.7
+		debugPart.Color = hitboxConfig.DebugColor or Color3.new(0, 1, 0)
+		debugPart.CFrame = originCFrame
+		if shape == "Box" or shape == "Capsule" then
+			debugPart.Size = boxSize or Vector3.new(hitboxConfig.Radius * 2, hitboxConfig.Height, hitboxConfig.Length or hitboxConfig.Radius * 2)
+		else
+			debugPart.Size = Vector3.new(hitboxConfig.Radius * 2, hitboxConfig.Radius * 2, hitboxConfig.Radius * 2)
+		end
+		debugPart.Parent = Workspace
+		Debris:AddItem(debugPart, hitboxConfig.DebugDuration or 0.1)
+	end
+
+	-- 🔍 调试: 输出候选Part数量
+	DebugLog(string.format("ResolveMeleeHit: 物理查询找到%d个候选Part", #candidateParts))
 
 	-- 步骤2: 将Part映射到Model，并进行精确过滤
 	local processedModels = {}  -- 防止重复处理同一个Model
@@ -354,23 +399,27 @@ function HitboxService.ResolveMeleeHit(attackerModel, targetTeam, battleId, hitb
 
 		local enemyPos = enemyRoot.Position
 
-		-- 精确过滤1: 距离验证（冗余检查，确保精度）
-		local distance = (enemyPos - attackerPos).Magnitude
-		if distance > hitboxConfig.Radius then
-			continue
-		end
-
-		-- 精确过滤2: 扇形角度过滤
-		if hitboxConfig.Angle < 180 then
-			if not IsInAttackAngle(attackerPos, attackerLook, enemyPos, hitboxConfig.Angle) then
+		-- 精确过滤1: 距离/体积验证
+		if shape == "Sphere" then
+			local distance = (enemyPos - originCFrame.Position).Magnitude
+			if distance > hitboxConfig.Radius then
 				continue
 			end
 		end
 
-		-- 精确过滤3: 高度过滤
-		local heightDiff = math.abs(enemyPos.Y - attackerPos.Y)
-		if heightDiff > hitboxConfig.Height then
-			continue
+		-- 精确过滤2: 扇形角度过滤
+		if hitboxConfig.Angle < 180 then
+			if not IsInAttackAngle(originCFrame.Position, forwardVector, enemyPos, hitboxConfig.Angle) then
+				continue
+			end
+		end
+
+		-- 精确过滤3: 高度过滤（球体使用，高度取决于配置）
+		if shape == "Sphere" then
+			local heightDiff = math.abs(enemyPos.Y - originCFrame.Position.Y)
+			if heightDiff > hitboxConfig.Height then
+				continue
+			end
 		end
 
 		-- 通过所有过滤,记录命中
@@ -389,6 +438,70 @@ function HitboxService.ResolveMeleeHit(attackerModel, targetTeam, battleId, hitb
 		DebugLog(string.format("命中判定: 攻击者=%s, 命中%d个目标",
 			attackerModel.Name, hitCount))
 	end
+
+	-- V2.9.1 补丁：兜底判定（物理查询未命中时，直接遍历敌人列表做距离/角度/高度校验）
+	if hitCount == 0 and unitManager and unitManager.GetBattleUnits then
+		local enemies = unitManager.GetBattleUnits(battleId, targetTeam)
+		-- 🔍 调试: 输出兜底判定信息
+		DebugLog(string.format("ResolveMeleeHit兜底: 物理查询未命中，遍历敌人列表(%d个)", enemies and #enemies or 0))
+		if enemies and #enemies > 0 then
+			for _, enemy in ipairs(enemies) do
+				if enemy and enemy.Parent and enemy ~= attackerModel then
+					local info = unitManager.GetUnitBattleInfo and unitManager.GetUnitBattleInfo(enemy)
+					-- 🔍 调试: 输出每个敌人的检查结果
+					if not info then
+						DebugLog(string.format("  敌人%s: info=nil (未注册)", enemy.Name))
+					elseif info.BattleId ~= battleId then
+						DebugLog(string.format("  敌人%s: battleId不匹配 (%s vs %s)", enemy.Name, tostring(info.BattleId), tostring(battleId)))
+					elseif info.Team ~= targetTeam then
+						DebugLog(string.format("  敌人%s: team不匹配 (%s vs %s)", enemy.Name, tostring(info.Team), tostring(targetTeam)))
+					end
+					if info and info.BattleId == battleId and info.Team == targetTeam then
+						local enemyRoot = enemy:FindFirstChild("HumanoidRootPart") or enemy.PrimaryPart
+						if enemyRoot then
+							local enemyPos = enemyRoot.Position
+							local distance = (enemyPos - originCFrame.Position).Magnitude
+							local heightDiff = math.abs(enemyPos.Y - originCFrame.Position.Y)
+							local angleOk = true
+
+							if hitboxConfig.Angle < 180 then
+								if not IsInAttackAngle(originCFrame.Position, forwardVector, enemyPos, hitboxConfig.Angle) then
+									angleOk = false
+								end
+							end
+
+							-- 🔍 调试: 输出距离和角度检查
+							DebugLog(string.format("  敌人%s: 距离=%.1f/%.1f, 高度差=%.1f/%.1f, 角度=%s",
+								enemy.Name, distance, hitboxConfig.Radius, heightDiff, hitboxConfig.Height, angleOk and "OK" or "超出"))
+
+							if shape == "Sphere" then
+								if distance <= hitboxConfig.Radius
+									and heightDiff <= hitboxConfig.Height
+									and angleOk then
+									table.insert(hitTargets, enemy)
+									hitCount += 1
+									if hitCount >= hitboxConfig.MaxTargets then
+										break
+									end
+								end
+							else
+								if angleOk then
+									table.insert(hitTargets, enemy)
+									hitCount += 1
+									if hitCount >= hitboxConfig.MaxTargets then
+										break
+									end
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+
+	-- 🔍 调试: 最终结果
+	DebugLog(string.format("ResolveMeleeHit结束: 最终命中%d个目标", hitCount))
 
 	return {
 		Targets = hitTargets,

@@ -94,7 +94,13 @@ CombatProfile = {
     HitboxMaxTargets = number,     -- 最大命中数
     UseAnimationEvent = boolean,   -- 是否使用动画事件
     AnimationEventName = string,   -- 动画事件名称
-    ContactOffset = number,        -- 武器长度补偿(studs)
+    ContactOffset = number,        -- 武器长度补偿(studs) - 影响AI停靠距离
+    HitboxShape = string,          -- 命中体积形状: "Sphere"|"Box"|"Capsule"(默认Sphere)
+    HitboxPartName = string,       -- 体积绑定的部件名(如Weapon/RightHand), 优先Attachment
+    HitboxAttachmentName = string, -- 部件下的Attachment名，用其世界CFrame做命中源
+    HitboxOffset = Vector3,        -- 命中源的局部偏移(右、上、前)
+    HitboxLength = number,         -- 命中体积前向长度(用于Capsule/Box)
+    HitboxBoxSize = Vector3,       -- 直接指定盒子尺寸(可选)
 
     -- V1.5远程子弹属性配置(当ProjectileModelPath为空时使用)
     ProjectileConfig = {
@@ -138,13 +144,19 @@ UnitConfig.Units = {
 		WeaponName = "",
 		ProjectileModelPath = "",
 		CombatProfile = {
-			HitboxRadius = 5,
-			HitboxAngle = 90,
-			HitboxHeight = 8,
+			HitboxRadius = 3.2,           -- 拳头命中球半径(稍大容错)
+			HitboxAngle = 120,            -- 挥拳扇区
+			HitboxHeight = 6,             -- 身体中部高度覆盖
 			HitboxMaxTargets = 1,
 			UseAnimationEvent = true,
 			AnimationEventName = "Damage",
-			ContactOffset = 0,
+			ContactOffset = 0.8,          -- 拳头前伸补偿
+			HitboxShape = "Sphere",
+			HitboxPartName = "RightHand", -- 没有武器，用右手为命中源
+			HitboxAttachmentName = "",
+			HitboxOffset = Vector3.new(0, 0, 0),
+			HitboxLength = 0,
+			HitboxBoxSize = nil,
 		},
 		PathfindingAgentRadius = 2,
 		PathfindingAgentHeight = 5,
@@ -294,13 +306,19 @@ UnitConfig.Units = {
 		WeaponName = "",
 		ProjectileModelPath = "",
 		CombatProfile = {
-			HitboxRadius = 5,
-			HitboxAngle = 90,
-			HitboxHeight = 8,
+			HitboxRadius = 3.2,           -- 拳头命中球半径(稍大容错)
+			HitboxAngle = 120,            -- 挥拳扇区
+			HitboxHeight = 6,             -- 身体中部高度覆盖
 			HitboxMaxTargets = 1,
 			UseAnimationEvent = true,
 			AnimationEventName = "Damage",
-			ContactOffset = 0,
+			ContactOffset = 0.8,          -- 拳头前伸补偿
+			HitboxShape = "Sphere",
+			HitboxPartName = "RightHand", -- 没有武器，用右手为命中源
+			HitboxAttachmentName = "",
+			HitboxOffset = Vector3.new(0, 0, 0),
+			HitboxLength = 0,
+			HitboxBoxSize = nil,
 		},
 		PathfindingAgentRadius = 2,
 		PathfindingAgentHeight = 5,
@@ -450,13 +468,19 @@ UnitConfig.Units = {
 		WeaponName = "",
 		ProjectileModelPath = "",
 		CombatProfile = {
-			HitboxRadius = 5,
-			HitboxAngle = 90,
-			HitboxHeight = 8,
+			HitboxRadius = 3.2,           -- 拳头命中球半径(稍大容错)
+			HitboxAngle = 120,            -- 挥拳扇区
+			HitboxHeight = 6,             -- 身体中部高度覆盖
 			HitboxMaxTargets = 1,
 			UseAnimationEvent = true,
 			AnimationEventName = "Damage",
-			ContactOffset = 0,
+			ContactOffset = 0.8,          -- 拳头前伸补偿
+			HitboxShape = "Sphere",
+			HitboxPartName = "RightHand", -- 没有武器，用右手为命中源
+			HitboxAttachmentName = "",
+			HitboxOffset = Vector3.new(0, 0, 0),
+			HitboxLength = 0,
+			HitboxBoxSize = nil,
 		},
 		PathfindingAgentRadius = 2,
 		PathfindingAgentHeight = 5,
@@ -606,13 +630,19 @@ UnitConfig.Units = {
 		WeaponName = "",
 		ProjectileModelPath = "",
 		CombatProfile = {
-			HitboxRadius = 5,
-			HitboxAngle = 90,
-			HitboxHeight = 8,
+			HitboxRadius = 3.2,           -- 拳头命中球半径(稍大容错)
+			HitboxAngle = 120,            -- 挥拳扇区
+			HitboxHeight = 6,             -- 身体中部高度覆盖
 			HitboxMaxTargets = 1,
 			UseAnimationEvent = true,
 			AnimationEventName = "Damage",
-			ContactOffset = 0,
+			ContactOffset = 0.8,          -- 拳头前伸补偿
+			HitboxShape = "Sphere",
+			HitboxPartName = "RightHand", -- 没有武器，用右手为命中源
+			HitboxAttachmentName = "",
+			HitboxOffset = Vector3.new(0, 0, 0),
+			HitboxLength = 0,
+			HitboxBoxSize = nil,
 		},
 		PathfindingAgentRadius = 2,
 		PathfindingAgentHeight = 5,
@@ -1534,6 +1564,12 @@ function UnitConfig.GetCombatProfile(unitId)
 		UseAnimationEvent = true,
 		AnimationEventName = "Damage",
 		ContactOffset = 0,         -- 默认无武器补偿
+		HitboxShape = "Sphere",
+		HitboxPartName = "",
+		HitboxAttachmentName = "",
+		HitboxOffset = Vector3.new(0, 0, 0),
+		HitboxLength = 0,
+		HitboxBoxSize = nil,
 	}
 
 	if not unitData then
@@ -1592,6 +1628,48 @@ end
 function UnitConfig.GetHitboxMaxTargets(unitId)
 	local profile = UnitConfig.GetCombatProfile(unitId)
 	return profile.HitboxMaxTargets
+end
+
+-- 获取命中形状
+function UnitConfig.GetHitboxShape(unitId)
+	local profile = UnitConfig.GetCombatProfile(unitId)
+	return profile.HitboxShape
+end
+
+-- 获取命中体积绑定的部件名
+function UnitConfig.GetHitboxPartName(unitId)
+	local profile = UnitConfig.GetCombatProfile(unitId)
+	return profile.HitboxPartName
+end
+
+-- 获取命中体积绑定的Attachment名
+function UnitConfig.GetHitboxAttachmentName(unitId)
+	local profile = UnitConfig.GetCombatProfile(unitId)
+	return profile.HitboxAttachmentName
+end
+
+-- 获取命中体积偏移
+function UnitConfig.GetHitboxOffset(unitId)
+	local profile = UnitConfig.GetCombatProfile(unitId)
+	return profile.HitboxOffset
+end
+
+-- 获取命中体积长度
+function UnitConfig.GetHitboxLength(unitId)
+	local profile = UnitConfig.GetCombatProfile(unitId)
+	return profile.HitboxLength
+end
+
+-- 获取命中体积盒子尺寸
+function UnitConfig.GetHitboxBoxSize(unitId)
+	local profile = UnitConfig.GetCombatProfile(unitId)
+	return profile.HitboxBoxSize
+end
+
+-- 获取接触补偿
+function UnitConfig.GetContactOffset(unitId)
+	local profile = UnitConfig.GetCombatProfile(unitId)
+	return profile.ContactOffset
 end
 
 --[[

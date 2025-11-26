@@ -780,31 +780,26 @@ function UnitAIRangePolicy.GetDockingDistance(unitState, targetState)
 	if isRanged then
 		return unitState.AttackRange * BattleConfig.RANGED_DOCKING_RATIO
 	else
-		local attackerRoot = unitState.UnitInstance:FindFirstChild("HumanoidRootPart")
-		if not attackerRoot then
+		local attackerModel = unitState.UnitInstance
+		if not attackerModel then
 			return unitState.AttackRange
 		end
 
-		local attackerDepth = attackerRoot.Size.Z
-		local targetDepth = 5
+		local attackerSize = attackerModel:GetExtentsSize()
+		local attackerDepth = attackerSize.Z
 
+		local targetDepth = attackerDepth
 		if targetState and targetState.UnitInstance then
-			local targetRoot = targetState.UnitInstance:FindFirstChild("HumanoidRootPart")
-			if targetRoot then
-				targetDepth = targetRoot.Size.Z
-			end
+			local targetSize = targetState.UnitInstance:GetExtentsSize()
+			targetDepth = targetSize.Z
 		end
 
+		local contactOffset = UnitConfig.GetContactOffset(unitState.UnitId) or 0
+
 		local contactDistance = (attackerDepth + targetDepth) * 0.5
-		local desiredDistance = math.max(contactDistance - BattleConfig.CONTACT_BUFFER, 0)
+		local desiredDistance = contactDistance - contactOffset + BattleConfig.CONTACT_BUFFER
 
-		local combatProfile = UnitConfig.GetCombatProfile(unitState.UnitId)
-		local contactOffset = (combatProfile and combatProfile.ContactOffset) or 0
-
-		return math.max(
-			math.min(unitState.AttackRange - BattleConfig.ATTACK_RANGE_TOLERANCE, desiredDistance),
-			BattleConfig.MIN_DOCKING_DISTANCE
-		) + contactOffset
+		return math.max(desiredDistance, BattleConfig.MIN_DOCKING_DISTANCE)
 	end
 end
 
@@ -815,7 +810,12 @@ function UnitAIRangePolicy.ShouldEnterAttack(distance, unitState)
 		local threshold = unitState.AttackRange * BattleConfig.RANGED_ENTER_ATTACK_RATIO
 		return distance <= threshold
 	else
-		local threshold = unitState.AttackRange + BattleConfig.ATTACK_RANGE_TOLERANCE
+		local targetState = nil
+		if unitState.CurrentTarget then
+			targetState = CombatSystem.GetUnitState(unitState.CurrentTarget)
+		end
+		local docking = UnitAIRangePolicy.GetDockingDistance(unitState, targetState)
+		local threshold = math.min(unitState.AttackRange, docking) + BattleConfig.ATTACK_ENTER_TOLERANCE
 		return distance <= threshold
 	end
 end
@@ -827,7 +827,12 @@ function UnitAIRangePolicy.ShouldExitAttack(distance, unitState)
 		local threshold = unitState.AttackRange * BattleConfig.RANGED_EXIT_ATTACK_RATIO
 		return distance > threshold
 	else
-		local threshold = unitState.AttackRange + BattleConfig.ATTACK_RANGE_TOLERANCE + BattleConfig.MOVE_STOP_TOLERANCE
+		local targetState = nil
+		if unitState.CurrentTarget then
+			targetState = CombatSystem.GetUnitState(unitState.CurrentTarget)
+		end
+		local docking = UnitAIRangePolicy.GetDockingDistance(unitState, targetState)
+		local threshold = math.min(unitState.AttackRange, docking) + BattleConfig.ATTACK_EXIT_TOLERANCE
 		return distance > threshold
 	end
 end
@@ -1192,6 +1197,8 @@ local function HandleMoving(unitModel, aiData, state)
 	if not target then
 		CombatSystem.SetTarget(unitModel, nil)
 		CombatSystem.SetAIState(unitModel, BattleConfig.AIState.SEEKING)
+		-- 🔥 V2.9.2修复：确保攻击阶段重置，防止状态残留
+		CombatSystem.ResetAttackPhase(unitModel)
 		LogStateChange(state.UnitId, "MOVING", "SEEKING", "目标失效")
 		-- 目标失效，清理路径并切换到Idle
 		PathService.ClearPath(unitModel)
@@ -1393,6 +1400,8 @@ local function HandleAttacking(unitModel, aiData, state)
 	if not target then
 		CombatSystem.SetTarget(unitModel, nil)
 		CombatSystem.SetAIState(unitModel, BattleConfig.AIState.SEEKING)
+		-- 🔥 V2.9.2关键修复：重置攻击阶段，防止切换目标后无法攻击
+		CombatSystem.ResetAttackPhase(unitModel)
 		LogStateChange(state.UnitId, "ATTACKING", "SEEKING", "目标失效")
 		-- 切换到Idle并清理路径
 		PathService.ClearPath(unitModel)  -- ⭐使用PathService
@@ -2123,8 +2132,19 @@ function UnitAI.TriggerAttack(unitModel, target, state, aiData)
 		return
 	end
 
-	-- 面向目标
-	OrientTowardsTarget(aiData, target)
+	-- 面向目标（更强硬）：将HRP朝向直接对准目标水平位置，避免切目标首击偏移
+	if aiData.HumanoidRootPart and target then
+		local targetRoot = target:FindFirstChild("HumanoidRootPart") or target.PrimaryPart
+		if targetRoot then
+			local lookVec = targetRoot.Position - aiData.HumanoidRootPart.Position
+			lookVec = Vector3.new(lookVec.X, 0, lookVec.Z)
+			if lookVec.Magnitude > 0 then
+				lookVec = lookVec.Unit
+				local pos = aiData.HumanoidRootPart.Position
+				aiData.HumanoidRootPart.CFrame = CFrame.lookAt(pos, pos + lookVec)
+			end
+		end
+	end
 
 	-- 开始攻击（进入Attacking阶段）
 	local success = CombatSystem.BeginAttack(unitModel, target)
@@ -2160,6 +2180,10 @@ function UnitAI.OnTargetDeath(deadUnit, battleId)
 			if currentTarget == deadUnit then
 				CombatSystem.SetTarget(unitModel, nil)
 				CombatSystem.SetAIState(unitModel, BattleConfig.AIState.SEEKING)
+
+				-- 🔥 V2.9.2关键修复：重置攻击阶段到Idle
+				-- 否则切换目标后AttackPhase还在Attacking/Recovery，导致无法攻击新目标
+				CombatSystem.ResetAttackPhase(unitModel)
 
 				LogStateChange(state.UnitId, state.State, "SEEKING", "目标死亡")
 
