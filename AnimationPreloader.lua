@@ -58,8 +58,9 @@ local function PreloadAllUnitAnimations()
 		local unitId = tostring(unitIdRaw)
 		unitCount = unitCount + 1
 
-		-- 收集该兵种的所有动画ID
+		-- 收集该兵种的所有动画ID (V2.9修复: 添加ShowAnimationId)
 		local animIds = {
+			{id = unitData.ShowAnimationId, name = "Show"},  -- V2.9新增：展示动画
 			{id = unitData.IdleAnimationId, name = "Idle"},
 			{id = unitData.MoveAnimationId, name = "Move"},
 			{id = unitData.AttackAnimationId, name = "Attack"},

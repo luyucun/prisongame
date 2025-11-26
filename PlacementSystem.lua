@@ -235,22 +235,28 @@ local function UpdateLevelDisplay(model, level)
 end
 
 --[[
-播放展示动画 (V1.5.2新增)
+播放展示动画 (V1.5.2新增, V2.8修复: 支持重复调用, V2.9修复: 禁用默认Animate脚本)
 @param model Model - 兵种模型
 @param unitId string - 兵种ID
 ]]
 local function PlayShowAnimation(model, unitId)
 	if not model or not unitId then
+		warn(GameConfig.LOG_PREFIX, "[PlayShowAnimation] 参数无效: model=", model, "unitId=", unitId)
 		return
 	end
+
+	print(GameConfig.LOG_PREFIX, "[PlayShowAnimation] 开始播放展示动画:", model.Name, "UnitId:", unitId)
 
 	-- 获取展示动画ID
 	local showAnimId = UnitConfig.GetShowAnimationId(unitId)
 
 	-- 如果没有配置展示动画，直接返回
 	if not showAnimId or showAnimId == "" or showAnimId == "0" then
+		warn(GameConfig.LOG_PREFIX, "[PlayShowAnimation] 没有配置ShowAnimationId:", unitId)
 		return
 	end
+
+	print(GameConfig.LOG_PREFIX, "[PlayShowAnimation] ShowAnimationId:", showAnimId)
 
 	-- V1.5.2调试：验证动画ID格式
 	if not tonumber(showAnimId) then
@@ -261,19 +267,47 @@ local function PlayShowAnimation(model, unitId)
 	-- 查找Humanoid
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
 	if not humanoid then
+		warn(GameConfig.LOG_PREFIX, "[PlayShowAnimation] 找不到Humanoid:", model.Name)
 		return
+	end
+
+	-- V2.9关键修复：禁用默认Animate脚本，防止与展示动画冲突
+	-- 默认Animate脚本会不断播放Idle动画，会覆盖我们的ShowAnimation
+	local animateScriptDisabled = false
+	for _, descendant in ipairs(model:GetDescendants()) do
+		if descendant:IsA("BaseScript") and descendant.Name == "Animate" then
+			descendant.Enabled = false
+			animateScriptDisabled = true
+			print(GameConfig.LOG_PREFIX, "[PlayShowAnimation] 已禁用Animate脚本:", model.Name)
+		end
+	end
+	if not animateScriptDisabled then
+		print(GameConfig.LOG_PREFIX, "[PlayShowAnimation] 未找到Animate脚本:", model.Name)
 	end
 
 	-- 查找Animator
 	local animator = humanoid:FindFirstChild("Animator")
 	if not animator then
-		warn(GameConfig.LOG_PREFIX, "PlayShowAnimation: Humanoid没有Animator:", model.Name, "- 尝试创建Animator")
 		-- 尝试创建Animator（Roblox会自动创建，但保险起见）
 		animator = humanoid:FindFirstChildOfClass("Animator")
 		if not animator then
-			warn(GameConfig.LOG_PREFIX, "PlayShowAnimation: 无法获取Animator，动画无法播放")
-			return
+			-- 手动创建Animator
+			animator = Instance.new("Animator")
+			animator.Parent = humanoid
+			print(GameConfig.LOG_PREFIX, "[PlayShowAnimation] 手动创建Animator:", model.Name)
 		end
+	end
+
+	-- V2.8修复：停止所有正在播放的动画，避免动画混播
+	-- 这在单位被移动位置后重新播放展示动画时很重要
+	local playingTracks = animator:GetPlayingAnimationTracks()
+	if #playingTracks > 0 then
+		print(GameConfig.LOG_PREFIX, "[PlayShowAnimation] 停止", #playingTracks, "个正在播放的动画:", model.Name)
+	end
+	for _, track in ipairs(playingTracks) do
+		pcall(function()
+			track:Stop(0)  -- 立即停止，不做淡出
+		end)
 	end
 
 	-- 创建动画实例
@@ -298,8 +332,13 @@ local function PlayShowAnimation(model, unitId)
 		return
 	end
 
+	print(GameConfig.LOG_PREFIX, "[PlayShowAnimation] 动画加载成功:", model.Name, "AnimTrack:", animTrack)
+
 	-- 设置循环播放
 	animTrack.Looped = true
+
+	-- V2.9修复：设置最高动画优先级，确保不被其他动画覆盖
+	animTrack.Priority = Enum.AnimationPriority.Action4
 
 	-- 播放动画
 	local playSuccess, playError = pcall(function()
@@ -312,9 +351,16 @@ local function PlayShowAnimation(model, unitId)
 		return
 	end
 
+	print(GameConfig.LOG_PREFIX, "[PlayShowAnimation] ✅ 动画播放成功:", model.Name, "Looped:", animTrack.Looped, "Priority:", tostring(animTrack.Priority), "IsPlaying:", animTrack.IsPlaying)
+
+	-- V2.9修复：将动画轨道保存到模型属性，方便后续管理
+	-- 这样在移动单位时可以先停止旧动画
+	model:SetAttribute("_ShowAnimTrackId", animTrack.Name or "ShowAnim")
+
 	-- V1.5.2修复：循环动画在停止时清理Animation对象，防止内存泄漏
 	-- 当单位被回收时，animTrack:Stop()会触发此事件
 	animTrack.Stopped:Connect(function()
+		print(GameConfig.LOG_PREFIX, "[PlayShowAnimation] 动画已停止:", model.Name)
 		if animation and animation.Parent then
 			animation:Destroy()
 		end
@@ -467,6 +513,22 @@ local function CreateUnitModel(unitId, position, instanceId, level, gridWidth, g
 				CollisionModule.OptimizeHumanoid(humanoid)
 			end
 		end)
+	end
+
+	-- V2.9修复：确保Animator存在，这是播放动画的前提条件
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		local animator = humanoid:FindFirstChild("Animator")
+		if not animator then
+			-- 等待一小段时间让Roblox自动创建Animator
+			task.wait(0.1)
+			animator = humanoid:FindFirstChild("Animator")
+			if not animator then
+				-- 如果还没有，手动创建
+				animator = Instance.new("Animator")
+				animator.Parent = humanoid
+			end
+		end
 	end
 
 	return model
@@ -853,6 +915,26 @@ function PlacementSystem.UpdateUnitPosition(player, instanceId, newPosition)
 
 	-- 11. 更新InventorySystem中的位置
 	unitInstance.PlacedPosition = finalPosition
+
+	-- V2.8修复：移动位置后重新播放展示动画
+	-- 因为PivotTo操作可能打断正在播放的动画
+	PlayShowAnimation(placedData.Model, placedData.UnitId)
+
+	-- V2.8修复：更新GridPositionSystem中的格子坐标
+	-- 战役系统会读取模型上的GridPosX/GridPosY属性来计算行军目标
+	-- 如果不更新这些属性，被移动的兵种在战斗中会前往错误的位置
+	local gridModule = ServerScriptService:WaitForChild("Systems"):FindFirstChild("GridPositionSystem")
+	if gridModule then
+		local GridPositionSystem = require(gridModule :: ModuleScript)
+		local gridPos = GridPositionSystem.SaveUnitGridPosition(placedData.Model, idleFloor)
+
+		-- 同时更新placedUnits表中的GridPos
+		if gridPos then
+			placedData.GridPos = gridPos
+		else
+			placedData.GridPos = {X = newGridX, Y = newGridZ}
+		end
+	end
 
 	-- 🔥修复持久化：更新DataManager中的位置数据
 	local updateSuccess = DataManager.UpdatePlacedUnitPosition(player, instanceId, newGridX, newGridZ)

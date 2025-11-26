@@ -781,13 +781,15 @@ function RestoreModelAfterDrag(model)
 		humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)  -- 切换回正常状态
 	end
 
-	-- 恢复锚固和碰撞
+	-- 恢复锚固和碰撞（只锚定根部件，其他部件保持可动画状态）
+	local rootPart = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
 	for _, descendant in ipairs(model:GetDescendants()) do
 		if descendant:IsA("BasePart") then
-			descendant.Anchored = true  -- 恢复锚固
-			if descendant.Name == "HumanoidRootPart" then
+			if descendant == rootPart then
+				descendant.Anchored = true
 				descendant.CanCollide = dragState.originalCanCollide or false
 			else
+				descendant.Anchored = false
 				descendant.CanCollide = false
 			end
 		end
