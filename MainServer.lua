@@ -50,6 +50,8 @@ local DoorControlService = require(ServerScriptService.Systems.DoorControlServic
 local ShopSystem = require(ServerScriptService.Systems.ShopSystem)
 -- V2.5新增 - 碰撞系统（寻路性能优化）
 local CollisionSystem = require(ServerScriptService.Systems.CollisionSystem)
+-- V2.6新增 - 挂机金币系统
+local IdleCoinSystem = require(ServerScriptService.Systems.IdleCoinSystem)
 
 -- ==================== 系统初始化顺序 ====================
 
@@ -277,6 +279,16 @@ local function InitializeServer()
         warn(GameConfig.LOG_PREFIX, "战役系统初始化失败(返回false)")
     end
 
+    -- 9. 初始化挂机金币系统 (V2.6新增)
+    success, result = pcall(function()
+        return IdleCoinSystem.Initialize()
+    end)
+    if not success then
+        warn(GameConfig.LOG_PREFIX, "挂机金币系统初始化失败(异常):", result)
+    elseif result == false then
+        warn(GameConfig.LOG_PREFIX, "挂机金币系统初始化失败(返回false)")
+    end
+
     -- 检查是否有关键系统初始化失败
     if initializationFailed then
         warn("==========================================")
@@ -354,8 +366,22 @@ Players.PlayerAdded:Connect(function(player)
 			return
 		end
 
-		-- 获取玩家基地ID
-		local homeId = PlayerManager.GetPlayerHomeId(player)
+		-- 🔥等待HomeSlot被设置（最多等待15秒）
+		local homeId = nil
+		local maxWaitTime = 15
+		local startTime = tick()
+		while tick() - startTime < maxWaitTime do
+			homeId = PlayerManager.GetPlayerHomeId(player)
+			if homeId and homeId > 0 then
+				break
+			end
+			task.wait(0.2)
+		end
+
+		if not homeId or homeId <= 0 then
+			warn(GameConfig.LOG_PREFIX, "等待HomeId超时，跳过部分初始化 -", player.Name)
+		end
+
 		if homeId and homeId > 0 then
 			-- 初始化玩家基地（确保门关闭）
 			pcall(function()
@@ -368,6 +394,16 @@ Players.PlayerAdded:Connect(function(player)
 			ShopSystem.InitializePlayerShopTimer(player, "UnitShop")
 			print(string.format(
 				"%s [MainServer] 玩家 %s 商店库存系统已初始化",
+				GameConfig.LOG_PREFIX,
+				player.Name
+			))
+		end)
+
+		-- V2.6新增：初始化挂机金币系统（HomeSlot已确认存在）
+		pcall(function()
+			IdleCoinSystem.OnPlayerJoin(player)
+			print(string.format(
+				"%s [MainServer] 玩家 %s 挂机金币系统已初始化",
 				GameConfig.LOG_PREFIX,
 				player.Name
 			))
@@ -394,6 +430,11 @@ Players.PlayerRemoving:Connect(function(player)
 			HomeSystem.CleanupPlayerHome(homeId, player)
 		end)
 	end
+
+	-- 3. V2.6新增：记录玩家登出时间（用于挂机金币计算）
+	pcall(function()
+		IdleCoinSystem.OnPlayerLeave(player)
+	end)
 end)
 
 -- ==================== 🔥修复持久化：服务器关闭数据保存 ====================

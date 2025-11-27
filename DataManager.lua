@@ -61,6 +61,10 @@ PlayerData = {
             LastRefreshTime = number,  -- 上次刷新时间戳
         }
     },
+    IdleCoinData = {           -- V2.6挂机金币系统
+        LastLogoutTime = number,   -- 上次登出时间戳
+        PendingCoins = number,     -- 待领取的挂机金币
+    },
     LastSaveTime = number,     -- 最后保存时间
 }
 ]]
@@ -164,6 +168,9 @@ local function LoadFromDataStore(player)
 		if data.ShopData then
 			data.ShopData = RestoreFromDataStore(data.ShopData)
 		end
+		if data.IdleCoinData then
+			data.IdleCoinData = RestoreFromDataStore(data.IdleCoinData)  -- V2.6：恢复挂机金币数据
+		end
 		return data
 	elseif not success then
 		warn(string.format(
@@ -196,6 +203,7 @@ local function SaveToDataStore(player, playerData, userId)
 		Units = CleanUnits(playerData.Units),  -- 关键：清洗Units中的Vector3等类型
 		PlacedUnits = SanitizeForDataStore(playerData.PlacedUnits),  -- 🔥修复持久化：保存放置数据
 		ShopData = SanitizeForDataStore(playerData.ShopData),  -- V2.1库存系统：保存商店数据
+		IdleCoinData = SanitizeForDataStore(playerData.IdleCoinData),  -- V2.6：保存挂机金币数据
 		LastSaveTime = os.time(),
 	}
 
@@ -233,6 +241,10 @@ local function CreateDefaultData(player)
         Units = {},  -- 后续版本使用
         PlacedUnits = {},  -- 🔥修复持久化：初始化空的放置数据
         ShopData = {},  -- V2.1库存系统：初始化空商店数据
+        IdleCoinData = {  -- V2.6挂机金币系统：初始化
+            LastLogoutTime = 0,
+            PendingCoins = 0,
+        },
         LastSaveTime = os.time(),
     }
 end
@@ -264,6 +276,10 @@ function DataManager.InitializePlayerData(player)
         playerData = loadedData
         playerData.Player = player
 
+        -- 🔥重要：清除旧的HomeSlot，让PlayerManager重新分配
+        -- HomeSlot是运行时动态分配的，不应该从存档恢复
+        playerData.HomeSlot = nil
+
         -- 确保ShopData字段存在（向后兼容）
         if not playerData.ShopData then
             playerData.ShopData = {}
@@ -279,6 +295,14 @@ function DataManager.InitializePlayerData(player)
         -- 🔥修复持久化：确保PlacedUnits字段存在（向后兼容）
         if not playerData.PlacedUnits then
             playerData.PlacedUnits = {}
+        end
+
+        -- V2.6挂机金币：确保IdleCoinData字段存在（向后兼容）
+        if not playerData.IdleCoinData then
+            playerData.IdleCoinData = {
+                LastLogoutTime = 0,
+                PendingCoins = 0,
+            }
         end
 
     else
@@ -924,6 +948,126 @@ function DataManager.AddPlacedUnit(player, instanceId, unitData)
     }
 
     return true
+end
+
+-- ==================== V2.6挂机金币系统接口 ====================
+
+--[[
+获取玩家挂机金币数据
+@param player Player - 玩家对象
+@return table - {LastLogoutTime = number, PendingCoins = number}
+]]
+function DataManager.GetIdleCoinData(player)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData then
+        return {LastLogoutTime = 0, PendingCoins = 0}
+    end
+
+    if not playerData.IdleCoinData then
+        playerData.IdleCoinData = {
+            LastLogoutTime = 0,
+            PendingCoins = 0,
+        }
+    end
+
+    return playerData.IdleCoinData
+end
+
+--[[
+设置玩家待领取的挂机金币
+@param player Player - 玩家对象
+@param coins number - 待领取金币数量
+@return boolean - 是否设置成功
+]]
+function DataManager.SetPendingIdleCoins(player, coins)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData then
+        warn(GameConfig.LOG_PREFIX, "SetPendingIdleCoins: 找不到玩家数据")
+        return false
+    end
+
+    if not playerData.IdleCoinData then
+        playerData.IdleCoinData = {
+            LastLogoutTime = 0,
+            PendingCoins = 0,
+        }
+    end
+
+    playerData.IdleCoinData.PendingCoins = coins
+    return true
+end
+
+--[[
+设置玩家上次登出时间
+@param player Player - 玩家对象
+@param timestamp number - 登出时间戳
+@return boolean - 是否设置成功
+]]
+function DataManager.SetLastLogoutTime(player, timestamp)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData then
+        warn(GameConfig.LOG_PREFIX, "SetLastLogoutTime: 找不到玩家数据")
+        return false
+    end
+
+    if not playerData.IdleCoinData then
+        playerData.IdleCoinData = {
+            LastLogoutTime = 0,
+            PendingCoins = 0,
+        }
+    end
+
+    playerData.IdleCoinData.LastLogoutTime = timestamp
+    return true
+end
+
+--[[
+增加玩家待领取的挂机金币
+@param player Player - 玩家对象
+@param amount number - 增加数量
+@return boolean, number - 是否成功, 新的待领取金币数量
+]]
+function DataManager.AddPendingIdleCoins(player, amount)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData then
+        warn(GameConfig.LOG_PREFIX, "AddPendingIdleCoins: 找不到玩家数据")
+        return false, 0
+    end
+
+    if not playerData.IdleCoinData then
+        playerData.IdleCoinData = {
+            LastLogoutTime = 0,
+            PendingCoins = 0,
+        }
+    end
+
+    playerData.IdleCoinData.PendingCoins = (playerData.IdleCoinData.PendingCoins or 0) + amount
+    return true, playerData.IdleCoinData.PendingCoins
+end
+
+--[[
+清空玩家待领取的挂机金币
+@param player Player - 玩家对象
+@return number - 清空前的金币数量
+]]
+function DataManager.ClearPendingIdleCoins(player)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData then
+        warn(GameConfig.LOG_PREFIX, "ClearPendingIdleCoins: 找不到玩家数据")
+        return 0
+    end
+
+    if not playerData.IdleCoinData then
+        playerData.IdleCoinData = {
+            LastLogoutTime = 0,
+            PendingCoins = 0,
+        }
+        return 0
+    end
+
+    local oldAmount = playerData.IdleCoinData.PendingCoins or 0
+    playerData.IdleCoinData.PendingCoins = 0
+    return oldAmount
 end
 
 return DataManager

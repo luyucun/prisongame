@@ -38,6 +38,7 @@ local CurrencySystem = require(ServerScriptService.Systems.CurrencySystem)
 local PlacementSystem = nil  -- 延迟加载，避免循环依赖
 local BattleTestSystem = nil  -- 延迟加载，避免循环依赖
 local BattleManager = nil     -- 延迟加载，避免循环依赖
+local IdleCoinSystem = nil    -- V2.6新增：延迟加载，避免循环依赖
 
 -- ==================== 配置 ====================
 
@@ -300,6 +301,10 @@ local function CMD_Help(player, args)
 /addcoins <amount> - 添加金币
 /clearcoins - 清空金币
 
+挂机金币(V2.6):
+/addidlecoins [minutes] - 添加挂机金币(默认60分钟)
+/idlecoins - 查看挂机金币状态
+
 系统调试:
 /iconpreload - 检查图标预加载状态
 
@@ -540,6 +545,61 @@ local function CMD_ClearBattle(player, args)
     SendMessage(player, "已清理战斗测试区域")
 end
 
+--[[
+命令: /addidlecoins [minutes]
+添加挂机金币（测试用）V2.6
+默认添加60分钟（1小时）的挂机金币
+]]
+local function CMD_AddIdleCoins(player, args)
+    -- 延迟加载IdleCoinSystem
+    if not IdleCoinSystem then
+        IdleCoinSystem = require(ServerScriptService.Systems.IdleCoinSystem)
+    end
+
+    local minutes = tonumber(args[1]) or 60  -- 默认60分钟
+
+    if minutes <= 0 then
+        SendMessage(player, "错误: 分钟数必须大于0")
+        return
+    end
+
+    -- 添加挂机金币
+    local success, coins = IdleCoinSystem.GMAddIdleCoins(player, minutes)
+
+    if success then
+        local idleCoinData = DataManager.GetIdleCoinData(player)
+        SendMessage(player, string.format("成功添加 %d 挂机金币（模拟 %d 分钟）", coins, minutes))
+        SendMessage(player, string.format("当前待领取金币: %d", idleCoinData.PendingCoins or 0))
+        SendMessage(player, "请靠近Mail模型长按E键领取")
+    else
+        SendMessage(player, "添加挂机金币失败")
+    end
+end
+
+--[[
+命令: /idlecoins
+查看当前待领取的挂机金币 V2.6
+]]
+local function CMD_IdleCoins(player, args)
+    local idleCoinData = DataManager.GetIdleCoinData(player)
+    local pendingCoins = idleCoinData.PendingCoins or 0
+    local lastLogoutTime = idleCoinData.LastLogoutTime or 0
+
+    SendMessage(player, string.format("=== 挂机金币信息 ==="))
+    SendMessage(player, string.format("待领取金币: %d", pendingCoins))
+
+    if lastLogoutTime > 0 then
+        local offlineSeconds = os.time() - lastLogoutTime
+        local offlineMinutes = math.floor(offlineSeconds / 60)
+        SendMessage(player, string.format("上次登出时间: %d (距今 %d 分钟)", lastLogoutTime, offlineMinutes))
+    else
+        SendMessage(player, "上次登出时间: 无记录")
+    end
+
+    SendMessage(player, string.format("金币产出速度: %d/分钟", GameConfig.IdleCoin.CoinsPerMinute))
+    SendMessage(player, string.format("最大离线时长: %d 小时", GameConfig.IdleCoin.MaxOfflineHours))
+end
+
 -- 命令映射表
 local COMMAND_HANDLERS = {
     ["addunit"] = CMD_AddUnit,
@@ -556,6 +616,8 @@ local COMMAND_HANDLERS = {
     ["startbattle"] = CMD_StartBattle,    -- V1.5新增
     ["stopbattle"] = CMD_StopBattle,      -- V1.5新增
     ["clearbattle"] = CMD_ClearBattle,    -- V1.5新增
+    ["addidlecoins"] = CMD_AddIdleCoins,  -- V2.6新增
+    ["idlecoins"] = CMD_IdleCoins,        -- V2.6新增
     ["help"] = CMD_Help,
 }
 

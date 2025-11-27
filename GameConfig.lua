@@ -123,6 +123,16 @@ GameConfig.UI.CoinRollDuration = 0.8     -- 金币滚动动画时长(秒)
 GameConfig.UI.ButtonScaleDown = 0.9      -- 按钮按下缩放比例
 GameConfig.UI.ButtonScaleDuration = 0.1  -- 按钮缩放动画时长(秒)
 
+-- ==================== 挂机金币配置 (V2.6) ====================
+GameConfig.IdleCoin = {
+	CoinsPerMinute = 10,                 -- 每分钟产出金币数
+	MaxOfflineHours = 6,                 -- 最大离线产出小时数
+	MaxOfflineMinutes = 6 * 60,          -- 最大离线产出分钟数(6小时=360分钟)
+	ProximityTriggerDistance = 8,        -- 触发交互的距离(studs)
+	ProximityHoldDuration = 1,           -- 长按确认时长(秒)
+	ParticleEffectDuration = 1,          -- 粒子特效持续时长(秒)
+}
+
 -- ==================== 调试配置 ====================
 -- 是否启用调试模式
 GameConfig.DEBUG_MODE = false
