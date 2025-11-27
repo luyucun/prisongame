@@ -1178,7 +1178,8 @@ function CampaignManager.ProcessPendingBattleResult(campaignData)
 	else
 		-- 我方失败
 		DebugLog(string.format("💀 我方失败，战役结束 (Winner=%s)", tostring(winner)))
-		CampaignManager.OnDefeat(campaignData)
+		-- 失败应立即弹出结算弹窗，不等待
+		CampaignManager.OnDefeat(campaignData, { skipDelay = true })
 	end
 end
 
@@ -1279,8 +1280,10 @@ end
 --[[
 战役失败
 @param campaignData table - 战役数据
+@param options table? - 可选参数 {skipDelay=true} 跳过结算前等待（用于Restart/Retreat）
 ]]
-function CampaignManager.OnDefeat(campaignData)
+function CampaignManager.OnDefeat(campaignData, options)
+	options = options or {}
 	DebugLog("💀 OnDefeat被调用 - 战役失败")
 	campaignData.State = CampaignState.DEFEAT
 
@@ -1293,8 +1296,11 @@ function CampaignManager.OnDefeat(campaignData)
 	end
 
 	-- 结束战役
-	DebugLog("⏰ OnDefeat等待3秒后调用OnCampaignEnd")
-	task.wait(3)
+	local delaySeconds = options.skipDelay and 0 or 3
+	DebugLog(string.format("⏰ OnDefeat等待%.1f秒后调用OnCampaignEnd", delaySeconds))
+	if delaySeconds > 0 then
+		task.wait(delaySeconds)
+	end
 	DebugLog("🔚 OnDefeat调用OnCampaignEnd(false)")
 	CampaignManager.OnCampaignEnd(campaignData, false)
 end
@@ -1833,7 +1839,8 @@ function CampaignManager.RequestRetreat(player)
 		return
 	end
 
-	CampaignManager.OnDefeat(campaignData)
+	-- Restart/Retreat：立刻弹出结算框，不等待
+	CampaignManager.OnDefeat(campaignData, { skipDelay = true })
 end
 
 --[[
