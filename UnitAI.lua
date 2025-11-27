@@ -33,6 +33,7 @@ local UnitAI = {}
 local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
 
 -- 引用配置
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
@@ -181,6 +182,86 @@ local function SoftFreezeForCampaign(unitModel, humanoid, rootPart, unitName)
 	end)
 
 	DebugLog(string.format("[%s] 软冻结完成 (PlatformStand=true, Physics状态, 已锚定)", unitName))
+end
+
+--[[ 渐隐工具：将模型逐步变透明至完全消失 ]]
+local function StartCorpseFade(unitModel: Model, duration: number)
+	if not unitModel or not unitModel.Parent then
+		return
+	end
+
+	duration = math.max(duration or 0.5, 0.05)
+
+	-- 记录并渐隐所有可渲染实例
+	for _, inst in ipairs(unitModel:GetDescendants()) do
+		local isPartLike = inst:IsA("BasePart")
+		local isDecal = inst:IsA("Decal") or inst:IsA("Texture")
+		local isSeq = inst:IsA("Beam") or inst:IsA("Trail") or inst:IsA("ParticleEmitter")
+
+		if isPartLike or isDecal or isSeq then
+			-- 记录原始透明度/局部透明度，方便复生时恢复
+			if inst:GetAttribute("_OrigTrans") == nil then
+				if isSeq then
+					local seq = inst.Transparency
+					if typeof(seq) == "NumberSequence" and #seq.Keypoints > 0 then
+						inst:SetAttribute("_OrigTrans", seq.Keypoints[1].Value)
+					else
+						inst:SetAttribute("_OrigTrans", 0)
+					end
+				else
+					inst:SetAttribute("_OrigTrans", inst.Transparency)
+				end
+			end
+
+			if isPartLike then
+				if inst:GetAttribute("_OrigLocalTrans") == nil then
+					inst:SetAttribute("_OrigLocalTrans", inst.LocalTransparencyModifier)
+				end
+
+				local tween = TweenService:Create(inst, TweenInfo.new(duration, Enum.EasingStyle.Linear), {
+					Transparency = 1,
+					LocalTransparencyModifier = 1,
+				})
+				tween:Play()
+			elseif isDecal then
+				local tween = TweenService:Create(inst, TweenInfo.new(duration, Enum.EasingStyle.Linear), {Transparency = 1})
+				tween:Play()
+			else
+				local orig = inst:GetAttribute("_OrigTrans") or 0
+				inst.Transparency = NumberSequence.new({
+					NumberSequenceKeypoint.new(0, orig),
+					NumberSequenceKeypoint.new(1, 1),
+				})
+			end
+		end
+	end
+end
+
+-- 复生时恢复透明度（仅在需要保留实例的战役单位上使用）
+function UnitAI.ResetModelTransparency(unitModel: Model)
+	if not unitModel then
+		return
+	end
+
+	for _, inst in ipairs(unitModel:GetDescendants()) do
+		local orig = inst:GetAttribute("_OrigTrans")
+		if orig ~= nil then
+			if inst:IsA("BasePart") or inst:IsA("Decal") or inst:IsA("Texture") then
+				inst.Transparency = orig
+				if inst:IsA("BasePart") then
+					local origLocal = inst:GetAttribute("_OrigLocalTrans")
+					if origLocal ~= nil then
+						inst.LocalTransparencyModifier = origLocal
+						inst:SetAttribute("_OrigLocalTrans", nil)
+					end
+				end
+			elseif inst:IsA("Beam") or inst:IsA("Trail") or inst:IsA("ParticleEmitter") then
+				inst.Transparency = NumberSequence.new(orig)
+			end
+			-- 清理标记，避免累积
+			inst:SetAttribute("_OrigTrans", nil)
+		end
+	end
 end
 
 -- ==================== 动画基础函数 ====================
@@ -2316,6 +2397,7 @@ end
 3. 创建死亡动画轨道并立刻播放（Priority=Action4，Fade=0）
 4. 等死亡轨道开始后再停止旧轨道（无缝覆盖）
 5. 动画结束时冻结尸体
+6. V2.9.3修复：确保渐隐逻辑总是执行（通过兜底定时器）
 ]]
 function UnitAI.BeginDeathAnimation(unitModel: Model, animationId: string | number, unitId: string?)
 	if not unitModel or not unitModel:IsA("Model") then
@@ -2353,6 +2435,36 @@ function UnitAI.BeginDeathAnimation(unitModel: Model, animationId: string | numb
 	-- ============ 步骤3: 设置AutoRotate=false ============
 	pcall(function()
 		humanoid.AutoRotate = false
+	end)
+
+	-- V2.9.3新增：标记渐隐是否已启动，防止重复触发
+	local fadeStarted = false
+
+	-- V2.9.3新增：统一的渐隐启动函数
+	local function StartFadeIfNeeded()
+		if fadeStarted then
+			return  -- 已启动，跳过
+		end
+		fadeStarted = true
+
+		if not unitModel or not unitModel.Parent then
+			return  -- 模型已被移除
+		end
+
+		-- 计算渐隐时长：使用固定的1.5秒渐隐时间，确保效果明显
+		-- 不再依赖 DeathRemovalTime，因为时序问题可能导致渐隐时间过短
+		local fadeDuration = 1.5
+
+		DebugLog(string.format("[%s] 启动渐隐效果，持续时间: %.2f秒", unitName, fadeDuration))
+		StartCorpseFade(unitModel, fadeDuration)
+	end
+
+	-- V2.9.3新增：兜底定时器，确保渐隐一定会触发
+	-- 在死亡后0.5秒启动渐隐（给死亡动画留出一些播放时间）
+	task.delay(0.5, function()
+		if unitModel and unitModel.Parent then
+			StartFadeIfNeeded()
+		end
 	end)
 
 	-- ============ 步骤4: 创建并立刻播放死亡动画 ============
@@ -2403,6 +2515,9 @@ function UnitAI.BeginDeathAnimation(unitModel: Model, animationId: string | numb
 							-- 战役单位：软冻结（保持姿态但可恢复）
 							SoftFreezeForCampaign(unitModel, humanoid, rootPart, unitName)
 						end
+
+						-- V2.9.3修复：动画结束时也尝试启动渐隐（如果兜底定时器还没触发）
+						StartFadeIfNeeded()
 					end
 				end)
 
@@ -2424,6 +2539,9 @@ function UnitAI.BeginDeathAnimation(unitModel: Model, animationId: string | numb
 					-- 战役单位：软冻结（保持姿态但可恢复）
 					SoftFreezeForCampaign(unitModel, humanoid, rootPart, unitName)
 				end
+
+				-- V2.9.3修复：立即启动渐隐（兜底定时器也会触发，但这里更早）
+				StartFadeIfNeeded()
 			end
 		else
 			WarnLog(string.format("[%s] ❌ 找不到Animator", unitName))
@@ -2436,6 +2554,9 @@ function UnitAI.BeginDeathAnimation(unitModel: Model, animationId: string | numb
 				-- 战役单位：软冻结（保持姿态但可恢复）
 				SoftFreezeForCampaign(unitModel, humanoid, rootPart, unitName)
 			end
+
+			-- V2.9.3修复：立即启动渐隐
+			StartFadeIfNeeded()
 		end
 	else
 		DebugLog(string.format("[%s] 无死亡动画配置，直接冻结尸体", unitName))
@@ -2448,6 +2569,9 @@ function UnitAI.BeginDeathAnimation(unitModel: Model, animationId: string | numb
 			-- 战役单位：软冻结（保持姿态但可恢复）
 			SoftFreezeForCampaign(unitModel, humanoid, rootPart, unitName)
 		end
+
+		-- V2.9.3修复：立即启动渐隐
+		StartFadeIfNeeded()
 	end
 end
 

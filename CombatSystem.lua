@@ -784,6 +784,17 @@ function CombatSystem.KillUnit(unitModel, killer)
 	local unitId = state.UnitId
 	local battleId = state.BattleId
 
+	-- V2.9.3新增：立即隐藏死亡单位头顶的所有UI（血条、等级等）
+	local head = unitModel:FindFirstChild("Head")
+	if head then
+		for _, child in ipairs(head:GetChildren()) do
+			if child:IsA("BillboardGui") then
+				child.Enabled = false
+			end
+		end
+		DebugLog(string.format("%s 头顶UI已隐藏", unitId))
+	end
+
 	-- V1.5.1 Bug修复: 从UnitManager中注销单位(必须在清除unitStates之前)
 	if UnitManager then
 		UnitManager.UnregisterUnit(unitModel)
@@ -822,6 +833,10 @@ function CombatSystem.KillUnit(unitModel, killer)
 	})
 
 	-- 步骤3: 固定2.9秒后销毁或隐藏模型
+	-- 记录预定移除时间供渐隐使用
+	local removalTime = os.clock() + 2.9
+	unitModel:SetAttribute("DeathRemovalTime", removalTime)
+
 	-- V2.0.1修复：战役单位死亡时保留实例用于重生
 	task.delay(2.9, function()
 		if unitModel and unitModel.Parent then

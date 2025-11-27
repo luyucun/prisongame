@@ -181,6 +181,13 @@ function HealthBarController.UpdateHealth(unitModel, currentHP, maxHP)
         return
     end
 
+    -- V2.9.3新增：血量归零时立即隐藏血条（死亡时）
+    if currentHP <= 0 then
+        healthBar.Enabled = false
+        debugLog(string.format("单位死亡，隐藏血条 - %s", unitModel.Name))
+        return
+    end
+
     -- 检查血条结构：Bg/Hpprogressbar
     local bg = healthBar:FindFirstChild("Bg")
     if not bg then
@@ -203,11 +210,6 @@ function HealthBarController.UpdateHealth(unitModel, currentHP, maxHP)
     -- 更新血条宽度：0到0.998之间
     local clampedRatio = math.clamp(ratio * MAX_HEALTH_SCALE, 0, MAX_HEALTH_SCALE)
     progressBar.Size = UDim2.new(clampedRatio, 0, 1, 0)
-
-    -- 调试信息（只在血量变化时输出）
-    if currentHP <= 0 then
-        debugLog(string.format("单位死亡血条更新 - %s: %d/%d", unitModel.Name, currentHP, maxHP))
-    end
 end
 
 --[[

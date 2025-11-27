@@ -1665,20 +1665,25 @@ function CampaignManager.RespawnUnits(campaignData)
 				end
 
 				-- 再次验证是否成功挂载
-				if not mountSuccess or not unitInstance.Parent then
-					DebugLog(string.format("    ❌ %s 挂载失败: Parent仍为nil", unitData.UnitId))
-					failCount = failCount + 1
-					continue
-				end
-
-				DebugLog(string.format("      ✅ %s 挂载成功", unitData.UnitId))
+			if not mountSuccess or not unitInstance.Parent then
+				DebugLog(string.format("    ❌ %s 挂载失败: Parent仍为nil", unitData.UnitId))
+				failCount = failCount + 1
+				continue
 			end
 
-			-- 计算原位置（使用基地IdleFloor进行坐标换算）
-			local targetCFrame = GridPositionSystem.GridToWorld(
-				homeIdleFloor,
-				unitData.GridPos
-			)
+			DebugLog(string.format("      ✅ %s 挂载成功", unitData.UnitId))
+		end
+
+		-- 重置因死亡渐隐带来的透明度，确保复生后可见
+		if UnitAI.ResetModelTransparency then
+			UnitAI.ResetModelTransparency(unitInstance)
+		end
+
+		-- 计算原位置（使用基地IdleFloor进行坐标换算）
+		local targetCFrame = GridPositionSystem.GridToWorld(
+			homeIdleFloor,
+			unitData.GridPos
+		)
 
 			if not targetCFrame then
 				DebugLog(string.format("    ❌ %s GridPos无效，无法计算目标坐标", unitData.UnitId))
