@@ -445,6 +445,31 @@ function AnimationController.SwitchToMove(unitModel, aiData, state)
 		aiData.Tracks.Attack = nil
 	end
 
+	-- V2.8.1修复：停止所有外部动画轨道（如DragSystem的展示动画）
+	-- 这些动画不在aiData.Tracks中，需要通过Animator直接获取
+	local humanoid = unitModel:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		local animator = humanoid:FindFirstChildOfClass("Animator")
+		if animator then
+			local allTracks = animator:GetPlayingAnimationTracks()
+			for _, track in ipairs(allTracks) do
+				-- 跳过已经在aiData.Tracks中管理的轨道
+				local isManaged = false
+				for _, managedTrack in pairs(aiData.Tracks) do
+					if managedTrack == track then
+						isManaged = true
+						break
+					end
+				end
+				if not isManaged then
+					pcall(function()
+						track:Stop(0.1)
+					end)
+				end
+			end
+		end
+	end
+
 	-- 播放移动动画（V2.8：设置Movement优先级）
 	local animId = UnitConfig.GetMoveAnimationId(state.UnitId)
 	if animId and animId ~= "" then
@@ -1668,6 +1693,18 @@ function UnitAI.StartAI(unitModel)
 	local unitId = state and state.UnitId or "Unknown"
 	DebugLog(string.format("启动AI: %s", unitId))
 
+	-- ⭐⭐⭐ V2.8.1修复：停止所有正在播放的动画轨道（包括DragSystem的展示动画）⭐⭐⭐
+	-- 这确保战斗开始时是干净的动画状态
+	local animator = humanoid:FindFirstChildOfClass("Animator")
+	if animator then
+		local allTracks = animator:GetPlayingAnimationTracks()
+		for _, track in ipairs(allTracks) do
+			pcall(function()
+				track:Stop(0)  -- 立即停止，无淡出
+			end)
+		end
+	end
+
 	-- ⭐⭐⭐ 预加载所有战斗动画,避免首次战斗时动画资源未缓存导致卡顿 ⭐⭐⭐
 	PreloadAllAnimations(unitModel, humanoid, unitId)
 
@@ -1963,14 +2000,14 @@ function UnitAI.StopAI(unitModel, options)
 	if aiData then
 		aiData.IsActive = false
 
-		-- 处理options参数（支持向后兼容的布尔值）
-		local opts = {}
-		if type(options) == "boolean" then
-			-- 向后兼容：UnitAI.StopAI(unitModel, true) → skipMoveTo=true
-			opts.skipMoveTo = options
-		elseif type(options) == "table" then
-			opts = options
-		end
+	-- 处理options参数（支持向后兼容的布尔值）
+	local opts = {}
+	if type(options) == "boolean" then
+		-- 向后兼容：UnitAI.StopAI(unitModel, true) → skipMoveTo=true
+		opts.skipMoveTo = options
+	elseif type(options) == "table" then
+		opts = options
+	end
 
 		-- V2.0.5性能优化：断开MoveToFinished连接
 		if aiData.MoveConnection then
@@ -1978,16 +2015,43 @@ function UnitAI.StopAI(unitModel, options)
 			aiData.MoveConnection = nil
 		end
 
-		-- 步骤1: 禁用Animate脚本（如果需要）
-		-- 使用递归查找，兼容任何位置的Animate脚本
-		if opts.disableAnimate then
-			local unitId = aiData.UnitModel and aiData.UnitModel.Name or "Unknown"
-			DisableAllAnimateScripts(unitModel, unitId)
+	-- 步骤1: 禁用Animate脚本（如果需要）
+	-- 使用递归查找，兼容任何位置的Animate脚本
+	if opts.disableAnimate then
+		local unitId = aiData.UnitModel and aiData.UnitModel.Name or "Unknown"
+		DisableAllAnimateScripts(unitModel, unitId)
+	end
+
+	-- 步骤2: 停止动画（可选保留Idle）
+	local fadeTime = opts.stopFadeTime or 0.1  -- 默认0.1秒淡出，死亡时为0
+
+	if opts.keepIdle then
+		-- 停掉移动/攻击，保留Idle循环，避免战斗结束后“傻站”
+		if aiData.Tracks.Attack then
+			SafeStopAnimation(aiData.Tracks.Attack)
+			aiData.Tracks.Attack = nil
+		end
+		if aiData.Tracks.Move then
+			SafeStopAnimation(aiData.Tracks.Move)
+			aiData.Tracks.Move = nil
 		end
 
-		-- 步骤2: 停止所有动画（带可配置的淡出时间）
-		local fadeTime = opts.stopFadeTime or 0.1  -- 默认0.1秒淡出，死亡时为0
+		-- 断开动画事件连接（Idle无需事件）
+		for _, connection in ipairs(aiData.AnimationConnections) do
+			if connection and connection.Connected then
+				connection:Disconnect()
+			end
+		end
+		aiData.AnimationConnections = {}
+
+		-- 确保Idle在播放
+		local state = CombatSystem.GetUnitState(unitModel)
+		if state then
+			AnimationController.SwitchToIdle(unitModel, aiData, state)
+		end
+	else
 		AnimationController.StopAllAnimations(aiData, fadeTime)
+	end
 
 		-- 步骤3: 清理路径数据
 		PathService.ClearPath(unitModel)  -- ⭐使用PathService
@@ -2205,7 +2269,8 @@ function UnitAI.ClearBattleAIs(battleId)
 		local state = CombatSystem.GetUnitState(unitModel)
 
 		if not state or (state and state.BattleId == battleId) then
-			UnitAI.StopAI(unitModel)
+			local keepIdle = state and state.IsAlive
+			UnitAI.StopAI(unitModel, { keepIdle = keepIdle })
 		end
 	end
 
@@ -2444,6 +2509,8 @@ function UnitAI.PlayMoveAnimation(unitModel)
 
 	if success and animTrack then
 		animTrack.Looped = true
+		-- 行军阶段也使用Movement优先级，确保覆盖展示动画
+		animTrack.Priority = Enum.AnimationPriority.Movement
 		pcall(function()
 			animTrack:Play()
 		end)

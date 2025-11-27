@@ -337,8 +337,8 @@ local function PlayShowAnimation(model, unitId)
 	-- 设置循环播放
 	animTrack.Looped = true
 
-	-- V2.9修复：设置最高动画优先级，确保不被其他动画覆盖
-	animTrack.Priority = Enum.AnimationPriority.Action4
+	-- V2.9修复：设置Idle优先级，便于战斗/行军动画覆盖
+	animTrack.Priority = Enum.AnimationPriority.Idle
 
 	-- 播放动画
 	local playSuccess, playError = pcall(function()
@@ -1273,6 +1273,8 @@ function PlacementSystem.RestorePlacedUnits(player)
 
 			-- 4.11 播放展示动画
 			PlayShowAnimation(model, savedData.UnitId)
+			-- 4.11.1 确保等级显示立即刷新
+			UpdateLevelDisplay(model, unitInstance.Level or savedData.Level or 1)
 
 			print(string.format(
 				"%s [PlacementSystem] 🔥 已恢复单位: %s (%s) 位置 (%d,%d)",

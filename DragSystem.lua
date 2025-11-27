@@ -62,6 +62,12 @@ local dragState = {
 	currentTouch = nil,
 }
 
+-- 最近一次拖动用于失败回退
+local lastDragRestore = {
+	model = nil,
+	origin = nil,
+}
+
 -- 远程事件
 local mergeEvents = nil
 local placementEvents = nil
@@ -425,6 +431,9 @@ function StartDragging(model)
 	dragState.draggedLevel = level
 	dragState.draggedGridWidth = gridWidth
 	dragState.draggedGridDepth = gridDepth
+	-- 清理上一次的回退缓存，防止旧数据干扰
+	lastDragRestore.model = nil
+	lastDragRestore.origin = nil
 
 	-- 保存原始位置
 	local originalPos = GetModelPosition(model)
@@ -710,6 +719,10 @@ function StopDragging()
 			requestEvent:FireServer(dragState.draggedInstanceId, targetInstanceId)
 		end
 
+		-- 记录回退信息，防止合成失败后悬空
+		lastDragRestore.model = model
+		lastDragRestore.origin = dragState.dragStartPos
+
 		-- 隐藏Grid，等待服务端响应
 		GridHelper.HideGrid()
 		-- 注意：不在这里恢复模型状态，等待服务端合成响应
@@ -797,6 +810,52 @@ function RestoreModelAfterDrag(model)
 
 	-- V1.4.1: 设置默认描边（透明）
 	HighlightHelper.SetDefaultHighlight(model)
+
+	-- 恢复展示动画（拖动时停止了动画，这里重新播）
+	-- 注意：基地上的兵种应该播放展示动画（ShowAnimationId），不是战斗待机动画
+	if humanoid then
+		-- V2.8.1修复：不要重新启用Animate脚本，战斗时UnitAI会禁用它们
+		-- 如果这里启用，会与UnitAI的自定义动画冲突
+
+		local animator = humanoid:FindFirstChildOfClass("Animator")
+		if not animator then
+			animator = Instance.new("Animator")
+			animator.Parent = humanoid
+		end
+
+		-- 停掉已有轨道，防止动画冲突
+		for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+			pcall(function()
+				track:Stop()
+			end)
+		end
+
+		-- 播放展示动画（ShowAnimationId），不是Idle动画
+		-- ShowAnimationId是基地上的展示动画，IdleAnimationId是战斗中的待机动画
+		local unitId = model:GetAttribute("UnitId")
+		local showId = unitId and UnitConfig.GetShowAnimationId(unitId)
+		if showId and showId ~= "" and showId ~= "0" then
+			local anim = Instance.new("Animation")
+			anim.AnimationId = "rbxassetid://" .. tostring(showId)
+			local track = nil
+			local ok = pcall(function()
+				track = animator:LoadAnimation(anim)
+			end)
+			if ok and track then
+				-- 使用较低优先级，便于战斗时被移动/攻击动画覆盖
+				track.Priority = Enum.AnimationPriority.Idle
+				track.Looped = true
+				pcall(function() track:Play() end)
+				track.Stopped:Connect(function()
+					if anim and anim.Parent then
+						anim:Destroy()
+					end
+				end)
+			else
+				anim:Destroy()
+			end
+		end
+	end
 end
 
 --[[
@@ -946,8 +1005,22 @@ function OnMergeResponse(success, message, newUnitData)
 		print("[DragSystem] 合成成功! 新等级:", newUnitData and newUnitData.Level or "?")
 		-- 服务端已经处理了模型的移除和新建，客户端不需要额外操作
 		-- 等待新模型自动同步
+		lastDragRestore.model = nil
+		lastDragRestore.origin = nil
 	else
 		warn("[DragSystem] 合成失败:", message)
+		-- 合成失败：将拖动的模型复位到原始位置
+		local modelToRestore = lastDragRestore.model
+		local origin = lastDragRestore.origin
+		if modelToRestore and origin then
+			SetModelPosition(modelToRestore, origin)
+			-- RestoreModelAfterDrag已经会调用SetDefaultHighlight移除描边
+			RestoreModelAfterDrag(modelToRestore)
+		end
+		lastDragRestore.model = nil
+		lastDragRestore.origin = nil
+		GridHelper.HideGrid()
+		-- 不需要再调用SetDraggingHighlight，RestoreModelAfterDrag已处理
 		-- 可以在这里添加UI提示
 	end
 end

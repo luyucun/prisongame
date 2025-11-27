@@ -599,29 +599,29 @@ function BattleManager.EndBattle(battleId, winner)
 	}
 
 	-- V2.4/V2.5修改：发送结算弹窗到客户端
-	-- V2.5修复：战役模式下不在单关结束时弹窗，由CampaignManager在整个战役结束时统一弹窗
-	if battle.BattleType ~= "Campaign" then
-		-- 非战役模式（测试战斗等）：立即发送结算弹窗
-		local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
-		if eventsFolder then
-			local battleEventsFolder = eventsFolder:FindFirstChild("BattleEvents")
-			if battleEventsFolder then
-				local victoryPopupEvent = battleEventsFolder:FindFirstChild("VictoryPopup")
-				if victoryPopupEvent then
-					local player = Players:GetPlayerByUserId(battle.PlayerId)
-					if player then
-						victoryPopupEvent:FireClient(player, battleId, winner or "Draw", currentStage, extraRewards)
-						DebugLog(string.format("已发送结算弹窗到客户端: BattleId=%d, Result=%s, Stage=%d",
-							battleId, winner or "Draw", currentStage))
-					end
-				else
-					WarnLog("VictoryPopup事件不存在，将启动自动结算")
-					-- 如果事件不存在，自动完成结算（容错处理）
-					task.delay(0.5, function()
-						BattleManager.CompleteBattle(battleId, winner)
-					end)
-				end
+	-- 战役模式：不弹窗，直接完成战斗，让CampaignManager决定是否继续行军
+	if battle.BattleType == "Campaign" then
+		DebugLog(string.format("战役战斗结束，跳过单关弹窗: BattleId=%d, Winner=%s", battleId, winner or "Draw"))
+		task.defer(function()
+			BattleManager.CompleteBattle(battleId, winner)
+		end)
+	else
+		local eventsFolder = ReplicatedStorage:FindChild("Events") or ReplicatedStorage:FindFirstChild("Events")
+		local battleEventsFolder = eventsFolder and eventsFolder:FindFirstChild("BattleEvents")
+		local victoryPopupEvent = battleEventsFolder and battleEventsFolder:FindFirstChild("VictoryPopup")
+
+		if victoryPopupEvent then
+			local player = Players:GetPlayerByUserId(battle.PlayerId)
+			if player then
+				victoryPopupEvent:FireClient(player, battleId, winner or "Draw", currentStage, extraRewards)
+				DebugLog(string.format("已发送结算弹窗到客户端: BattleId=%d, Result=%s, Stage=%d",
+					battleId, winner or "Draw", currentStage))
 			end
+		else
+			WarnLog("VictoryPopup事件不存在，将启动自动结算")
+			task.delay(0.5, function()
+				BattleManager.CompleteBattle(battleId, winner)
+			end)
 		end
 
 		-- V2.4新增：设置超时自动结算（防止客户端卡死）
@@ -631,14 +631,6 @@ function BattleManager.EndBattle(battleId, winner)
 				WarnLog(string.format("战斗 %d 结算超时，强制完成", battleId))
 				BattleManager.CompleteBattle(battleId, winner)
 			end
-		end)
-	else
-		-- 战役模式：不弹窗，由CampaignManager控制
-		-- 直接完成战斗结算，让CampaignManager继续处理下一关或战役结束
-		DebugLog(string.format("战役战斗结束，跳过单关弹窗: BattleId=%d, Winner=%s", battleId, winner or "Draw"))
-		-- 延迟一帧后完成战斗，确保状态更新
-		task.defer(function()
-			BattleManager.CompleteBattle(battleId, winner)
 		end)
 	end
 
@@ -701,21 +693,6 @@ function BattleManager.CompleteBattle(battleId, winner)
 		if campaignData then
 			DebugLog(string.format("通知CampaignManager处理确认后逻辑: BattleId=%d", battleId))
 			CampaignManager.ProcessPendingBattleResult(campaignData)
-
-			-- 兜底：确保战役结算弹窗必达（battleId=0）
-			local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
-			local battleEventsFolder = eventsFolder and eventsFolder:FindFirstChild("BattleEvents")
-			local victoryPopupEvent = battleEventsFolder and battleEventsFolder:FindFirstChild("VictoryPopup")
-			if victoryPopupEvent then
-				-- 记录等待确认状态
-				campaignData.IsWaitingForConfirm = true
-				campaignData.IsVictory = (winner == "Attack")
-
-				-- 当前关卡号兜底
-				local stageNum = campaignData.CurrentStage or (campaignData.PendingBattleResult and campaignData.PendingBattleResult.StageNum) or 1
-				victoryPopupEvent:FireClient(campaignData.Player, 0, winner, stageNum, nil)
-				DebugLog(string.format("战役兜底结算弹窗已发送: PlayerId=%d, Result=%s, Stage=%d", playerId, tostring(winner), stageNum))
-			end
 		end
 	end
 

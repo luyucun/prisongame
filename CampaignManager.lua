@@ -1573,8 +1573,8 @@ local function PlayShowAnimation(unitModel, unitId)
 		return animator:LoadAnimation(animation)
 	end)
 	if success and track then
-		--  关键修复1：使用Action4优先级
-		track.Priority = Enum.AnimationPriority.Action4
+		--  关键修复1：使用Idle优先级，行军/战斗时可被覆盖
+		track.Priority = Enum.AnimationPriority.Idle
 		track.Looped = true
 
 		--  关键修复2：不要立即销毁Animation对象，而是绑定到Stopped事件
