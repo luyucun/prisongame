@@ -84,6 +84,21 @@ end)
 -- 状态文本UI（可选，如果有的话）
 local statusTextLabel = mainGui:FindFirstChild("StatusText")
 
+-- ==================== 背包显示控制（战斗期间强制隐藏） ====================
+
+local function HideBackpackForBattle()
+	-- 优先调用统一背包接口
+	if _G.BackpackDisplay and _G.BackpackDisplay.HideBackpack then
+		_G.BackpackDisplay.HideBackpack()
+	else
+		-- 兜底：直接关闭BackpackGui
+		local backpackGui = playerGui:FindFirstChild("BackpackGui")
+		if backpackGui then
+			backpackGui.Enabled = false
+		end
+	end
+end
+
 -- ==================== UI控制函数 ====================
 
 --[[
@@ -149,6 +164,9 @@ end
 Play按钮点击事件
 ]]
 playButton.MouseButton1Click:Connect(function()
+	-- 开战点击后立刻隐藏背包
+	HideBackpackForBattle()
+
 	-- 触发服务器事件
 	local requestStart = CampaignEvents:FindFirstChild("RequestStartCampaign")
 	if requestStart then
@@ -182,30 +200,34 @@ local stateUpdateEvent = CampaignEvents:FindFirstChild("CampaignStateUpdate")
 if stateUpdateEvent then
 	stateUpdateEvent.OnClientEvent:Connect(function(state, stageNum)
 		if state == "Preparing" or state == "PrepareBattle" then
-			-- V2.3修复：支持"Preparing"和"PrepareBattle"两种状态字符串
 			-- 准备阶段（包括战斗准备）
 			playButton.Visible = false
 			retreatButton.Visible = true
 			LockHomeOperations(true)
 			ShowStatusText("准备中...")
+			HideBackpackForBattle()
 
 		elseif state == "Marching" then
 			-- 行军阶段
 			ShowStatusText("前往第 " .. stageNum .. " 关...")
+			HideBackpackForBattle()
 
 		elseif state == "Fighting" then
 			-- 战斗阶段
 			ShowStatusText("战斗中 - 第 " .. stageNum .. " 关")
+			HideBackpackForBattle()
 
 		elseif state == "StageClear" then
 			-- 关卡完成
 			ShowStatusText("第 " .. stageNum .. " 关完成！")
+			HideBackpackForBattle()
 
 		elseif state == "Victory" then
 			-- 战役胜利
 			playButton.Visible = true
 			retreatButton.Visible = false
 			ShowVictoryUI()
+			HideBackpackForBattle()
 			task.wait(3)
 			HideStatusText()
 
@@ -214,6 +236,7 @@ if stateUpdateEvent then
 			playButton.Visible = true
 			retreatButton.Visible = false
 			ShowDefeatUI()
+			HideBackpackForBattle()
 			task.wait(3)
 			HideStatusText()
 

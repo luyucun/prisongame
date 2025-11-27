@@ -33,15 +33,42 @@ local placementEvents = nil
 -- UI引用
 local playerGui = nil
 local mainGui = nil
+local removeButton = nil
 
 -- ==================== 回收状态 ====================
 local removalState = {
     isRemovalMode = false,      -- 是否处于回收模式
+    isEnabled = true,           -- 是否允许回收（战斗中会被锁定）
+    isOnIdleFloor = false,      -- 玩家是否站在IdleFloor上
     highlightedModel = nil,     -- 当前高光的模型
     createdHighlight = false,   -- 标记Highlight是否是我们创建的
     placedModels = {},          -- 客户端跟踪的已放置模型列表（用于计数）
     placedUnitCount = 0,        -- 已放置兵种计数（Bug修复：性能优化）
 }
+
+-- ==================== UI显示辅助（提前定义，供初始化阶段调用） ====================
+
+local function ShouldShowRemoveButton()
+    if not removeButton then
+        return false
+    end
+
+    if removalState.isRemovalMode then
+        return false
+    end
+
+    if not removalState.isEnabled then
+        return false
+    end
+
+    return removalState.isOnIdleFloor
+end
+
+local function RefreshRemoveButtonVisibility()
+    if removeButton then
+        removeButton.Visible = ShouldShowRemoveButton()
+    end
+end
 
 -- ==================== 初始化 ====================
 
@@ -105,6 +132,9 @@ function RemovalController.Initialize()
     -- 连接输入事件（点击检测）
     ConnectInputEvents()
 
+    -- 初始化时刷新Remove显隐（受IdleFloor/战斗状态影响）
+    RefreshRemoveButtonVisibility()
+
     return true
 end
 
@@ -115,7 +145,7 @@ end
 ]]
 function ConnectUIButtons()
     -- 连接Remove按钮
-    local removeButton = mainGui:FindFirstChild("Remove")
+    removeButton = mainGui:FindFirstChild("Remove")
     if removeButton then
         removeButton.MouseButton1Click:Connect(function()
             RemovalController.EnterRemovalMode()
@@ -142,6 +172,11 @@ end
 ]]
 function RemovalController.EnterRemovalMode()
     if removalState.isRemovalMode then
+        return
+    end
+
+    -- 战斗锁定或不在IdleFloor时禁止进入回收模式
+    if not removalState.isEnabled or not removalState.isOnIdleFloor then
         return
     end
 
@@ -196,8 +231,6 @@ function RemovalController.IsRemovalMode()
     return removalState.isRemovalMode
 end
 
--- ==================== UI更新 ====================
-
 --[[
 更新UI显示状态
 @param isRemovalMode boolean - 是否为回收模式
@@ -231,7 +264,6 @@ function UpdateUIForRemovalMode(isRemovalMode)
             coinNum.Visible = false
         end
 
-        local removeButton = mainGui:FindFirstChild("Remove")
         if removeButton then
             removeButton.Visible = false
         end
@@ -248,10 +280,8 @@ function UpdateUIForRemovalMode(isRemovalMode)
             coinNum.Visible = true
         end
 
-        local removeButton = mainGui:FindFirstChild("Remove")
-        if removeButton then
-            removeButton.Visible = true
-        end
+        -- Remove按钮显隐由状态控制
+        RefreshRemoveButtonVisibility()
 
         -- 隐藏：RemoveTips, Exit
         local removeTips = mainGui:FindFirstChild("RemoveTips")
@@ -493,6 +523,33 @@ function HasAnyPlacedUnits()
     return false
 end
 
+-- ==================== 状态控制（战斗锁定 / IdleFloor监听）====================
+
+-- 战斗期间锁定或解锁回收功能
+function RemovalController.SetEnabled(enabled)
+    removalState.isEnabled = enabled and true or false
+
+    -- 禁用时退出回收模式并清理高光
+    if not removalState.isEnabled then
+        if removalState.isRemovalMode then
+            RemovalController.ExitRemovalMode()
+        else
+            ClearHighlight()
+        end
+    end
+
+    RefreshRemoveButtonVisibility()
+end
+
+-- IdleFloor站位变化回调
+local function OnIdleFloorStateChanged(onFloor)
+    removalState.isOnIdleFloor = onFloor and true or false
+
+    if not removalState.isRemovalMode then
+        RefreshRemoveButtonVisibility()
+    end
+end
+
 -- ==================== 全局访问 ====================
 
 -- 提供全局访问接口
@@ -502,6 +559,16 @@ _G.RemovalController = RemovalController
 task.spawn(function()
     task.wait(1.5)  -- 等待其他系统加载
     RemovalController.Initialize()
+
+    -- 订阅IdleFloor站位变化（依赖BackpackTrigger提供的接口）
+    if _G.BackpackTrigger and _G.BackpackTrigger.SubscribeIdleFloorChanged then
+        _G.BackpackTrigger.SubscribeIdleFloorChanged(OnIdleFloorStateChanged)
+        if _G.BackpackTrigger.IsOnIdleFloor then
+            OnIdleFloorStateChanged(_G.BackpackTrigger.IsOnIdleFloor())
+        end
+    else
+        warn("[RemovalController] 未找到BackpackTrigger的IdleFloor监听接口，Remove按钮显隐可能不会随站位更新")
+    end
 end)
 
 return RemovalController
