@@ -1,4 +1,4 @@
---[[
+﻿--[[
 =====================================================
 脚本名称: BattleControlUI
 脚本类型: LocalScript (客户端)
@@ -167,6 +167,11 @@ playButton.MouseButton1Click:Connect(function()
 	-- 开战点击后立刻隐藏背包
 	HideBackpackForBattle()
 
+	-- Immediately lock battle camera for smoother start
+	if _G.BattleCameraController and _G.BattleCameraController.Start then
+		_G.BattleCameraController.Start()
+	end
+
 	-- 触发服务器事件
 	local requestStart = CampaignEvents:FindFirstChild("RequestStartCampaign")
 	if requestStart then
@@ -240,16 +245,20 @@ if stateUpdateEvent then
 			task.wait(3)
 			HideStatusText()
 
-		elseif state == "Idle" then
-			-- 闲置状态
-			playButton.Visible = true
-			retreatButton.Visible = false
-			LockHomeOperations(false)
-			HideStatusText()
-
-		else
-			warn("[BattleControlUI] 未知状态:", state)
+	elseif state == "Idle" then
+		-- 闲置状态
+		playButton.Visible = true
+		retreatButton.Visible = false
+		LockHomeOperations(false)
+		-- ensure camera unlocked
+		if _G.BattleCameraController and _G.BattleCameraController.Stop then
+			_G.BattleCameraController.Stop()
 		end
+		HideStatusText()
+
+	else
+		warn("[BattleControlUI] 未知状态:", state)
+	end
 	end)
 else
 	warn("[BattleControlUI] CampaignStateUpdate事件未找到")
@@ -286,3 +295,4 @@ end
 playButton.Visible = true
 retreatButton.Visible = false
 HideStatusText()
+

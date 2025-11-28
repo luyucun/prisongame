@@ -1,4 +1,4 @@
---[[
+﻿--[[
 =====================================================
 脚本名称: VictoryUIController
 脚本类型: LocalScript (客户端UI控制器)
@@ -23,7 +23,7 @@ UI路径说明:
 - 确认按钮路径：PlayerGui > Victory > Information > Confirm
 - 注意：无需创建Back Frame，只需Effect和Information两个Frame
 
-]]]
+]]
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -335,6 +335,10 @@ local function OnConfirmButtonClick()
 
     if success then
         DebugLog("已发送VictoryConfirm事件到服务器")
+        -- Unlock camera/movement after confirm
+        if _G.BattleCameraController and _G.BattleCameraController.Stop then
+            _G.BattleCameraController.Stop()
+        end
 
         -- 短暂延迟后隐藏UI
         task.delay(0.3, function()
@@ -439,3 +443,4 @@ task.spawn(function()
 end)
 
 DebugLog("VictoryUIController脚本加载完成")
+

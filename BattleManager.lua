@@ -670,19 +670,18 @@ function BattleManager.CompleteBattle(battleId, winner)
 	battle.IsSettling = false
 
 	-- V2.0: 触发OnBattleEnd回调(战役系统)
+	-- V2.6修复：同步调用OnBattleEnd，避免与ProcessPendingBattleResult竞态
 	if battle.OnBattleEnd then
-		task.spawn(function()
-			local success, err = pcall(function()
-				battle.OnBattleEnd({
-					BattleId = battleId,
-					Winner = winner,
-					BattleType = battle.BattleType,
-				})
-			end)
-			if not success then
-				WarnLog("OnBattleEnd回调执行失败:", err)
-			end
+		local success, err = pcall(function()
+			battle.OnBattleEnd({
+				BattleId = battleId,
+				Winner = winner,
+				BattleType = battle.BattleType,
+			})
 		end)
+		if not success then
+			WarnLog("OnBattleEnd回调执行失败:", err)
+		end
 	end
 
 	-- V2.4新增：如果是战役战斗，通知CampaignManager处理确认后的逻辑
