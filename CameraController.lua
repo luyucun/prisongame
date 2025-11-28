@@ -21,9 +21,11 @@ local CAMERA_OFFSET = Vector3.new(0, 20, 35)
 local SMOOTHNESS = 0.12
 local DYNAMIC_ZOOM_PER_UNIT = 0.4
 local DYNAMIC_ZOOM_MAX = 35
--- V2.8调整：跟随距离设为24
+-- V2.8调整：跟随距离设为24（备用）
 local FOLLOW_DISTANCE = 24
 local FOLLOW_HEIGHT = 2
+-- V2.9新增：主角到达WatchPart后的停止距离阈值
+local WATCHPART_STOP_THRESHOLD = 2
 
 local isActive = false
 local renderConnection = nil
@@ -35,6 +37,8 @@ local characterFollowDelayTimer = nil
 local initialCenterPosition = nil  -- 进入Marching时的初始质心位置
 local centerIsMoving = false
 local CENTER_MOVE_THRESHOLD = 3  -- 质心累计移动超过3 studs才认为兵种开始移动
+-- V2.9新增：当前关卡编号
+local currentStageNum = 0
 
 local cachedCameraType = nil
 local cachedCameraSubject = nil
@@ -68,6 +72,53 @@ local function getIdleFloor()
 	end
 
 	return playerHome:FindFirstChild("IdleFloor")
+end
+
+--[[
+V2.9新增：获取当前关卡的WatchPart位置
+@param stageNum number - 关卡编号
+@return Vector3|nil - WatchPart的位置，未找到返回nil
+]]
+local function getWatchPartPosition(stageNum)
+	if stageNum <= 0 then
+		return nil
+	end
+
+	local homeSlot = player:GetAttribute("HomeSlot")
+	if not homeSlot then
+		return nil
+	end
+
+	local homeFolder = Workspace:FindFirstChild("Home")
+	if not homeFolder then
+		return nil
+	end
+
+	local playerHome = homeFolder:FindFirstChild("PlayerHome" .. tostring(homeSlot))
+	if not playerHome then
+		return nil
+	end
+
+	-- 关卡文件夹在PlayerHome下的Stage文件夹中
+	local stageContainer = playerHome:FindFirstChild("Stage")
+	if not stageContainer then
+		return nil
+	end
+
+	-- 获取对应关卡文件夹 (Stage001, Stage002, ...)
+	local stageName = string.format("Stage%03d", stageNum)
+	local stageFolder = stageContainer:FindFirstChild(stageName)
+	if not stageFolder then
+		return nil
+	end
+
+	-- 递归查找WatchPart
+	local watchPart = stageFolder:FindFirstChild("WatchPart", true)
+	if watchPart and watchPart:IsA("BasePart") then
+		return watchPart.Position
+	end
+
+	return nil
 end
 
 local function collectAllyPositions()
@@ -186,14 +237,32 @@ local function updateCharacterFollow(center, targetCFrame)
 		return
 	end
 
-	local followTarget = center - targetCFrame.LookVector * FOLLOW_DISTANCE
-	local targetY = math.max(hrp.Position.Y, center.Y + FOLLOW_HEIGHT)
-	followTarget = Vector3.new(followTarget.X, targetY, followTarget.Z)
+	-- V2.9修改：目标位置改为当前关卡的WatchPart
+	local watchPartPos = getWatchPartPosition(currentStageNum)
+	if watchPartPos then
+		-- 使用WatchPart位置作为目标
+		local targetY = math.max(hrp.Position.Y, watchPartPos.Y + FOLLOW_HEIGHT)
+		local followTarget = Vector3.new(watchPartPos.X, targetY, watchPartPos.Z)
 
-	if (hrp.Position - followTarget).Magnitude > 1 then
-		humanoid:MoveTo(followTarget)
+		local distanceToTarget = (Vector3.new(hrp.Position.X, 0, hrp.Position.Z) - Vector3.new(followTarget.X, 0, followTarget.Z)).Magnitude
+
+		-- 到达WatchPart附近后停止移动
+		if distanceToTarget > WATCHPART_STOP_THRESHOLD then
+			humanoid:MoveTo(followTarget)
+		else
+			humanoid:Move(Vector3.zero, false)
+		end
 	else
-		humanoid:Move(Vector3.zero, false)
+		-- 回退方案：如果找不到WatchPart，使用原来的质心跟随逻辑
+		local followTarget = center - targetCFrame.LookVector * FOLLOW_DISTANCE
+		local targetY = math.max(hrp.Position.Y, center.Y + FOLLOW_HEIGHT)
+		followTarget = Vector3.new(followTarget.X, targetY, followTarget.Z)
+
+		if (hrp.Position - followTarget).Magnitude > 1 then
+			humanoid:MoveTo(followTarget)
+		else
+			humanoid:Move(Vector3.zero, false)
+		end
 	end
 end
 
@@ -348,8 +417,12 @@ task.spawn(function()
 	if campaignEvents then
 		local stateUpdate = campaignEvents:FindFirstChild("CampaignStateUpdate")
 		if stateUpdate then
-			stateUpdate.OnClientEvent:Connect(function(state)
+			stateUpdate.OnClientEvent:Connect(function(state, stageNum)
 				currentState = state or "Idle"
+				-- V2.9新增：更新当前关卡编号
+				if stageNum and type(stageNum) == "number" then
+					currentStageNum = stageNum
+				end
 
 				-- V2.8.1修复：跟随时机绑定到状态
 				-- 在行军、准备战斗、战斗、过关状态时都允许主角跟随
@@ -404,6 +477,8 @@ task.spawn(function()
 				then
 					startCameraLock()
 				elseif state == "Idle" then
+					-- V2.9：重置关卡编号
+					currentStageNum = 0
 					stopCameraLock()
 				end
 			end)
