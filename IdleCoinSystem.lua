@@ -175,12 +175,6 @@ local function UpdateMailDisplay(homeId, coins)
 
 	local textValue = string.format("%d$", coins)
 	numberLabel.Text = textValue
-	-- 保险：同步更新Bg下所有TextLabel，避免资源命名差异导致显示不变
-	for _, child in ipairs(bg:GetChildren()) do
-		if child:IsA("TextLabel") then
-			child.Text = textValue
-		end
-	end
 
 	print(GameConfig.LOG_PREFIX, "[IdleCoinSystem] 更新金币显示成功: homeId=" .. homeId .. ", coins=" .. coins)
 	return true
