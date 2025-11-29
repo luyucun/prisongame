@@ -6,6 +6,11 @@ Purpose (V2.7):
 - Lock camera during battle, aim at friendly formation center, smooth follow
 - Auto-follow player behind formation; disable manual move/jump input
 - Unlock and restore controls after battle/settlement
+
+V2.10新增：战斗特写镜头
+- 行军时使用跟随模式（较高、较远）
+- 接战后切换到战斗模式（较低、较近，给特写效果）
+- 关卡结束后恢复跟随模式
 ]]
 
 local Players = game:GetService("Players")
@@ -17,7 +22,24 @@ local Workspace = game:GetService("Workspace")
 local player = Players.LocalPlayer
 local camera = Workspace.CurrentCamera
 
-local CAMERA_OFFSET = Vector3.new(0, 20, 35)
+-- ============================================
+-- V2.10新增：镜头模式配置
+-- ============================================
+-- 跟随模式（行军时）：高俯视角度，看整体阵型
+local FOLLOW_MODE_OFFSET = Vector3.new(0, 28, 18)  -- Y大Z小 = 俯视
+-- 战斗模式（接战时）：低平视角度，特写效果
+local COMBAT_MODE_OFFSET = Vector3.new(0, 12, 25)  -- Y小Z大 = 平视特写
+-- 镜头切换过渡速度（0-1，越大越快）
+local MODE_TRANSITION_SPEED = 0.08
+
+-- 当前使用的偏移量（会在两个模式之间平滑过渡）
+local currentOffset = FOLLOW_MODE_OFFSET
+-- 目标偏移量
+local targetOffset = FOLLOW_MODE_OFFSET
+-- 当前镜头模式: "Follow" 或 "Combat"
+local cameraMode = "Follow"
+
+local CAMERA_OFFSET = Vector3.new(0, 18, 35)  -- 保留兼容（实际使用currentOffset）
 local SMOOTHNESS = 0.12
 local DYNAMIC_ZOOM_PER_UNIT = 0.4
 local DYNAMIC_ZOOM_MAX = 35
@@ -157,6 +179,46 @@ local function computeCenter()
 	return sum / #positions, #positions
 end
 
+-- ============================================
+-- V2.10新增：镜头模式切换函数
+-- ============================================
+--[[
+切换到战斗模式（特写）
+- 镜头往前推进、往低推进
+- 给战斗一个特写效果
+]]
+local function setCombatMode()
+	if cameraMode == "Combat" then
+		return
+	end
+	cameraMode = "Combat"
+	targetOffset = COMBAT_MODE_OFFSET
+	print("[CameraController] 切换到战斗特写模式")
+end
+
+--[[
+切换到跟随模式
+- 镜头抬高、拉远
+- 用于行军跟随
+]]
+local function setFollowMode()
+	if cameraMode == "Follow" then
+		return
+	end
+	cameraMode = "Follow"
+	targetOffset = FOLLOW_MODE_OFFSET
+	print("[CameraController] 切换到跟随模式")
+end
+
+--[[
+重置镜头模式（立即重置，无过渡）
+]]
+local function resetCameraMode()
+	cameraMode = "Follow"
+	targetOffset = FOLLOW_MODE_OFFSET
+	currentOffset = FOLLOW_MODE_OFFSET
+end
+
 local function unbindInputBlock()
 	ContextActionService:UnbindAction(BlockActionName)
 end
@@ -284,8 +346,13 @@ local function updateCamera()
 		return
 	end
 
+	-- V2.10新增：平滑过渡镜头偏移量
+	-- 使用Lerp让currentOffset平滑趋近targetOffset
+	currentOffset = currentOffset:Lerp(targetOffset, MODE_TRANSITION_SPEED)
+
+	-- V2.10修改：使用currentOffset代替固定的CAMERA_OFFSET
 	local dynamicZoom = math.min(count * DYNAMIC_ZOOM_PER_UNIT, DYNAMIC_ZOOM_MAX)
-	local offset = CAMERA_OFFSET + Vector3.new(0, dynamicZoom, dynamicZoom)
+	local offset = currentOffset + Vector3.new(0, dynamicZoom, dynamicZoom)
 	local targetPosition = center + offset
 	local targetCFrame = CFrame.new(targetPosition, center)
 
@@ -437,14 +504,22 @@ task.spawn(function()
 						allowCharacterFollow = true
 						characterFollowDelayTimer = nil
 					end)
-				elseif state == "PrepareBattle" or state == "Fighting" then
-					-- V2.8.1修复：战斗准备和战斗阶段保持跟随
-					-- 不重置质心检测，让主角继续跟随到设定距离
+					-- V2.10新增：行军时使用跟随模式（镜头抬高）
+					setFollowMode()
+				elseif state == "PrepareBattle" then
+					-- V2.8.1修复：战斗准备阶段保持跟随
 					if not allowCharacterFollow then
-						-- 如果之前没有开启跟随，现在开启
 						allowCharacterFollow = true
 					end
-					-- 保持centerIsMoving状态，让主角继续移动
+					-- V2.10新增：准备战斗时切换到战斗特写模式（镜头推近）
+					setCombatMode()
+				elseif state == "Fighting" then
+					-- V2.8.1修复：战斗阶段保持跟随
+					if not allowCharacterFollow then
+						allowCharacterFollow = true
+					end
+					-- V2.10新增：战斗时保持战斗特写模式
+					setCombatMode()
 				elseif state == "StageClear" then
 					-- V2.8.1修复：过关后保持跟随状态
 					-- 重置质心检测为下一关做准备，但保持allowCharacterFollow
@@ -453,6 +528,8 @@ task.spawn(function()
 					if not allowCharacterFollow then
 						allowCharacterFollow = true
 					end
+					-- V2.10新增：关卡结束后立即切换到跟随模式（镜头抬高）
+					setFollowMode()
 				else
 					-- 其他状态，关闭跟随并停止移动
 					allowCharacterFollow = false
@@ -463,6 +540,10 @@ task.spawn(function()
 						characterFollowDelayTimer = nil
 					end
 					stopCharacterFollow()
+					-- V2.10新增：非战斗状态重置镜头模式
+					if state == "Idle" then
+						resetCameraMode()
+					end
 				end
 
 				-- 战役流程中都保持镜头锁定；Idle 时解除
@@ -490,6 +571,10 @@ end)
 _G.BattleCameraController = {
 	Start = startCameraLock,
 	Stop = stopCameraLock,
+	-- V2.10新增：镜头模式控制
+	SetCombatMode = setCombatMode,      -- 切换到战斗特写模式
+	SetFollowMode = setFollowMode,      -- 切换到跟随模式
+	ResetCameraMode = resetCameraMode,  -- 重置镜头模式
 }
 
 return _G.BattleCameraController

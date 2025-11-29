@@ -372,6 +372,25 @@ function PlayerManager.OnPlayerAdded(player)
         end
     end)
 
+    -- V2.8新增：6.9 初始化玩家房屋（根据章节进度加载正确的房屋模型）
+    task.spawn(function()
+        -- 等待基地完全初始化
+        task.wait(1.5)
+
+        local HouseUpgradeSystem = ServerScriptService.Systems:FindFirstChild("HouseUpgradeSystem")
+        if HouseUpgradeSystem then
+            local houseModule = require(HouseUpgradeSystem)
+            if houseModule.InitializePlayerHouse then
+                houseModule.InitializePlayerHouse(player, homeSlot)
+                print(string.format(
+                    "%s [PlayerManager] V2.8 玩家 %s 房屋初始化完成",
+                    GameConfig.LOG_PREFIX,
+                    player.Name
+                ))
+            end
+        end
+    end)
+
     -- 7. 处理角色传送 - 使用异步方式避免阻塞
     -- 标记是否应跳过首次传送（用于Studio Play Here模式）
     local shouldSkipFirstTeleport = skipHomeAssignment

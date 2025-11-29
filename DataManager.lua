@@ -65,6 +65,11 @@ PlayerData = {
         LastLogoutTime = number,   -- 上次登出时间戳
         PendingCoins = number,     -- 待领取的挂机金币
     },
+    ChapterProgress = {        -- V2.8章节进度系统
+        CurrentChapter = number,   -- 当前挑战章节(从1开始)
+        CompletedChapters = number, -- 已通关的章节数(0表示未通关任何章节)
+        CurrentHouseModel = string, -- 当前房屋模型名称
+    },
     LastSaveTime = number,     -- 最后保存时间
 }
 ]]
@@ -171,6 +176,9 @@ local function LoadFromDataStore(player)
 		if data.IdleCoinData then
 			data.IdleCoinData = RestoreFromDataStore(data.IdleCoinData)  -- V2.6：恢复挂机金币数据
 		end
+		if data.ChapterProgress then
+			data.ChapterProgress = RestoreFromDataStore(data.ChapterProgress)  -- V2.8：恢复章节进度数据
+		end
 		return data
 	elseif not success then
 		warn(string.format(
@@ -204,6 +212,7 @@ local function SaveToDataStore(player, playerData, userId)
 		PlacedUnits = SanitizeForDataStore(playerData.PlacedUnits),  -- 🔥修复持久化：保存放置数据
 		ShopData = SanitizeForDataStore(playerData.ShopData),  -- V2.1库存系统：保存商店数据
 		IdleCoinData = SanitizeForDataStore(playerData.IdleCoinData),  -- V2.6：保存挂机金币数据
+		ChapterProgress = SanitizeForDataStore(playerData.ChapterProgress),  -- V2.8：保存章节进度数据
 		LastSaveTime = os.time(),
 	}
 
@@ -244,6 +253,11 @@ local function CreateDefaultData(player)
         IdleCoinData = {  -- V2.6挂机金币系统：初始化
             LastLogoutTime = 0,
             PendingCoins = 0,
+        },
+        ChapterProgress = {  -- V2.8章节进度系统：初始化
+            CurrentChapter = 1,       -- 默认从第1章开始
+            CompletedChapters = 0,    -- 未通关任何章节
+            CurrentHouseModel = "PrisonLv1",  -- 默认初始房屋
         },
         LastSaveTime = os.time(),
     }
@@ -302,6 +316,15 @@ function DataManager.InitializePlayerData(player)
             playerData.IdleCoinData = {
                 LastLogoutTime = 0,
                 PendingCoins = 0,
+            }
+        end
+
+        -- V2.8章节进度：确保ChapterProgress字段存在（向后兼容）
+        if not playerData.ChapterProgress then
+            playerData.ChapterProgress = {
+                CurrentChapter = 1,
+                CompletedChapters = 0,
+                CurrentHouseModel = "PrisonLv1",
             }
         end
 
@@ -1068,6 +1091,184 @@ function DataManager.ClearPendingIdleCoins(player)
     local oldAmount = playerData.IdleCoinData.PendingCoins or 0
     playerData.IdleCoinData.PendingCoins = 0
     return oldAmount
+end
+
+--[[
+GM命令：重置玩家所有数据
+@param player Player - 玩家对象
+@return boolean - 是否重置成功
+说明: 此函数会清空玩家的所有数据并保存到DataStore
+]]
+function DataManager.ResetAllPlayerData(player)
+    if not player then
+        warn(GameConfig.LOG_PREFIX, "ResetAllPlayerData: player为空")
+        return false
+    end
+
+    local userId = player.UserId
+
+    -- 创建全新的默认数据
+    local newData = CreateDefaultData(player)
+
+    -- 更新缓存
+    playerDataCache[userId] = newData
+
+    -- 立即保存到DataStore
+    local saveSuccess = SaveToDataStore(player, newData)
+
+    if saveSuccess then
+        print(string.format(
+            "%s [DataManager] ✅ 玩家 %s 的所有数据已重置",
+            GameConfig.LOG_PREFIX,
+            player.Name
+        ))
+    else
+        warn(string.format(
+            "%s [DataManager] ⚠ 玩家 %s 数据重置后保存失败",
+            GameConfig.LOG_PREFIX,
+            player.Name
+        ))
+    end
+
+    return saveSuccess
+end
+
+-- ==================== V2.8章节进度系统接口 ====================
+
+--[[
+获取玩家章节进度数据
+@param player Player - 玩家对象
+@return table - {CurrentChapter = number, CompletedChapters = number, CurrentHouseModel = string}
+]]
+function DataManager.GetChapterProgress(player)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData then
+        return {CurrentChapter = 1, CompletedChapters = 0, CurrentHouseModel = "PrisonLv1"}
+    end
+
+    if not playerData.ChapterProgress then
+        playerData.ChapterProgress = {
+            CurrentChapter = 1,
+            CompletedChapters = 0,
+            CurrentHouseModel = "PrisonLv1",
+        }
+    end
+
+    return playerData.ChapterProgress
+end
+
+--[[
+获取玩家当前挑战章节
+@param player Player - 玩家对象
+@return number - 当前章节ID
+]]
+function DataManager.GetCurrentChapter(player)
+    local progress = DataManager.GetChapterProgress(player)
+    return progress.CurrentChapter or 1
+end
+
+--[[
+获取玩家已通关章节数
+@param player Player - 玩家对象
+@return number - 已通关章节数
+]]
+function DataManager.GetCompletedChapters(player)
+    local progress = DataManager.GetChapterProgress(player)
+    return progress.CompletedChapters or 0
+end
+
+--[[
+设置玩家当前挑战章节
+@param player Player - 玩家对象
+@param chapterId number - 章节ID
+@return boolean - 是否设置成功
+]]
+function DataManager.SetCurrentChapter(player, chapterId)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData then
+        warn(GameConfig.LOG_PREFIX, "SetCurrentChapter: 找不到玩家数据")
+        return false
+    end
+
+    if not playerData.ChapterProgress then
+        playerData.ChapterProgress = {
+            CurrentChapter = 1,
+            CompletedChapters = 0,
+            CurrentHouseModel = "PrisonLv1",
+        }
+    end
+
+    playerData.ChapterProgress.CurrentChapter = chapterId
+    return true
+end
+
+--[[
+通关章节（增加已通关章节数）
+@param player Player - 玩家对象
+@param chapterId number - 通关的章节ID
+@return boolean, number - 是否成功, 新的已通关章节数
+]]
+function DataManager.CompleteChapter(player, chapterId)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData then
+        warn(GameConfig.LOG_PREFIX, "CompleteChapter: 找不到玩家数据")
+        return false, 0
+    end
+
+    if not playerData.ChapterProgress then
+        playerData.ChapterProgress = {
+            CurrentChapter = 1,
+            CompletedChapters = 0,
+            CurrentHouseModel = "PrisonLv1",
+        }
+    end
+
+    -- 只有通关当前章节才更新进度（防止重复通关刷进度）
+    if chapterId == playerData.ChapterProgress.CurrentChapter then
+        -- 更新已通关章节数
+        if chapterId > playerData.ChapterProgress.CompletedChapters then
+            playerData.ChapterProgress.CompletedChapters = chapterId
+        end
+        -- 自动进入下一章
+        playerData.ChapterProgress.CurrentChapter = chapterId + 1
+    end
+
+    return true, playerData.ChapterProgress.CompletedChapters
+end
+
+--[[
+获取玩家当前房屋模型名称
+@param player Player - 玩家对象
+@return string - 房屋模型名称
+]]
+function DataManager.GetCurrentHouseModel(player)
+    local progress = DataManager.GetChapterProgress(player)
+    return progress.CurrentHouseModel or "PrisonLv1"
+end
+
+--[[
+设置玩家当前房屋模型名称
+@param player Player - 玩家对象
+@param modelName string - 新的房屋模型名称
+@return boolean - 是否设置成功
+]]
+function DataManager.SetCurrentHouseModel(player, modelName)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData then
+        warn(GameConfig.LOG_PREFIX, "SetCurrentHouseModel: 找不到玩家数据")
+        return false
+    end
+
+    if not playerData.ChapterProgress then
+        playerData.ChapterProgress = {
+            CurrentChapter = 1,
+            CompletedChapters = 0,
+            CurrentHouseModel = "PrisonLv1",
+        }
+    end
+
+    playerData.ChapterProgress.CurrentHouseModel = modelName
+    return true
 end
 
 return DataManager

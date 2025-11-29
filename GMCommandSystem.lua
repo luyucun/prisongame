@@ -305,6 +305,9 @@ local function CMD_Help(player, args)
 /addidlecoins [minutes] - 添加挂机金币(默认60分钟)
 /idlecoins - 查看挂机金币状态
 
+数据管理(V2.9):
+/resetdata - 重置所有玩家数据(需二次确认)
+
 系统调试:
 /iconpreload - 检查图标预加载状态
 
@@ -600,6 +603,48 @@ local function CMD_IdleCoins(player, args)
     SendMessage(player, string.format("最大离线时长: %d 小时", GameConfig.IdleCoin.MaxOfflineHours))
 end
 
+--[[
+命令: /resetdata
+重置玩家所有数据（危险操作）V2.9
+]]
+local function CMD_ResetData(player, args)
+    -- 二次确认机制：需要输入 /resetdata confirm 才会执行
+    if #args < 1 or args[1] ~= "confirm" then
+        SendMessage(player, "⚠️ 警告：此操作将清除你的所有游戏数据！")
+        SendMessage(player, "包括：金币、背包、已放置兵种、商店数据、挂机金币等")
+        SendMessage(player, "此操作不可撤销！")
+        SendMessage(player, "")
+        SendMessage(player, "如确认重置，请输入: /resetdata confirm")
+        return
+    end
+
+    -- 延迟加载PlacementSystem，用于清除已放置的兵种模型
+    if not PlacementSystem then
+        PlacementSystem = require(ServerScriptService.Systems.PlacementSystem)
+    end
+
+    -- 清除场景中已放置的兵种模型
+    local clearedCount = PlacementSystem.ClearAllPlacedUnits(player)
+    SendMessage(player, string.format("已清除 %d 个已放置的兵种模型", clearedCount))
+
+    -- 重置DataStore中的所有数据
+    local success = DataManager.ResetAllPlayerData(player)
+
+    if success then
+        SendMessage(player, "✅ 数据重置成功！")
+        SendMessage(player, "你的所有数据已恢复为初始状态：")
+        SendMessage(player, string.format("  - 金币: %d", GameConfig.INITIAL_COINS))
+        SendMessage(player, "  - 背包: 已清空")
+        SendMessage(player, "  - 已放置兵种: 已清空")
+        SendMessage(player, "  - 商店数据: 已重置")
+        SendMessage(player, "  - 挂机金币: 已清空")
+        SendMessage(player, "")
+        SendMessage(player, "建议重新进入游戏以确保所有系统正确初始化")
+    else
+        SendMessage(player, "❌ 数据重置失败，请重试或联系管理员")
+    end
+end
+
 -- 命令映射表
 local COMMAND_HANDLERS = {
     ["addunit"] = CMD_AddUnit,
@@ -618,6 +663,7 @@ local COMMAND_HANDLERS = {
     ["clearbattle"] = CMD_ClearBattle,    -- V1.5新增
     ["addidlecoins"] = CMD_AddIdleCoins,  -- V2.6新增
     ["idlecoins"] = CMD_IdleCoins,        -- V2.6新增
+    ["resetdata"] = CMD_ResetData,        -- V2.9新增
     ["help"] = CMD_Help,
 }
 

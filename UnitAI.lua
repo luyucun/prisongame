@@ -1,4 +1,4 @@
---[[
+﻿--[[
 脚本名称: UnitAI (重构版 - 使用PathService)
 脚本类型: ModuleScript (服务端系统)
 脚本位置: ServerScriptService/Systems/UnitAI
@@ -1314,6 +1314,52 @@ local function HandleMoving(unitModel, aiData, state)
 		return
 	end
 
+	-- ==================== V2.9.5新增：基于速度的卡住检测 ====================
+	-- 如果单位应该在移动但速度接近0，说明被卡住了，立即重新寻路
+	local currentPos = aiData.HumanoidRootPart.Position
+	local now = tick()
+
+	-- 初始化位置追踪
+	if not aiData.LastMovingPos then
+		aiData.LastMovingPos = currentPos
+		aiData.LastMovingTime = now
+		aiData.StuckCount = 0
+	else
+		local timeDelta = now - aiData.LastMovingTime
+		-- 每0.3秒检测一次（比PathService更频繁）
+		if timeDelta >= 0.3 then
+			local posDelta = (currentPos - aiData.LastMovingPos).Magnitude
+			local expectedSpeed = aiData.Humanoid.WalkSpeed or 16
+			local expectedDistance = expectedSpeed * timeDelta * 0.3  -- 期望移动距离的30%作为阈值
+
+			-- 如果实际移动距离远小于期望，说明被卡住
+			if posDelta < math.min(0.3, expectedDistance) then
+				aiData.StuckCount = (aiData.StuckCount or 0) + 1
+
+				-- 连续2次检测到卡住（0.6秒），立即触发重新寻路
+				if aiData.StuckCount >= 2 then
+					DebugLog(string.format("%s 速度检测卡住(移动%.2f studs in %.2fs)，立即重寻",
+						state.UnitId, posDelta, timeDelta))
+
+					-- 清理旧路径并重置寻路标志
+					PathService.ClearPath(unitModel)
+					aiData.PathRequested = false
+					aiData.StuckCount = 0
+
+					-- 强制触发新的寻路请求
+					PathService.ForceRepath(unitModel)
+				end
+			else
+				-- 正常移动，重置卡住计数
+				aiData.StuckCount = 0
+			end
+
+			-- 更新追踪位置
+			aiData.LastMovingPos = currentPos
+			aiData.LastMovingTime = now
+		end
+	end
+
 	-- 确保播放移动动画
 	AnimationController.SwitchToMove(unitModel, aiData, state)
 
@@ -2064,6 +2110,10 @@ function UnitAI.StartAI(unitModel)
 		end
 	end)
 
+	-- 注意：Roblox Humanoid 没有 MoveToBlocked 事件
+	-- 已通过超时机制和AI批量检测来处理移动阻塞情况
+	-- 如果需要更精确的阻塞检测，可以使用位置检测或 MoveToFinished 事件
+
 	return true
 end
 
@@ -2090,11 +2140,15 @@ function UnitAI.StopAI(unitModel, options)
 		opts = options
 	end
 
-		-- V2.0.5性能优化：断开MoveToFinished连接
-		if aiData.MoveConnection then
-			aiData.MoveConnection:Disconnect()
-			aiData.MoveConnection = nil
-		end
+	-- V2.0.5性能优化：断开MoveToFinished连接
+	if aiData.MoveConnection then
+		aiData.MoveConnection:Disconnect()
+		aiData.MoveConnection = nil
+	end
+	if aiData.MoveBlockedConnection then
+		aiData.MoveBlockedConnection:Disconnect()
+		aiData.MoveBlockedConnection = nil
+	end
 
 	-- 步骤1: 禁用Animate脚本（如果需要）
 	-- 使用递归查找，兼容任何位置的Animate脚本

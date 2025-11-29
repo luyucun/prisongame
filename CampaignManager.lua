@@ -3,7 +3,7 @@
 脚本名称: CampaignManager
 脚本类型: ModuleScript (服务端核心)
 脚本位置: ServerScriptService/Systems/CampaignManager.lua
-版本: V2.8.2
+版本: V2.8.3
 =====================================================
 
 功能描述:
@@ -11,6 +11,7 @@
 - 协调单位行军、战斗、胜利和关卡切换
 - 处理胜利/失败/清理逻辑
 - 管理单位血条继承
+- V2.8新增: 章节系统支持
 
 状态机:
 IDLE → PREPARING → MARCHING → FIGHTING → STAGE_CLEAR/DEFEAT → CLEANUP → IDLE
@@ -33,6 +34,7 @@ local UnitConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild
 
 -- 引用核心管理器
 local PlayerManager = require(ServerScriptService:WaitForChild("Core"):WaitForChild("PlayerManager") :: ModuleScript)
+local DataManager = require(ServerScriptService:WaitForChild("Core"):WaitForChild("DataManager") :: ModuleScript)  -- V2.8新增
 
 -- 引用系统模块
 local SystemsFolder = ServerScriptService:WaitForChild("Systems")
@@ -651,13 +653,22 @@ function CampaignManager.StartCampaign(player)
 		return false
 	end
 
+	-- V2.8新增: 获取玩家当前章节信息
+	local currentChapter = DataManager.GetCurrentChapter(player)
+	local chapterConfig = StageConfig.GetChapterConfig(currentChapter)
+	local totalStagesInChapter = chapterConfig and chapterConfig.StagesPerChapter or GameConfig.Campaign.MaxStages
+
+	DebugLog(string.format("[StartCampaign] 玩家 %s 开始章节 %d，关卡数: %d",
+		player.Name, currentChapter, totalStagesInChapter))
+
 	-- 初始化战役数据
 	local campaignData = {
 		PlayerId = playerId,
 		Player = player,
 		HomeId = homeId,
 		CurrentStage = 1,
-		TotalStages = GameConfig.Campaign.MaxStages,
+		TotalStages = totalStagesInChapter,  -- V2.8: 使用章节的关卡数
+		CurrentChapter = currentChapter,      -- V2.8新增: 当前章节
 		State = CampaignState.PREPARING,
 		Units = {},
 		StageInstances = {},
@@ -986,9 +997,18 @@ function CampaignManager.MarchToStage(campaignData, stageNum)
 	fireAttachHealthBars(marchingUnits)
 	DebugLog(string.format("✅ 行军开始，已为 %d 个单位附加血条", #marchingUnits))
 
+	-- V2.7新增：计算战场中心（敌方IdleFloorEnemy的中心）
+	local battleCenter = nil
+	local idleFloorEnemy = stageFolder:FindFirstChild("IdleFloorEnemy", true)
+	if idleFloorEnemy then
+		battleCenter = idleFloorEnemy.Position
+		DebugLog(string.format("🎯 战场中心位置: (%.1f, %.1f, %.1f)", battleCenter.X, battleCenter.Y, battleCenter.Z))
+	end
+
 	-- 使用PathService进行批量寻路移动
 	DebugLog(string.format("[MarchToStage] 开始PathService寻路，目标数量: %d", #moveTargets))
 	local moveId = PathService.MoveUnitsToPositions(moveTargets, {
+		battleCenter = battleCenter,  -- V2.7新增：传递战场中心位置
 		onUnitArrived = function(unitInstance, status)
 			-- 单位到达时的回调(当前为空实现)
 		end,
@@ -1414,16 +1434,33 @@ function CampaignManager.OnVictory(campaignData)
 		end
 	end
 
-	-- 计算总奖励(根据关卡模板Style01)
-	local totalReward = 0
-	local templateStyle = GameConfig.Campaign.StageTemplateStyle or "Style01"
-	local styleRewards = StageConfig[templateStyle] and StageConfig[templateStyle].Rewards
+	-- V2.8新增: 获取当前章节信息
+	local currentChapter = campaignData.CurrentChapter or 1
 
-	if styleRewards then
+	-- V2.8: 计算章节奖励
+	local totalReward = 0
+	local chapterConfig = StageConfig.GetChapterConfig(currentChapter)
+
+	if chapterConfig and chapterConfig.Rewards then
+		-- 使用章节配置的奖励
 		for i = 1, campaignData.TotalStages do
-			local reward = styleRewards[i]
+			local reward = chapterConfig.Rewards[i]
 			if reward then
 				totalReward = totalReward + (reward.Coins or 0)
+			end
+		end
+		DebugLog(string.format("[OnVictory] 章节 %d 奖励计算完成，总奖励: %d 金币", currentChapter, totalReward))
+	else
+		-- 兼容旧版本: 使用Style01奖励
+		local templateStyle = GameConfig.Campaign.StageTemplateStyle or "Style01"
+		local styleRewards = StageConfig[templateStyle] and StageConfig[templateStyle].Rewards
+
+		if styleRewards then
+			for i = 1, campaignData.TotalStages do
+				local reward = styleRewards[i]
+				if reward then
+					totalReward = totalReward + (reward.Coins or 0)
+				end
 			end
 		end
 	end
@@ -1431,6 +1468,29 @@ function CampaignManager.OnVictory(campaignData)
 	-- 发放奖励金币
 	if totalReward > 0 then
 		CurrencySystem.AddCoins(campaignData.Player, totalReward, "战役胜利奖励")
+	end
+
+	-- V2.8新增: 更新章节进度
+	local player = campaignData.Player
+	if player then
+		local success, newCompletedChapters = DataManager.CompleteChapter(player, currentChapter)
+		if success then
+			DebugLog(string.format("[OnVictory] 玩家 %s 通关章节 %d，已通关章节数: %d",
+				player.Name, currentChapter, newCompletedChapters))
+
+			-- 保存数据
+			DataManager.SavePlayerDataThrottled(player, true)  -- 强制保存
+
+			-- V2.8: 触发房屋升级检查
+			local HouseUpgradeSystem = nil
+			pcall(function()
+				HouseUpgradeSystem = require(SystemsFolder:WaitForChild("HouseUpgradeSystem"))
+			end)
+
+			if HouseUpgradeSystem then
+				HouseUpgradeSystem.OnChapterCompleted(player, currentChapter)
+			end
+		end
 	end
 
 	-- 延迟后进入结束流程

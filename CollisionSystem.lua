@@ -16,7 +16,7 @@ local UNIT_GROUP = "Units"
 local PLAYER_GROUP = "Players" -- 可选
 
 -- 调试开关
-local DEBUG_MODE = true
+local DEBUG_MODE = false
 local LOG_PREFIX = "[CollisionSystem]"
 
 --[[
@@ -50,7 +50,7 @@ function CollisionSystem.Initialize()
 	end)
 
 	if setSuccess then
-		print(LOG_PREFIX, "✅ 兵种间碰撞已关闭 - Units组内不碰撞")
+		-- print(LOG_PREFIX, "✅ 兵种间碰撞已关闭 - Units组内不碰撞")
 	else
 		warn(LOG_PREFIX, "❌ 设置碰撞规则失败:", setErr)
 	end
@@ -69,7 +69,7 @@ function CollisionSystem.Initialize()
 		CollisionSystem.SetUnitCollision(unit)
 	end
 
-	print(LOG_PREFIX, "✅ 碰撞系统初始化完成")
+	-- print(LOG_PREFIX, "✅ 碰撞系统初始化完成")
 end
 
 --[[

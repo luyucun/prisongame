@@ -26,7 +26,7 @@ local Players = game:GetService("Players")
 local player = Players.LocalPlayer
 
 -- 配置
-local DEBUG_MODE = true
+local DEBUG_MODE = false
 local LOG_PREFIX = "[IconPreloader]"
 
 -- 延迟启动时间(秒) - 等待其他系统初始化

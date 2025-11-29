@@ -58,11 +58,11 @@ local CONFIG = {
 	-- 最大重试次数
 	MAX_RETRY_COUNT = 3,
 
-	-- 连续阻挡次数上限 - V2.3修复：降低到2加快重寻
-	MAX_BLOCKED_COUNT = 2,
+	-- 连续阻挡次数上限 - V2.5优化：降低到1，立即触发重寻
+	MAX_BLOCKED_COUNT = 1,
 
-	-- 阻挡时间窗口（秒）- V2.3修复：缩短到1.5秒加快响应
-	BLOCKED_TIME_WINDOW = 1.5,
+	-- 阻挡时间窗口（秒）- V2.5优化：缩短到0.5秒，更快响应
+	BLOCKED_TIME_WINDOW = 0.5,
 
 	-- 降级策略：减小AgentRadius的比例
 	RADIUS_REDUCTION_RATIO = 0.85,
@@ -1487,11 +1487,13 @@ RunService.Heartbeat:Connect(ProcessComputeQueue)
 3. 分批启动（避免瞬时大量ComputeAsync）
 4. 降低更新频率（0.15秒而非60FPS）
 5. V2.3新增：支持缓存路径，避免重复ComputeAsync
+6. V2.7新增：到达后朝向战场中心
 
 @param moveTargets table - {[unitInstance] = targetCFrame, ...}
 @param callbacks table - 回调函数表 {
     onUnitArrived = function(unitInstance, status),  -- 单位到达时回调
     onAllSettled = function(arrivedList, timedOutList, failedList),  -- 所有单位完成时回调
+    battleCenter = Vector3 (optional) - 战场中心位置，到达后兵种会朝向此位置
 }
 @return string - 移动任务ID，可用于取消
 ]]
@@ -1503,12 +1505,14 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)  -- V2.3.1：�
 	-- 兼容旧版API：callbacks可以是function（相当于onAllSettled）
 	local onUnitArrived = nil
 	local onAllSettled = nil
+	local battleCenter = nil  -- V2.7新增：战场中心位置
 
 	if type(callbacks) == "function" then
 		onAllSettled = callbacks  -- 向后兼容
 	elseif type(callbacks) == "table" then
 		onUnitArrived = callbacks.onUnitArrived
 		onAllSettled = callbacks.onAllSettled
+		battleCenter = callbacks.battleCenter  -- V2.7新增：提取战场中心
 	end
 
 	-- 生成移动任务ID
@@ -1706,6 +1710,19 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)  -- V2.3.1：�
 				-- 到达目标（无论 reached 是 true 还是 false）
 				data.Arrived = true
 
+				-- V2.7新增：到达后朝向战场中心
+				if battleCenter and typeof(battleCenter) == "Vector3" then
+					local lookAtPos = Vector3.new(battleCenter.X, rootPart.Position.Y, battleCenter.Z)
+					local direction = (lookAtPos - rootPart.Position).Unit
+					if direction.Magnitude > 0.1 then  -- 避免零向量
+						local newCFrame = CFrame.new(rootPart.Position, rootPart.Position + direction)
+						pcall(function()
+							rootPart.CFrame = newCFrame
+						end)
+						DebugLog(string.format("🎯 %s 朝向战场中心", unitInstance.Name))
+					end
+				end
+
 				-- 断开连接
 				if data.MoveToConnection then
 					data.MoveToConnection:Disconnect()
@@ -1831,6 +1848,10 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)  -- V2.3.1：�
 				end
 			end
 		end)
+
+		-- 注意：Roblox Humanoid 没有 MoveToBlocked 事件
+		-- 已通过超时机制和批量检测来处理移动阻塞情况
+		-- 如果需要更精确的阻塞检测，可以使用位置检测或 MoveToFinished 事件
 
 		-- V2.3优化：移除per-unit Heartbeat连接
 		-- 原V2.0.4的持续MoveTo推进逻辑已整合到checkConnection批处理器中
@@ -1976,6 +1997,10 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)  -- V2.3.1：�
 						data.MoveToConnection:Disconnect()
 						data.MoveToConnection = nil
 					end
+					if data.MoveBlockedConnection then
+						data.MoveBlockedConnection:Disconnect()
+						data.MoveBlockedConnection = nil
+					end
 
 					-- 清理
 					PathService.ClearPath(unitInstance)
@@ -2120,8 +2145,8 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)  -- V2.3.1：�
 						local positionDelta = (currentPos - data.LastPosition).Magnitude
 						local timeDelta = now - data.LastPositionTime
 
-						-- V2.3修复：降低阈值，提高灵敏度（0.3→0.2 studs, 1.0→0.8s）
-						if positionDelta < 0.2 and timeDelta > 0.8 and distanceXZToFinal > 5 then
+						-- V2.5优化：更激进的卡住检测（0.15 studs in 0.5s）
+						if positionDelta < 0.15 and timeDelta > 0.5 and distanceXZToFinal > 5 then
 							-- 单位卡住，强制高优先级重寻
 							if not data.PathRequested then
 								data.PathRequested = true
@@ -2163,8 +2188,8 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)  -- V2.3.1：�
 							-- 更新位置追踪（避免重复触发）
 							data.LastPosition = currentPos
 							data.LastPositionTime = now
-						elseif timeDelta > 0.8 then
-							-- 每0.8秒更新一次位置追踪
+						elseif timeDelta > 0.5 then
+							-- V2.5优化：每0.5秒更新一次位置追踪（从0.8降低）
 							data.LastPosition = currentPos
 							data.LastPositionTime = now
 						end
@@ -2233,6 +2258,10 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)  -- V2.3.1：�
 							if data.MoveToConnection then
 								data.MoveToConnection:Disconnect()
 								data.MoveToConnection = nil
+							end
+							if data.MoveBlockedConnection then
+								data.MoveBlockedConnection:Disconnect()
+								data.MoveBlockedConnection = nil
 							end
 							if data.TargetPart and data.TargetPart.Parent then
 								data.TargetPart:Destroy()
@@ -2306,6 +2335,10 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)  -- V2.3.1：�
 				if data.MoveToConnection then
 					data.MoveToConnection:Disconnect()
 					data.MoveToConnection = nil
+				end
+				if data.MoveBlockedConnection then
+					data.MoveBlockedConnection:Disconnect()
+					data.MoveBlockedConnection = nil
 				end
 				if data.TargetPart and data.TargetPart.Parent then
 					data.TargetPart:Destroy()
@@ -2381,6 +2414,10 @@ function PathService.CancelGroupMove(moveId)
 		if data.MoveToConnection then
 			data.MoveToConnection:Disconnect()
 			data.MoveToConnection = nil
+		end
+		if data.MoveBlockedConnection then
+			data.MoveBlockedConnection:Disconnect()
+			data.MoveBlockedConnection = nil
 		end
 
 		-- V2.3优化：移除HeartbeatConn断开（已不存在）

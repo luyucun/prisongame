@@ -23,9 +23,9 @@ local HealthBarController = require(player.PlayerScripts:WaitForChild("Utils"):W
 local events = ReplicatedStorage:WaitForChild("Events")
 local battleEvents = events:WaitForChild("BattleEvents")
 
--- 调试日志
+-- 调试日志（已禁用）
 local function debugLog(message)
-    print("[HealthBarEventHandler] " .. message)
+    -- print("[HealthBarEventHandler] " .. message)
 end
 
 --[[

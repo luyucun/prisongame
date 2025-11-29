@@ -28,9 +28,9 @@ local healthConnections = {}
 local HEALTH_BAR_TEMPLATE_PATH = "HpTemplate"
 local MAX_HEALTH_SCALE = 0.998 -- 满血时的Scale值
 
--- 调试日志
+-- 调试日志（已禁用）
 local function debugLog(message)
-    print("[HealthBarController] " .. message)
+    -- print("[HealthBarController] " .. message)
 end
 
 --[[

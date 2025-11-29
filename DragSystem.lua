@@ -78,18 +78,18 @@ local placementEvents = nil
 初始化拖动系统
 ]]
 function DragSystem.Initialize()
-	print("[DragSystem] 正在初始化...")
+	-- print("[DragSystem] 正在初始化...")
 
 	-- 初始化GridHelper (V1.4)
 	GridHelper.Initialize()
 
 	-- V1.4: 检测设备类型
 	dragState.isMobile = UserInputService.TouchEnabled and not UserInputService.MouseEnabled
-	print("[DragSystem] 设备类型:", dragState.isMobile and "移动端" or "PC端")
+	-- print("[DragSystem] 设备类型:", dragState.isMobile and "移动端" or "PC端")
 
 	-- 等待玩家角色加载
 	local character = player.Character or player.CharacterAdded:Wait()
-	print("[DragSystem] 玩家角色已加载")
+	-- print("[DragSystem] 玩家角色已加载")
 
 	-- 等待基地分配完成
 	task.wait(2)
@@ -97,7 +97,7 @@ function DragSystem.Initialize()
 	-- 查找IdleFloor
 	dragState.idleFloor = FindPlayerIdleFloor()
 	if dragState.idleFloor then
-		print("[DragSystem] 找到IdleFloor:", dragState.idleFloor:GetFullName())
+		-- print("[DragSystem] 找到IdleFloor:", dragState.idleFloor:GetFullName())
 		-- V2.0.4: 设置GridHelper的IdleFloor引用，用于精确计算Grid的Y坐标
 		GridHelper.SetIdleFloor(dragState.idleFloor)
 	else
@@ -154,14 +154,14 @@ function DragSystem.Initialize()
 
 	-- 连接输入事件
 	if dragState.isMobile then
-		print("[DragSystem] 连接移动端触摸事件")
+		-- print("[DragSystem] 连接移动端触摸事件")
 		ConnectMobileEvents()
 	else
-		print("[DragSystem] 连接PC端鼠标事件")
+		-- print("[DragSystem] 连接PC端鼠标事件")
 		ConnectMouseEvents()
 	end
 
-	print("[DragSystem] 初始化完成")
+	-- print("[DragSystem] 初始化完成")
 	return true
 end
 
@@ -210,7 +210,7 @@ function FindPlayerIdleFloor()
 
 	-- 如果在合理范围内找到了基地，优先使用
 	if currentFloor then
-		print("[DragSystem] 找到玩家当前基地，距离:", minDistance)
+		-- print("[DragSystem] 找到玩家当前基地，距离:", minDistance)
 		return currentFloor
 	end
 
@@ -271,7 +271,7 @@ function ConnectMouseEvents()
 					while model and model ~= Workspace do
 						if model:FindFirstChild("Humanoid") and model:GetAttribute("InstanceId") then
 							-- 这是一个已放置的NPC模型
-							print("[DragSystem] 检测到点击模型:", model.Name)
+							-- print("[DragSystem] 检测到点击模型:", model.Name)
 							StartDragging(model)
 							return
 						end
@@ -336,7 +336,7 @@ function ConnectMobileEvents()
 				while model and model ~= Workspace do
 					if model:FindFirstChild("Humanoid") and model:GetAttribute("InstanceId") then
 						-- 这是一个已放置的NPC模型，开始拖动
-						print("[DragSystem] 移动端检测到触摸模型:", model.Name)
+						-- print("[DragSystem] 移动端检测到触摸模型:", model.Name)
 						dragState.currentTouch = touch
 						StartDragging(model)
 						return
@@ -422,7 +422,7 @@ function StartDragging(model)
 	end
 
 	-- V2.0.4调试：打印占地尺寸，确认属性是否正确读取
-	print(string.format("[DragSystem] 开始拖动: %s Level: %d GridSize: %dx%d", model:GetFullName(), level, gridWidth, gridDepth))
+	-- print(string.format("[DragSystem] 开始拖动: %s Level: %d GridSize: %dx%d", model:GetFullName(), level, gridWidth, gridDepth))
 
 	dragState.isDragging = true
 	dragState.draggedModel = model
@@ -702,7 +702,7 @@ function StopDragging()
 		return
 	end
 
-	print("[DragSystem] 停止拖动:", dragState.draggedModel:GetFullName())
+	-- print("[DragSystem] 停止拖动:", dragState.draggedModel:GetFullName())
 
 	local model = dragState.draggedModel
 
@@ -711,7 +711,7 @@ function StopDragging()
 		-- ==================== 合成模式 ====================
 		local targetInstanceId = dragState.targetModel:GetAttribute("InstanceId")
 
-		print("[DragSystem] 请求合成:", dragState.draggedInstanceId, "->", targetInstanceId)
+		-- print("[DragSystem] 请求合成:", dragState.draggedInstanceId, "->", targetInstanceId)
 
 		-- 发送合成请求到服务端
 		local requestEvent = mergeEvents:FindFirstChild("RequestMerge")
@@ -734,7 +734,7 @@ function StopDragging()
 			-- 检查该位置是否有效
 			local isValid, _ = IsPositionValidForRelocate(currentPos)  -- V1.5.1: 接收第二个返回值
 			if isValid then
-				print("[DragSystem] 请求换位:", dragState.draggedInstanceId, "新位置:", currentPos)
+				-- print("[DragSystem] 请求换位:", dragState.draggedInstanceId, "新位置:", currentPos)
 
 				-- 发送位置更新请求到服务端（使用对齐后的网格中心）
 				local snappedPos = PlacementHelper.GetNearestGridPosition(currentPos, dragState.idleFloor.Position, dragState.draggedGridWidth, dragState.draggedGridDepth)
@@ -748,7 +748,7 @@ function StopDragging()
 				GridHelper.HideGrid()
 			else
 				-- 位置无效，回到原位
-				print("[DragSystem] 换位位置无效，回到原位")
+				-- print("[DragSystem] 换位位置无效，回到原位")
 				ReturnToOriginalPosition(model)
 			end
 		else
@@ -757,7 +757,7 @@ function StopDragging()
 
 	else
 		-- ==================== 取消拖动（回到原位） ====================
-		print("[DragSystem] 取消拖动，回到原位")
+		-- print("[DragSystem] 取消拖动，回到原位")
 		ReturnToOriginalPosition(model)
 	end
 
@@ -999,10 +999,10 @@ end
 @param newUnitData table|nil - 新兵种数据
 ]]
 function OnMergeResponse(success, message, newUnitData)
-	print("[DragSystem] 收到合成响应:", success, message)
+	-- print("[DragSystem] 收到合成响应:", success, message)
 
 	if success then
-		print("[DragSystem] 合成成功! 新等级:", newUnitData and newUnitData.Level or "?")
+		-- print("[DragSystem] 合成成功! 新等级:", newUnitData and newUnitData.Level or "?")
 		-- 服务端已经处理了模型的移除和新建，客户端不需要额外操作
 		-- 等待新模型自动同步
 		lastDragRestore.model = nil
@@ -1034,10 +1034,10 @@ end
 @param instanceId string - 兵种实例ID
 ]]
 function OnUpdateResponse(success, message, instanceId)
-	print("[DragSystem] 收到位置更新响应:", success, message, instanceId)
+	-- print("[DragSystem] 收到位置更新响应:", success, message, instanceId)
 
 	if success then
-		print("[DragSystem] 换位成功!")
+		-- print("[DragSystem] 换位成功!")
 		-- 服务端已经更新了位置，客户端已经在StopDragging中做了处理
 	else
 		warn("[DragSystem] 换位失败:", message)

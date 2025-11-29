@@ -139,10 +139,10 @@ BattleConfig.DEBUG_HITBOX_COLOR_GOOD = Color3.fromRGB(0, 255, 0)
 BattleConfig.DEBUG_HITBOX_COLOR_BAD = Color3.fromRGB(255, 0, 0)
 
 -- 是否输出AI详细日志
-BattleConfig.DEBUG_AI_LOGS = true
+BattleConfig.DEBUG_AI_LOGS = false
 
 -- 是否输出战斗详细日志
-BattleConfig.DEBUG_COMBAT_LOGS = true
+BattleConfig.DEBUG_COMBAT_LOGS = false
 
 -- ==================== 动画设置 ====================
 -- 默认移动动画速度

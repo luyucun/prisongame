@@ -451,6 +451,13 @@ function IdleCoinSystem.OnCollectRequest(player)
 		return
 	end
 
+	-- V2.7修复：立即获取玩家基地ID并播放特效，不等待金币发放完成
+	local homeId = PlayerManager.GetPlayerHomeId(player)
+	if homeId and homeId > 0 then
+		-- 立即播放领取特效（在发放金币之前）
+		PlayCollectEffect(homeId)
+	end
+
 	-- 发放金币
 	local success, newAmount = CurrencySystem.AddCoinsFromIdle(player, pendingCoins, pendingCoins * 60 / GameConfig.IdleCoin.CoinsPerMinute)
 
@@ -458,14 +465,9 @@ function IdleCoinSystem.OnCollectRequest(player)
 		-- 清空待领取金币
 		DataManager.ClearPendingIdleCoins(player)
 
-		-- 获取玩家基地ID
-		local homeId = PlayerManager.GetPlayerHomeId(player)
+		-- 更新显示
 		if homeId and homeId > 0 then
-			-- 更新显示
 			UpdateMailDisplay(homeId, 0)
-
-			-- 播放领取特效
-			PlayCollectEffect(homeId)
 		end
 
 		-- 通知客户端

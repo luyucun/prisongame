@@ -50,9 +50,9 @@ local currentBattleId = nil
 local isVictoryShowing = false
 local uiInitialized = false
 
--- 调试日志
+-- 调试日志（已禁用）
 local function DebugLog(...)
-    print("[VictoryUIController]", ...)
+    -- print("[VictoryUIController]", ...)
 end
 
 --[[

@@ -245,18 +245,18 @@ local function PlayShowAnimation(model, unitId)
 		return
 	end
 
-	print(GameConfig.LOG_PREFIX, "[PlayShowAnimation] 开始播放展示动画:", model.Name, "UnitId:", unitId)
+	-- print(GameConfig.LOG_PREFIX, "[PlayShowAnimation] 开始播放展示动画:", model.Name, "UnitId:", unitId)
 
 	-- 获取展示动画ID
 	local showAnimId = UnitConfig.GetShowAnimationId(unitId)
 
 	-- 如果没有配置展示动画，直接返回
 	if not showAnimId or showAnimId == "" or showAnimId == "0" then
-		warn(GameConfig.LOG_PREFIX, "[PlayShowAnimation] 没有配置ShowAnimationId:", unitId)
+		-- warn(GameConfig.LOG_PREFIX, "[PlayShowAnimation] 没有配置ShowAnimationId:", unitId)
 		return
 	end
 
-	print(GameConfig.LOG_PREFIX, "[PlayShowAnimation] ShowAnimationId:", showAnimId)
+	-- print(GameConfig.LOG_PREFIX, "[PlayShowAnimation] ShowAnimationId:", showAnimId)
 
 	-- V1.5.2调试：验证动画ID格式
 	if not tonumber(showAnimId) then
@@ -278,11 +278,11 @@ local function PlayShowAnimation(model, unitId)
 		if descendant:IsA("BaseScript") and descendant.Name == "Animate" then
 			descendant.Enabled = false
 			animateScriptDisabled = true
-			print(GameConfig.LOG_PREFIX, "[PlayShowAnimation] 已禁用Animate脚本:", model.Name)
+			-- print(GameConfig.LOG_PREFIX, "[PlayShowAnimation] 已禁用Animate脚本:", model.Name)
 		end
 	end
 	if not animateScriptDisabled then
-		print(GameConfig.LOG_PREFIX, "[PlayShowAnimation] 未找到Animate脚本:", model.Name)
+		-- print(GameConfig.LOG_PREFIX, "[PlayShowAnimation] 未找到Animate脚本:", model.Name)
 	end
 
 	-- 查找Animator
@@ -294,7 +294,7 @@ local function PlayShowAnimation(model, unitId)
 			-- 手动创建Animator
 			animator = Instance.new("Animator")
 			animator.Parent = humanoid
-			print(GameConfig.LOG_PREFIX, "[PlayShowAnimation] 手动创建Animator:", model.Name)
+			-- print(GameConfig.LOG_PREFIX, "[PlayShowAnimation] 手动创建Animator:", model.Name)
 		end
 	end
 
@@ -302,7 +302,7 @@ local function PlayShowAnimation(model, unitId)
 	-- 这在单位被移动位置后重新播放展示动画时很重要
 	local playingTracks = animator:GetPlayingAnimationTracks()
 	if #playingTracks > 0 then
-		print(GameConfig.LOG_PREFIX, "[PlayShowAnimation] 停止", #playingTracks, "个正在播放的动画:", model.Name)
+		-- print(GameConfig.LOG_PREFIX, "[PlayShowAnimation] 停止", #playingTracks, "个正在播放的动画:", model.Name)
 	end
 	for _, track in ipairs(playingTracks) do
 		pcall(function()
@@ -332,7 +332,7 @@ local function PlayShowAnimation(model, unitId)
 		return
 	end
 
-	print(GameConfig.LOG_PREFIX, "[PlayShowAnimation] 动画加载成功:", model.Name, "AnimTrack:", animTrack)
+	-- print(GameConfig.LOG_PREFIX, "[PlayShowAnimation] 动画加载成功:", model.Name, "AnimTrack:", animTrack)
 
 	-- 设置循环播放
 	animTrack.Looped = true
@@ -351,7 +351,7 @@ local function PlayShowAnimation(model, unitId)
 		return
 	end
 
-	print(GameConfig.LOG_PREFIX, "[PlayShowAnimation] ✅ 动画播放成功:", model.Name, "Looped:", animTrack.Looped, "Priority:", tostring(animTrack.Priority), "IsPlaying:", animTrack.IsPlaying)
+	-- print(GameConfig.LOG_PREFIX, "[PlayShowAnimation] ✅ 动画播放成功:", model.Name, "Looped:", animTrack.Looped, "Priority:", tostring(animTrack.Priority), "IsPlaying:", animTrack.IsPlaying)
 
 	-- V2.9修复：将动画轨道保存到模型属性，方便后续管理
 	-- 这样在移动单位时可以先停止旧动画
@@ -360,7 +360,7 @@ local function PlayShowAnimation(model, unitId)
 	-- V1.5.2修复：循环动画在停止时清理Animation对象，防止内存泄漏
 	-- 当单位被回收时，animTrack:Stop()会触发此事件
 	animTrack.Stopped:Connect(function()
-		print(GameConfig.LOG_PREFIX, "[PlayShowAnimation] 动画已停止:", model.Name)
+		-- print(GameConfig.LOG_PREFIX, "[PlayShowAnimation] 动画已停止:", model.Name)
 		if animation and animation.Parent then
 			animation:Destroy()
 		end
@@ -718,14 +718,14 @@ function PlacementSystem.PlaceUnit(player, instanceId, position)
 	if saveSuccess then
 		-- 节流式保存整个玩家数据
 		DataManager.SavePlayerDataThrottled(player)
-		print(string.format(
-			"%s [PlacementSystem] 🔥 已保存放置数据: 玩家 %s, 兵种 %s, 位置 (%d,%d)",
-			GameConfig.LOG_PREFIX,
-			player.Name,
-			unitInstance.UnitId,
-			gridX,
-			gridZ
-			))
+		-- print(string.format(
+		-- 	"%s [PlacementSystem] 🔥 已保存放置数据: 玩家 %s, 兵种 %s, 位置 (%d,%d)",
+		-- 	GameConfig.LOG_PREFIX,
+		-- 	player.Name,
+		-- 	unitInstance.UnitId,
+		-- 	gridX,
+		-- 	gridZ
+		-- 	))
 	else
 		warn(string.format(
 			"%s [PlacementSystem] 🔥 保存放置数据失败: 玩家 %s, 兵种 %s",
@@ -777,12 +777,12 @@ function PlacementSystem.RemovePlacedUnit(player, instanceId)
 	if removeSuccess then
 		-- 节流式保存整个玩家数据
 		DataManager.SavePlayerDataThrottled(player)
-		print(string.format(
-			"%s [PlacementSystem] 🔥 已移除放置数据: 玩家 %s, 兵种 %s",
-			GameConfig.LOG_PREFIX,
-			player.Name,
-			instanceId
-			))
+		-- print(string.format(
+		-- 	"%s [PlacementSystem] 🔥 已移除放置数据: 玩家 %s, 兵种 %s",
+		-- 	GameConfig.LOG_PREFIX,
+		-- 	player.Name,
+		-- 	instanceId
+		-- 	))
 	else
 		warn(string.format(
 			"%s [PlacementSystem] 🔥 移除放置数据失败: 玩家 %s, 兵种 %s",
@@ -941,14 +941,14 @@ function PlacementSystem.UpdateUnitPosition(player, instanceId, newPosition)
 	if updateSuccess then
 		-- 节流式保存整个玩家数据
 		DataManager.SavePlayerDataThrottled(player)
-		print(string.format(
-			"%s [PlacementSystem] 🔥 已更新位置数据: 玩家 %s, 兵种 %s, 新位置 (%d,%d)",
-			GameConfig.LOG_PREFIX,
-			player.Name,
-			instanceId,
-			newGridX,
-			newGridZ
-			))
+		-- print(string.format(
+		-- 	"%s [PlacementSystem] 🔥 已更新位置数据: 玩家 %s, 兵种 %s, 新位置 (%d,%d)",
+		-- 	GameConfig.LOG_PREFIX,
+		-- 	player.Name,
+		-- 	instanceId,
+		-- 	newGridX,
+		-- 	newGridZ
+		-- 	))
 	else
 		warn(string.format(
 			"%s [PlacementSystem] 🔥 更新位置数据失败: 玩家 %s, 兵种 %s",
@@ -1009,21 +1009,21 @@ function PlacementSystem.OnPlayerLeaving(player)
 
 	-- 🔥修复持久化：在清理模型前先同步所有数据到DataManager
 	if placedUnits[userId] then
-		print(string.format(
-			"%s [PlacementSystem] 🔥 玩家 %s 离开，同步 %d 个放置单位的数据",
-			GameConfig.LOG_PREFIX,
-			player.Name,
-			GetTableCount(placedUnits[userId])
-			))
+		-- print(string.format(
+		-- 	"%s [PlacementSystem] 🔥 玩家 %s 离开，同步 %d 个放置单位的数据",
+		-- 	GameConfig.LOG_PREFIX,
+		-- 	player.Name,
+		-- 	GetTableCount(placedUnits[userId])
+		-- 	))
 
 		-- 🔥关键修复：同步内存中的放置数据到DataManager
 		local syncSuccess = DataManager.SyncPlacedUnits(player, placedUnits[userId])
 		if syncSuccess then
-			print(string.format(
-				"%s [PlacementSystem] ✅ 玩家 %s 的放置数据已同步到DataManager",
-				GameConfig.LOG_PREFIX,
-				player.Name
-				))
+			-- print(string.format(
+			-- 	"%s [PlacementSystem] ✅ 玩家 %s 的放置数据已同步到DataManager",
+			-- 	GameConfig.LOG_PREFIX,
+			-- 	player.Name
+			-- 	))
 		else
 			warn(string.format(
 				"%s [PlacementSystem] ❌ 玩家 %s 的放置数据同步失败",
@@ -1062,11 +1062,11 @@ function PlacementSystem.OnPlayerLeaving(player)
 		gridOccupancy[userId] = nil
 	end
 
-	print(string.format(
-		"%s [PlacementSystem] 🔥 玩家 %s 的放置数据已清理（保留持久化数据）",
-		GameConfig.LOG_PREFIX,
-		player.Name
-		))
+	-- print(string.format(
+	-- 	"%s [PlacementSystem] 🔥 玩家 %s 的放置数据已清理（保留持久化数据）",
+	-- 	GameConfig.LOG_PREFIX,
+	-- 	player.Name
+	-- 	))
 end
 
 -- ==================== 🔥修复持久化：放置单位恢复功能 ====================
@@ -1088,20 +1088,20 @@ function PlacementSystem.RestorePlacedUnits(player)
 	-- 2. 从DataManager获取已保存的放置单位数据
 	local savedPlacedUnits = DataManager.GetPlacedUnits(player)
 	if not savedPlacedUnits or next(savedPlacedUnits) == nil then
-		print(string.format(
-			"%s [PlacementSystem] 🔥 玩家 %s 没有需要恢复的放置单位",
-			GameConfig.LOG_PREFIX,
-			player.Name
-			))
+		-- print(string.format(
+		-- 	"%s [PlacementSystem] 🔥 玩家 %s 没有需要恢复的放置单位",
+		-- 	GameConfig.LOG_PREFIX,
+		-- 	player.Name
+		-- 	))
 		return true, "0"
 	end
 
-	print(string.format(
-		"%s [PlacementSystem] 🔥 开始恢复玩家 %s 的 %d 个放置单位...",
-		GameConfig.LOG_PREFIX,
-		player.Name,
-		GetTableCount(savedPlacedUnits)
-		))
+	-- print(string.format(
+	-- 	"%s [PlacementSystem] 🔥 开始恢复玩家 %s 的 %d 个放置单位...",
+	-- 	GameConfig.LOG_PREFIX,
+	-- 	player.Name,
+	-- 	GetTableCount(savedPlacedUnits)
+	-- 	))
 
 	local floorCenter = idleFloor.Position
 	local restoredCount = 0
@@ -1276,14 +1276,14 @@ function PlacementSystem.RestorePlacedUnits(player)
 			-- 4.11.1 确保等级显示立即刷新
 			UpdateLevelDisplay(model, unitInstance.Level or savedData.Level or 1)
 
-			print(string.format(
-				"%s [PlacementSystem] 🔥 已恢复单位: %s (%s) 位置 (%d,%d)",
-				GameConfig.LOG_PREFIX,
-				instanceId,
-				savedData.UnitId,
-				savedData.GridX,
-				savedData.GridZ
-				))
+			-- print(string.format(
+			-- 	"%s [PlacementSystem] 🔥 已恢复单位: %s (%s) 位置 (%d,%d)",
+			-- 	GameConfig.LOG_PREFIX,
+			-- 	instanceId,
+			-- 	savedData.UnitId,
+			-- 	savedData.GridX,
+			-- 	savedData.GridZ
+			-- 	))
 
 			return true
 		end)
@@ -1300,12 +1300,12 @@ function PlacementSystem.RestorePlacedUnits(player)
 
 	-- 6. 返回恢复结果
 	local message = string.format("成功恢复 %d 个，失败 %d 个", restoredCount, errorCount)
-	print(string.format(
-		"%s [PlacementSystem] 🔥 玩家 %s 放置单位恢复完成：%s",
-		GameConfig.LOG_PREFIX,
-		player.Name,
-		message
-		))
+	-- print(string.format(
+	-- 	"%s [PlacementSystem] 🔥 玩家 %s 放置单位恢复完成：%s",
+	-- 	GameConfig.LOG_PREFIX,
+	-- 	player.Name,
+	-- 	message
+	-- 	))
 
 	-- 如果有失败的恢复，保存一次数据以清理无效数据
 	if errorCount > 0 then
