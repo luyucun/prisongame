@@ -18,6 +18,7 @@ local RunService = game:GetService("RunService")
 local ContextActionService = game:GetService("ContextActionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
+local PathfindingService = game:GetService("PathfindingService")  -- V2.10新增：寻路服务
 
 local player = Players.LocalPlayer
 local camera = Workspace.CurrentCamera
@@ -48,6 +49,18 @@ local FOLLOW_DISTANCE = 24
 local FOLLOW_HEIGHT = 2
 -- V2.9新增：主角到达WatchPart后的停止距离阈值
 local WATCHPART_STOP_THRESHOLD = 2
+
+-- V2.10新增：寻路相关变量
+local currentPath = nil
+local currentWaypoints = nil
+local currentWaypointIndex = 1
+local lastPathTarget = nil
+local PATH_RECOMPUTE_DISTANCE = 5  -- 目标移动超过此距离时重新计算路径
+-- V2.10新增：卡住检测
+local lastCharacterPosition = nil
+local stuckCheckTime = 0
+local STUCK_TIME_THRESHOLD = 0.5  -- 卡住超过0.5秒就重新规划
+local STUCK_DISTANCE_THRESHOLD = 0.5  -- 移动距离小于0.5视为卡住
 
 local isActive = false
 local renderConnection = nil
@@ -301,30 +314,132 @@ local function updateCharacterFollow(center, targetCFrame)
 
 	-- V2.9修改：目标位置改为当前关卡的WatchPart
 	local watchPartPos = getWatchPartPosition(currentStageNum)
+	local followTarget
+
 	if watchPartPos then
 		-- 使用WatchPart位置作为目标
 		local targetY = math.max(hrp.Position.Y, watchPartPos.Y + FOLLOW_HEIGHT)
-		local followTarget = Vector3.new(watchPartPos.X, targetY, watchPartPos.Z)
-
-		local distanceToTarget = (Vector3.new(hrp.Position.X, 0, hrp.Position.Z) - Vector3.new(followTarget.X, 0, followTarget.Z)).Magnitude
-
-		-- 到达WatchPart附近后停止移动
-		if distanceToTarget > WATCHPART_STOP_THRESHOLD then
-			humanoid:MoveTo(followTarget)
-		else
-			humanoid:Move(Vector3.zero, false)
-		end
+		followTarget = Vector3.new(watchPartPos.X, targetY, watchPartPos.Z)
 	else
 		-- 回退方案：如果找不到WatchPart，使用原来的质心跟随逻辑
-		local followTarget = center - targetCFrame.LookVector * FOLLOW_DISTANCE
+		followTarget = center - targetCFrame.LookVector * FOLLOW_DISTANCE
 		local targetY = math.max(hrp.Position.Y, center.Y + FOLLOW_HEIGHT)
 		followTarget = Vector3.new(followTarget.X, targetY, followTarget.Z)
+	end
 
-		if (hrp.Position - followTarget).Magnitude > 1 then
-			humanoid:MoveTo(followTarget)
-		else
-			humanoid:Move(Vector3.zero, false)
+	local distanceToTarget = (Vector3.new(hrp.Position.X, 0, hrp.Position.Z) - Vector3.new(followTarget.X, 0, followTarget.Z)).Magnitude
+
+	-- 到达目标附近后停止移动并面朝战场
+	if distanceToTarget <= WATCHPART_STOP_THRESHOLD then
+		humanoid:Move(Vector3.zero, false)
+		-- 清理寻路状态
+		currentPath = nil
+		currentWaypoints = nil
+		currentWaypointIndex = 1
+		lastPathTarget = nil
+		lastCharacterPosition = nil
+		stuckCheckTime = 0
+
+		-- V2.10新增：到达后面朝战场中心（观察战斗）
+		local lookAtPos = Vector3.new(center.X, hrp.Position.Y, center.Z)
+		local lookDir = (lookAtPos - hrp.Position)
+		if lookDir.Magnitude > 0.1 then
+			local targetCF = CFrame.new(hrp.Position, lookAtPos)
+			hrp.CFrame = hrp.CFrame:Lerp(targetCF, 0.1)  -- 平滑转向
 		end
+		return
+	end
+
+	-- V2.10新增：卡住检测
+	local currentPos = hrp.Position
+	local isStuck = false
+
+	if lastCharacterPosition then
+		local movedDistance = (currentPos - lastCharacterPosition).Magnitude
+		if movedDistance < STUCK_DISTANCE_THRESHOLD then
+			stuckCheckTime = stuckCheckTime + RunService.RenderStepped:Wait()
+			if stuckCheckTime >= STUCK_TIME_THRESHOLD then
+				isStuck = true
+				stuckCheckTime = 0
+			end
+		else
+			stuckCheckTime = 0
+		end
+	end
+	lastCharacterPosition = currentPos
+
+	-- V2.10新增：使用PathfindingService进行智能寻路
+	-- 检查是否需要重新计算路径
+	local needNewPath = false
+	if not currentPath or not currentWaypoints then
+		needNewPath = true
+	elseif lastPathTarget and (lastPathTarget - followTarget).Magnitude > PATH_RECOMPUTE_DISTANCE then
+		needNewPath = true
+	elseif currentWaypointIndex > #currentWaypoints then
+		needNewPath = true
+	elseif isStuck then
+		-- 卡住了，强制重新计算路径
+		needNewPath = true
+		print("[CameraController] 检测到角色卡住，重新规划路径")
+	end
+
+	if needNewPath then
+		-- 创建新路径
+		local path = PathfindingService:CreatePath({
+			AgentRadius = 2,
+			AgentHeight = 5,
+			AgentCanJump = true,  -- 允许跳跃绕过障碍
+			AgentCanClimb = false,
+			WaypointSpacing = 4,  -- 路径点间距
+		})
+
+		local success, errorMessage = pcall(function()
+			path:ComputeAsync(hrp.Position, followTarget)
+		end)
+
+		if success and path.Status == Enum.PathStatus.Success then
+			currentPath = path
+			currentWaypoints = path:GetWaypoints()
+			currentWaypointIndex = 2  -- 跳过起点
+			lastPathTarget = followTarget
+
+			-- 监听路径被阻塞事件
+			path.Blocked:Connect(function(blockedWaypointIndex)
+				if blockedWaypointIndex >= currentWaypointIndex then
+					-- 路径被阻塞，强制重新计算
+					currentPath = nil
+				end
+			end)
+		else
+			-- 寻路失败，直接朝目标移动
+			humanoid:MoveTo(followTarget)
+			return
+		end
+	end
+
+	-- 沿路径点移动
+	if currentWaypoints and currentWaypointIndex <= #currentWaypoints then
+		local waypoint = currentWaypoints[currentWaypointIndex]
+		local waypointPos = waypoint.Position
+		local distToWaypoint = (Vector3.new(hrp.Position.X, 0, hrp.Position.Z) - Vector3.new(waypointPos.X, 0, waypointPos.Z)).Magnitude
+
+		if distToWaypoint < 2 then
+			-- 到达当前路径点，移动到下一个
+			currentWaypointIndex = currentWaypointIndex + 1
+		end
+
+		if currentWaypointIndex <= #currentWaypoints then
+			local nextWaypoint = currentWaypoints[currentWaypointIndex]
+			humanoid:MoveTo(nextWaypoint.Position)
+
+			-- 如果是跳跃点，执行跳跃
+			if nextWaypoint.Action == Enum.PathWaypointAction.Jump then
+				humanoid.Jump = true
+			end
+		end
+	else
+		-- 没有有效路径点，直接MoveTo
+		humanoid:MoveTo(followTarget)
 	end
 end
 
@@ -334,6 +449,13 @@ local function stopCharacterFollow()
 		return
 	end
 	humanoid:Move(Vector3.zero, false)
+	-- V2.10新增：清理寻路状态
+	currentPath = nil
+	currentWaypoints = nil
+	currentWaypointIndex = 1
+	lastPathTarget = nil
+	lastCharacterPosition = nil
+	stuckCheckTime = 0
 end
 
 local function updateCamera()

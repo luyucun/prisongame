@@ -85,13 +85,10 @@ function CreateCollisionGroups()
 		-- 禁用玩家与敌军碰撞
 		PhysicsService:CollisionGroupSetCollidable("Players", "Enemies", false)
 
-		-- ✅ 核心修复：禁用友军之间碰撞（解决100单位拥堵）
+		-- 禁用友军之间碰撞（解决拥堵）
 		PhysicsService:CollisionGroupSetCollidable("Allies", "Allies", false)
 
-		-- V2.3策略选择：敌军之间碰撞
-		-- 选项A(当前)：禁用碰撞 → 寻路稳定，但战斗时多敌可能重叠
-		-- 选项B：启用碰撞 → 战斗更真实，但敌军行军可能拥堵（敌军战前是锚定的，问题不大）
-		-- 建议：保持禁用（当前设置），除非战斗表现需要更多"挤压感"
+		-- 禁用敌军之间碰撞
 		PhysicsService:CollisionGroupSetCollidable("Enemies", "Enemies", false)
 
 		-- 启用友军与敌军碰撞（战斗时需要）
@@ -102,7 +99,7 @@ function CreateCollisionGroups()
 
 	if GameConfig.DEBUG_MODE then
 		print(GameConfig.LOG_PREFIX, "✅ 碰撞组已创建：Players/Allies/Enemies")
-		print(GameConfig.LOG_PREFIX, "   - 友军↔友军: 不碰撞 (解决拥堵)")
+		print(GameConfig.LOG_PREFIX, "   - 友军↔友军: 不碰撞")
 		print(GameConfig.LOG_PREFIX, "   - 敌军↔敌军: 不碰撞")
 		print(GameConfig.LOG_PREFIX, "   - 友军↔敌军: 碰撞")
 	end
