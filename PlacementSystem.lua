@@ -468,13 +468,70 @@ local function CreateUnitModel(unitId, position, instanceId, level, gridWidth, g
 		model.HumanoidRootPart.CFrame = CFrame.new(position)
 	end
 
-	-- V2.7修复：获取放置后的包围盒，根据底部对齐地板顶面
+	-- V2.12修复：计算角色底部位置时，排除武器等附件的影响
+	-- 问题：GetBoundingBox会包括武器，如果武器尖端低于脚底会导致角色浮空
+	-- 解决：只考虑角色身体部件的包围盒，排除Tool/Accessory/武器等
 	do
-		local bboxCf, bboxSize = model:GetBoundingBox()
-		local bottomY = bboxCf.Position.Y - bboxSize.Y / 2  -- 模型底部Y坐标
-		local floorTopY = position.Y - PlacementConfig.PLACEMENT_Y_OFFSET  -- 反推地板顶面
+		local floorTopY = position.Y - PlacementConfig.PLACEMENT_Y_OFFSET  -- 地板顶面Y坐标
 		local padding = 0.05
-		local deltaY = (floorTopY + padding) - bottomY  -- 需要向上/下移动的距离
+
+		-- 收集角色身体部件（排除武器、工具、饰品等）
+		local bodyParts = {}
+		local excludeNames = {"Handle", "Sword", "Spear", "Weapon", "Gun", "Bow", "Staff", "Axe", "Knife", "Shield"}
+
+		for _, part in ipairs(model:GetDescendants()) do
+			if part:IsA("BasePart") then
+				-- 排除工具和饰品
+				local parent = part.Parent
+				local isAccessoryOrTool = false
+
+				while parent and parent ~= model do
+					if parent:IsA("Tool") or parent:IsA("Accoutrement") or parent:IsA("Accessory") then
+						isAccessoryOrTool = true
+						break
+					end
+					parent = parent.Parent
+				end
+
+				-- 排除武器相关名称的部件
+				local isWeaponPart = false
+				for _, excludeName in ipairs(excludeNames) do
+					if string.find(string.lower(part.Name), string.lower(excludeName)) then
+						isWeaponPart = true
+						break
+					end
+				end
+
+				if not isAccessoryOrTool and not isWeaponPart then
+					table.insert(bodyParts, part)
+				end
+			end
+		end
+
+		-- 计算身体部件的最低点
+		local lowestY = math.huge
+		if #bodyParts > 0 then
+			for _, part in ipairs(bodyParts) do
+				local partBottomY = part.Position.Y - part.Size.Y / 2
+				if partBottomY < lowestY then
+					lowestY = partBottomY
+				end
+			end
+		else
+			-- 回退方案：如果没有找到身体部件，使用HumanoidRootPart减去标准高度
+			local hrp = model:FindFirstChild("HumanoidRootPart")
+			if hrp then
+				-- 标准R15/R6角色的HRP到脚底约为3 studs
+				lowestY = hrp.Position.Y - 3
+			else
+				-- 最后回退：使用原来的包围盒方法
+				local bboxCf, bboxSize = model:GetBoundingBox()
+				lowestY = bboxCf.Position.Y - bboxSize.Y / 2
+			end
+		end
+
+		-- 计算需要调整的Y偏移
+		local deltaY = (floorTopY + padding) - lowestY
 
 		-- 二次PivotTo，将模型底部对齐地板顶面
 		model:PivotTo(model:GetPivot() * CFrame.new(0, deltaY, 0))
@@ -880,7 +937,7 @@ function PlacementSystem.UpdateUnitPosition(player, instanceId, newPosition)
 	-- 7. 计算新的精确位置
 	local finalPosition = PlacementConfig.GridToWorld(newGridX, newGridZ, floorCenter, gridWidth, gridDepth)
 
-	-- 8. 更新模型位置（V2.7修复：先放再调，使用包围盒底部对齐地板顶面）
+	-- 8. 更新模型位置（V2.12修复：排除武器影响，使用角色身体计算底部）
 	if placedData.Model and placedData.Model.Parent then
 		-- V2.7修复：第一次PivotTo到新的XZ位置（使用finalPosition作为初值）
 		if placedData.Model.PrimaryPart then
@@ -889,12 +946,66 @@ function PlacementSystem.UpdateUnitPosition(player, instanceId, newPosition)
 			placedData.Model.HumanoidRootPart.CFrame = CFrame.new(finalPosition)
 		end
 
-		-- V2.7修复：获取放置后的包围盒，根据底部对齐地板顶面
-		local bboxCf, bboxSize = placedData.Model:GetBoundingBox()
-		local bottomY = bboxCf.Position.Y - bboxSize.Y / 2  -- 模型底部Y坐标
-		local floorTopY = finalPosition.Y - PlacementConfig.PLACEMENT_Y_OFFSET  -- 反推地板顶面
+		-- V2.12修复：计算角色底部位置时，排除武器等附件的影响
+		local floorTopY = finalPosition.Y - PlacementConfig.PLACEMENT_Y_OFFSET  -- 地板顶面Y坐标
 		local padding = 0.05
-		local deltaY = (floorTopY + padding) - bottomY  -- 需要向上/下移动的距离
+
+		-- 收集角色身体部件（排除武器、工具、饰品等）
+		local bodyParts = {}
+		local excludeNames = {"Handle", "Sword", "Spear", "Weapon", "Gun", "Bow", "Staff", "Axe", "Knife", "Shield"}
+
+		for _, part in ipairs(placedData.Model:GetDescendants()) do
+			if part:IsA("BasePart") then
+				-- 排除工具和饰品
+				local parent = part.Parent
+				local isAccessoryOrTool = false
+
+				while parent and parent ~= placedData.Model do
+					if parent:IsA("Tool") or parent:IsA("Accoutrement") or parent:IsA("Accessory") then
+						isAccessoryOrTool = true
+						break
+					end
+					parent = parent.Parent
+				end
+
+				-- 排除武器相关名称的部件
+				local isWeaponPart = false
+				for _, excludeName in ipairs(excludeNames) do
+					if string.find(string.lower(part.Name), string.lower(excludeName)) then
+						isWeaponPart = true
+						break
+					end
+				end
+
+				if not isAccessoryOrTool and not isWeaponPart then
+					table.insert(bodyParts, part)
+				end
+			end
+		end
+
+		-- 计算身体部件的最低点
+		local lowestY = math.huge
+		if #bodyParts > 0 then
+			for _, part in ipairs(bodyParts) do
+				local partBottomY = part.Position.Y - part.Size.Y / 2
+				if partBottomY < lowestY then
+					lowestY = partBottomY
+				end
+			end
+		else
+			-- 回退方案：如果没有找到身体部件，使用HumanoidRootPart减去标准高度
+			local hrp = placedData.Model:FindFirstChild("HumanoidRootPart")
+			if hrp then
+				lowestY = hrp.Position.Y - 3
+			else
+				-- 最后回退：使用原来的包围盒方法
+				local bboxCf, bboxSize = placedData.Model:GetBoundingBox()
+				lowestY = bboxCf.Position.Y - bboxSize.Y / 2
+			end
+		end
+
+		-- 计算需要调整的Y偏移
+		local deltaY = (floorTopY + padding) - lowestY
 
 		-- 二次PivotTo，将模型底部对齐地板顶面
 		placedData.Model:PivotTo(placedData.Model:GetPivot() * CFrame.new(0, deltaY, 0))

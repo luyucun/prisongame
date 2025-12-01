@@ -10,6 +10,7 @@
 1. 管理玩家基地的初始化
 2. 为后续兵种放置功能预留接口
 3. 基地内容管理(后续版本扩展)
+4. V2.8.2新增：基地初始化时立即替换正确等级的房屋
 ]]
 
 local HomeSystem = {}
@@ -22,6 +23,22 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
 local DataManager = require(ServerScriptService.Core.DataManager)
 local DoorControlService = require(ServerScriptService.Systems.DoorControlService)  -- V2.0.1新增
+
+-- V2.8.2新增：延迟加载HouseConfig和HouseUpgradeSystem避免循环依赖
+local HouseConfig
+local HouseUpgradeSystem
+
+local function EnsureHouseModulesLoaded()
+	if not HouseConfig then
+		HouseConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("HouseConfig"))
+	end
+	if not HouseUpgradeSystem then
+		local houseModule = ServerScriptService:WaitForChild("Systems"):FindFirstChild("HouseUpgradeSystem")
+		if houseModule then
+			HouseUpgradeSystem = require(houseModule)
+		end
+	end
+end
 
 -- 存储每个玩家的基地信息 [UserId] = HomeData
 local playerHomes = {}
@@ -64,7 +81,7 @@ end
 -- ==================== 公共接口 ====================
 
 --[[
-初始化玩家基地 (V2.0.1修改：增加homeId参数，支持门状态初始化)
+初始化玩家基地 (V2.8.2修改：立即替换正确等级的房屋，无延迟)
 @param homeId number - 基地编号 (1~6)
 @param player Player - 玩家对象
 @return boolean - 是否初始化成功
@@ -99,6 +116,69 @@ function HomeSystem.InitializePlayerHome(homeId, player)
     if not spawnLocation:IsA("BasePart") then
         warn(GameConfig.LOG_PREFIX, "HomeSystem.InitializePlayerHome: SpawnLocation不是有效的BasePart", homeId)
         return false
+    end
+
+    -- V2.8.2新增：立即替换正确等级的房屋（无延迟）
+    EnsureHouseModulesLoaded()
+    if HouseConfig and HouseUpgradeSystem then
+        local completedChapters = DataManager.GetCompletedChapters(player)
+        local targetModelName = HouseConfig.GetHouseModelByChapter(completedChapters)
+
+        -- 获取场景中当前的房屋模型
+        local houseFolder = homeFolder:FindFirstChild("House")
+        local currentHouseModel = nil
+        if houseFolder then
+            for _, child in ipairs(houseFolder:GetChildren()) do
+                if child:IsA("Model") then
+                    currentHouseModel = child
+                    break
+                end
+            end
+        end
+
+        local actualModelName = currentHouseModel and currentHouseModel.Name or "PrisonLv1"
+
+        -- 如果当前房屋不是目标房屋，立即替换
+        if actualModelName ~= targetModelName then
+            print(string.format(
+                "%s [HomeSystem] V2.8.2 立即替换房屋: %s -> %s (玩家: %s, 通关章节: %d)",
+                GameConfig.LOG_PREFIX,
+                actualModelName,
+                targetModelName,
+                player.Name,
+                completedChapters
+            ))
+
+            -- 立即执行替换，不使用延迟
+            local success = HouseUpgradeSystem.ReplaceHouseModel(player, targetModelName)
+            if success then
+                print(string.format(
+                    "%s [HomeSystem] V2.8.2 房屋替换成功: %s",
+                    GameConfig.LOG_PREFIX,
+                    targetModelName
+                ))
+            else
+                warn(string.format(
+                    "%s [HomeSystem] V2.8.2 房屋替换失败: %s",
+                    GameConfig.LOG_PREFIX,
+                    targetModelName
+                ))
+            end
+        else
+            if GameConfig.DEBUG_MODE then
+                print(string.format(
+                    "%s [HomeSystem] V2.8.2 房屋已是正确等级: %s",
+                    GameConfig.LOG_PREFIX,
+                    actualModelName
+                ))
+            end
+        end
+
+        -- 更新存档中的房屋模型名称
+        local savedModelName = DataManager.GetCurrentHouseModel(player)
+        if savedModelName ~= targetModelName then
+            DataManager.SetCurrentHouseModel(player, targetModelName)
+        end
     end
 
     -- 创建基地数据

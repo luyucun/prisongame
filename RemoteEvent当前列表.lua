@@ -49,6 +49,8 @@ ReplicatedStorage
     └──IdleCoinEvents（Folder）/  【V2.6新增】
         ├──CollectIdleCoins（RemoteEvent） - 客户端→服务器：请求领取挂机金币
         └──SyncIdleCoins（RemoteEvent） - 服务器→客户端：同步待领取金币数量(coins)
+    └──BattleControlEvents（Folder）/  【V2.11新增】
+        └──ReturnToHome（RemoteEvent） - 客户端→服务器：请求传送回家园出生点
 
 
 如果需要补充新的RemoteEvent或者Remotefunction，请在这里列出来，我会自己去创建
@@ -131,3 +133,34 @@ ReplicatedStorage
 
 注意：服务端IdleCoinSystem.lua也会在初始化时自动创建这些事件（如果不存在），
 但建议手动创建以确保事件在系统初始化前就存在。
+
+
+【V2.11战斗控制RemoteEvent创建说明】
+位置：ReplicatedStorage/Events/BattleControlEvents/ （新建文件夹）
+🆕 ReturnToHome (RemoteEvent) - 需在Studio中手动创建
+
+创建步骤：
+1. 打开Roblox Studio
+2. 导航到 ReplicatedStorage > Events
+3. 右键点击 Events 文件夹
+4. 选择 "Insert Object" > "Folder"
+5. 将新建的 Folder 重命名为 "BattleControlEvents"
+6. 右键点击 BattleControlEvents 文件夹
+7. 选择 "Insert Object" > "RemoteEvent"
+8. 将新建的 RemoteEvent 重命名为 "ReturnToHome"
+9. 保存游戏
+
+功能说明：
+- ReturnToHome：客户端→服务器：请求传送回家园出生点
+  参数：无（服务器根据玩家身份获取家园位置）
+
+UI配置说明（MainGui）：
+1. 在StarterGui中的MainGui下创建两个按钮：
+   - ReturnToHome (TextButton/ImageButton) - 返回家园按钮
+   - UnlockMove (TextButton/ImageButton) - 解锁镜头按钮
+2. 两个按钮的初始Visible属性设为false
+3. 按钮会在战斗开始时自动显示，战斗结束时自动隐藏
+
+客户端脚本说明：
+- MainGuiController.lua 需放置在 StarterPlayer/StarterPlayerScripts/Controllers/
+- 负责管理MainGui下的战斗控制按钮显示/隐藏和点击事件

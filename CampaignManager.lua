@@ -2128,6 +2128,68 @@ function CampaignManager.RequestRetreat(player)
 end
 
 --[[
+V2.11新增：传送玩家回家园出生点
+在战斗期间允许玩家返回家园
+@param player Player - 玩家
+@return boolean - 是否传送成功
+]]
+function CampaignManager.ReturnToHome(player)
+	if not player then
+		return false
+	end
+
+	local playerId = player.UserId
+	local campaignData = CampaignManager.ActiveCampaigns[playerId]
+
+	-- 获取玩家HomeId
+	local homeId = nil
+	if campaignData then
+		homeId = campaignData.HomeId
+	else
+		-- 如果没有战役数据，从PlayerManager获取
+		homeId = PlayerManager.GetPlayerHomeId(player)
+	end
+
+	if not homeId then
+		DebugLog(string.format("ReturnToHome失败: 玩家 %s 没有分配家园", player.Name))
+		return false
+	end
+
+	-- 获取家园出生点
+	local homeFolder = Workspace.Home:FindFirstChild("PlayerHome" .. homeId)
+	if not homeFolder then
+		DebugLog(string.format("ReturnToHome失败: 未找到PlayerHome%s", tostring(homeId)))
+		return false
+	end
+
+	local spawnLocation = homeFolder:FindFirstChild("SpawnLocation")
+	if not spawnLocation then
+		DebugLog(string.format("ReturnToHome失败: PlayerHome%s中未找到SpawnLocation", tostring(homeId)))
+		return false
+	end
+
+	-- 传送玩家
+	local character = player.Character
+	if not character then
+		DebugLog(string.format("ReturnToHome失败: 玩家 %s 没有角色", player.Name))
+		return false
+	end
+
+	local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+	if not humanoidRootPart then
+		DebugLog(string.format("ReturnToHome失败: 玩家 %s 角色没有HumanoidRootPart", player.Name))
+		return false
+	end
+
+	-- 执行传送（在出生点上方一定高度）
+	local teleportPosition = spawnLocation.CFrame + Vector3.new(0, 5, 0)
+	humanoidRootPart.CFrame = teleportPosition
+
+	DebugLog(string.format("✅ 玩家 %s 已传送回家园出生点", player.Name))
+	return true
+end
+
+--[[
 初始化CampaignManager
 @return boolean - 是否初始化成功
 ]]
@@ -2157,6 +2219,30 @@ function CampaignManager.Initialize()
 			end)
 
 		end)
+	end
+
+	-- V2.11新增：监听返回家园请求
+	local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
+	if eventsFolder then
+		local battleControlEvents = eventsFolder:FindFirstChild("BattleControlEvents")
+		if battleControlEvents then
+			local returnToHomeEvent = battleControlEvents:FindFirstChild("ReturnToHome")
+			if returnToHomeEvent then
+				returnToHomeEvent.OnServerEvent:Connect(function(player)
+					local success, err = pcall(function()
+						CampaignManager.ReturnToHome(player)
+					end)
+					if not success then
+						warn("[CampaignManager] ReturnToHome处理失败:", err)
+					end
+				end)
+				DebugLog("✅ 已监听ReturnToHome远程事件")
+			else
+				DebugLog("⚠ BattleControlEvents中未找到ReturnToHome事件")
+			end
+		else
+			DebugLog("⚠ Events中未找到BattleControlEvents文件夹")
+		end
 	end
 
 	-- 监听玩家离开事件

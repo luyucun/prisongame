@@ -67,6 +67,8 @@ local renderConnection = nil
 local characterAddedConnection = nil
 -- V2.8新增：延迟跟随标记
 local allowCharacterFollow = false
+-- V2.11新增：镜头解锁标记（玩家手动解锁镜头跟随战场）
+local isCameraUnlocked = false
 local characterFollowDelayTimer = nil
 -- V2.8新增：质心移动检测（检测累计移动距离）
 local initialCenterPosition = nil  -- 进入Marching时的初始质心位置
@@ -463,6 +465,11 @@ local function updateCamera()
 		return
 	end
 
+	-- V2.11新增：如果镜头已解锁，不执行战场跟随逻辑
+	if isCameraUnlocked then
+		return
+	end
+
 	local center, count = computeCenter()
 	if not center then
 		return
@@ -535,6 +542,8 @@ local function stopCameraLock()
 	allowCharacterFollow = false
 	centerIsMoving = false
 	initialCenterPosition = nil
+	-- V2.11新增：重置解锁标记
+	isCameraUnlocked = false
 	if characterFollowDelayTimer then
 		task.cancel(characterFollowDelayTimer)
 		characterFollowDelayTimer = nil
@@ -689,6 +698,54 @@ task.spawn(function()
 	end
 end)
 
+--[[
+V2.11新增：解锁镜头跟随战场，恢复玩家视角
+- 解除镜头锁定到战场
+- 恢复镜头跟随玩家角色
+- 恢复玩家移动控制
+]]
+local function unlockCameraToPlayer()
+	if not isActive then
+		print("[CameraController] 解锁镜头失败：战斗镜头未激活")
+		return false
+	end
+
+	if isCameraUnlocked then
+		print("[CameraController] 镜头已经解锁，忽略重复请求")
+		return true
+	end
+
+	print("[CameraController] 🔓 解锁镜头，恢复玩家视角")
+
+	-- 标记镜头已解锁
+	isCameraUnlocked = true
+
+	-- 停止角色自动跟随战场
+	stopCharacterFollow()
+
+	-- 解除输入屏蔽
+	unbindInputBlock()
+
+	-- 恢复Humanoid设置（允许玩家控制）
+	restoreHumanoidSettings()
+
+	-- 恢复相机为默认类型（跟随玩家）
+	if camera then
+		camera.CameraType = Enum.CameraType.Custom
+
+		-- 设置相机跟随玩家角色
+		local character = player.Character
+		if character then
+			local humanoid = character:FindFirstChildOfClass("Humanoid")
+			if humanoid then
+				camera.CameraSubject = humanoid
+			end
+		end
+	end
+
+	return true
+end
+
 -- Expose to other client scripts
 _G.BattleCameraController = {
 	Start = startCameraLock,
@@ -697,6 +754,9 @@ _G.BattleCameraController = {
 	SetCombatMode = setCombatMode,      -- 切换到战斗特写模式
 	SetFollowMode = setFollowMode,      -- 切换到跟随模式
 	ResetCameraMode = resetCameraMode,  -- 重置镜头模式
+	-- V2.11新增：解锁镜头
+	UnlockToPlayer = unlockCameraToPlayer,  -- 解锁镜头，恢复玩家视角
+	IsUnlocked = function() return isCameraUnlocked end,  -- 查询镜头是否已解锁
 }
 
 return _G.BattleCameraController
