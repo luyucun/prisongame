@@ -4,8 +4,8 @@
 =====================================================
 
 项目名称: Roblox 兵种塔防游戏
-当前版本: V2.11
-最后更新: 2025-01-30
+当前版本: V3.0
+最后更新: 2025-12-01
 
 =====================================================
 一、架构设计原则
@@ -56,7 +56,8 @@ ServerScriptService/
 │   ├── DoorControlService.lua   (门控制服务 V2.0新增)
 │   ├── ShopSystem.lua           (商店系统 V2.1新增)
 │   ├── IdleCoinSystem.lua       (挂机金币系统 V2.6新增)
-│   └── HouseUpgradeSystem.lua   (房屋升级系统 V2.8新增)
+│   ├── HouseUpgradeSystem.lua   (房屋升级系统 V2.8新增)
+│   └── SkillSystem.lua          (技能系统 V3.0新增)
 
 StarterPlayer/StarterPlayerScripts/
 ├── UI/
@@ -65,14 +66,16 @@ StarterPlayer/StarterPlayerScripts/
 │   ├── ShopDisplay.lua          (商店显示 V2.1新增)
 │   ├── BattleTestUI.lua         (战斗测试UI)
 │   ├── BattleControlUI.lua      (战斗控制UI V2.0新增)
-│   └── DamageNumberSystem.lua   (伤害冒字系统 V2.5增强)
+│   ├── DamageNumberSystem.lua   (伤害冒字系统 V2.5增强)
+│   └── SkillBackpackDisplay.lua (技能背包显示 V3.0新增)
 ├── Controllers/
 │   ├── PlacementController.lua  (放置控制)
 │   ├── DragSystem.lua           (拖动系统)
 │   ├── RemovalController.lua    (回收控制)
 │   ├── CameraController.lua     (战斗相机控制 V2.11增强)
 │   ├── IdleCoinController.lua   (挂机金币控制 V2.6新增)
-│   └── MainGuiController.lua    (主界面控制 V2.11新增)
+│   ├── MainGuiController.lua    (主界面控制 V2.11新增)
+│   └── SkillController.lua      (技能控制器 V3.0新增)
 ├── Utils/
 │   ├── PlacementHelper.lua      (放置辅助)
 │   ├── HighlightHelper.lua      (高光辅助)
@@ -98,7 +101,8 @@ ReplicatedStorage/
 │   ├── StageConfig.lua          (关卡配置 V2.8章节系统)
 │   ├── EnemyConfig.lua          (敌人配置)
 │   ├── HouseConfig.lua          (房屋配置 V2.8新增)
-│   └── LevelColorConfig.lua     (等级颜色配置)
+│   ├── LevelColorConfig.lua     (等级颜色配置)
+│   └── SkillConfig.lua          (技能配置 V3.0新增)
 ├── Events/                      (RemoteEvent事件)
 │   ├── CurrencyEvents/
 │   ├── PlayerEvents/
@@ -109,7 +113,8 @@ ReplicatedStorage/
 │   ├── CampaignEvents/          (V2.0新增)
 │   ├── ShopEvents/              (V2.1新增)
 │   ├── IdleCoinEvents/          (V2.6新增)
-│   └── BattleControlEvents/     (V2.11新增)
+│   ├── BattleControlEvents/     (V2.11新增)
+│   └── SkillEvents/             (V3.0新增)
 └── Modules/
     └── FormatHelper.lua         (格式化工具)
 
@@ -246,6 +251,33 @@ ReplicatedStorage/
 - 状态机: CLOSED ↔ OPENING → OPEN ↔ CLOSING → CLOSED
 - 1秒TweenService动画
 
+【3.24 技能系统】SkillSystem (V3.0新增)
+- 管理玩家技能背包数据
+- 处理技能释放请求和验证
+- 计算技能伤害并应用效果
+- 支持即时伤害(INSTANT)和持续伤害(DOT)
+- 与战斗系统(CombatSystem)集成
+- 技能特效生成和同步
+
+【3.25 技能配置】SkillConfig (V3.0新增)
+- 数据驱动的技能配置表
+- 技能类型: DAMAGE(伤害)/HEALING(治疗)/BUFF(增益)
+- 效果类型: INSTANT(即时)/DOT(持续伤害)/HOT(持续治疗)
+- 目标类型: ENEMY(敌方)/ALLY(友方)/SELF(自身)/ALL(全体)
+- 可扩展设计,便于添加新技能
+
+【3.26 技能控制器】SkillController (V3.0新增)
+- 客户端技能释放输入处理
+- 技能预览圆圈(SkillPreview)显示
+- 支持PC端(鼠标)和移动端(触屏)
+- 瞄准模式: 显示预览 → 左键确认/右键取消
+
+【3.27 技能背包显示】SkillBackpackDisplay (V3.0新增)
+- 管理技能背包UI显示
+- 动态创建技能图标列表
+- 战斗开始时显示,战斗结束时隐藏
+- 与CampaignStateUpdate事件集成
+
 =====================================================
 四、版本历史
 =====================================================
@@ -343,6 +375,17 @@ ReplicatedStorage/
 - CameraController.UnlockToPlayer: 解锁镜头
 - CampaignManager.ReturnToHome: 传送功能
 - BattleControlEvents: 新增事件文件夹
+
+【V3.0】技能系统
+- SkillConfig: 技能配置表(数据驱动)
+- SkillSystem: 服务端技能处理系统
+- SkillController: 客户端技能控制器
+- SkillBackpackDisplay: 技能背包UI显示
+- 技能类型: 即时伤害/持续伤害(DOT)
+- 技能范围: AOE圆形范围(直径=Range)
+- 技能背包: 玩家技能存储与消耗
+- GM命令: /addskill /removeskill /listskills /skilllist
+- 初始技能: 喷水枪(1001)/毒气炸弹(1002)/大火(1003)
 
 =====================================================
 五、核心技术要点
@@ -449,6 +492,13 @@ ReplicatedStorage/
 【LevelColorConfig】等级颜色配置
 - 等级颜色: [Level] = Color3
 
+【SkillConfig】技能配置 (V3.0新增)
+- 技能列表: [SkillId] = 技能配置
+- 技能属性: Name/ResourceName/Icon/SkillType/EffectType/TargetType
+- 伤害属性: Range(直径)/Damage(即时)/TickDamage(DOT)/Duration/TickInterval
+- 特效属性: EffectDuration
+- 公共接口: GetSkillById()/IsValidSkill()/GetAllSkillIds()/IsDOTSkill()
+
 =====================================================
 七、RemoteEvent事件列表
 =====================================================
@@ -510,6 +560,12 @@ ReplicatedStorage/
 
 【BattleControlEvents】V2.11
 - ReturnToHome: Client → Server (传送回家园)
+
+【SkillEvents】V3.0
+- RequestCastSkill: Client → Server (请求释放技能: skillId, position)
+- CastSkillResponse: Server → Client (释放结果: success, message)
+- SkillInventoryUpdate: Server → Client (技能背包更新: inventory)
+- SpawnSkillEffect: Server → Client (生成技能特效: skillId, position, duration)
 
 =====================================================
 八、最佳实践
@@ -684,6 +740,60 @@ ReplicatedStorage/
 - 战斗结束时隐藏按钮
 - 处理按钮点击事件
 
+【11.9 技能系统】SkillSystem (V3.0新增)
+职责：服务端技能处理
+
+核心API：
+- Initialize()                    初始化技能系统
+- HandleCastSkillRequest(player, skillId, position)  处理释放请求
+- AddSkill(player, skillId, count)  添加技能
+- GetSkillCount(player, skillId)    获取技能数量
+- GetPlayerSkills(player)           获取技能背包
+- SyncSkillInventory(player)        同步背包到客户端
+- SendCastResponse(player, success, message)  发送释放结果
+
+内部机制：
+- DOT效果管理(ActiveDOTEffects表)
+- Heartbeat驱动DOT伤害tick
+- 技能冷却(0.5秒)
+- 延迟加载DataManager/CombatSystem/UnitManager避免循环依赖
+
+【11.10 技能控制器】SkillController (V3.0新增)
+职责：客户端技能输入处理
+
+核心API：
+- Initialize()                    初始化控制器
+- StartSkillCast(skillId)         开始释放技能(由UI调用)
+- CancelAiming()                  取消瞄准
+- IsAiming()                      检查是否在瞄准
+- GetCurrentSkillId()             获取当前技能ID
+
+内部机制：
+- 创建SkillPreview圆柱体显示范围
+- RenderStepped更新预览位置
+- 射线检测地面位置
+- 支持鼠标/触屏/ESC输入
+
+全局访问：_G.SkillController
+
+【11.11 技能背包显示】SkillBackpackDisplay (V3.0新增)
+职责：技能背包UI管理
+
+核心API：
+- Initialize()                    初始化显示
+- Refresh(inventory)              刷新背包
+- Show()                          显示背包
+- Hide()                          隐藏背包
+- GetSkillCount(skillId)          获取技能数量
+
+内部机制：
+- 从SkillTemplate克隆技能图标
+- 监听SkillInventoryUpdate事件
+- 监听CampaignStateUpdate事件(战斗时显示)
+- 点击图标调用SkillController.StartSkillCast()
+
+全局访问：_G.SkillBackpackDisplay
+
 =====================================================
 十二、核心数据结构
 =====================================================
@@ -736,6 +846,7 @@ ReplicatedStorage/
     CompletedChapters = number,     -- V2.8
     CurrentChapter = number,        -- V2.8
     HouseLevel = number,            -- V2.8
+    SkillInventory = {[skillId] = count},  -- V3.0
 }
 ```
 
@@ -753,10 +864,12 @@ ReplicatedStorage/
 8. 服务器端ContentProvider对客户端无效
 9. V2.8+: 多格占地单位需配置GridWidth/GridDepth
 10. V2.11+: 战斗按钮需在MainGui下创建ReturnToHome/UnlockMove
+11. V3.0+: 技能背包UI需按指定结构创建(SkillBackpackGui/BackpackFrame/ItemListFrame/SkillTemplate)
+12. V3.0+: 新增技能只需在SkillConfig.Skills表中添加配置，无需修改其他代码
 
 =====================================================
 架构设计文档完成
-版本: V2.11
-最后更新: 2025-01-30
+版本: V3.0
+最后更新: 2025-12-01
 =====================================================
 ]]

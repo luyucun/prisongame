@@ -19,6 +19,11 @@ GM命令系统模块
 - /addcoins <amount> : 添加金币
 - /clearcoins : 清空金币
 - /unitlist : 列出所有可用的兵种ID
+- /addskill <skillId> [count] : 添加技能到背包 (V3.0)
+- /removeskill <skillId> [count] : 移除技能 (V3.0)
+- /clearskills : 清空技能背包 (V3.0)
+- /listskills : 列出技能背包 (V3.0)
+- /skilllist : 列出所有可用技能 (V3.0)
 ]]
 
 local GMCommandSystem = {}
@@ -32,6 +37,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
 local UnitConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("UnitConfig"))
 local BattleConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("BattleConfig"))
+local SkillConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("SkillConfig"))  -- V3.0新增
 local DataManager = require(ServerScriptService.Core.DataManager)
 local InventorySystem = require(ServerScriptService.Systems.InventorySystem)
 local CurrencySystem = require(ServerScriptService.Systems.CurrencySystem)
@@ -39,6 +45,7 @@ local PlacementSystem = nil  -- 延迟加载，避免循环依赖
 local BattleTestSystem = nil  -- 延迟加载，避免循环依赖
 local BattleManager = nil     -- 延迟加载，避免循环依赖
 local IdleCoinSystem = nil    -- V2.6新增：延迟加载，避免循环依赖
+local SkillSystem = nil       -- V3.0新增：延迟加载，避免循环依赖
 
 -- ==================== 配置 ====================
 
@@ -304,6 +311,13 @@ local function CMD_Help(player, args)
 挂机金币(V2.6):
 /addidlecoins [minutes] - 添加挂机金币(默认60分钟)
 /idlecoins - 查看挂机金币状态
+
+技能管理(V3.0):
+/addskill <skillId> [count] - 添加技能(默认1个)
+/removeskill <skillId> [count] - 移除技能
+/listskills - 查看技能背包
+/clearskills - 清空技能背包
+/skilllist - 查看所有可用技能
 
 数据管理(V2.9):
 /resetdata - 重置所有玩家数据(需二次确认)
@@ -645,6 +659,214 @@ local function CMD_ResetData(player, args)
     end
 end
 
+-- ==================== V3.0 技能系统命令 ====================
+
+--[[
+命令: /addskill <skillId> [count]
+添加技能到背包 V3.0
+]]
+local function CMD_AddSkill(player, args)
+    if #args < 1 then
+        SendMessage(player, "用法: /addskill <skillId> [count]")
+        SendMessage(player, "例如: /addskill 1001 3")
+        return
+    end
+
+    -- 延迟加载SkillSystem
+    if not SkillSystem then
+        local systemsFolder = ServerScriptService:FindFirstChild("Systems")
+        if systemsFolder then
+            local ss = systemsFolder:FindFirstChild("SkillSystem")
+            if ss then
+                SkillSystem = require(ss)
+            end
+        end
+    end
+
+    local skillId = tonumber(args[1])
+    local count = tonumber(args[2]) or 1
+
+    -- 验证技能ID
+    if not skillId or not SkillConfig.IsValidSkill(skillId) then
+        SendMessage(player, "错误: 无效的技能ID: " .. tostring(args[1]))
+        SendMessage(player, "使用 /skilllist 查看所有可用的技能")
+        return
+    end
+
+    -- 验证数量
+    if count < 1 or count > 100 then
+        SendMessage(player, "错误: 数量必须在1-100之间")
+        return
+    end
+
+    -- 添加技能
+    local success = false
+    if SkillSystem then
+        success = SkillSystem.AddSkill(player, skillId, count)
+    else
+        -- SkillSystem未加载时，直接使用DataManager
+        local addSuccess, newCount = DataManager.AddSkill(player, skillId, count)
+        success = addSuccess
+    end
+
+    if success then
+        local skillName = SkillConfig.GetSkillName(skillId)
+        SendMessage(player, string.format("成功添加 %d 个 %s (ID:%d)", count, skillName, skillId))
+        SendMessage(player, "使用 /listskills 查看当前技能背包")
+        -- V3.0修复：保存数据到DataStore
+        DataManager.SavePlayerDataThrottled(player)
+        -- V3.0修复：确保同步到客户端（重新加载SkillSystem以确保同步）
+        if not SkillSystem then
+            local systemsFolder = ServerScriptService:FindFirstChild("Systems")
+            if systemsFolder then
+                local ss = systemsFolder:FindFirstChild("SkillSystem")
+                if ss then
+                    SkillSystem = require(ss)
+                end
+            end
+        end
+        if SkillSystem and SkillSystem.SyncSkillInventory then
+            SkillSystem.SyncSkillInventory(player)
+        end
+    else
+        SendMessage(player, "添加技能失败")
+    end
+end
+
+--[[
+命令: /removeskill <skillId> [count]
+从背包移除技能 V3.0
+]]
+local function CMD_RemoveSkill(player, args)
+    if #args < 1 then
+        SendMessage(player, "用法: /removeskill <skillId> [count]")
+        SendMessage(player, "例如: /removeskill 1001 1")
+        return
+    end
+
+    local skillId = tonumber(args[1])
+    local count = tonumber(args[2]) or 1
+
+    -- 验证技能ID
+    if not skillId or not SkillConfig.IsValidSkill(skillId) then
+        SendMessage(player, "错误: 无效的技能ID: " .. tostring(args[1]))
+        return
+    end
+
+    -- 移除技能
+    local success = false
+    local remaining = 0
+    if DataManager and DataManager.RemoveSkill then
+        success, remaining = DataManager.RemoveSkill(player, skillId, count)
+    end
+
+    if success then
+        local skillName = SkillConfig.GetSkillName(skillId)
+        SendMessage(player, string.format("成功移除 %d 个 %s (ID:%d), 剩余: %d", count, skillName, skillId, remaining))
+        -- 同步到客户端
+        if SkillSystem then
+            SkillSystem.SyncSkillInventory(player)
+        end
+        -- V3.0修复：保存数据到DataStore
+        DataManager.SavePlayerDataThrottled(player)
+    else
+        SendMessage(player, "移除技能失败(数量不足或技能不存在)")
+    end
+end
+
+--[[
+命令: /clearskills
+清空技能背包 V3.0
+]]
+local function CMD_ClearSkills(player, args)
+    local success = false
+    if DataManager and DataManager.ClearSkillInventory then
+        success = DataManager.ClearSkillInventory(player)
+    end
+
+    if success then
+        SendMessage(player, "技能背包已清空")
+        -- 同步到客户端
+        if SkillSystem then
+            SkillSystem.SyncSkillInventory(player)
+        end
+        -- V3.0修复：保存数据到DataStore
+        DataManager.SavePlayerDataThrottled(player)
+    else
+        SendMessage(player, "清空失败")
+    end
+end
+
+--[[
+命令: /listskills
+列出技能背包中的所有技能 V3.0
+]]
+local function CMD_ListSkills(player, args)
+    local inventory = {}
+    if DataManager and DataManager.GetSkillInventory then
+        inventory = DataManager.GetSkillInventory(player)
+    end
+
+    -- 检查是否为空
+    local isEmpty = true
+    for _, _ in pairs(inventory) do
+        isEmpty = false
+        break
+    end
+
+    if isEmpty then
+        SendMessage(player, "技能背包为空")
+        return
+    end
+
+    local message = "=== 技能背包 ===\n"
+    local totalSkills = 0
+    for skillIdKey, count in pairs(inventory) do
+        local skillId = tonumber(skillIdKey) or 0
+        local skillData = SkillConfig.GetSkillById(skillId)
+        local skillName = skillData and skillData.Name or "Unknown"
+        message = message .. string.format("  - %s (ID:%d) x%d\n", skillName, skillId, count)
+        totalSkills = totalSkills + count
+    end
+    message = message .. string.format("总计: %d 个技能", totalSkills)
+
+    SendMessage(player, message)
+end
+
+--[[
+命令: /skilllist
+列出所有可用的技能ID V3.0
+]]
+local function CMD_SkillList(player, args)
+    local allSkillIds = SkillConfig.GetAllSkillIds()
+    local message = "=== 可用技能列表 ===\n"
+
+    for _, skillId in ipairs(allSkillIds) do
+        local skillData = SkillConfig.GetSkillById(skillId)
+        if skillData then
+            local effectInfo = ""
+            if skillData.EffectType == SkillConfig.EffectType.INSTANT then
+                effectInfo = string.format("即时伤害%d", skillData.Damage or 0)
+            elseif skillData.EffectType == SkillConfig.EffectType.DOT then
+                local totalDamage = SkillConfig.CalculateDOTTotalDamage(skillId)
+                effectInfo = string.format("DOT %d/%.1fs 共%d伤害",
+                    skillData.TickDamage, skillData.TickInterval, totalDamage)
+            end
+
+            message = message .. string.format(
+                "  - ID:%d %s (%s, 范围%d)\n    %s\n",
+                skillId,
+                skillData.Name,
+                skillData.SkillType,
+                skillData.Range,
+                effectInfo
+            )
+        end
+    end
+
+    SendMessage(player, message)
+end
+
 -- 命令映射表
 local COMMAND_HANDLERS = {
     ["addunit"] = CMD_AddUnit,
@@ -664,6 +886,11 @@ local COMMAND_HANDLERS = {
     ["addidlecoins"] = CMD_AddIdleCoins,  -- V2.6新增
     ["idlecoins"] = CMD_IdleCoins,        -- V2.6新增
     ["resetdata"] = CMD_ResetData,        -- V2.9新增
+    ["addskill"] = CMD_AddSkill,          -- V3.0新增
+    ["removeskill"] = CMD_RemoveSkill,    -- V3.0新增
+    ["clearskills"] = CMD_ClearSkills,    -- V3.0新增
+    ["listskills"] = CMD_ListSkills,      -- V3.0新增
+    ["skilllist"] = CMD_SkillList,        -- V3.0新增
     ["help"] = CMD_Help,
 }
 

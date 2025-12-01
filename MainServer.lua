@@ -52,6 +52,8 @@ local ShopSystem = require(ServerScriptService.Systems.ShopSystem)
 local CollisionSystem = require(ServerScriptService.Systems.CollisionSystem)
 -- V2.6新增 - 挂机金币系统
 local IdleCoinSystem = require(ServerScriptService.Systems.IdleCoinSystem)
+-- V3.0新增 - 技能系统
+local SkillSystem = require(ServerScriptService.Systems.SkillSystem)
 
 -- ==================== 系统初始化顺序 ====================
 
@@ -289,6 +291,16 @@ local function InitializeServer()
         warn(GameConfig.LOG_PREFIX, "挂机金币系统初始化失败(返回false)")
     end
 
+    -- 10. 初始化技能系统 (V3.0新增)
+    success, result = pcall(function()
+        return SkillSystem.Initialize()
+    end)
+    if not success then
+        warn(GameConfig.LOG_PREFIX, "技能系统初始化失败(异常):", result)
+    elseif result == false then
+        warn(GameConfig.LOG_PREFIX, "技能系统初始化失败(返回false)")
+    end
+
     -- 检查是否有关键系统初始化失败
     if initializationFailed then
         warn("==========================================")
@@ -404,6 +416,16 @@ Players.PlayerAdded:Connect(function(player)
 			IdleCoinSystem.OnPlayerJoin(player)
 			print(string.format(
 				"%s [MainServer] 玩家 %s 挂机金币系统已初始化",
+				GameConfig.LOG_PREFIX,
+				player.Name
+			))
+		end)
+
+		-- V3.0新增：同步技能背包数据到客户端
+		pcall(function()
+			SkillSystem.SyncSkillInventory(player)
+			print(string.format(
+				"%s [MainServer] 玩家 %s 技能背包已同步",
 				GameConfig.LOG_PREFIX,
 				player.Name
 			))

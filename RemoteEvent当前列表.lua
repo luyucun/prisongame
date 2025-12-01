@@ -51,6 +51,11 @@ ReplicatedStorage
         └──SyncIdleCoins（RemoteEvent） - 服务器→客户端：同步待领取金币数量(coins)
     └──BattleControlEvents（Folder）/  【V2.11新增】
         └──ReturnToHome（RemoteEvent） - 客户端→服务器：请求传送回家园出生点
+    └──SkillEvents（Folder）/  【V3.0新增】
+        ├──RequestCastSkill（RemoteEvent） - 客户端→服务器：请求释放技能(skillId, position)
+        ├──CastSkillResponse（RemoteEvent） - 服务器→客户端：技能释放结果(success, message)
+        ├──SkillInventoryUpdate（RemoteEvent） - 服务器→客户端：技能背包更新(inventory)
+        └──SpawnSkillEffect（RemoteEvent） - 服务器→客户端：生成技能特效(skillId, position, duration)
 
 
 如果需要补充新的RemoteEvent或者Remotefunction，请在这里列出来，我会自己去创建
@@ -164,3 +169,65 @@ UI配置说明（MainGui）：
 客户端脚本说明：
 - MainGuiController.lua 需放置在 StarterPlayer/StarterPlayerScripts/Controllers/
 - 负责管理MainGui下的战斗控制按钮显示/隐藏和点击事件
+
+
+【V3.0技能系统RemoteEvent创建说明】
+位置：ReplicatedStorage/Events/SkillEvents/ （新建文件夹）
+🆕 RequestCastSkill (RemoteEvent) - 需在Studio中手动创建
+🆕 CastSkillResponse (RemoteEvent) - 需在Studio中手动创建
+🆕 SkillInventoryUpdate (RemoteEvent) - 需在Studio中手动创建
+🆕 SpawnSkillEffect (RemoteEvent) - 需在Studio中手动创建
+
+创建步骤：
+1. 打开Roblox Studio
+2. 导航到 ReplicatedStorage > Events
+3. 右键点击 Events 文件夹
+4. 选择 "Insert Object" > "Folder"
+5. 将新建的 Folder 重命名为 "SkillEvents"
+6. 右键点击 SkillEvents 文件夹
+7. 选择 "Insert Object" > "RemoteEvent"
+8. 将新建的 RemoteEvent 重命名为 "RequestCastSkill"
+9. 重复步骤7-8，创建 "CastSkillResponse"
+10. 重复步骤7-8，创建 "SkillInventoryUpdate"
+11. 重复步骤7-8，创建 "SpawnSkillEffect"
+12. 保存游戏
+
+功能说明：
+- RequestCastSkill：客户端→服务器：请求释放技能
+  参数：(skillId: number, position: Vector3) 技能ID和释放位置
+- CastSkillResponse：服务器→客户端：技能释放结果
+  参数：(success: boolean, message: string) 是否成功和消息
+- SkillInventoryUpdate：服务器→客户端：技能背包更新
+  参数：(inventory: table) 技能背包数据 {[skillId] = count}
+- SpawnSkillEffect：服务器→客户端：生成技能特效
+  参数：(skillId: number, position: Vector3, duration: number) 技能ID、位置和持续时间
+
+注意：服务端SkillSystem.lua会在初始化时自动创建这些事件（如果不存在），
+但建议手动创建以确保事件在系统初始化前就存在。
+
+【V3.0技能系统其他资源创建说明】
+
+1. 技能特效资源位置：ReplicatedStorage/Skills/
+   需要创建以下特效资源（Model或Part）：
+   - WaterGun (喷水枪特效)
+   - PoisonGas (毒气炸弹特效)
+   - Molotov (大火特效)
+
+2. 技能预览圆圈（可选）：ReplicatedStorage/SkillPreview
+   如果不存在，SkillController会自动创建一个绿色发光圆柱体作为默认预览
+
+3. 技能背包UI结构：StarterGui/SkillBackpackGui/
+   └── BackpackFrame (Frame)
+       └── ItemListFrame (ScrollingFrame)
+           ├── UIListLayout
+           └── SkillTemplate (ImageButton) [Visible=false]
+               ├── Icon (ImageLabel) - 技能图标
+               └── Number (TextLabel) - 数量显示
+
+4. 技能配置模块位置：ReplicatedStorage/Config/SkillConfig
+
+5. 服务端系统位置：ServerScriptService/Systems/SkillSystem
+
+6. 客户端控制器位置：
+   - StarterPlayer/StarterPlayerScripts/Controllers/SkillController
+   - StarterPlayer/StarterPlayerScripts/UI/SkillBackpackDisplay

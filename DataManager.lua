@@ -70,6 +70,9 @@ PlayerData = {
         CompletedChapters = number, -- 已通关的章节数(0表示未通关任何章节)
         CurrentHouseModel = string, -- 当前房屋模型名称
     },
+    SkillInventory = {         -- V3.0技能系统
+        [skillId] = count,     -- 技能ID: 数量
+    },
     LastSaveTime = number,     -- 最后保存时间
 }
 ]]
@@ -179,6 +182,9 @@ local function LoadFromDataStore(player)
 		if data.ChapterProgress then
 			data.ChapterProgress = RestoreFromDataStore(data.ChapterProgress)  -- V2.8：恢复章节进度数据
 		end
+		if data.SkillInventory then
+			data.SkillInventory = RestoreFromDataStore(data.SkillInventory)  -- V3.0：恢复技能背包数据
+		end
 		return data
 	elseif not success then
 		warn(string.format(
@@ -213,6 +219,7 @@ local function SaveToDataStore(player, playerData, userId)
 		ShopData = SanitizeForDataStore(playerData.ShopData),  -- V2.1库存系统：保存商店数据
 		IdleCoinData = SanitizeForDataStore(playerData.IdleCoinData),  -- V2.6：保存挂机金币数据
 		ChapterProgress = SanitizeForDataStore(playerData.ChapterProgress),  -- V2.8：保存章节进度数据
+		SkillInventory = SanitizeForDataStore(playerData.SkillInventory),  -- V3.0：保存技能背包
 		LastSaveTime = os.time(),
 	}
 
@@ -259,6 +266,7 @@ local function CreateDefaultData(player)
             CompletedChapters = 0,    -- 未通关任何章节
             CurrentHouseModel = "PrisonLv1",  -- 默认初始房屋
         },
+        SkillInventory = {},  -- V3.0技能系统：初始化空技能背包
         LastSaveTime = os.time(),
     }
 end
@@ -326,6 +334,11 @@ function DataManager.InitializePlayerData(player)
                 CompletedChapters = 0,
                 CurrentHouseModel = "PrisonLv1",
             }
+        end
+
+        -- V3.0技能系统：确保SkillInventory字段存在（向后兼容）
+        if not playerData.SkillInventory then
+            playerData.SkillInventory = {}
         end
 
     else
@@ -1268,6 +1281,179 @@ function DataManager.SetCurrentHouseModel(player, modelName)
     end
 
     playerData.ChapterProgress.CurrentHouseModel = modelName
+    return true
+end
+
+-- ==================== V3.0技能系统接口 ====================
+
+--[[
+获取玩家技能背包
+@param player Player - 玩家对象
+@return table - 技能背包 {[skillId] = count}
+]]
+function DataManager.GetSkillInventory(player)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData then
+        return {}
+    end
+
+    if not playerData.SkillInventory then
+        playerData.SkillInventory = {}
+    end
+
+    -- V3.0修复：确保所有key都是number类型（DataStore加载后可能变成string）
+    local normalizedInventory = {}
+    for skillIdKey, count in pairs(playerData.SkillInventory) do
+        local skillId = tonumber(skillIdKey)
+        if skillId and count and count > 0 then
+            normalizedInventory[skillId] = count
+        end
+    end
+
+    return normalizedInventory
+end
+
+--[[
+获取玩家指定技能的数量
+@param player Player - 玩家对象
+@param skillId number - 技能ID
+@return number - 技能数量
+]]
+function DataManager.GetSkillCount(player, skillId)
+    local inventory = DataManager.GetSkillInventory(player)
+    -- V3.0修复：确保skillId是number类型
+    local normalizedId = tonumber(skillId)
+    if not normalizedId then
+        return 0
+    end
+    return inventory[normalizedId] or 0
+end
+
+--[[
+添加技能到玩家背包
+@param player Player - 玩家对象
+@param skillId number - 技能ID
+@param count number - 添加数量
+@return boolean, number - 是否成功, 新数量
+]]
+function DataManager.AddSkill(player, skillId, count)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData then
+        warn(GameConfig.LOG_PREFIX, "AddSkill: 找不到玩家数据")
+        return false, 0
+    end
+
+    if not playerData.SkillInventory then
+        playerData.SkillInventory = {}
+    end
+
+    -- V3.0修复：确保skillId是number类型
+    local normalizedId = tonumber(skillId)
+    if not normalizedId then
+        warn(GameConfig.LOG_PREFIX, "AddSkill: 无效的技能ID", skillId)
+        return false, 0
+    end
+
+    local currentCount = playerData.SkillInventory[normalizedId] or 0
+    local newCount = currentCount + count
+    playerData.SkillInventory[normalizedId] = newCount
+
+    print(string.format("[DataManager] 添加技能: skillId=%d, 添加数量=%d, 新数量=%d", normalizedId, count, newCount))
+
+    return true, newCount
+end
+
+--[[
+从玩家背包移除技能
+@param player Player - 玩家对象
+@param skillId number - 技能ID
+@param count number - 移除数量
+@return boolean, number - 是否成功, 剩余数量
+]]
+function DataManager.RemoveSkill(player, skillId, count)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData then
+        warn(GameConfig.LOG_PREFIX, "RemoveSkill: 找不到玩家数据")
+        return false, 0
+    end
+
+    if not playerData.SkillInventory then
+        playerData.SkillInventory = {}
+        return false, 0
+    end
+
+    -- V3.0修复：确保skillId是number类型
+    local normalizedId = tonumber(skillId)
+    if not normalizedId then
+        warn(GameConfig.LOG_PREFIX, "RemoveSkill: 无效的技能ID", skillId)
+        return false, 0
+    end
+
+    local currentCount = playerData.SkillInventory[normalizedId] or 0
+    if currentCount < count then
+        warn(string.format("[DataManager] RemoveSkill: 技能数量不足 skillId=%d, 当前=%d, 请求移除=%d", normalizedId, currentCount, count))
+        return false, currentCount
+    end
+
+    local newCount = currentCount - count
+    if newCount <= 0 then
+        playerData.SkillInventory[normalizedId] = nil
+    else
+        playerData.SkillInventory[normalizedId] = newCount
+    end
+
+    print(string.format("[DataManager] 移除技能: skillId=%d, 移除数量=%d, 剩余=%d", normalizedId, count, newCount))
+
+    return true, newCount
+end
+
+--[[
+设置玩家技能数量
+@param player Player - 玩家对象
+@param skillId number - 技能ID
+@param count number - 设置数量
+@return boolean - 是否成功
+]]
+function DataManager.SetSkillCount(player, skillId, count)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData then
+        warn(GameConfig.LOG_PREFIX, "SetSkillCount: 找不到玩家数据")
+        return false
+    end
+
+    if not playerData.SkillInventory then
+        playerData.SkillInventory = {}
+    end
+
+    -- V3.0修复：确保skillId是number类型
+    local normalizedId = tonumber(skillId)
+    if not normalizedId then
+        warn(GameConfig.LOG_PREFIX, "SetSkillCount: 无效的技能ID", skillId)
+        return false
+    end
+
+    if count <= 0 then
+        playerData.SkillInventory[normalizedId] = nil
+    else
+        playerData.SkillInventory[normalizedId] = count
+    end
+
+    return true
+end
+
+--[[
+清空玩家技能背包
+@param player Player - 玩家对象
+@return boolean - 是否成功
+]]
+function DataManager.ClearSkillInventory(player)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData then
+        warn(GameConfig.LOG_PREFIX, "ClearSkillInventory: 找不到玩家数据")
+        return false
+    end
+
+    playerData.SkillInventory = {}
     return true
 end
 
