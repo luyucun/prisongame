@@ -828,6 +828,17 @@ local isInitialized = false
 -- V2.0新增：存储战役行军动画轨道 [unitModel] = AnimationTrack
 local marchAnimationTracks = {}
 
+-- V2.9.5新增：围攻站位系统 - 追踪每个目标被哪些近战兵攻击
+-- 结构: targetEngagements[targetModel] = { [attackerModel] = slotIndex, ... }
+local targetEngagements = {}
+
+-- 围攻配置
+local SURROUND_CONFIG = {
+	MAX_SLOTS = 8,           -- 每个目标最多8个围攻槽位（八个方向）
+	SLOT_ANGLE = math.pi / 4, -- 每个槽位间隔45度
+	MIN_SPREAD_DISTANCE = 2,  -- 最小分散距离（studs）
+}
+
 -- ==================== AIData数据结构 ====================
 
 --[[
@@ -940,6 +951,136 @@ function UnitAIRangePolicy.ShouldExitAttack(distance, unitState)
 		local docking = UnitAIRangePolicy.GetDockingDistance(unitState, targetState)
 		local threshold = math.min(unitState.AttackRange, docking) + BattleConfig.ATTACK_EXIT_TOLERANCE
 		return distance > threshold
+	end
+end
+
+-- ==================== V2.9.5 围攻站位系统 ====================
+
+--[[
+为攻击者分配一个围攻槽位
+@param attackerModel Model - 攻击者模型
+@param targetModel Model - 目标模型
+@return number - 分配的槽位索引 (0-7)
+]]
+local function AssignSurroundSlot(attackerModel, targetModel)
+	if not targetModel or not attackerModel then
+		return 0
+	end
+
+	-- 确保目标有追踪表
+	if not targetEngagements[targetModel] then
+		targetEngagements[targetModel] = {}
+	end
+
+	local engagements = targetEngagements[targetModel]
+
+	-- 检查攻击者是否已有槽位
+	if engagements[attackerModel] then
+		return engagements[attackerModel]
+	end
+
+	-- 找到空闲的槽位
+	local usedSlots = {}
+	for _, slotIndex in pairs(engagements) do
+		usedSlots[slotIndex] = true
+	end
+
+	-- 优先分配基于攻击者当前方向的槽位
+	local attackerRoot = attackerModel:FindFirstChild("HumanoidRootPart")
+	local targetRoot = targetModel:FindFirstChild("HumanoidRootPart") or targetModel.PrimaryPart
+
+	local preferredSlot = 0
+	if attackerRoot and targetRoot then
+		-- 计算攻击者相对于目标的方向角度
+		local direction = (attackerRoot.Position - targetRoot.Position)
+		direction = Vector3.new(direction.X, 0, direction.Z)  -- 只看水平面
+
+		if direction.Magnitude > 0.1 then
+			local angle = math.atan2(direction.X, direction.Z)  -- 返回 -π 到 π
+			-- 转换为槽位索引 (0-7)
+			preferredSlot = math.floor(((angle + math.pi) / SURROUND_CONFIG.SLOT_ANGLE) + 0.5) % SURROUND_CONFIG.MAX_SLOTS
+		end
+	end
+
+	-- 从首选槽位开始，找到最近的空闲槽位
+	for offset = 0, SURROUND_CONFIG.MAX_SLOTS - 1 do
+		local slot1 = (preferredSlot + offset) % SURROUND_CONFIG.MAX_SLOTS
+		if not usedSlots[slot1] then
+			engagements[attackerModel] = slot1
+			return slot1
+		end
+
+		local slot2 = (preferredSlot - offset + SURROUND_CONFIG.MAX_SLOTS) % SURROUND_CONFIG.MAX_SLOTS
+		if not usedSlots[slot2] then
+			engagements[attackerModel] = slot2
+			return slot2
+		end
+	end
+
+	-- 所有槽位都满了，强制分配首选槽位（会与其他兵重叠，但至少方向合理）
+	engagements[attackerModel] = preferredSlot
+	return preferredSlot
+end
+
+--[[
+释放攻击者的围攻槽位
+@param attackerModel Model - 攻击者模型
+@param targetModel Model - 目标模型（可选，如果不传则从所有目标中清理）
+]]
+local function ReleaseSurroundSlot(attackerModel, targetModel)
+	if targetModel then
+		-- 从指定目标释放
+		if targetEngagements[targetModel] then
+			targetEngagements[targetModel][attackerModel] = nil
+
+			-- 如果目标没有攻击者了，清理整个条目
+			if next(targetEngagements[targetModel]) == nil then
+				targetEngagements[targetModel] = nil
+			end
+		end
+	else
+		-- 从所有目标释放
+		for target, engagements in pairs(targetEngagements) do
+			engagements[attackerModel] = nil
+			if next(engagements) == nil then
+				targetEngagements[target] = nil
+			end
+		end
+	end
+end
+
+--[[
+根据槽位计算围攻站位位置
+@param targetModel Model - 目标模型
+@param slotIndex number - 槽位索引 (0-7)
+@param dockingDistance number - 停靠距离
+@return Vector3 - 站位的世界坐标
+]]
+local function GetSurroundPosition(targetModel, slotIndex, dockingDistance)
+	local targetRoot = targetModel:FindFirstChild("HumanoidRootPart") or targetModel.PrimaryPart
+	if not targetRoot then
+		return nil
+	end
+
+	local targetPos = targetRoot.Position
+
+	-- 计算该槽位的角度（从正北开始，顺时针）
+	local angle = slotIndex * SURROUND_CONFIG.SLOT_ANGLE - math.pi
+
+	-- 计算站位方向（从目标指向攻击者站位的方向）
+	local offsetX = math.sin(angle) * dockingDistance
+	local offsetZ = math.cos(angle) * dockingDistance
+
+	return Vector3.new(targetPos.X + offsetX, targetPos.Y, targetPos.Z + offsetZ)
+end
+
+--[[
+清理无效的围攻数据（目标死亡或被移除时调用）
+@param targetModel Model - 目标模型
+]]
+local function CleanupTargetEngagements(targetModel)
+	if targetEngagements[targetModel] then
+		targetEngagements[targetModel] = nil
 	end
 end
 
@@ -1234,6 +1375,9 @@ local function HandleSeeking(unitModel, aiData, state)
 			-- V2.4：只有当新目标至少近5 studs时才切换
 			-- 防止单位频繁切换目标造成抖动
 			if distanceDifference >= 5 then
+				-- V2.9.5：切换目标前释放旧目标的围攻槽位
+				ReleaseSurroundSlot(unitModel, currentTarget)
+
 				-- 新目标足够接近，切换
 				CombatSystem.SetTarget(unitModel, newTarget)
 				CombatSystem.SetAIState(unitModel, BattleConfig.AIState.MOVING)
@@ -1272,6 +1416,9 @@ local function HandleSeeking(unitModel, aiData, state)
 			local lockDuration = tick() - targetLockTime
 
 			if lockDuration > 30 then
+				-- V2.9.5：目标超时，释放围攻槽位
+				ReleaseSurroundSlot(unitModel, currentTarget)
+
 				-- 目标超时，放弃
 				DebugLog(string.format("%s 目标超时(%.1f秒)，放弃并寻找新目标",
 					state.UnitId, lockDuration))
@@ -1283,6 +1430,9 @@ local function HandleSeeking(unitModel, aiData, state)
 				CombatSystem.SetAIState(unitModel, BattleConfig.AIState.MOVING)
 			end
 		else
+			-- V2.9.5：无目标时清理所有围攻槽位
+			ReleaseSurroundSlot(unitModel, nil)
+
 			-- 无任何目标，切换到IDLE
 			CombatSystem.SetAIState(unitModel, BattleConfig.AIState.IDLE)
 			AnimationController.SwitchToIdle(unitModel, aiData, state)
@@ -1301,6 +1451,9 @@ local function HandleMoving(unitModel, aiData, state)
 	-- 验证目标
 	local target = ValidateTarget(unitModel)
 	if not target then
+		-- V2.9.5：目标失效，释放围攻槽位
+		ReleaseSurroundSlot(unitModel, nil)
+
 		CombatSystem.SetTarget(unitModel, nil)
 		CombatSystem.SetAIState(unitModel, BattleConfig.AIState.SEEKING)
 		-- 🔥 V2.9.2修复：确保攻击阶段重置，防止状态残留
@@ -1462,11 +1615,53 @@ local function HandleMoving(unitModel, aiData, state)
 			local targetState = CombatSystem.GetUnitState(target)
 			local dockingDistance = UnitAIRangePolicy.GetDockingDistance(state, targetState)
 
-			-- 计算方向和停靠位置
+			-- V2.9.5新增：近战单位使用围攻站位系统
+			local isRangedUnit = UnitConfig.IsRangedUnit(state.UnitId)
+			local moveTarget
 			local myPos = aiData.HumanoidRootPart.Position
 			local targetPos = targetPart.Position
-			local direction = (targetPos - myPos).Unit
-			local moveTarget = targetPos - direction * dockingDistance
+
+			if not isRangedUnit then
+				-- 近战单位：分配围攻槽位，计算分散站位
+				local slotIndex = AssignSurroundSlot(unitModel, target)
+				local surroundPos = GetSurroundPosition(target, slotIndex, dockingDistance)
+
+				if surroundPos then
+					-- V2.9.5修复：检查围攻站位是否可以直线到达
+					-- 如果不能直线到达，回退到默认的直线停靠
+					local directionVec = (surroundPos - myPos)
+					local distanceToSurround = directionVec.Magnitude
+
+					if distanceToSurround > 0.5 then
+						local raycastParams = RaycastParams.new()
+						raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+						raycastParams.FilterDescendantsInstances = {unitModel, target}
+
+						local rayResult = workspace:Raycast(myPos, directionVec.Unit * distanceToSurround, raycastParams)
+
+						-- 如果没有击中障碍物，或者击中点在目标之后，可以直线到达
+						if not rayResult or rayResult.Distance >= distanceToSurround - 0.5 then
+							-- 可以直线到达围攻站位
+							moveTarget = surroundPos
+						else
+							-- 围攻站位被阻挡，使用直线停靠（朝向目标的方向）
+							local directDirection = (targetPos - myPos).Unit
+							moveTarget = targetPos - directDirection * dockingDistance
+						end
+					else
+						-- 已经很近了，直接用围攻站位
+						moveTarget = surroundPos
+					end
+				else
+					-- 回退到默认计算
+					local direction = (targetPos - myPos).Unit
+					moveTarget = targetPos - direction * dockingDistance
+				end
+			else
+				-- 远程单位：保持原有逻辑，直线停靠
+				local direction = (targetPos - myPos).Unit
+				moveTarget = targetPos - direction * dockingDistance
+			end
 
 			-- 检查是否已足够接近停靠点
 			-- 修复：增加容差，不要在临界值处急停
@@ -1550,6 +1745,9 @@ local function HandleAttacking(unitModel, aiData, state)
 	-- 验证目标
 	local target = ValidateTarget(unitModel)
 	if not target then
+		-- V2.9.5：目标失效，释放围攻槽位
+		ReleaseSurroundSlot(unitModel, nil)
+
 		CombatSystem.SetTarget(unitModel, nil)
 		CombatSystem.SetAIState(unitModel, BattleConfig.AIState.SEEKING)
 		-- 🔥 V2.9.2关键修复：重置攻击阶段，防止切换目标后无法攻击
@@ -2131,6 +2329,9 @@ function UnitAI.StopAI(unitModel, options)
 	if aiData then
 		aiData.IsActive = false
 
+	-- V2.9.5：停止AI时清理围攻槽位
+	ReleaseSurroundSlot(unitModel, nil)
+
 	-- 处理options参数（支持向后兼容的布尔值）
 	local opts = {}
 	if type(options) == "boolean" then
@@ -2366,6 +2567,9 @@ function UnitAI.TriggerAttack(unitModel, target, state, aiData)
 end
 
 function UnitAI.OnTargetDeath(deadUnit, battleId)
+	-- V2.9.5：清理死亡单位的围攻数据
+	CleanupTargetEngagements(deadUnit)
+
 	for unitModel, aiData in pairs(activeAIs) do
 		if not aiData.IsActive then
 			continue
@@ -2377,6 +2581,9 @@ function UnitAI.OnTargetDeath(deadUnit, battleId)
 			local currentTarget = CombatSystem.GetTarget(unitModel)
 
 			if currentTarget == deadUnit then
+				-- V2.9.5：释放攻击者的围攻槽位
+				ReleaseSurroundSlot(unitModel, deadUnit)
+
 				CombatSystem.SetTarget(unitModel, nil)
 				CombatSystem.SetAIState(unitModel, BattleConfig.AIState.SEEKING)
 
@@ -2408,6 +2615,9 @@ function UnitAI.ClearBattleAIs(battleId)
 			UnitAI.StopAI(unitModel, { keepIdle = keepIdle })
 		end
 	end
+
+	-- V2.9.5：清理所有围攻站位数据
+	UnitAI.ClearAllSurroundData()
 
 	-- 清理指定战斗的路径
 	PathService.ClearBattlePaths(battleId, CombatSystem.GetUnitState)  -- ⭐使用PathService
@@ -2794,8 +3004,38 @@ function UnitAI.SetMode(unitModel, mode)
 		return false
 	end
 
+	local oldMode = aiData.Mode
 	aiData.Mode = mode
-	DebugLog(string.format("AI模式切换: %s → %s", unitModel.Name, mode))
+
+	-- V2.9.5修复：切换到行军模式时，清理战斗相关状态
+	if mode == AIMode.MARCH and oldMode == AIMode.COMBAT then
+		-- 清理围攻槽位
+		ReleaseSurroundSlot(unitModel, nil)
+
+		-- 清理PathService状态，让行军系统重新规划路径
+		PathService.ClearPath(unitModel)
+
+		-- 重置寻路标志
+		aiData.PathRequested = false
+
+		-- 清理LoS缓存，避免过时的缓存影响行军
+		aiData.LastLoSResult = nil
+		aiData.LastLoSCheckTick = nil
+		aiData.LastLoSDistance = nil
+
+		-- 清理卡住检测状态
+		aiData.LastMovingPos = nil
+		aiData.LastMovingTime = nil
+		aiData.StuckCount = nil
+
+		-- 清理攻击状态
+		aiData.StoppedForAttack = nil
+
+		DebugLog(string.format("AI模式切换: %s → %s (已清理战斗状态)", unitModel.Name, mode))
+	else
+		DebugLog(string.format("AI模式切换: %s → %s", unitModel.Name, mode))
+	end
+
 	return true
 end
 
@@ -2838,6 +3078,24 @@ function UnitAI.PrepareForCombat(unitModel)
 
 	DebugLog(string.format("✅单位准备完成: %s", unitId))
 	return true
+end
+
+--[[
+V2.9.5新增：清理所有围攻站位数据
+在战斗结束时调用，重置围攻追踪表
+]]
+function UnitAI.ClearAllSurroundData()
+	targetEngagements = {}
+	DebugLog("围攻站位数据已清理")
+end
+
+--[[
+V2.9.5新增：清理指定目标的围攻数据
+当目标死亡时调用
+@param targetModel Model - 死亡的目标模型
+]]
+function UnitAI.ClearTargetSurroundData(targetModel)
+	CleanupTargetEngagements(targetModel)
 end
 
 return UnitAI
