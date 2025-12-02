@@ -1755,75 +1755,59 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)  -- V2.3.1：�
 
 			-- 未到达目标，根据 reached 处理
 			if not reached then
-				-- 关键修复2：reached=false 表示被碰撞/打断，不要盲目推进路径点
-				DebugLog(string.format("⚠️ %s 移动被打断 (reached=false)，保持当前路径点", unitId))
+				-- V3.1修复：reached=false 立即高优先级重寻，不等待位置看门狗
+				DebugLog(string.format("⚠️ %s MoveToFinished(reached=false)，立即高优先级重寻", unitId))
 
-				local pathStatus = PathService.GetPathStatus(unitInstance)
+				-- 清理旧路径
+				PathService.ClearPath(unitInstance)
 
-				if pathStatus == PathStatus.SUCCESS then
-					-- 路径有效，重新尝试移动到当前路径点（不推进索引）
-					local currentWaypoint = PathService.GetNextWaypoint(unitInstance)
-					if currentWaypoint then
-						humanoid:MoveTo(currentWaypoint)
-						DebugLog(string.format("🔄 %s 重试当前路径点", unitId))
-					else
-						-- 路径点无效，直线移动到目标
-						humanoid:MoveTo(data.TargetCFrame.Position)
-					end
-				else
-					-- 路径失效，需要重新寻路
-					DebugLog(string.format("🔄 %s 路径失效，重新寻路", unitId))
+				-- 立即高优先级重寻（绕过冷却）
+				if not data.PathRequested then
+					data.PathRequested = true
 
-					-- 🔑 关键修复：重试寻路时必须遵守"先 true，回调结束再 false"的约定
-					-- 防止同一单位被重复入队
-					if not data.PathRequested then
-						data.PathRequested = true
+					QueuePathCompute(unitInstance, data.TargetPart, unitId, function(success, pathState)
+						-- 🔑 关键：回调结束时无论成功失败都要重置
+						data.PathRequested = false
 
-						-- 重新加入限流队列（V2.0.5：标记为战役路径）
-						QueuePathCompute(unitInstance, data.TargetPart, unitId, function(success, pathState)
-							-- 🔑 关键：回调结束时无论成功失败都要重置
-							data.PathRequested = false
+						-- V2.0修复：检查任务是否已被取消
+						if data.Arrived or data.Cancelled then
+							DebugLog(string.format("⛔ %s 任务已取消，忽略重试回调", unitId))
+							return
+						end
 
-							-- V2.0修复：检查任务是否已被取消
-							if data.Arrived or data.Cancelled then
-								DebugLog(string.format("⛔ %s 任务已取消，忽略重试回调", unitId))
-								return
-							end
-
-							if success and pathState and pathState.Status == PathStatus.SUCCESS then
-								local nextWaypoint = PathService.GetNextWaypoint(unitInstance)
-								if nextWaypoint then
-									humanoid:MoveTo(nextWaypoint)
-									DebugLog(string.format("🚀 %s 重新寻路成功", unitId))
-									-- 重寻成功，重置失败计数
-									data.PathFailureCount = 0
-								else
-									-- 设置强制直线移动标志，允许直线移动
-									data.ForceStraightMove = true
-									humanoid:MoveTo(data.TargetCFrame.Position)
-								end
+						if success and pathState and pathState.Status == PathStatus.SUCCESS then
+							local nextWaypoint = PathService.GetNextWaypoint(unitInstance)
+							if nextWaypoint then
+								humanoid:MoveTo(nextWaypoint)
+								DebugLog(string.format("🚀 %s reached=false重寻成功", unitId))
+								-- 重寻成功，重置失败计数
+								data.PathFailureCount = 0
 							else
-								-- 重寻失败，增加失败计数
-								data.PathFailureCount = (data.PathFailureCount or 0) + 1
-								if data.PathFailureCount >= CONFIG.MAX_RETRY_COUNT then
-									-- 多次失败，允许强制直线移动
-									data.ForceStraightMove = true
-									DebugLog(string.format("⚠️ %s 多次重寻失败(%d次)，允许强制直线移动",
-										unitId, data.PathFailureCount))
-								end
-								-- 设置强制直线移动标志
+								-- 设置强制直线移动标志，允许直线移动
 								data.ForceStraightMove = true
 								humanoid:MoveTo(data.TargetCFrame.Position)
-								DebugLog(string.format("⚠️ %s 重新寻路失败，直线移动", unitId))
 							end
-						end, "Campaign")  -- V2.0.5：标记为战役路径
-					else
-						-- V2.7修复：使用软停代替MoveTo(当前位置)，避免前倾抖动
-						if humanoid then
-							humanoid:Move(Vector3.zero, true)
+						else
+							-- 重寻失败，增加失败计数
+							data.PathFailureCount = (data.PathFailureCount or 0) + 1
+							if data.PathFailureCount >= CONFIG.MAX_RETRY_COUNT then
+								-- 多次失败，允许强制直线移动
+								data.ForceStraightMove = true
+								DebugLog(string.format("⚠️ %s 多次重寻失败(%d次)，允许强制直线移动",
+									unitId, data.PathFailureCount))
+							end
+							-- 设置强制直线移动标志
+							data.ForceStraightMove = true
+							humanoid:MoveTo(data.TargetCFrame.Position)
+							DebugLog(string.format("⚠️ %s reached=false重寻失败，直线移动", unitId))
 						end
-						DebugLog(string.format("⏳ %s 正在寻路队列中，原地待命", unitId))
+					end, "Campaign", "high")  -- V3.1关键：高优先级重寻
+				else
+					-- V2.7修复：使用软停代替MoveTo(当前位置)，避免前倾抖动
+					if humanoid then
+						humanoid:Move(Vector3.zero, true)
 					end
+					DebugLog(string.format("⏳ %s 正在寻路队列中，原地待命", unitId))
 				end
 			else
 				-- 关键修复2：reached=true，正常到达当前路径点，推进到下一个
@@ -2137,68 +2121,100 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)  -- V2.3.1：�
 						end
 					end
 
-					-- V2.3强化：卡住检测watchdog - 如果单位1秒内移动<0.2 studs且远离目标，强制重寻
+					-- V3.1强化：卡住检测watchdog - 双重检测：位置变化+速度检测
 				if data.StartTime > 0 then
 					local currentPos = rootPart.Position
+					local humanoid = unitInstance:FindFirstChild("Humanoid")
+					local isStuck = false
+					local stuckReason = ""
 
-					if data.LastPosition then
+					-- V3.1新增：速度卡死检测 - 如果距离目标远但速度接近0持续0.8秒
+					if humanoid and distanceXZToFinal > arrivalThreshold then
+						local speed = humanoid.MoveDirection.Magnitude
+						-- 初始化速度追踪
+						if not data.LastLowSpeedTime then
+							data.LastLowSpeedTime = 0
+						end
+
+						if speed < 0.05 then
+							-- 速度很低
+							if data.LastLowSpeedTime == 0 then
+								data.LastLowSpeedTime = now
+							elseif now - data.LastLowSpeedTime > 0.8 then
+								-- 速度持续低于阈值超过0.8秒
+								isStuck = true
+								stuckReason = string.format("速度卡死(speed=%.3f持续%.1fs)", speed, now - data.LastLowSpeedTime)
+								data.LastLowSpeedTime = 0  -- 重置，避免重复触发
+							end
+						else
+							-- 速度恢复，重置计时
+							data.LastLowSpeedTime = 0
+						end
+					end
+
+					-- V3.1修改：位置卡住检测 - 放宽阈值从0.15到0.35 studs
+					if data.LastPosition and not isStuck then
 						local positionDelta = (currentPos - data.LastPosition).Magnitude
 						local timeDelta = now - data.LastPositionTime
 
-						-- V2.5优化：更激进的卡住检测（0.15 studs in 0.5s）
-						if positionDelta < 0.15 and timeDelta > 0.5 and distanceXZToFinal > 5 then
-							-- 单位卡住，强制高优先级重寻
-							if not data.PathRequested then
-								data.PathRequested = true
-								DebugLog(string.format("🚨 %s 检测到卡住 (%.2f studs in %.1fs)，强制重寻",
-									unitInstance.Name, positionDelta, timeDelta))
-
-								-- 立即清理旧路径
-								PathService.ClearPath(unitInstance)
-
-								-- 高优先级重寻
-								QueuePathCompute(unitInstance, data.TargetPart, unitInstance.Name,
-									function(success)
-										data.PathRequested = false
-										if success then
-											-- 重寻成功，立即开始移动
-											local humanoid = unitInstance:FindFirstChild("Humanoid")
-											if humanoid then
-												local nextWaypoint = PathService.GetNextWaypoint(unitInstance)
-												if nextWaypoint then
-													humanoid:MoveTo(nextWaypoint)
-													DebugLog(string.format("✅ %s 重寻成功，恢复移动", unitInstance.Name))
-												end
-											end
-											-- 重寻成功，重置失败计数
-											data.PathFailureCount = 0
-										else
-											-- 重寻失败，增加失败计数
-											data.PathFailureCount = (data.PathFailureCount or 0) + 1
-											if data.PathFailureCount >= CONFIG.MAX_RETRY_COUNT then
-												-- 多次失败，允许强制直线移动
-												data.ForceStraightMove = true
-												DebugLog(string.format("⚠️ %s 卡住重寻失败(%d次)，允许强制直线移动",
-													unitInstance.Name, data.PathFailureCount))
-											end
-										end
-									end, "Campaign", "high")
-							end
-
-							-- 更新位置追踪（避免重复触发）
-							data.LastPosition = currentPos
-							data.LastPositionTime = now
+						-- V3.1优化：放宽卡住检测阈值（0.35 studs in 0.5s）
+						if positionDelta < 0.35 and timeDelta > 0.5 and distanceXZToFinal > 5 then
+							isStuck = true
+							stuckReason = string.format("位置卡住(%.2f studs in %.1fs)", positionDelta, timeDelta)
 						elseif timeDelta > 0.5 then
-							-- V2.5优化：每0.5秒更新一次位置追踪（从0.8降低）
+							-- 每0.5秒更新一次位置追踪
 							data.LastPosition = currentPos
 							data.LastPositionTime = now
 						end
-					else
+					elseif not data.LastPosition then
 						-- 初始化位置追踪
 						data.LastPosition = currentPos
 						data.LastPositionTime = now
-						-- V2.3.3保险：未启动同样视为未完成
 						allArrived = false
+					end
+
+					-- 卡住时强制高优先级重寻
+					if isStuck then
+						if not data.PathRequested then
+							data.PathRequested = true
+							DebugLog(string.format("🚨 %s 检测到%s，强制重寻",
+								unitInstance.Name, stuckReason))
+
+							-- 立即清理旧路径
+							PathService.ClearPath(unitInstance)
+
+							-- 高优先级重寻
+							QueuePathCompute(unitInstance, data.TargetPart, unitInstance.Name,
+								function(success)
+									data.PathRequested = false
+									if success then
+										-- 重寻成功，立即开始移动
+										local humanoid = unitInstance:FindFirstChild("Humanoid")
+										if humanoid then
+											local nextWaypoint = PathService.GetNextWaypoint(unitInstance)
+											if nextWaypoint then
+												humanoid:MoveTo(nextWaypoint)
+												DebugLog(string.format("✅ %s 重寻成功，恢复移动", unitInstance.Name))
+											end
+										end
+										-- 重寻成功，重置失败计数
+										data.PathFailureCount = 0
+									else
+										-- 重寻失败，增加失败计数
+										data.PathFailureCount = (data.PathFailureCount or 0) + 1
+										if data.PathFailureCount >= CONFIG.MAX_RETRY_COUNT then
+											-- 多次失败，允许强制直线移动
+											data.ForceStraightMove = true
+											DebugLog(string.format("⚠️ %s 卡住重寻失败(%d次)，允许强制直线移动",
+												unitInstance.Name, data.PathFailureCount))
+										end
+									end
+								end, "Campaign", "high")
+						end
+
+						-- 更新位置追踪（避免重复触发）
+						data.LastPosition = currentPos
+						data.LastPositionTime = now
 					end
 				end
 

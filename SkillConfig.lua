@@ -3,13 +3,14 @@
 脚本名称: SkillConfig
 脚本类型: ModuleScript (配置模块)
 脚本位置: ReplicatedStorage/Config/SkillConfig.lua
-版本: V3.0
+版本: V3.1
 =====================================================
 
 功能描述:
 - 定义所有技能的基础配置
 - 提供技能数据查询接口
 - 支持技能类型分类
+- V3.1新增: DevProductId字段支持Robux购买
 - 可扩展设计，便于添加新技能
 
 =====================================================
@@ -72,6 +73,9 @@ SkillConfig.TargetType = {
 	-- 特效相关
 	EffectDuration = number,    -- 特效显示时长(秒)
 
+	-- V3.1新增: 商店购买相关
+	DevProductId = number?,     -- 开发者商品ID（用于Robux购买，0或nil表示未配置）
+
 	-- 扩展字段(便于未来扩展)
 	Extra = table?,             -- 额外配置数据
 }
@@ -90,6 +94,7 @@ SkillConfig.Skills = {
 		Range = 20,                    -- 直径100studs的圆形范围
 		Damage = 100,                   -- 造成100点真实伤害
 		EffectDuration = 3,             -- 特效显示3秒
+		DevProductId = 0,               -- V3.1: 开发者商品ID（0表示未配置）
 		Extra = {
 			Description = "对范围内所有敌人造成100点真实伤害",
 		},
@@ -107,6 +112,7 @@ SkillConfig.Skills = {
 		Range = 20,                    -- 直径100studs的圆形范围
 		Damage = 100,                   -- 造成100点真实伤害
 		EffectDuration = 3,             -- 特效显示3秒
+		DevProductId = 0,               -- V3.1: 开发者商品ID（0表示未配置）
 		Extra = {
 			Description = "对范围内所有敌人造成100点真实伤害",
 		},
@@ -126,6 +132,7 @@ SkillConfig.Skills = {
 		TickInterval = 0.5,             -- 每0.5秒触发一次
 		Duration = 4,                   -- 持续4秒
 		EffectDuration = 4,             -- 特效显示4秒(与持续时间一致)
+		DevProductId = 0,               -- V3.1: 开发者商品ID（0表示未配置）
 		Extra = {
 			Description = "对范围内所有敌人造成持续伤害，每0.5秒造成20点伤害，持续4秒",
 		},
@@ -310,6 +317,26 @@ end
 function SkillConfig.GetDuration(skillId)
 	local skill = SkillConfig.GetSkillById(skillId)
 	return skill and skill.Duration or 0
+end
+
+--[[
+V3.1新增：获取技能的开发者商品ID
+@param skillId number - 技能ID
+@return number - DevProductId，未配置返回0
+]]
+function SkillConfig.GetDevProductId(skillId)
+	local skill = SkillConfig.GetSkillById(skillId)
+	return skill and skill.DevProductId or 0
+end
+
+--[[
+V3.1新增：检查技能是否支持Robux购买
+@param skillId number - 技能ID
+@return boolean - 是否支持Robux购买
+]]
+function SkillConfig.HasRobuxPurchase(skillId)
+	local devProductId = SkillConfig.GetDevProductId(skillId)
+	return devProductId and devProductId > 0
 end
 
 return SkillConfig

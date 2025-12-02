@@ -48,6 +48,8 @@ local CampaignManager = require(ServerScriptService.Systems.CampaignManager)
 local DoorControlService = require(ServerScriptService.Systems.DoorControlService)
 -- V2.1新增 - 商店系统
 local ShopSystem = require(ServerScriptService.Systems.ShopSystem)
+-- V3.1新增 - 技能商店系统
+local SkillShopSystem = require(ServerScriptService.Systems.SkillShopSystem)
 -- V2.5新增 - 碰撞系统（寻路性能优化）
 local CollisionSystem = require(ServerScriptService.Systems.CollisionSystem)
 -- V2.6新增 - 挂机金币系统
@@ -177,6 +179,21 @@ local function InitializeServer()
         -- 商店系统不是关键系统,失败不影响游戏运行
     elseif result == false then
         warn(GameConfig.LOG_PREFIX, "商店系统初始化失败(返回false),购买功能将不可用")
+    end
+
+    -- 5.7. 初始化技能商店系统(V3.1新增)
+    success, result = pcall(function()
+        return SkillShopSystem.Initialize()
+    end)
+    if not success then
+        warn(GameConfig.LOG_PREFIX, "⚠️ 技能商店系统初始化失败(异常):", result)
+        warn(GameConfig.LOG_PREFIX, "请检查：")
+        warn("  1. ReplicatedStorage/Events/SkillShopEvents 是否已创建")
+        warn("  2. SkillShopEvents 下是否有 RequestSkillShopList、SkillShopList、PurchaseSkill、SkillPurchaseResult")
+        warn("  3. ReplicatedStorage/Config/SkillShopConfig 是否已创建")
+        -- 技能商店系统不是关键系统,失败不影响游戏运行
+    elseif result == false then
+        warn(GameConfig.LOG_PREFIX, "技能商店系统初始化失败(返回false),技能购买功能将不可用")
     end
 
     -- 6. 初始化GM命令系统(连接聊天事件)
@@ -406,6 +423,16 @@ Players.PlayerAdded:Connect(function(player)
 			ShopSystem.InitializePlayerShopTimer(player, "UnitShop")
 			print(string.format(
 				"%s [MainServer] 玩家 %s 商店库存系统已初始化",
+				GameConfig.LOG_PREFIX,
+				player.Name
+			))
+		end)
+
+		-- V3.1新增：初始化玩家技能商店库存系统
+		pcall(function()
+			SkillShopSystem.InitializePlayerSkillShopTimer(player, "SkillShop")
+			print(string.format(
+				"%s [MainServer] 玩家 %s 技能商店库存系统已初始化",
 				GameConfig.LOG_PREFIX,
 				player.Name
 			))

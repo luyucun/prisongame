@@ -1287,6 +1287,34 @@ end
 -- ==================== V3.0技能系统接口 ====================
 
 --[[
+归一化技能背包，确保所有key都是number类型
+@param playerData table - 玩家数据
+]]
+local function NormalizeSkillInventory(playerData)
+    if not playerData.SkillInventory then
+        playerData.SkillInventory = {}
+        return
+    end
+
+    -- 收集需要转换的字符串key
+    local keysToConvert = {}
+    for key, count in pairs(playerData.SkillInventory) do
+        if type(key) ~= "number" then
+            local nid = tonumber(key)
+            if nid then
+                table.insert(keysToConvert, {oldKey = key, newKey = nid, count = count})
+            end
+        end
+    end
+
+    -- 执行转换
+    for _, item in ipairs(keysToConvert) do
+        playerData.SkillInventory[item.oldKey] = nil
+        playerData.SkillInventory[item.newKey] = (playerData.SkillInventory[item.newKey] or 0) + item.count
+    end
+end
+
+--[[
 获取玩家技能背包
 @param player Player - 玩家对象
 @return table - 技能背包 {[skillId] = count}
@@ -1301,16 +1329,18 @@ function DataManager.GetSkillInventory(player)
         playerData.SkillInventory = {}
     end
 
-    -- V3.0修复：确保所有key都是number类型（DataStore加载后可能变成string）
-    local normalizedInventory = {}
-    for skillIdKey, count in pairs(playerData.SkillInventory) do
-        local skillId = tonumber(skillIdKey)
-        if skillId and count and count > 0 then
-            normalizedInventory[skillId] = count
+    -- V3.1修复：归一化后回写到playerData，确保后续操作都是数字key
+    NormalizeSkillInventory(playerData)
+
+    -- 返回副本
+    local inventory = {}
+    for skillId, count in pairs(playerData.SkillInventory) do
+        if count and count > 0 then
+            inventory[skillId] = count
         end
     end
 
-    return normalizedInventory
+    return inventory
 end
 
 --[[
@@ -1347,6 +1377,9 @@ function DataManager.AddSkill(player, skillId, count)
         playerData.SkillInventory = {}
     end
 
+    -- V3.1修复：先归一化，确保所有key都是数字类型
+    NormalizeSkillInventory(playerData)
+
     -- V3.0修复：确保skillId是number类型
     local normalizedId = tonumber(skillId)
     if not normalizedId then
@@ -1381,6 +1414,9 @@ function DataManager.RemoveSkill(player, skillId, count)
         playerData.SkillInventory = {}
         return false, 0
     end
+
+    -- V3.1修复：先归一化，确保所有key都是数字类型
+    NormalizeSkillInventory(playerData)
 
     -- V3.0修复：确保skillId是number类型
     local normalizedId = tonumber(skillId)

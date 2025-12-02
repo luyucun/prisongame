@@ -695,14 +695,16 @@ function ShopConfig.ValidateShopConfig()
 	local success = true
 
 	for shopId, shopData in pairs(ShopConfig.Shops) do
+		local shopIdStr = tostring(shopId)
+
 		-- 检查必要字段
 		if not shopData.NPCName then
-			table.insert(errors, string.format("商店[%s]缺少NPCName", shopId))
+			table.insert(errors, string.format("商店[%s]缺少NPCName", shopIdStr))
 			success = false
 		end
 
 		if not shopData.Items or #shopData.Items == 0 then
-			table.insert(errors, string.format("商店[%s]没有商品", shopId))
+			table.insert(errors, string.format("商店[%s]没有商品", shopIdStr))
 			success = false
 		end
 
@@ -713,7 +715,7 @@ function ShopConfig.ValidateShopConfig()
 				if not UnitConfig.IsValidUnit(unitId) then
 					table.insert(errors, string.format(
 						"商店[%s]商品[%d]的UnitId不存在: %s",
-						shopId, i, unitId
+						shopIdStr, i, tostring(unitId)
 					))
 					success = false
 				end

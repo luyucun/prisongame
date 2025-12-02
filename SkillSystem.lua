@@ -336,22 +336,37 @@ local function SpawnSkillEffect(player, skillData, position)
 	local effectClone = effectTemplate:Clone()
 	effectClone.Name = skillData.ResourceName .. "_Effect_" .. tick()
 
-	-- 设置位置
+	-- 辅助函数：放置特效并自动抬高，避免埋入地面
+	local function placeEffect(effect, pos)
+		local targetCf = CFrame.new(pos)
+		local sizeY = nil
+
+		if effect:IsA("BasePart") then
+			sizeY = effect.Size.Y
+		else
+			local _, extentsSize = effect:GetBoundingBox()
+			sizeY = extentsSize.Y
+		end
+
+		-- 向上抬高半个高度，使底部贴地
+		if sizeY then
+			targetCf = targetCf + Vector3.new(0, sizeY * 0.5, 0)
+		end
+
+		if effect:IsA("Model") then
+			effect:PivotTo(targetCf)
+		else
+			effect.CFrame = targetCf
+		end
+	end
+
+	-- 设置位置（使用placeEffect自动处理高度偏移）
 	if effectClone:IsA("BasePart") then
-		effectClone.CFrame = CFrame.new(position)
+		placeEffect(effectClone, position)
 		effectClone.Anchored = true
 		effectClone.CanCollide = false
 	elseif effectClone:IsA("Model") then
-		if effectClone.PrimaryPart then
-			effectClone:PivotTo(CFrame.new(position))
-		else
-			-- 尝试找到第一个Part并设置位置
-			local firstPart = effectClone:FindFirstChildWhichIsA("BasePart", true)
-			if firstPart then
-				local offset = firstPart.Position - effectClone:GetBoundingBox().Position
-				effectClone:PivotTo(CFrame.new(position + offset))
-			end
-		end
+		placeEffect(effectClone, position)
 	end
 
 	effectClone.Parent = Workspace

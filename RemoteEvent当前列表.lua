@@ -55,7 +55,15 @@ ReplicatedStorage
         ├──RequestCastSkill（RemoteEvent） - 客户端→服务器：请求释放技能(skillId, position)
         ├──CastSkillResponse（RemoteEvent） - 服务器→客户端：技能释放结果(success, message)
         ├──SkillInventoryUpdate（RemoteEvent） - 服务器→客户端：技能背包更新(inventory)
-        └──SpawnSkillEffect（RemoteEvent） - 服务器→客户端：生成技能特效(skillId, position, duration)
+        ├──SpawnSkillEffect（RemoteEvent） - 服务器→客户端：生成技能特效(skillId, position, duration)
+        └──RequestSkillSync（RemoteEvent） - 客户端→服务器：请求同步技能背包
+    └──SkillShopEvents（Folder）/  【V3.1新增】
+        ├──RequestSkillShopList（RemoteEvent） - 客户端→服务器：请求技能商店列表
+        ├──SkillShopList（RemoteEvent） - 服务器→客户端：返回技能商品数据数组（含库存信息）
+        ├──PurchaseSkill（RemoteEvent） - 客户端→服务器：请求购买技能(skillId)
+        ├──SkillPurchaseResult（RemoteEvent） - 服务器→客户端：返回购买结果(success,message,skillId,newCoins)
+        ├──SkillStockUpdate（RemoteEvent） - 服务器→客户端：技能库存更新通知(shopId, stockData)
+        └──SkillRefreshTimeUpdate（RemoteEvent） - 服务器→客户端：技能刷新倒计时更新(remainingTime)
 
 
 如果需要补充新的RemoteEvent或者Remotefunction，请在这里列出来，我会自己去创建
@@ -231,3 +239,89 @@ UI配置说明（MainGui）：
 6. 客户端控制器位置：
    - StarterPlayer/StarterPlayerScripts/Controllers/SkillController
    - StarterPlayer/StarterPlayerScripts/UI/SkillBackpackDisplay
+
+
+【V3.1技能商店系统RemoteEvent创建说明】
+位置：ReplicatedStorage/Events/SkillShopEvents/ （新建文件夹）
+🆕 RequestSkillShopList (RemoteEvent) - 需在Studio中手动创建
+🆕 SkillShopList (RemoteEvent) - 需在Studio中手动创建
+🆕 PurchaseSkill (RemoteEvent) - 需在Studio中手动创建
+🆕 SkillPurchaseResult (RemoteEvent) - 需在Studio中手动创建
+🆕 SkillStockUpdate (RemoteEvent) - 需在Studio中手动创建
+🆕 SkillRefreshTimeUpdate (RemoteEvent) - 需在Studio中手动创建
+
+创建步骤：
+1. 打开Roblox Studio
+2. 导航到 ReplicatedStorage > Events
+3. 右键点击 Events 文件夹
+4. 选择 "Insert Object" > "Folder"
+5. 将新建的 Folder 重命名为 "SkillShopEvents"
+6. 右键点击 SkillShopEvents 文件夹
+7. 选择 "Insert Object" > "RemoteEvent"
+8. 将新建的 RemoteEvent 重命名为 "RequestSkillShopList"
+9. 重复步骤7-8，创建 "SkillShopList"
+10. 重复步骤7-8，创建 "PurchaseSkill"
+11. 重复步骤7-8，创建 "SkillPurchaseResult"
+12. 重复步骤7-8，创建 "SkillStockUpdate"
+13. 重复步骤7-8，创建 "SkillRefreshTimeUpdate"
+14. 保存游戏
+
+功能说明：
+- RequestSkillShopList：客户端→服务器：请求技能商店列表
+  参数：无（服务器根据玩家位置判断商店）
+- SkillShopList：服务器→客户端：返回技能商品数据数组
+  参数：(shopItems: table) 商品列表 [{SkillId, Name, Price, Icon, Stock, ...}]
+- PurchaseSkill：客户端→服务器：请求购买技能
+  参数：(skillId: number) 技能ID
+- SkillPurchaseResult：服务器→客户端：返回购买结果
+  参数：(success: boolean, message: string, skillId: number, newCoins: number)
+- SkillStockUpdate：服务器→客户端：技能库存更新通知
+  参数：(shopId: string, stockData: table) 商店ID和库存数据 {[skillId] = stock}
+- SkillRefreshTimeUpdate：服务器→客户端：技能刷新倒计时更新
+  参数：(remainingTime: number) 剩余秒数
+
+注意：服务端SkillShopSystem.lua会在初始化时自动创建这些事件（如果不存在），
+但建议手动创建以确保事件在系统初始化前就存在。
+
+
+【V3.1技能商店系统其他资源创建说明】
+
+1. 技能商店配置模块位置：ReplicatedStorage/Config/SkillShopConfig
+
+2. 服务端系统位置：ServerScriptService/Systems/SkillShopSystem
+
+3. 客户端控制器位置：
+   - StarterPlayer/StarterPlayerScripts/UI/SkillShopDisplay
+   - StarterPlayer/StarterPlayerScripts/Triggers/SkillShopTrigger
+
+4. 技能商店UI结构：StarterGui/SkillStore/
+   └── StoreBg (Frame)
+       ├── TitleLabel (TextLabel) - 标题（显示刷新倒计时）
+       ├── CloseButton (TextButton) - 关闭按钮
+       └── ItemContainer (ScrollingFrame)
+           ├── UIGridLayout
+           ├── SkillCardTemplate (Frame) [Visible=false] - 技能卡片模板
+           │   ├── IconBg (Frame)
+           │   │   └── Icon (ImageLabel) - 技能图标
+           │   ├── Name (TextLabel) - 技能名称
+           │   ├── Type (TextLabel) - 技能类型
+           │   ├── Effect (TextLabel) - 效果类型
+           │   ├── Range (TextLabel) - 技能范围
+           │   ├── Description (TextLabel) - 描述
+           │   ├── Number (TextLabel) - 库存数量
+           │   └── Price (TextLabel) - 价格
+           └── BuyButtonFrame (Frame) [Visible=false] - 购买按钮面板
+               ├── GoldBuy (TextButton) - 金币购买按钮
+               │   └── Price (TextLabel)
+               └── RobuxBuy (TextButton) - Robux购买按钮
+                   └── Price (TextLabel)
+
+5. 技能商店NPC：
+   - NPC名称：KeepShoper02
+   - 位置：Home/PlayerHomeX/KeepShoper02
+   - 需要有HumanoidRootPart或PrimaryPart用于距离检测
+
+6. 技能商店与兵种商店共享刷新周期：
+   - 两个商店使用相同的刷新间隔（默认300秒/5分钟）
+   - ShopSystem.InitializePlayerShopTimer() 会同时初始化两个商店的定时器
+   - 库存数据分别存储：兵种商店在 ShopData[shopId]，技能商店在 ShopData["Skill_" + shopId]

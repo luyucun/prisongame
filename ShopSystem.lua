@@ -1062,6 +1062,24 @@ function ShopSystem.InitializePlayerShopTimer(player, shopId)
 		player.Name,
 		shopId
 	))
+
+	-- V3.1新增：同时初始化技能商店定时器（共享刷新周期）
+	local SkillShopSystem = nil
+	local skillSystemModule = ServerScriptService.Systems:FindFirstChild("SkillShopSystem")
+	if skillSystemModule then
+		local success, result = pcall(function()
+			return require(skillSystemModule)
+		end)
+		if success then
+			SkillShopSystem = result
+			SkillShopSystem.InitializePlayerSkillShopTimer(player, "SkillShop")
+			print(string.format(
+				"%s [ShopSystem] V3.1 同时初始化技能商店定时器 - 玩家:%s",
+				GameConfig.LOG_PREFIX,
+				player.Name
+			))
+		end
+	end
 end
 
 return ShopSystem

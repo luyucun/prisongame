@@ -4,7 +4,7 @@
 =====================================================
 
 项目名称: Roblox 兵种塔防游戏
-当前版本: V3.0
+当前版本: V3.1
 最后更新: 2025-12-01
 
 =====================================================
@@ -54,10 +54,11 @@ ServerScriptService/
 │   ├── CampaignManager.lua      (战役管理器 V2.11增强)
 │   ├── CampaignUnitHelper.lua   (战役单位辅助)
 │   ├── DoorControlService.lua   (门控制服务 V2.0新增)
-│   ├── ShopSystem.lua           (商店系统 V2.1新增)
+│   ├── ShopSystem.lua           (商店系统 V2.1新增 V3.1增强)
 │   ├── IdleCoinSystem.lua       (挂机金币系统 V2.6新增)
 │   ├── HouseUpgradeSystem.lua   (房屋升级系统 V2.8新增)
-│   └── SkillSystem.lua          (技能系统 V3.0新增)
+│   ├── SkillSystem.lua          (技能系统 V3.0新增)
+│   └── SkillShopSystem.lua      (技能商店系统 V3.1新增)
 
 StarterPlayer/StarterPlayerScripts/
 ├── UI/
@@ -67,7 +68,8 @@ StarterPlayer/StarterPlayerScripts/
 │   ├── BattleTestUI.lua         (战斗测试UI)
 │   ├── BattleControlUI.lua      (战斗控制UI V2.0新增)
 │   ├── DamageNumberSystem.lua   (伤害冒字系统 V2.5增强)
-│   └── SkillBackpackDisplay.lua (技能背包显示 V3.0新增)
+│   ├── SkillBackpackDisplay.lua (技能背包显示 V3.0新增)
+│   └── SkillShopDisplay.lua     (技能商店显示 V3.1新增)
 ├── Controllers/
 │   ├── PlacementController.lua  (放置控制)
 │   ├── DragSystem.lua           (拖动系统)
@@ -76,6 +78,8 @@ StarterPlayer/StarterPlayerScripts/
 │   ├── IdleCoinController.lua   (挂机金币控制 V2.6新增)
 │   ├── MainGuiController.lua    (主界面控制 V2.11新增)
 │   └── SkillController.lua      (技能控制器 V3.0新增)
+├── Triggers/                        (V3.1新增)
+│   └── SkillShopTrigger.lua     (技能商店触发器 V3.1新增)
 ├── Utils/
 │   ├── PlacementHelper.lua      (放置辅助)
 │   ├── HighlightHelper.lua      (高光辅助)
@@ -102,7 +106,8 @@ ReplicatedStorage/
 │   ├── EnemyConfig.lua          (敌人配置)
 │   ├── HouseConfig.lua          (房屋配置 V2.8新增)
 │   ├── LevelColorConfig.lua     (等级颜色配置)
-│   └── SkillConfig.lua          (技能配置 V3.0新增)
+│   ├── SkillConfig.lua          (技能配置 V3.0新增 V3.1增强)
+│   └── SkillShopConfig.lua      (技能商店配置 V3.1新增)
 ├── Events/                      (RemoteEvent事件)
 │   ├── CurrencyEvents/
 │   ├── PlayerEvents/
@@ -114,7 +119,8 @@ ReplicatedStorage/
 │   ├── ShopEvents/              (V2.1新增)
 │   ├── IdleCoinEvents/          (V2.6新增)
 │   ├── BattleControlEvents/     (V2.11新增)
-│   └── SkillEvents/             (V3.0新增)
+│   ├── SkillEvents/             (V3.0新增)
+│   └── SkillShopEvents/         (V3.1新增)
 └── Modules/
     └── FormatHelper.lua         (格式化工具)
 
@@ -387,6 +393,17 @@ ReplicatedStorage/
 - GM命令: /addskill /removeskill /listskills /skilllist
 - 初始技能: 喷水枪(1001)/毒气炸弹(1002)/大火(1003)
 
+【V3.1】技能商店系统
+- SkillShopConfig: 技能商店配置表(数据驱动)
+- SkillShopSystem: 服务端技能商店系统
+- SkillShopDisplay: 客户端技能商店UI显示
+- SkillShopTrigger: 技能商店NPC距离触发器
+- SkillConfig增强: 新增DevProductId字段(Robux购买)
+- ShopSystem增强: 共享刷新周期(与兵种商店同步)
+- 库存系统: 概率刷新/库存上限/售罄机制
+- 支持金币购买和Robux购买(MarketplaceService)
+- 技能商店NPC: KeepShoper02
+
 =====================================================
 五、核心技术要点
 =====================================================
@@ -492,12 +509,21 @@ ReplicatedStorage/
 【LevelColorConfig】等级颜色配置
 - 等级颜色: [Level] = Color3
 
-【SkillConfig】技能配置 (V3.0新增)
+【SkillConfig】技能配置 (V3.0新增 V3.1增强)
 - 技能列表: [SkillId] = 技能配置
 - 技能属性: Name/ResourceName/Icon/SkillType/EffectType/TargetType
 - 伤害属性: Range(直径)/Damage(即时)/TickDamage(DOT)/Duration/TickInterval
 - 特效属性: EffectDuration
+- V3.1新增: DevProductId(开发者商品ID，用于Robux购买)
 - 公共接口: GetSkillById()/IsValidSkill()/GetAllSkillIds()/IsDOTSkill()
+- V3.1新增: GetDevProductId()/HasRobuxPurchase()
+
+【SkillShopConfig】技能商店配置 (V3.1新增)
+- 商店列表: Shops[shopId] = 商店配置
+- 商店属性: Name/NPCName/RefreshInterval/Items
+- 商品属性: SkillId/Price/RobuxPrice/Sort/Enabled
+- 库存配置: StockMin/StockMax/RefreshProbability
+- 公共接口: GetShopItems()/GetPrice()/IsSkillOnSale()/GetStockConfig()
 
 =====================================================
 七、RemoteEvent事件列表
@@ -566,6 +592,14 @@ ReplicatedStorage/
 - CastSkillResponse: Server → Client (释放结果: success, message)
 - SkillInventoryUpdate: Server → Client (技能背包更新: inventory)
 - SpawnSkillEffect: Server → Client (生成技能特效: skillId, position, duration)
+
+【SkillShopEvents】V3.1
+- RequestSkillShopList: Client → Server (请求技能商店列表)
+- SkillShopList: Server → Client (返回技能商品数据数组)
+- PurchaseSkill: Client → Server (请求购买技能: skillId)
+- SkillPurchaseResult: Server → Client (购买结果: success, message, skillId, newCoins)
+- SkillStockUpdate: Server → Client (技能库存更新: shopId, stockData)
+- SkillRefreshTimeUpdate: Server → Client (刷新倒计时: remainingTime)
 
 =====================================================
 八、最佳实践
@@ -794,6 +828,57 @@ ReplicatedStorage/
 
 全局访问：_G.SkillBackpackDisplay
 
+【11.12 技能商店系统】SkillShopSystem (V3.1新增)
+职责：服务端技能商店处理
+
+核心API：
+- Initialize()                    初始化技能商店系统
+- InitializePlayerSkillShopTimer(player, shopId)  初始化玩家商店定时器
+- OnPurchaseSkill(player, skillId)  处理购买请求
+- RefreshSkillShopStock(player, shopId)  刷新库存
+- GetPlayerStock(player, shopId, skillId)  获取库存
+- DeductStock(player, shopId, skillId, amount)  扣除库存
+
+内部机制：
+- 库存数据持久化(DataManager，使用"Skill_"+shopId前缀)
+- 概率刷新机制(RefreshProbability)
+- 刷新定时器(与兵种商店共享周期)
+- 购买锁防止并发购买
+- Robux购买支持(MarketplaceService)
+
+【11.13 技能商店显示】SkillShopDisplay (V3.1新增)
+职责：客户端技能商店UI管理
+
+核心API：
+- Initialize()                    初始化显示系统
+- RequestShopList()               请求商店列表
+- GetShopData()                   获取当前商店数据
+- Cleanup()                       清理商店显示
+
+内部机制：
+- 从SkillCardTemplate克隆技能卡片
+- 监听SkillShopList/SkillPurchaseResult事件
+- 监听SkillStockUpdate/SkillRefreshTimeUpdate事件
+- 卡片点击展开购买按钮(BuyButtonFrame)
+- 标题显示刷新倒计时
+
+【11.14 技能商店触发器】SkillShopTrigger (V3.1新增)
+职责：客户端技能商店NPC距离检测
+
+核心API：
+- Initialize()                    初始化触发器
+- Stop()                          停止触发器
+- OpenShop()                      手动打开商店
+- CloseShop()                     手动关闭商店
+- IsNearShop()                    获取当前状态
+
+内部机制：
+- Heartbeat循环检测玩家与NPC距离
+- 使用GameConfig.Shop.OpenDistance判定
+- 进入范围自动打开商店UI
+- 离开范围自动关闭商店UI
+- 技能商店NPC名称：KeepShoper02
+
 =====================================================
 十二、核心数据结构
 =====================================================
@@ -847,6 +932,16 @@ ReplicatedStorage/
     CurrentChapter = number,        -- V2.8
     HouseLevel = number,            -- V2.8
     SkillInventory = {[skillId] = count},  -- V3.0
+    ShopData = {                    -- V2.1/V3.1 商店库存数据
+        [shopId] = {                -- 兵种商店数据 (V2.1)
+            LastRefreshTime = number,
+            Stock = {[unitId] = count},
+        },
+        ["Skill_" + shopId] = {     -- 技能商店数据 (V3.1)
+            LastRefreshTime = number,
+            Stock = {[skillId] = count},
+        },
+    },
 }
 ```
 
@@ -866,10 +961,14 @@ ReplicatedStorage/
 10. V2.11+: 战斗按钮需在MainGui下创建ReturnToHome/UnlockMove
 11. V3.0+: 技能背包UI需按指定结构创建(SkillBackpackGui/BackpackFrame/ItemListFrame/SkillTemplate)
 12. V3.0+: 新增技能只需在SkillConfig.Skills表中添加配置，无需修改其他代码
+13. V3.1+: 技能商店UI需按指定结构创建(SkillStore/StoreBg/ItemContainer/SkillCardTemplate)
+14. V3.1+: 技能商店NPC为KeepShoper02，需在各玩家家园下创建
+15. V3.1+: 技能商店与兵种商店共享刷新周期，由ShopSystem.InitializePlayerShopTimer同时初始化
+16. V3.1+: Robux购买需在Roblox开发者后台配置DevProductId对应的开发者商品
 
 =====================================================
 架构设计文档完成
-版本: V3.0
-最后更新: 2025-12-01
+版本: V3.1
+最后更新: 2025-12-02
 =====================================================
 ]]
