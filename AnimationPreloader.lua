@@ -2,11 +2,17 @@
 脚本名称: AnimationPreloader
 脚本类型: LocalScript (客户端脚本)
 脚本位置: StarterPlayer/StarterPlayerScripts/AnimationPreloader
+版本: V3.2 (集成Loading系统)
 
 职责:
 1. 在客户端启动时预加载所有战斗动画资源
 2. 避免首场战斗时动画从CDN下载导致的卡顿
 3. 确保死亡/攻击/移动动画无缝衔接
+
+V3.2更新:
+- 预加载功能已整合到LoadingController中
+- 此脚本作为备份，仅在LoadingController未加载时执行
+- 避免重复预加载
 ]]
 
 -- 引用服务
@@ -30,6 +36,13 @@ local function WarnLog(...)
 	warn(LOG_PREFIX, ...)
 end
 
+-- V3.2: 检查是否已由LoadingController处理预加载
+task.wait(1) -- 等待LoadingController初始化
+if _G.LoadingController then
+	DebugLog("检测到LoadingController，跳过独立预加载")
+	return
+end
+
 -- 等待配置加载
 local Config = ReplicatedStorage:WaitForChild("Config", 10)
 if not Config then
@@ -43,7 +56,7 @@ if not UnitConfig then
 	return
 end
 
-DebugLog("✅ 动画预加载器启动")
+DebugLog("✅ 动画预加载器启动 (独立模式)")
 
 --[[
 预加载所有兵种的战斗动画

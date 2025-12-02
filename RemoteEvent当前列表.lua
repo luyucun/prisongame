@@ -64,6 +64,11 @@ ReplicatedStorage
         ├──SkillPurchaseResult（RemoteEvent） - 服务器→客户端：返回购买结果(success,message,skillId,newCoins)
         ├──SkillStockUpdate（RemoteEvent） - 服务器→客户端：技能库存更新通知(shopId, stockData)
         └──SkillRefreshTimeUpdate（RemoteEvent） - 服务器→客户端：技能刷新倒计时更新(remainingTime)
+    └──LoadingEvents（Folder）/  【V3.2新增】
+        ├──LoadingProgress（RemoteEvent） - 服务器→客户端：加载进度更新(progress, stageName)
+        ├──LoadingStageUpdate（RemoteEvent） - 服务器→客户端：加载阶段更新(stage)
+        ├──LoadingComplete（RemoteEvent） - 服务器→客户端：加载完成通知
+        └──ClientPreloadComplete（RemoteEvent） - 客户端→服务器：客户端预加载完成通知
 
 
 如果需要补充新的RemoteEvent或者Remotefunction，请在这里列出来，我会自己去创建
@@ -325,3 +330,86 @@ UI配置说明（MainGui）：
    - 两个商店使用相同的刷新间隔（默认300秒/5分钟）
    - ShopSystem.InitializePlayerShopTimer() 会同时初始化两个商店的定时器
    - 库存数据分别存储：兵种商店在 ShopData[shopId]，技能商店在 ShopData["Skill_" + shopId]
+
+
+【V3.2 Loading系统RemoteEvent创建说明】
+位置：ReplicatedStorage/Events/LoadingEvents/ （新建文件夹）
+🆕 LoadingProgress (RemoteEvent) - 需在Studio中手动创建
+🆕 LoadingStageUpdate (RemoteEvent) - 需在Studio中手动创建
+🆕 LoadingComplete (RemoteEvent) - 需在Studio中手动创建
+🆕 ClientPreloadComplete (RemoteEvent) - 需在Studio中手动创建
+
+创建步骤：
+1. 打开Roblox Studio
+2. 导航到 ReplicatedStorage > Events
+3. 右键点击 Events 文件夹
+4. 选择 "Insert Object" > "Folder"
+5. 将新建的 Folder 重命名为 "LoadingEvents"
+6. 右键点击 LoadingEvents 文件夹
+7. 选择 "Insert Object" > "RemoteEvent"
+8. 将新建的 RemoteEvent 重命名为 "LoadingProgress"
+9. 重复步骤7-8，创建 "LoadingStageUpdate"
+10. 重复步骤7-8，创建 "LoadingComplete"
+11. 重复步骤7-8，创建 "ClientPreloadComplete"
+12. 保存游戏
+
+功能说明：
+- LoadingProgress：服务器→客户端：加载进度更新
+  参数：(progress: number, stageName: string) 进度值(0-100)和当前阶段名称
+- LoadingStageUpdate：服务器→客户端：加载阶段更新
+  参数：(stage: string) 加载阶段名称(INIT/DATA_LOADING/HOME_SETUP/SCENE_SETUP/SYNC_DATA/COMPLETE)
+- LoadingComplete：服务器→客户端：加载完成通知
+  参数：无
+- ClientPreloadComplete：客户端→服务器：客户端预加载完成通知
+  参数：无（服务器根据玩家身份处理）
+
+注意：服务端LoadingSystem.lua会在初始化时自动创建这些事件（如果不存在），
+但建议手动创建以确保事件在系统初始化前就存在。
+
+
+【V3.2 Loading系统其他资源创建说明】
+
+1. 服务端系统位置：ServerScriptService/Systems/LoadingSystem
+
+2. 客户端控制器位置：StarterPlayer/StarterPlayerScripts/LoadingController
+
+3. Loading UI结构：StarterGui/Loading/
+   └── Bg (Frame) - 全屏黑色背景
+       ├── LoadingImage (ImageLabel) - 随机显示的背景图片
+       ├── ProgressBg (Frame) - 进度条背景
+       │   ├── Progressbar (Frame) - 进度条填充（Size.X.Scale从0到1）
+       │   └── Number (TextLabel) - 进度百分比显示（XX%格式）
+       └── [其他装饰元素]
+
+4. Loading背景图片资源（3张随机选择）：
+   - rbxassetid://98877166419333
+   - rbxassetid://111664305611167
+   - rbxassetid://136231844959584
+
+5. 加载阶段权重（用于进度计算）：
+   - 服务端进度占60%权重
+   - 客户端预加载占40%权重
+   - 总进度 = 服务端进度 × 0.6 + 客户端进度 × 0.4
+
+6. 加载流程说明：
+   阶段1 - INIT (0%): 初始化开始
+   阶段2 - DATA_LOADING (0-20%): 玩家数据加载
+   阶段3 - HOME_SETUP (20-40%): 基地设置（等待HomeSlot分配）
+   阶段4 - SCENE_SETUP (40-60%): 场景设置（商店/挂机金币等系统初始化）
+   阶段5 - SYNC_DATA (60-80%): 数据同步（技能背包等同步到客户端）
+   阶段6 - COMPLETE (100%): 加载完成
+
+7. 客户端预加载内容：
+   - 动画资源（所有兵种的Show/Idle/Move/Attack/Death动画）
+   - 图标资源（所有兵种图标）
+   - 技能图标（SkillConfig中的技能图标）
+   - Loading背景图片
+
+8. 超时保护：
+   - 客户端60秒超时自动完成Loading
+   - 防止因网络问题导致无限等待
+
+9. 与现有预加载脚本的集成：
+   - AnimationPreloader.lua: 检测到LoadingController后跳过独立预加载
+   - IconPreloader.lua: 检测到LoadingController后跳过独立预加载
+   - 保留原有脚本作为备份，当LoadingController未正常加载时自动启用

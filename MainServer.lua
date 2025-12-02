@@ -56,6 +56,8 @@ local CollisionSystem = require(ServerScriptService.Systems.CollisionSystem)
 local IdleCoinSystem = require(ServerScriptService.Systems.IdleCoinSystem)
 -- V3.0新增 - 技能系统
 local SkillSystem = require(ServerScriptService.Systems.SkillSystem)
+-- V3.2新增 - Loading系统
+local LoadingSystem = require(ServerScriptService.Systems.LoadingSystem)
 
 -- ==================== 系统初始化顺序 ====================
 
@@ -318,6 +320,16 @@ local function InitializeServer()
         warn(GameConfig.LOG_PREFIX, "技能系统初始化失败(返回false)")
     end
 
+    -- 11. 初始化Loading系统 (V3.2新增)
+    success, result = pcall(function()
+        return LoadingSystem.Initialize()
+    end)
+    if not success then
+        warn(GameConfig.LOG_PREFIX, "Loading系统初始化失败(异常):", result)
+    elseif result == false then
+        warn(GameConfig.LOG_PREFIX, "Loading系统初始化失败(返回false)")
+    end
+
     -- 检查是否有关键系统初始化失败
     if initializationFailed then
         warn("==========================================")
@@ -388,14 +400,25 @@ local Players = game:GetService("Players")
 -- 玩家加入时初始化基地
 Players.PlayerAdded:Connect(function(player)
 	task.spawn(function()  -- 使用task.spawn避免阻塞其他玩家加入
+		-- V3.2新增：开始玩家加载流程
+		LoadingSystem.StartPlayerLoading(player)
+
 		-- 🔥修复竞态条件：等待玩家数据加载完成
+		-- V3.2: 通知数据加载阶段开始
+		LoadingSystem.NotifyDataLoading(player, 0)
 		local playerData = DataManager.WaitForPlayerData(player, 10)
 		if not playerData then
 			warn(GameConfig.LOG_PREFIX, "玩家数据加载失败，跳过初始化 -", player.Name)
+			-- V3.2: 即使数据加载失败也要完成Loading流程
+			LoadingSystem.ForceCompleteLoading(player)
 			return
 		end
+		-- V3.2: 通知数据加载完成
+		LoadingSystem.NotifyDataLoadComplete(player)
 
 		-- 🔥等待HomeSlot被设置（最多等待15秒）
+		-- V3.2: 通知基地设置阶段开始
+		LoadingSystem.NotifyHomeSetup(player, 0)
 		local homeId = nil
 		local maxWaitTime = 15
 		local startTime = tick()
@@ -404,6 +427,8 @@ Players.PlayerAdded:Connect(function(player)
 			if homeId and homeId > 0 then
 				break
 			end
+			-- V3.2: 更新基地设置进度
+			LoadingSystem.NotifyHomeSetup(player, (tick() - startTime) / maxWaitTime * 0.5)
 			task.wait(0.2)
 		end
 
@@ -417,6 +442,11 @@ Players.PlayerAdded:Connect(function(player)
 				HomeSystem.InitializePlayerHome(homeId, player)
 			end)
 		end
+		-- V3.2: 通知基地设置完成
+		LoadingSystem.NotifyHomeSetupComplete(player)
+
+		-- V3.2: 通知场景设置阶段开始
+		LoadingSystem.NotifySceneSetup(player, 0)
 
 		-- V2.1修复：初始化玩家商店库存系统
 		pcall(function()
@@ -427,6 +457,7 @@ Players.PlayerAdded:Connect(function(player)
 				player.Name
 			))
 		end)
+		LoadingSystem.NotifySceneSetup(player, 0.25)
 
 		-- V3.1新增：初始化玩家技能商店库存系统
 		pcall(function()
@@ -437,6 +468,7 @@ Players.PlayerAdded:Connect(function(player)
 				player.Name
 			))
 		end)
+		LoadingSystem.NotifySceneSetup(player, 0.5)
 
 		-- V2.6新增：初始化挂机金币系统（HomeSlot已确认存在）
 		pcall(function()
@@ -447,6 +479,13 @@ Players.PlayerAdded:Connect(function(player)
 				player.Name
 			))
 		end)
+		LoadingSystem.NotifySceneSetup(player, 0.75)
+
+		-- V3.2: 通知场景设置完成
+		LoadingSystem.NotifySceneSetupComplete(player)
+
+		-- V3.2: 通知数据同步阶段开始
+		LoadingSystem.NotifyDataSync(player, 0)
 
 		-- V3.0新增：同步技能背包数据到客户端
 		pcall(function()
@@ -457,6 +496,10 @@ Players.PlayerAdded:Connect(function(player)
 				player.Name
 			))
 		end)
+		LoadingSystem.NotifyDataSync(player, 0.5)
+
+		-- V3.2: 通知数据同步完成（这会尝试完成加载流程）
+		LoadingSystem.NotifyDataSyncComplete(player)
 	end)
 end)
 
@@ -464,6 +507,11 @@ end)
 Players.PlayerRemoving:Connect(function(player)
 	local playerId = player.UserId
 	local homeId = PlayerManager.GetPlayerHomeId(player)
+
+	-- V3.2新增：清理玩家加载状态
+	pcall(function()
+		LoadingSystem.CleanupPlayer(player)
+	end)
 
 	-- 1. 如果玩家在战役中，强制结束战役并关门
 	local campaignData = CampaignManager.ActiveCampaigns[playerId]

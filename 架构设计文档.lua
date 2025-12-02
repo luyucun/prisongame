@@ -4,8 +4,8 @@
 =====================================================
 
 项目名称: Roblox 兵种塔防游戏
-当前版本: V3.1
-最后更新: 2025-12-01
+当前版本: V3.2
+最后更新: 2025-12-02
 
 =====================================================
 一、架构设计原则
@@ -58,7 +58,8 @@ ServerScriptService/
 │   ├── IdleCoinSystem.lua       (挂机金币系统 V2.6新增)
 │   ├── HouseUpgradeSystem.lua   (房屋升级系统 V2.8新增)
 │   ├── SkillSystem.lua          (技能系统 V3.0新增)
-│   └── SkillShopSystem.lua      (技能商店系统 V3.1新增)
+│   ├── SkillShopSystem.lua      (技能商店系统 V3.1新增)
+│   └── LoadingSystem.lua        (加载系统 V3.2新增)
 
 StarterPlayer/StarterPlayerScripts/
 ├── UI/
@@ -92,8 +93,9 @@ StarterPlayer/StarterPlayerScripts/
 │   ├── ButtonEffectHelper.lua   (按钮特效辅助)
 │   ├── CoinAnimationHelper.lua  (金币动画辅助)
 │   └── UIEffectController.lua   (UI特效控制)
-├── AnimationPreloader.lua       (动画预加载)
-└── IconPreloader.lua            (图标预加载 V2.1新增)
+├── LoadingController.lua        (加载控制器 V3.2新增)
+├── AnimationPreloader.lua       (动画预加载 V3.2集成)
+└── IconPreloader.lua            (图标预加载 V2.1新增 V3.2集成)
 
 ReplicatedStorage/
 ├── Config/
@@ -120,7 +122,8 @@ ReplicatedStorage/
 │   ├── IdleCoinEvents/          (V2.6新增)
 │   ├── BattleControlEvents/     (V2.11新增)
 │   ├── SkillEvents/             (V3.0新增)
-│   └── SkillShopEvents/         (V3.1新增)
+│   ├── SkillShopEvents/         (V3.1新增)
+│   └── LoadingEvents/           (V3.2新增)
 └── Modules/
     └── FormatHelper.lua         (格式化工具)
 
@@ -284,6 +287,17 @@ ReplicatedStorage/
 - 战斗开始时显示,战斗结束时隐藏
 - 与CampaignStateUpdate事件集成
 
+【3.28 Loading系统】LoadingSystem/LoadingController (V3.2新增)
+- 服务端LoadingSystem管理玩家加载状态和进度
+- 客户端LoadingController显示Loading界面和预加载资源
+- 加载阶段: INIT → DATA_LOADING → HOME_SETUP → SCENE_SETUP → SYNC_DATA → COMPLETE
+- 服务端进度权重60%,客户端预加载权重40%
+- 客户端预加载内容: 动画/图标/技能图标/Loading背景图
+- 随机显示3张Loading背景图之一
+- 进度条平滑动画(TweenService)
+- 60秒超时保护机制
+- 与AnimationPreloader/IconPreloader集成(备份机制)
+
 =====================================================
 四、版本历史
 =====================================================
@@ -403,6 +417,17 @@ ReplicatedStorage/
 - 库存系统: 概率刷新/库存上限/售罄机制
 - 支持金币购买和Robux购买(MarketplaceService)
 - 技能商店NPC: KeepShoper02
+
+【V3.2】Loading系统
+- LoadingSystem: 服务端加载状态管理
+- LoadingController: 客户端Loading界面与预加载
+- 加载阶段: INIT/DATA_LOADING/HOME_SETUP/SCENE_SETUP/SYNC_DATA/COMPLETE
+- 加载进度: 服务端60%权重 + 客户端40%权重
+- Loading UI: 随机背景图/进度条/百分比显示
+- 客户端预加载: 动画/图标/技能图标资源
+- 超时保护: 60秒客户端超时自动完成
+- AnimationPreloader/IconPreloader集成: 备份机制
+- LoadingEvents: 新增事件文件夹
 
 =====================================================
 五、核心技术要点
@@ -600,6 +625,12 @@ ReplicatedStorage/
 - SkillPurchaseResult: Server → Client (购买结果: success, message, skillId, newCoins)
 - SkillStockUpdate: Server → Client (技能库存更新: shopId, stockData)
 - SkillRefreshTimeUpdate: Server → Client (刷新倒计时: remainingTime)
+
+【LoadingEvents】V3.2
+- LoadingProgress: Server → Client (加载进度更新: progress, stageName)
+- LoadingStageUpdate: Server → Client (加载阶段更新: stage)
+- LoadingComplete: Server → Client (加载完成通知)
+- ClientPreloadComplete: Client → Server (客户端预加载完成通知)
 
 =====================================================
 八、最佳实践
@@ -879,6 +910,55 @@ ReplicatedStorage/
 - 离开范围自动关闭商店UI
 - 技能商店NPC名称：KeepShoper02
 
+【11.15 Loading系统】LoadingSystem (V3.2新增)
+职责：服务端玩家加载状态管理
+
+核心API：
+- Initialize()                    初始化Loading系统
+- StartPlayerLoading(player)      开始玩家加载流程
+- NotifyDataLoading(player, sub)  通知数据加载阶段
+- NotifyDataLoadComplete(player)  通知数据加载完成
+- NotifyHomeSetup(player, sub)    通知基地设置阶段
+- NotifyHomeSetupComplete(player) 通知基地设置完成
+- NotifySceneSetup(player, sub)   通知场景设置阶段
+- NotifySceneSetupComplete(player)通知场景设置完成
+- NotifyDataSync(player, sub)     通知数据同步阶段
+- NotifyDataSyncComplete(player)  通知数据同步完成
+- TryCompleteLoading(player)      尝试完成加载
+- ForceCompleteLoading(player)    强制完成加载(超时)
+- IsPlayerLoaded(player)          检查是否加载完成
+- CleanupPlayer(player)           清理玩家加载状态
+
+内部机制：
+- playerLoadingStates存储每个玩家的加载状态
+- 加载阶段权重: INIT(0%)/DATA_LOADING(20%)/HOME_SETUP(40%)/SCENE_SETUP(60%)/SYNC_DATA(80%)/COMPLETE(100%)
+- 需要服务端和客户端同时完成才触发LoadingComplete
+- 自动创建LoadingEvents文件夹和RemoteEvent
+
+【11.16 Loading控制器】LoadingController (V3.2新增)
+职责：客户端Loading界面与资源预加载
+
+核心API：
+- LoadingController.IsLoadingComplete()  检查是否加载完成
+- LoadingController.GetProgress()        获取当前进度
+- LoadingController.ForceHide()          强制隐藏Loading(紧急)
+
+内部机制：
+- 初始化时立即显示Loading界面
+- 随机选择3张背景图之一显示
+- 服务端进度60%权重 + 客户端预加载40%权重
+- 客户端预加载内容:
+  - 动画资源(Show/Idle/Move/Attack/Death)
+  - 兵种图标
+  - 技能图标
+  - Loading背景图片
+- 分批预加载(每批10个资源)避免卡顿
+- 60秒超时看门狗自动完成
+- 进度条TweenService平滑动画
+- 完成后0.5秒淡出效果
+
+全局访问：_G.LoadingController
+
 =====================================================
 十二、核心数据结构
 =====================================================
@@ -965,10 +1045,13 @@ ReplicatedStorage/
 14. V3.1+: 技能商店NPC为KeepShoper02，需在各玩家家园下创建
 15. V3.1+: 技能商店与兵种商店共享刷新周期，由ShopSystem.InitializePlayerShopTimer同时初始化
 16. V3.1+: Robux购买需在Roblox开发者后台配置DevProductId对应的开发者商品
+17. V3.2+: Loading UI需按指定结构创建(Loading/Bg/LoadingImage/ProgressBg/Progressbar/Number)
+18. V3.2+: LoadingController会自动检测并使用AnimationPreloader/IconPreloader作为备份
+19. V3.2+: 服务端需在PlayerAdded中调用LoadingSystem各阶段通知方法
 
 =====================================================
 架构设计文档完成
-版本: V3.1
+版本: V3.2
 最后更新: 2025-12-02
 =====================================================
 ]]

@@ -2,7 +2,7 @@
 脚本名称: IconPreloader
 脚本类型: LocalScript (客户端)
 脚本位置: StarterPlayer/StarterPlayerScripts/IconPreloader
-版本: V2.3
+版本: V3.2 (集成Loading系统)
 ]]
 
 --[[
@@ -12,6 +12,11 @@
 2. 使用ContentProvider批量下载图片资源
 3. 避免打开商店/背包时图标加载卡顿
 4. 提供加载进度日志
+
+V3.2更新:
+- 预加载功能已整合到LoadingController中
+- 此脚本作为备份，仅在LoadingController未加载时执行
+- 避免重复预加载
 
 使用说明:
 - 此脚本会在玩家进入游戏后自动运行
@@ -30,7 +35,7 @@ local DEBUG_MODE = false
 local LOG_PREFIX = "[IconPreloader]"
 
 -- 延迟启动时间(秒) - 等待其他系统初始化
-local STARTUP_DELAY = 0.5
+local STARTUP_DELAY = 1.5  -- V3.2: 增加延迟以等待LoadingController
 
 -- 日志函数
 local function Log(...)
@@ -38,6 +43,25 @@ local function Log(...)
 		print(LOG_PREFIX, ...)
 	end
 end
+
+-- V3.2: 检查是否已由LoadingController处理预加载
+task.wait(STARTUP_DELAY)
+if _G.LoadingController then
+	Log("检测到LoadingController，跳过独立预加载")
+
+	-- 设置全局标记表示预加载已完成（由LoadingController处理）
+	_G.IconPreloadComplete = true
+	_G.IconPreloadStats = {
+		Total = 0,
+		Success = 0,
+		Failed = 0,
+		Duration = 0,
+		Source = "LoadingController"
+	}
+	return
+end
+
+Log("图标预加载系统启动 (独立模式)...")
 
 --[[
 收集所有需要预加载的图标资源
