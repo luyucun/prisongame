@@ -404,10 +404,11 @@ function BattleManager.StartBattle(battleId)
     battle.DefenseUnits = validDefenseUnits
 
     -- V2.0新增：初始化CombatSystem状态并启动AI
-    -- 如果CombatSystem初始化失败，不启动AI
+    -- V3.0修复：先完成所有单位的注册，再统一启动AI，避免时序问题
     local finalAttackUnits = {}
     local finalDefenseUnits = {}
 
+    -- ==================== 第一阶段：注册所有单位（不启动AI）====================
     -- 处理攻击方
     for i, unit in ipairs(battle.AttackUnits) do
         -- V2.5新增：标记阵营
@@ -422,10 +423,7 @@ function BattleManager.StartBattle(battleId)
 
         if success then
             PhysicsManager.ConfigureUnitPhysics(unit, "ally")
-
-            -- 4. 启动AI
-            local aiStartResult = UnitAI.StartAI(unit)
-
+            -- V3.0修复：暂时不启动AI，等所有单位注册完成后再统一启动
             table.insert(finalAttackUnits, unit)
         end
     end
@@ -459,12 +457,22 @@ function BattleManager.StartBattle(battleId)
 
         if success then
             PhysicsManager.ConfigureUnitPhysics(unit, "enemy")
-
-            -- 4. 启动AI
-            local aiStartResult = UnitAI.StartAI(unit)
-
+            -- V3.0修复：暂时不启动AI，等所有单位注册完成后再统一启动
             table.insert(finalDefenseUnits, unit)
         end
+    end
+
+    -- ==================== 第二阶段：统一启动AI ====================
+    -- V3.0修复：确保所有单位都已注册到UnitManager后再启动AI
+    -- 这样FindNearestEnemy才能正确找到所有敌人
+    DebugLog(string.format("所有单位注册完成，开始启动AI - 攻击方:%d, 防守方:%d", #finalAttackUnits, #finalDefenseUnits))
+
+    for _, unit in ipairs(finalAttackUnits) do
+        UnitAI.StartAI(unit)
+    end
+
+    for _, unit in ipairs(finalDefenseUnits) do
+        UnitAI.StartAI(unit)
     end
 
     -- 再次检查：如果有单位初始化失败，更新战斗列表

@@ -1467,51 +1467,53 @@ local function HandleMoving(unitModel, aiData, state)
 		return
 	end
 
-	-- ==================== V2.9.5新增：基于速度的卡住检测 ====================
-	-- 如果单位应该在移动但速度接近0，说明被卡住了，立即重新寻路
-	local currentPos = aiData.HumanoidRootPart.Position
+	-- ==================== V3.0极速防撞墙检测：速度骤降瞬间判定 ====================
+	-- 🔥 核心优化：不依赖位置累积（太慢），而是直接检测物理速度
+	-- 只要Humanoid想移动但速度接近0，立即判定撞墙，0.05秒内响应
 	local now = tick()
+	local h = aiData.Humanoid
+	local root = aiData.HumanoidRootPart
 
-	-- 初始化位置追踪
-	if not aiData.LastMovingPos then
-		aiData.LastMovingPos = currentPos
-		aiData.LastMovingTime = now
-		aiData.StuckCount = 0
-	else
-		local timeDelta = now - aiData.LastMovingTime
-		-- 每0.3秒检测一次（比PathService更频繁）
-		if timeDelta >= 0.3 then
-			local posDelta = (currentPos - aiData.LastMovingPos).Magnitude
-			local expectedSpeed = aiData.Humanoid.WalkSpeed or 16
-			local expectedDistance = expectedSpeed * timeDelta * 0.3  -- 期望移动距离的30%作为阈值
+	-- 只有当单位试图移动时才检测
+	if h.MoveDirection.Magnitude > 0.1 then
+		-- 检测实际物理速度 (XZ平面，忽略Y轴跳跃影响)
+		local velocity = root.AssemblyLinearVelocity * Vector3.new(1, 0, 1)
+		local speed = velocity.Magnitude
 
-			-- 如果实际移动距离远小于期望，说明被卡住
-			if posDelta < math.min(0.3, expectedDistance) then
-				aiData.StuckCount = (aiData.StuckCount or 0) + 1
+		-- 阈值：如果速度小于 1.0 studs/s (几乎停滞) 且距离上次检测超过 0.1秒
+		if speed < 1.0 and (now - (aiData.LastStuckCheckTime or 0) > 0.1) then
+			aiData.StuckFrameCount = (aiData.StuckFrameCount or 0) + 1
 
-				-- 连续2次检测到卡住（0.6秒），立即触发重新寻路
-				if aiData.StuckCount >= 2 then
-					DebugLog(string.format("%s 速度检测卡住(移动%.2f studs in %.2fs)，立即重寻",
-						state.UnitId, posDelta, timeDelta))
+			-- 🔥 连续 3 帧 (约0.05-0.1秒) 检测到速度异常，判定为撞墙
+			if aiData.StuckFrameCount >= 3 then
+				DebugLog(string.format("🚨 %s 极速撞墙检测! 速度: %.2f, 立即重寻", state.UnitId, speed))
 
-					-- 清理旧路径并重置寻路标志
-					PathService.ClearPath(unitModel)
-					aiData.PathRequested = false
-					aiData.StuckCount = 0
+				-- 1. 立即物理刹车，防止继续怼墙
+				h:Move(Vector3.zero)
+				root.AssemblyLinearVelocity = Vector3.zero
 
-					-- 强制触发新的寻路请求
-					PathService.ForceRepath(unitModel)
-				end
-			else
-				-- 正常移动，重置卡住计数
-				aiData.StuckCount = 0
+				-- 2. 清理旧路径和状态
+				aiData.StuckFrameCount = 0
+				aiData.LastStuckCheckTime = now + 1.0 -- 给1秒冷却防止疯狂触发
+				PathService.ClearPath(unitModel)
+				aiData.PathRequested = false
+
+				-- 3. 强制触发高优先级寻路
+				PathService.ForceRepath(unitModel)
+
+				-- 4. 短暂回退到 IDLE 状态一帧，重置状态机
+				-- 这样可以让寻路逻辑重新接管，而不是继续执行下面的直连逻辑
+				return
 			end
-
-			-- 更新追踪位置
-			aiData.LastMovingPos = currentPos
-			aiData.LastMovingTime = now
+		else
+			-- 速度正常，重置计数器
+			if speed > 2.0 then
+				aiData.StuckFrameCount = 0
+			end
 		end
+		aiData.LastStuckCheckTime = now
 	end
+	-- ====================================================================
 
 	-- 确保播放移动动画
 	AnimationController.SwitchToMove(unitModel, aiData, state)
@@ -1607,7 +1609,39 @@ local function HandleMoving(unitModel, aiData, state)
 	end
 
 	-- 策略2：优先直线移动（简单场景，无寻路开销）
-	if HasLineOfSight(unitModel, target, aiData) then
+	-- ==================== V3.0新增：触须射线防撞检测 ====================
+	-- 🔥 在判断HasLineOfSight之前，先用短射线探测正前方是否有墙
+	-- 防止射线检测漏判（穿过墙缝/复杂几何体）导致撞墙
+	local isFrontBlocked = false
+	local frontRayParams = RaycastParams.new()
+	frontRayParams.FilterType = Enum.RaycastFilterType.Exclude
+
+	-- 排除自己、目标和所有兵种文件夹
+	local frontFilterList = {unitModel, target}
+	local unitsFolder = workspace:FindFirstChild("Units")
+	if unitsFolder then
+		table.insert(frontFilterList, unitsFolder)
+	end
+	frontRayParams.FilterDescendantsInstances = frontFilterList
+
+	local frontOrigin = aiData.HumanoidRootPart.Position
+	local frontDir = aiData.HumanoidRootPart.CFrame.LookVector * 4.0 -- 探测前方4米
+
+	local frontRay = workspace:Raycast(frontOrigin, frontDir, frontRayParams)
+
+	if frontRay then
+		-- 只有打中可碰撞的墙壁(CanCollide=true)才算阻挡
+		-- 忽略特效等CanCollide=false的物体
+		if frontRay.Instance.CanCollide then
+			isFrontBlocked = true
+			DebugLog(string.format("%s 触须检测到前方墙壁: %s, 距离%.1f",
+				state.UnitId, frontRay.Instance.Name, frontRay.Distance))
+		end
+	end
+	-- ====================================================================
+
+	-- 只有在触须没检测到墙壁 且 HasLineOfSight通过时，才允许直线移动
+	if not isFrontBlocked and HasLineOfSight(unitModel, target, aiData) then
 		-- 直线可达，但要计算停靠距离避免转圈
 		local targetPart = target:FindFirstChild("HumanoidRootPart") or target.PrimaryPart
 		if targetPart then

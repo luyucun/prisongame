@@ -73,6 +73,12 @@ PlayerData = {
     SkillInventory = {         -- V3.0技能系统
         [skillId] = count,     -- 技能ID: 数量
     },
+    TaskData = {               -- V3.3任务系统
+        CurrentTaskId = number,    -- 当前任务ID
+        CurrentProgress = number,  -- 当前任务进度
+        CompletedTaskIds = {},     -- 已完成的任务ID列表
+        AllTasksCompleted = boolean, -- 是否全部任务完成
+    },
     LastSaveTime = number,     -- 最后保存时间
 }
 ]]
@@ -185,6 +191,9 @@ local function LoadFromDataStore(player)
 		if data.SkillInventory then
 			data.SkillInventory = RestoreFromDataStore(data.SkillInventory)  -- V3.0：恢复技能背包数据
 		end
+		if data.TaskData then
+			data.TaskData = RestoreFromDataStore(data.TaskData)  -- V3.3：恢复任务数据
+		end
 		return data
 	elseif not success then
 		warn(string.format(
@@ -220,6 +229,7 @@ local function SaveToDataStore(player, playerData, userId)
 		IdleCoinData = SanitizeForDataStore(playerData.IdleCoinData),  -- V2.6：保存挂机金币数据
 		ChapterProgress = SanitizeForDataStore(playerData.ChapterProgress),  -- V2.8：保存章节进度数据
 		SkillInventory = SanitizeForDataStore(playerData.SkillInventory),  -- V3.0：保存技能背包
+		TaskData = SanitizeForDataStore(playerData.TaskData),  -- V3.3：保存任务数据
 		LastSaveTime = os.time(),
 	}
 
@@ -267,6 +277,12 @@ local function CreateDefaultData(player)
             CurrentHouseModel = "PrisonLv1",  -- 默认初始房屋
         },
         SkillInventory = {},  -- V3.0技能系统：初始化空技能背包
+        TaskData = {  -- V3.3任务系统：初始化
+            CurrentTaskId = 1001,     -- 默认从第一个任务开始（需要与TaskConfig.GetFirstTaskId()同步）
+            CurrentProgress = 0,
+            CompletedTaskIds = {},
+            AllTasksCompleted = false,
+        },
         LastSaveTime = os.time(),
     }
 end
@@ -339,6 +355,16 @@ function DataManager.InitializePlayerData(player)
         -- V3.0技能系统：确保SkillInventory字段存在（向后兼容）
         if not playerData.SkillInventory then
             playerData.SkillInventory = {}
+        end
+
+        -- V3.3任务系统：确保TaskData字段存在（向后兼容）
+        if not playerData.TaskData then
+            playerData.TaskData = {
+                CurrentTaskId = 1001,  -- 默认从第一个任务开始
+                CurrentProgress = 0,
+                CompletedTaskIds = {},
+                AllTasksCompleted = false,
+            }
         end
 
     else

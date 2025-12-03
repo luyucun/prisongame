@@ -1516,6 +1516,16 @@ local function OnConfirmPlacement(player, instanceId, position)
 
 	local success, message = PlacementSystem.PlaceUnit(player, instanceId, position)
 
+	-- V3.3任务系统：放置成功时通知任务系统
+	if success then
+		local TaskSystem = nil
+		local taskModule = ServerScriptService.Systems:FindFirstChild("TaskSystem")
+		if taskModule then
+			TaskSystem = require(taskModule)
+			TaskSystem.OnPlaceUnit(player, instanceId)
+		end
+	end
+
 	-- 通知客户端结果
 	if InitializeEvents() then
 		local responseEvent = PlacementEvents:FindFirstChild("PlacementResponse")

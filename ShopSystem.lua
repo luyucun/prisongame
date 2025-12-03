@@ -910,6 +910,14 @@ local function OnPurchaseUnit(player, unitId)
 		local instanceId = type(instanceData) == "table" and instanceData.InstanceId or "unknown"
 		SendSuccess(player, "购买成功", unitId, newCoins, instanceId)
 
+		-- V3.3任务系统：通知购买兵种
+		local TaskSystem = nil
+		local taskModule = ServerScriptService.Systems:FindFirstChild("TaskSystem")
+		if taskModule then
+			TaskSystem = require(taskModule)
+			TaskSystem.OnPurchaseUnit(player, unitId)
+		end
+
 	end)
 
 	if not success then

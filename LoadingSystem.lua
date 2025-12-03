@@ -2,13 +2,18 @@
 脚本名称: LoadingSystem
 脚本类型: ModuleScript (服务端)
 脚本位置: ServerScriptService/Systems/LoadingSystem
-版本: V3.2
+版本: V3.2.4
 
 职责:
 1. 管理玩家加载流程
 2. 协调各系统初始化顺序
 3. 通知客户端加载进度
 4. 确保所有数据和资源准备就绪后才允许游戏
+
+V3.2.4更新:
+- 【修复】处理竞态条件：缓存提前到达的ClientPreloadComplete消息
+- 【修复】StartPlayerLoading时检查是否有缓存的预加载完成消息
+- 【修复】CleanupPlayer时同时清理缓存
 ]]
 
 local LoadingSystem = {}
@@ -44,6 +49,10 @@ local STAGE_WEIGHTS = {
 
 -- 玩家加载状态 [UserId] = {Stage, Progress, StartTime, ...}
 local playerLoadingStates = {}
+
+-- V3.2.4新增：缓存提前到达的客户端预加载完成消息
+-- 用于处理客户端比服务端StartPlayerLoading更快完成预加载的情况
+local pendingClientPreloadComplete = {}  -- [UserId] = true
 
 -- RemoteEvent引用
 local LoadingEvents = nil
@@ -203,16 +212,23 @@ function LoadingSystem.Initialize()
 	LoadingEvents = GetOrCreateLoadingEvents()
 
 	-- 监听客户端预加载完成事件
+	-- V3.2.4修复：处理竞态条件，如果客户端消息比StartPlayerLoading先到达，缓存该状态
 	local clientCompleteEvent = LoadingEvents:FindFirstChild("ClientPreloadComplete")
 	if clientCompleteEvent then
 		clientCompleteEvent.OnServerEvent:Connect(function(player)
 			local userId = player.UserId
 			if playerLoadingStates[userId] then
+				-- 正常情况：加载状态已存在，直接标记完成
 				playerLoadingStates[userId].ClientPreloadComplete = true
 				DebugLog("客户端预加载完成:", player.Name)
 
 				-- 检查是否可以完成加载
 				LoadingSystem.TryCompleteLoading(player)
+			else
+				-- V3.2.4修复：加载状态尚不存在（客户端先于服务端StartPlayerLoading完成）
+				-- 缓存此消息，等StartPlayerLoading时检查
+				pendingClientPreloadComplete[userId] = true
+				DebugLog("客户端预加载完成(缓存，等待StartPlayerLoading):", player.Name)
 			end
 		end)
 	end
@@ -228,19 +244,26 @@ end
 function LoadingSystem.StartPlayerLoading(player)
 	local userId = player.UserId
 
+	-- V3.2.4修复：检查是否有提前到达的客户端预加载完成消息
+	local hasPendingPreload = pendingClientPreloadComplete[userId] == true
+	if hasPendingPreload then
+		pendingClientPreloadComplete[userId] = nil  -- 清除缓存
+		DebugLog("检测到缓存的客户端预加载完成消息:", player.Name)
+	end
+
 	-- 初始化加载状态
 	playerLoadingStates[userId] = {
 		Stage = LoadingSystem.LoadingStage.INIT,
 		Progress = 0,
 		StartTime = tick(),
-		ClientPreloadComplete = false,
+		ClientPreloadComplete = hasPendingPreload,  -- V3.2.4：如果有缓存，直接标记为true
 		DataLoaded = false,
 		HomeSetup = false,
 		SceneSetup = false,
 		DataSynced = false,
 	}
 
-	DebugLog("开始玩家加载流程:", player.Name)
+	DebugLog("开始玩家加载流程:", player.Name, "ClientPreloadComplete:", hasPendingPreload)
 	UpdatePlayerLoadingState(player, LoadingSystem.LoadingStage.INIT, 0)
 end
 
@@ -403,7 +426,9 @@ end
 @param player Player - 玩家对象
 ]]
 function LoadingSystem.CleanupPlayer(player)
-	playerLoadingStates[player.UserId] = nil
+	local userId = player.UserId
+	playerLoadingStates[userId] = nil
+	pendingClientPreloadComplete[userId] = nil  -- V3.2.4：同时清理缓存
 	DebugLog("清理玩家加载状态:", player.Name)
 end
 

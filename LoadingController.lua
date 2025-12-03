@@ -2,13 +2,18 @@
 脚本名称: LoadingController
 脚本类型: LocalScript (客户端)
 脚本位置: StarterPlayer/StarterPlayerScripts/LoadingController
-版本: V3.2.3
+版本: V3.2.4
 
 职责:
 1. 显示Loading界面
 2. 管理客户端资源预加载
 3. 接收服务端加载进度
 4. 控制Loading界面显示/隐藏
+
+V3.2.4更新:
+- 【修复】超时时同时通知服务器ClientPreloadComplete，避免服务端加载状态永远无法结束
+- 【修复】监听CharacterAdded，确保角色后生成时也能禁用移动
+- 【修复】Loading结束时断开CharacterAdded连接并恢复移动
 
 V3.2.3更新:
 - 【修复】立即连接服务端事件，不再放在task.spawn中
@@ -82,6 +87,9 @@ local LoadingEvents = nil
 local originalWalkSpeed = 16
 local originalJumpPower = 50
 
+-- V3.2.4新增：CharacterAdded连接，用于在Loading结束时断开
+local characterAddedConnection = nil
+
 -- ==================== 私有函数 ====================
 
 local function DebugLog(...)
@@ -91,29 +99,63 @@ local function DebugLog(...)
 end
 
 --[[
+禁用玩家操作（针对单个角色）
+V3.2.4新增：独立函数，可被CharacterAdded调用
+@param character Model - 角色模型
+]]
+local function DisableCharacterMovement(character)
+	if not character then return end
+
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		-- 保存原始值（仅首次保存）
+		if originalWalkSpeed == 16 and humanoid.WalkSpeed > 0 then
+			originalWalkSpeed = humanoid.WalkSpeed
+		end
+		if originalJumpPower == 50 and humanoid.JumpPower > 0 then
+			originalJumpPower = humanoid.JumpPower
+		end
+		humanoid.WalkSpeed = 0
+		humanoid.JumpPower = 0
+		DebugLog("角色移动已禁用:", character.Name)
+	end
+end
+
+--[[
 禁用玩家操作
+V3.2.4修复：监听CharacterAdded，确保角色后生成时也能禁用移动
 ]]
 local function DisablePlayerControls()
-	-- 1. 禁用角色移动
+	-- 1. 禁用当前角色移动（如果存在）
 	local character = LocalPlayer.Character
 	if character then
-		local humanoid = character:FindFirstChildOfClass("Humanoid")
-		if humanoid then
-			originalWalkSpeed = humanoid.WalkSpeed
-			originalJumpPower = humanoid.JumpPower
-			humanoid.WalkSpeed = 0
-			humanoid.JumpPower = 0
-		end
+		DisableCharacterMovement(character)
 	end
 
-	-- 2. 禁用部分Roblox默认UI（避免PlayerList警告）
+	-- 2. V3.2.4新增：监听CharacterAdded，处理角色后生成的情况
+	-- 断开之前的连接（如果存在）
+	if characterAddedConnection then
+		characterAddedConnection:Disconnect()
+	end
+	characterAddedConnection = LocalPlayer.CharacterAdded:Connect(function(newCharacter)
+		-- 只有在Loading未完成时才禁用移动
+		if not isLoadingComplete then
+			-- 等待Humanoid加载
+			local humanoid = newCharacter:WaitForChild("Humanoid", 5)
+			if humanoid then
+				DisableCharacterMovement(newCharacter)
+			end
+		end
+	end)
+
+	-- 3. 禁用部分Roblox默认UI（避免PlayerList警告）
 	pcall(function()
 		StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false)
 		StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Chat, false)
 		StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.EmotesMenu, false)
 	end)
 
-	-- 3. 禁用鼠标锁定
+	-- 4. 禁用鼠标锁定
 	pcall(function()
 		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
 	end)
@@ -123,8 +165,15 @@ end
 
 --[[
 恢复玩家操作
+V3.2.4修复：断开CharacterAdded连接
 ]]
 local function EnablePlayerControls()
+	-- 0. V3.2.4新增：断开CharacterAdded连接，不再需要监听
+	if characterAddedConnection then
+		characterAddedConnection:Disconnect()
+		characterAddedConnection = nil
+	end
+
 	-- 1. 恢复角色移动
 	local character = LocalPlayer.Character
 	if character then
@@ -498,6 +547,7 @@ end
 
 --[[
 超时处理
+V3.2.4修复：超时时同时通知服务器，避免服务端加载状态永远无法结束
 ]]
 local function StartTimeoutWatchdog()
 	task.spawn(function()
@@ -506,6 +556,15 @@ local function StartTimeoutWatchdog()
 			task.wait(1)
 			if tick() - startTime > LOADING_TIMEOUT then
 				warn(LOG_PREFIX, "加载超时，强制完成")
+
+				-- V3.2.4修复：超时时也需要标记客户端预加载完成并通知服务器
+				if not clientPreloadComplete then
+					clientPreloadComplete = true
+					clientPreloadProgress = 100
+					-- 通知服务器客户端预加载完成（即使是超时完成）
+					NotifyServerPreloadComplete()
+				end
+
 				isLoadingComplete = true
 				HideLoadingScreen()
 				break

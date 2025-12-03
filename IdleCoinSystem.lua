@@ -476,6 +476,14 @@ function IdleCoinSystem.OnCollectRequest(player)
 		-- 保存数据
 		DataManager.SavePlayerDataThrottled(player)
 
+		-- V3.3任务系统：通知领取挂机金币
+		local TaskSystem = nil
+		local taskModule = ServerScriptService.Systems:FindFirstChild("TaskSystem")
+		if taskModule then
+			TaskSystem = require(taskModule)
+			TaskSystem.OnCollectIdleCoin(player)
+		end
+
 		print(string.format(
 			"%s [IdleCoinSystem] 玩家 %s 领取了 %d 挂机金币，当前金币 %d",
 			GameConfig.LOG_PREFIX,

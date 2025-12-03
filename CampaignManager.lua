@@ -640,6 +640,13 @@ function CampaignManager.StartCampaign(player)
 		return false
 	end
 
+	-- 重启/重新开战前，彻底清理旧的关卡缓存与路径缓存，避免复用上一次关卡的空气墙/敌人状态
+	StageService.CleanupStages(playerId)
+	ClearPathCache(homeId)
+
+	-- [修复步骤 1]：清理后等待一帧，确保物理引擎处理完 Destroy
+	task.wait()
+
 	-- 获取PlacementSystem中已放置的单位
 	local placementModule = SystemsFolder:FindFirstChild("PlacementSystem")
 	if not placementModule then
@@ -799,6 +806,13 @@ function CampaignManager.StartCampaign(player)
 	-- 锁定家园操作
 	LockHomeOperations(player, true)
 
+	-- [修复步骤 2]：显式预加载第一关，并强制等待 NavMesh 更新
+	local stage1 = StageService.GetOrCreateStage(playerId, 1, false)
+
+	-- ⭐⭐ 关键修复：强制等待 0.2~0.3 秒 ⭐⭐
+	-- 这段时间足够 Roblox 重新计算动态 NavMesh，识别出墙壁
+	task.wait(0.3)
+
 	-- V2.8优化：延迟4秒显示战斗特效（RedLine）
 	task.delay(4, function()
 		SetHomeFightingEffect(homeId, true)
@@ -916,6 +930,10 @@ function CampaignManager.MarchToStage(campaignData, stageNum)
 		end
 	end
 
+	-- ⭐⭐ 关键修复：修改空气墙后等待一小会儿 ⭐⭐
+	-- AirWall 的 CanCollide 属性改变也会触发 NavMesh 更新，不等待的话可能会寻路失败
+	task.wait(0.1)
+
 	-- 获取目标IdleFloor
 	local targetIdleFloor = stageFolder:FindFirstChild("IdleFloor", true)
 	if not targetIdleFloor then
@@ -924,64 +942,103 @@ function CampaignManager.MarchToStage(campaignData, stageNum)
 
 	-- 构建单位移动目标列表
 	-- V2.8修复: 使用PlacementConfig.GridToWorld计算正确的行军目标位置
+	-- V2.9修复: 添加随机偏移避免多个单位目标位置重叠导致寻路混乱
+	-- V3.0修复: 增大偏移量(0.5→2.0)，并使用确定性排序确保行为一致
 	local moveTargets = {}
 	local moveCount = 0
 	local targetFloorCenter = targetIdleFloor.Position
 
+	-- V3.0修复：将units转为数组并按InstanceId排序，确保遍历顺序一致
+	-- 避免pairs()的不确定性导致每次Restart行为不同
+	local sortedUnits = {}
 	for unitInstance, unitData in pairs(campaignData.Units) do
 		if not unitData.IsDead and unitInstance and unitInstance.Parent then
-			-- V2.8修复: 使用完整的GridX/GridZ/GridWidth/GridDepth计算目标位置
-			local gridX = unitData.GridX
-			local gridZ = unitData.GridZ
-			local gridWidth = unitData.GridWidth or 1
-			local gridDepth = unitData.GridDepth or gridWidth
+			table.insert(sortedUnits, {
+				instance = unitInstance,
+				data = unitData,
+				sortKey = unitData.InstanceId or unitInstance.Name or tostring(unitInstance)
+			})
+		end
+	end
+	table.sort(sortedUnits, function(a, b)
+		return a.sortKey < b.sortKey
+	end)
 
-			-- 使用PlacementConfig.GridToWorld计算目标IdleFloor上的中心位置
-			local targetPosition = PlacementConfig.GridToWorld(gridX, gridZ, targetFloorCenter, gridWidth, gridDepth)
-			local targetCFrame = CFrame.new(targetPosition)
+	for unitIndex, entry in ipairs(sortedUnits) do
+		local unitInstance = entry.instance
+		local unitData = entry.data
 
-			moveTargets[unitInstance] = targetCFrame
-			moveCount = moveCount + 1
+		-- V2.8修复: 使用完整的GridX/GridZ/GridWidth/GridDepth计算目标位置
+		local gridX = unitData.GridX
+		local gridZ = unitData.GridZ
+		local gridWidth = unitData.GridWidth or 1
+		local gridDepth = unitData.GridDepth or gridWidth
 
-			DebugLog(string.format("  行军目标 %s: GridX=%d, GridZ=%d, 占地=%dx%d, 目标=(%.1f, %.1f, %.1f)",
-				unitData.UnitId, gridX, gridZ, gridWidth, gridDepth,
-				targetPosition.X, targetPosition.Y, targetPosition.Z))
+		-- 使用PlacementConfig.GridToWorld计算目标IdleFloor上的中心位置
+		local targetPosition = PlacementConfig.GridToWorld(gridX, gridZ, targetFloorCenter, gridWidth, gridDepth)
 
-			-- 设置单位移动速度
-			local unitId = unitInstance:GetAttribute("UnitId") or unitData.UnitId or unitInstance.Name
-			if unitId and type(unitId) ~= "string" then
-				unitId = tostring(unitId)
-			end
-			local humanoid = unitInstance:FindFirstChild("Humanoid")
-			if humanoid and unitId then
-				local UnitConfigModule = require(ReplicatedStorage.Config.UnitConfig)
-				local success, configSpeed = pcall(function()
-					return UnitConfigModule.GetMoveSpeed(unitId)
-				end)
-				if success and configSpeed and type(configSpeed) == "number" and configSpeed > 0 then
-					humanoid.WalkSpeed = configSpeed
-					DebugLog(string.format("  ✅ %s 设置移动速度: %.1f", tostring(unitInstance.Name), configSpeed))
-				else
-					-- 使用默认速度
-					local defaultSpeed = humanoid.WalkSpeed
-					if defaultSpeed <= 0 then
-						defaultSpeed = 16
-					end
-					humanoid.WalkSpeed = defaultSpeed
-					DebugLog(string.format("  ℹ %s 使用默认速度: %.1f", tostring(unitInstance.Name), defaultSpeed))
+		-- V3.0修复：增大偏移量从0.5到2.0 studs，更有效地分散单位避免拥挤
+		-- 使用单位索引和网格位置作为种子，确保同一单位每次偏移一致
+		local offsetSeed = unitIndex * 1000 + (gridX or 0) * 100 + (gridZ or 0)
+		local randomX = (math.sin(offsetSeed) * 2.0)  -- -2.0 到 2.0
+		local randomZ = (math.cos(offsetSeed) * 2.0)  -- -2.0 到 2.0
+		targetPosition = targetPosition + Vector3.new(randomX, 0, randomZ)
+
+		-- 额外安全夹紧：确保目标点落在当前关卡IdleFloor可达范围内，避免贴在下一关空气墙后无法到达
+		do
+			local halfX = (targetIdleFloor.Size.X or 0) / 2
+			local halfZ = (targetIdleFloor.Size.Z or 0) / 2
+			-- 预留安全边距，防止贴边/贴空气墙
+			local margin = 3
+			targetPosition = Vector3.new(
+				math.clamp(targetPosition.X, targetFloorCenter.X - halfX + margin, targetFloorCenter.X + halfX - margin),
+				targetPosition.Y,
+				math.clamp(targetPosition.Z, targetFloorCenter.Z - halfZ + margin, targetFloorCenter.Z + halfZ - margin)
+			)
+		end
+		local targetCFrame = CFrame.new(targetPosition)
+
+		moveTargets[unitInstance] = targetCFrame
+		moveCount = moveCount + 1
+
+		DebugLog(string.format("  行军目标 %s: GridX=%d, GridZ=%d, 占地=%dx%d, 目标=(%.1f, %.1f, %.1f)",
+			unitData.UnitId, gridX, gridZ, gridWidth, gridDepth,
+			targetPosition.X, targetPosition.Y, targetPosition.Z))
+
+		-- 设置单位移动速度
+		local unitId = unitInstance:GetAttribute("UnitId") or unitData.UnitId or unitInstance.Name
+		if unitId and type(unitId) ~= "string" then
+			unitId = tostring(unitId)
+		end
+		local humanoid = unitInstance:FindFirstChild("Humanoid")
+		if humanoid and unitId then
+			local UnitConfigModule = require(ReplicatedStorage.Config.UnitConfig)
+			local success, configSpeed = pcall(function()
+				return UnitConfigModule.GetMoveSpeed(unitId)
+			end)
+			if success and configSpeed and type(configSpeed) == "number" and configSpeed > 0 then
+				humanoid.WalkSpeed = configSpeed
+				DebugLog(string.format("  ✅ %s 设置移动速度: %.1f", tostring(unitInstance.Name), configSpeed))
+			else
+				-- 使用默认速度
+				local defaultSpeed = humanoid.WalkSpeed
+				if defaultSpeed <= 0 then
+					defaultSpeed = 16
 				end
+				humanoid.WalkSpeed = defaultSpeed
+				DebugLog(string.format("  ℹ %s 使用默认速度: %.1f", tostring(unitInstance.Name), defaultSpeed))
 			end
+		end
 
-			-- 停止所有正在播放的动画
-			if humanoid then
-				local animator = humanoid:FindFirstChild("Animator")
-				if animator then
-					local tracks = animator:GetPlayingAnimationTracks()
-					for _, track in ipairs(tracks) do
-						pcall(function()
-							track:Stop(0.1)
-						end)
-					end
+		-- 停止所有正在播放的动画
+		if humanoid then
+			local animator = humanoid:FindFirstChild("Animator")
+			if animator then
+				local tracks = animator:GetPlayingAnimationTracks()
+				for _, track in ipairs(tracks) do
+					pcall(function()
+						track:Stop(0.1)
+					end)
 				end
 			end
 		end
@@ -1171,10 +1228,16 @@ function CampaignManager.BeginBattlePrep(campaignData, stageNum, arrivedList, ti
 	if idleFloorEnemy then
 		for _, child in ipairs(idleFloorEnemy:GetChildren()) do
 			if child:IsA("Model") and child:FindFirstChild("Humanoid") then
+				-- V2.9修复：强制重置激活状态，确保Restart后敌人能被正确激活
+				child:SetAttribute("IsActivated", false)
+
 				-- 激活敌军单位,指定类型为"enemy"
 				local activated = CampaignUnitHelper.ActivateUnit(child, "enemy")
 				if activated then
 					table.insert(preparedEnemies, child)
+					DebugLog(string.format("  ✅ 敌军 %s 激活成功", child.Name))
+				else
+					DebugLog(string.format("  ⚠ 敌军 %s 激活失败", child.Name))
 				end
 			end
 		end
@@ -1590,6 +1653,32 @@ function CampaignManager.CompleteCampaignEnd(campaignData)
 	RestorePlayerMovement(campaignData)
 	DebugLog(string.format("✅ CompleteCampaignEnd开始，PlayerId=%d", campaignData.PlayerId))
 
+	-- ==================== 修复核心：强制清理移动和AI ====================
+
+	-- 1. 强制取消当前的批量行军任务（解决原地转圈和奔向第二关的问题）
+	if campaignData.CurrentMoveId then
+		DebugLog(string.format("🛑 强制取消行军任务: %s", tostring(campaignData.CurrentMoveId)))
+		PathService.CancelGroupMove(campaignData.CurrentMoveId)
+		campaignData.CurrentMoveId = nil
+	end
+
+	-- 2. 强制停止所有单位的AI和路径（解决实例复用导致的状态残留）
+	for unitInstance, unitData in pairs(campaignData.Units) do
+		if unitInstance then
+			-- 停止AI逻辑
+			UnitAI.StopAI(unitInstance)
+			-- 清理PathService中的单体路径状态
+			PathService.ClearPath(unitInstance)
+			-- 停止所有动画
+			local humanoid = unitInstance:FindFirstChild("Humanoid")
+			if humanoid then
+				humanoid:Move(Vector3.zero) -- 物理刹车
+			end
+		end
+	end
+
+	-- =================================================================
+
 	-- 传送玩家回出生点
 	local player = campaignData.Player
 	if player and player.Character then
@@ -1624,7 +1713,7 @@ function CampaignManager.CompleteCampaignEnd(campaignData)
 		DebugLog(string.format("✅ 战役结束，已移除 %d 个单位的血条", #campaignUnits))
 	end
 
-	-- 执行单位重生
+	-- 执行单位重生（现在是安全的，因为AI和移动都已停止）
 	DebugLog("✅ CompleteCampaignEnd调用RespawnUnits")
 	CampaignManager.RespawnUnits(campaignData)
 

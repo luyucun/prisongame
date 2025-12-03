@@ -137,6 +137,22 @@ function StageService.GetOrCreateStage(playerId, stageNum, resetAirWall)
                         warn("[StageService] Stage001缓存失效，HomeId已变化")
                         StageService.StageCache[playerId][stageNum] = nil
                     else
+                        -- V2.9修复：检查敌人是否存在，如果被销毁则重新加载
+                        local idleFloorEnemy = cached:FindFirstChild("IdleFloorEnemy", true)
+                        if idleFloorEnemy then
+                            local hasEnemies = false
+                            for _, child in ipairs(idleFloorEnemy:GetChildren()) do
+                                if child:IsA("Model") and child:FindFirstChild("Humanoid") then
+                                    hasEnemies = true
+                                    break
+                                end
+                            end
+                            if not hasEnemies then
+                                DebugLog("Stage" .. stageNum .. " 敌人已被销毁，重新加载敌人数据")
+                                StageService.LoadEnemyData(cached, stageNum)
+                            end
+                        end
+
                         -- V2.0.4修复：只有显式要求时才重置空气墙状态
                         if resetAirWall then
                             StageService.SetAirWallState(cached, false)
@@ -145,6 +161,22 @@ function StageService.GetOrCreateStage(playerId, stageNum, resetAirWall)
                     end
                 end
             else
+                -- V2.9修复：非Stage001也检查敌人是否存在
+                local idleFloorEnemy = cached:FindFirstChild("IdleFloorEnemy", true)
+                if idleFloorEnemy then
+                    local hasEnemies = false
+                    for _, child in ipairs(idleFloorEnemy:GetChildren()) do
+                        if child:IsA("Model") and child:FindFirstChild("Humanoid") then
+                            hasEnemies = true
+                            break
+                        end
+                    end
+                    if not hasEnemies then
+                        DebugLog("Stage" .. stageNum .. " 敌人已被销毁，重新加载敌人数据")
+                        StageService.LoadEnemyData(cached, stageNum)
+                    end
+                end
+
                 -- V2.0.4修复：只有显式要求时才重置空气墙状态
                 if resetAirWall then
                     StageService.SetAirWallState(cached, false)

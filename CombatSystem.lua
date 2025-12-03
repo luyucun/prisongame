@@ -388,7 +388,10 @@ function CombatSystem.OnDamageEvent(unitModel)
 			if planarDist > 0 then
 				flatDir = flatDir.Unit
 				-- 让命中中心落在两者之间（靠近敌人一点），并预留半个半径
-				local desired = math.clamp(planarDist - math.min((combatProfile.HitboxRadius or 3), 1.5), 0.5, planarDist)
+				-- V3.0修复：确保clamp的max >= min，避免planarDist过小时报错
+				local clampMin = 0.5
+				local clampMax = math.max(planarDist, clampMin)  -- 确保max >= min
+				local desired = math.clamp(planarDist - math.min((combatProfile.HitboxRadius or 3), 1.5), clampMin, clampMax)
 				forwardOffset = desired
 				attackerRoot.CFrame = CFrame.lookAt(attackerRoot.Position, attackerRoot.Position + flatDir) -- 再次确保朝向
 			end

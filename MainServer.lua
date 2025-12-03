@@ -58,6 +58,8 @@ local IdleCoinSystem = require(ServerScriptService.Systems.IdleCoinSystem)
 local SkillSystem = require(ServerScriptService.Systems.SkillSystem)
 -- V3.2新增 - Loading系统
 local LoadingSystem = require(ServerScriptService.Systems.LoadingSystem)
+-- V3.3新增 - 任务系统
+local TaskSystem = require(ServerScriptService.Systems.TaskSystem)
 
 -- ==================== 系统初始化顺序 ====================
 
@@ -330,6 +332,16 @@ local function InitializeServer()
         warn(GameConfig.LOG_PREFIX, "Loading系统初始化失败(返回false)")
     end
 
+    -- 12. 初始化任务系统 (V3.3新增)
+    success, result = pcall(function()
+        return TaskSystem.Initialize()
+    end)
+    if not success then
+        warn(GameConfig.LOG_PREFIX, "任务系统初始化失败(异常):", result)
+    elseif result == false then
+        warn(GameConfig.LOG_PREFIX, "任务系统初始化失败(返回false)")
+    end
+
     -- 检查是否有关键系统初始化失败
     if initializationFailed then
         warn("==========================================")
@@ -497,6 +509,17 @@ Players.PlayerAdded:Connect(function(player)
 			))
 		end)
 		LoadingSystem.NotifyDataSync(player, 0.5)
+
+		-- V3.3新增：初始化玩家任务数据并同步到客户端
+		pcall(function()
+			TaskSystem.InitializePlayerTask(player)
+			print(string.format(
+				"%s [MainServer] 玩家 %s 任务系统已初始化",
+				GameConfig.LOG_PREFIX,
+				player.Name
+			))
+		end)
+		LoadingSystem.NotifyDataSync(player, 0.75)
 
 		-- V3.2: 通知数据同步完成（这会尝试完成加载流程）
 		LoadingSystem.NotifyDataSyncComplete(player)

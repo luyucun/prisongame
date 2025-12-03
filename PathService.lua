@@ -49,8 +49,8 @@ local CONFIG = {
 	PATH_RECALC_COOLDOWN_BATTLE = 0.6,  -- 战斗模式：减少重算频率
 	PATH_RECALC_COOLDOWN = 0.3,         -- 默认值（向后兼容）
 
-	-- 目标移动阈值（studs）- V2.2优化：提高阈值避免频繁重算
-	TARGET_MOVE_THRESHOLD = 35,  -- 从15提高到35，减少重算
+	-- 目标移动阈值（studs）- V3.0优化：降低阈值加快响应
+	TARGET_MOVE_THRESHOLD = 20,  -- 从35降低到20，更快触发重寻
 
 	-- Waypoint到达阈值（studs）- V2.3修复：保持2避免卡在阈值
 	WAYPOINT_REACH_THRESHOLD = 2,
@@ -58,11 +58,11 @@ local CONFIG = {
 	-- 最大重试次数
 	MAX_RETRY_COUNT = 3,
 
-	-- 连续阻挡次数上限 - V2.3修复：降低到2加快重寻
-	MAX_BLOCKED_COUNT = 2,
+	-- 连续阻挡次数上限 - V3.0修复：降低到1，一次阻挡立即重寻
+	MAX_BLOCKED_COUNT = 1,
 
-	-- 阻挡时间窗口（秒）- V2.3修复：缩短到1.5秒加快响应
-	BLOCKED_TIME_WINDOW = 1.5,
+	-- 阻挡时间窗口（秒）- V3.0修复：缩短到0.5秒极速响应
+	BLOCKED_TIME_WINDOW = 0.5,
 
 	-- 降级策略：减小AgentRadius的比例
 	RADIUS_REDUCTION_RATIO = 0.85,
@@ -1686,6 +1686,8 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)  -- V2.3.1：�
 
 		-- V2.1.3新增：实际启动时才设置StartTime
 		data.StartTime = tick()
+		-- 记录首次启动时间，用于绝对超时兜底
+		data.FirstStartTime = data.FirstStartTime or data.StartTime
 
 		local unitId = unitInstance:GetAttribute("UnitId") or unitInstance.Name
 
@@ -2112,7 +2114,7 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)  -- V2.3.1：�
 						end
 					end
 
-					-- V2.3强化：卡住检测watchdog - 如果单位1秒内移动<0.2 studs且远离目标，强制重寻
+					-- V3.0极速卡住检测watchdog - 如果单位0.4秒内移动<0.5 studs且远离目标，立即重寻
 					if data.StartTime > 0 then
 						local currentPos = rootPart.Position
 
@@ -2120,12 +2122,13 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)  -- V2.3.1：�
 							local positionDelta = (currentPos - data.LastPosition).Magnitude
 							local timeDelta = now - data.LastPositionTime
 
-							-- V2.3修复：降低阈值，提高灵敏度（0.3→0.2 studs, 1.0→0.8s）
-							if positionDelta < 0.2 and timeDelta > 0.8 and distanceXZToFinal > 5 then
+							-- V3.0修复：极速响应（0.5 studs in 0.4s）比UnitAI还要快
+							-- 只要0.4秒内移动小于0.5 stud，且离终点还有距离，立刻判定卡住
+							if positionDelta < 0.5 and timeDelta > 0.4 and distanceXZToFinal > 3 then
 								-- 单位卡住，强制高优先级重寻
 								if not data.PathRequested then
 									data.PathRequested = true
-									DebugLog(string.format("🚨 %s 检测到卡住 (%.2f studs in %.1fs)，强制重寻",
+									DebugLog(string.format("🚨 %s PathService极速卡住检测 (%.2f studs in %.1fs)，强制重寻",
 										unitInstance.Name, positionDelta, timeDelta))
 
 									-- 立即清理旧路径
@@ -2180,6 +2183,33 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)  -- V2.3.1：�
 					-- 超时检测 - V2.3.1修复：只检测已启动的单位（StartTime > 0）
 					-- 排队等待的单位 StartTime = 0，不应被视为超时
 					if data.StartTime > 0 and now - data.StartTime > GameConfig.Campaign.MoveTimeout then
+
+						-- 绝对超时兜底：总耗时超过 2 倍 MoveTimeout 时直接判定为超时，避免反复重试导致整体阻塞
+						local absoluteElapsed = data.FirstStartTime and (now - data.FirstStartTime) or (now - data.StartTime)
+						local absoluteLimit = (GameConfig.Campaign.MoveTimeout or 30) * 2
+						if absoluteElapsed > absoluteLimit then
+							DebugLog(string.format("[Timeout] %s 超过绝对超时上限(%.1fs)，标记为TimedOut", unitInstance.Name, absoluteElapsed))
+							StopUnitMovement(unitInstance, "绝对超时")
+							data.Arrived = true
+
+							if data.TargetPart and data.TargetPart.Parent then
+								data.TargetPart:Destroy()
+							end
+
+							table.insert(timedOutList, unitInstance)
+							arrivedCount = arrivedCount + 1
+
+							-- 减少行军计数并尝试启动下一批
+							marchingCount = marchingCount - 1
+							TryStartNextBatch()
+
+							if onUnitArrived then
+								pcall(function()
+									onUnitArrived(unitInstance, "TimedOut")
+								end)
+							end
+							continue
+						end
 
 						-- V2.7修复：超时不再瞬移，改为重试机制
 						local timeoutRetryCount = data.TimeoutRetryCount or 0

@@ -4,7 +4,7 @@
 =====================================================
 
 项目名称: Roblox 兵种塔防游戏
-当前版本: V3.2
+当前版本: V3.3
 最后更新: 2025-12-02
 
 =====================================================
@@ -59,7 +59,8 @@ ServerScriptService/
 │   ├── HouseUpgradeSystem.lua   (房屋升级系统 V2.8新增)
 │   ├── SkillSystem.lua          (技能系统 V3.0新增)
 │   ├── SkillShopSystem.lua      (技能商店系统 V3.1新增)
-│   └── LoadingSystem.lua        (加载系统 V3.2新增)
+│   ├── LoadingSystem.lua        (加载系统 V3.2新增)
+│   └── TaskSystem.lua           (任务系统 V3.3新增)
 
 StarterPlayer/StarterPlayerScripts/
 ├── UI/
@@ -70,7 +71,8 @@ StarterPlayer/StarterPlayerScripts/
 │   ├── BattleControlUI.lua      (战斗控制UI V2.0新增)
 │   ├── DamageNumberSystem.lua   (伤害冒字系统 V2.5增强)
 │   ├── SkillBackpackDisplay.lua (技能背包显示 V3.0新增)
-│   └── SkillShopDisplay.lua     (技能商店显示 V3.1新增)
+│   ├── SkillShopDisplay.lua     (技能商店显示 V3.1新增)
+│   └── TaskDisplay.lua          (任务显示 V3.3新增)
 ├── Controllers/
 │   ├── PlacementController.lua  (放置控制)
 │   ├── DragSystem.lua           (拖动系统)
@@ -109,7 +111,8 @@ ReplicatedStorage/
 │   ├── HouseConfig.lua          (房屋配置 V2.8新增)
 │   ├── LevelColorConfig.lua     (等级颜色配置)
 │   ├── SkillConfig.lua          (技能配置 V3.0新增 V3.1增强)
-│   └── SkillShopConfig.lua      (技能商店配置 V3.1新增)
+│   ├── SkillShopConfig.lua      (技能商店配置 V3.1新增)
+│   └── TaskConfig.lua           (任务配置 V3.3新增)
 ├── Events/                      (RemoteEvent事件)
 │   ├── CurrencyEvents/
 │   ├── PlayerEvents/
@@ -123,7 +126,8 @@ ReplicatedStorage/
 │   ├── BattleControlEvents/     (V2.11新增)
 │   ├── SkillEvents/             (V3.0新增)
 │   ├── SkillShopEvents/         (V3.1新增)
-│   └── LoadingEvents/           (V3.2新增)
+│   ├── LoadingEvents/           (V3.2新增)
+│   └── TaskEvents/              (V3.3新增)
 └── Modules/
     └── FormatHelper.lua         (格式化工具)
 
@@ -298,6 +302,16 @@ ReplicatedStorage/
 - 60秒超时保护机制
 - 与AnimationPreloader/IconPreloader集成(备份机制)
 
+【3.29 任务系统】TaskSystem/TaskDisplay (V3.3新增)
+- 服务端TaskSystem管理任务进度和奖励发放
+- 客户端TaskDisplay显示任务UI和处理领取交互
+- 任务类型: 购买兵种/布置兵种/购买技能/完成战斗/领取挂机金币
+- 线性任务流程: 按顺序完成任务
+- 任务进度实时同步到客户端
+- 完成任务可领取金币奖励
+- 数据持久化(DataManager.TaskData)
+- 支持运营更新新任务(自动检测未完成任务)
+
 =====================================================
 四、版本历史
 =====================================================
@@ -429,6 +443,17 @@ ReplicatedStorage/
 - AnimationPreloader/IconPreloader集成: 备份机制
 - LoadingEvents: 新增事件文件夹
 
+【V3.3】任务系统
+- TaskConfig: 任务配置表(数据驱动)
+- TaskSystem: 服务端任务处理系统
+- TaskDisplay: 客户端任务UI显示
+- 任务类型: 购买兵种/布置兵种/购买技能/完成战斗/领取挂机金币
+- 任务流程: 线性任务，按顺序完成
+- 奖励系统: 完成任务领取金币奖励
+- 数据持久化: DataManager.TaskData
+- 自动检测: 运营更新新任务后自动激活
+- TaskEvents: 新增事件文件夹
+
 =====================================================
 五、核心技术要点
 =====================================================
@@ -550,6 +575,12 @@ ReplicatedStorage/
 - 库存配置: StockMin/StockMax/RefreshProbability
 - 公共接口: GetShopItems()/GetPrice()/IsSkillOnSale()/GetStockConfig()
 
+【TaskConfig】任务配置 (V3.3新增)
+- 任务类型枚举: TaskType (PURCHASE_UNIT/PLACE_UNIT/PURCHASE_SKILL/COMPLETE_BATTLE/COLLECT_IDLE_COIN)
+- 任务列表: Tasks[index] = 任务配置
+- 任务属性: TaskId/TaskType/RequiredCount/Description/RewardCoins/Sort
+- 公共接口: GetTaskById()/GetFirstTaskId()/GetNextTaskId()/IsValidTask()/GetAllTaskIds()/GetTaskCount()/IsLastTask()/GetTaskTypeName()
+
 =====================================================
 七、RemoteEvent事件列表
 =====================================================
@@ -631,6 +662,12 @@ ReplicatedStorage/
 - LoadingStageUpdate: Server → Client (加载阶段更新: stage)
 - LoadingComplete: Server → Client (加载完成通知)
 - ClientPreloadComplete: Client → Server (客户端预加载完成通知)
+
+【TaskEvents】V3.3
+- TaskProgress: Server → Client (任务进度更新: taskData)
+- TaskComplete: Server → Client (任务完成通知: taskInfo)
+- ClaimTaskReward: Client → Server (领取任务奖励)
+- ClaimRewardResult: Server → Client (领取结果: success, message, rewardCoins)
 
 =====================================================
 八、最佳实践
@@ -959,6 +996,53 @@ ReplicatedStorage/
 
 全局访问：_G.LoadingController
 
+【11.17 任务系统】TaskSystem (V3.3新增)
+职责：服务端任务进度管理与奖励发放
+
+核心API：
+- Initialize()                    初始化任务系统
+- InitializePlayerTask(player)    初始化玩家任务数据
+- OnPurchaseUnit(player, unitId)  购买兵种时触发（任务类型1）
+- OnPlaceUnit(player, unitId)     放置兵种时触发（任务类型2）
+- OnPurchaseSkill(player, skillId)购买技能时触发（任务类型3）
+- OnCompleteBattle(player)        完成战斗时触发（任务类型4）
+- OnCollectIdleCoin(player)       领取挂机金币时触发（任务类型5）
+- SyncTaskToClient(player)        同步任务数据到客户端
+- GetPlayerTaskInfo(player)       获取玩家任务信息
+- HasPendingTask(player)          检查是否有未完成任务
+
+内部机制：
+- 获取玩家TaskData(从DataManager)
+- 检查任务类型是否匹配当前任务
+- 增加进度并判断是否完成
+- 完成时发送TaskComplete事件
+- 玩家领取奖励后切换到下一个任务
+- 自动检测新增任务(运营更新后)
+
+【11.18 任务显示】TaskDisplay (V3.3新增)
+职责：客户端任务UI管理
+
+核心API：
+- Initialize()                    初始化任务显示模块
+
+内部机制：
+- 监听TaskProgress事件更新UI
+- 监听TaskComplete事件显示完成提示
+- 监听ClaimRewardResult事件处理领取结果
+- 进度条TweenService动画
+- 任务完成时闪烁领取按钮
+- 全部任务完成时显示"已全部完成"
+
+UI结构：
+- TaskPanel (Frame)
+  - TaskDescription (TextLabel): 任务描述
+  - ProgressText (TextLabel): 进度文本
+  - ProgressBar (Frame): 进度条背景
+    - Fill (Frame): 进度条填充
+  - RewardText (TextLabel): 奖励显示
+  - ClaimButton (TextButton): 领取按钮
+  - CompletedLabel (TextLabel): 完成标签(可选)
+
 =====================================================
 十二、核心数据结构
 =====================================================
@@ -1022,6 +1106,12 @@ ReplicatedStorage/
             Stock = {[skillId] = count},
         },
     },
+    TaskData = {                    -- V3.3 任务数据
+        CurrentTaskId = number,         -- 当前任务ID
+        CurrentProgress = number,       -- 当前任务进度
+        CompletedTaskIds = {taskId, ...}, -- 已完成的任务ID列表
+        AllTasksCompleted = boolean,    -- 是否全部任务完成
+    },
 }
 ```
 
@@ -1048,10 +1138,14 @@ ReplicatedStorage/
 17. V3.2+: Loading UI需按指定结构创建(Loading/Bg/LoadingImage/ProgressBg/Progressbar/Number)
 18. V3.2+: LoadingController会自动检测并使用AnimationPreloader/IconPreloader作为备份
 19. V3.2+: 服务端需在PlayerAdded中调用LoadingSystem各阶段通知方法
+20. V3.3+: 任务UI需按指定结构创建(TaskPanel/TaskDescription/ProgressText/ProgressBar/Fill/RewardText/ClaimButton)
+21. V3.3+: 新增任务只需在TaskConfig.Tasks表中添加配置，无需修改其他代码
+22. V3.3+: 任务系统会在玩家加入时自动初始化和同步任务数据
+23. V3.3+: 各系统购买/放置/战斗完成时需调用TaskSystem对应方法通知进度
 
 =====================================================
 架构设计文档完成
-版本: V3.2
+版本: V3.3
 最后更新: 2025-12-02
 =====================================================
 ]]
