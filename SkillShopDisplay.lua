@@ -273,7 +273,7 @@ local function CreateSkillItemCard(itemData, index)
 	local number = cardFrame:FindFirstChild("Number")
 	if number and number:IsA("TextLabel") then
 		if itemData.Stock and itemData.Stock <= 0 then
-			number.Text = "售罄"
+			number.Text = "Sold out"
 			number.TextColor3 = Color3.fromRGB(255, 50, 50)
 		else
 			number.Text = "x" .. tostring(itemData.Stock or 999)
@@ -649,7 +649,7 @@ local function OnSkillStockUpdate(shopId, stockData)
 				local numberLabel = card:FindFirstChild("Number")
 				if numberLabel and numberLabel:IsA("TextLabel") then
 					if stock <= 0 then
-						numberLabel.Text = "售罄"
+						numberLabel.Text = "Sold out"
 						numberLabel.TextColor3 = Color3.fromRGB(255, 50, 50)
 					else
 						numberLabel.Text = "x" .. stock

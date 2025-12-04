@@ -58,7 +58,7 @@ local lastPathTarget = nil
 local PATH_RECOMPUTE_DISTANCE = 5  -- 目标移动超过此距离时重新计算路径
 -- V2.10新增：卡住检测
 local lastCharacterPosition = nil
-local stuckCheckTime = 0
+local lastStuckCheckTime = nil  -- V4.0新增：用于时间戳累计，替代stuckCheckTime+Wait()
 local STUCK_TIME_THRESHOLD = 0.5  -- 卡住超过0.5秒就重新规划
 local STUCK_DISTANCE_THRESHOLD = 0.5  -- 移动距离小于0.5视为卡住
 
@@ -73,7 +73,9 @@ local characterFollowDelayTimer = nil
 -- V2.8新增：质心移动检测（检测累计移动距离）
 local initialCenterPosition = nil  -- 进入Marching时的初始质心位置
 local centerIsMoving = false
-local CENTER_MOVE_THRESHOLD = 3  -- 质心累计移动超过3 studs才认为兵种开始移动
+local CENTER_MOVE_THRESHOLD = 1  -- V4.0修复：降低阈值到1 stud，更快响应行军开始
+-- V4.0新增：跟随状态标记，避免每帧调用stop
+local characterFollowActive = false
 -- V2.9新增：当前关卡编号
 local currentStageNum = 0
 
@@ -340,7 +342,7 @@ local function updateCharacterFollow(center, targetCFrame)
 		currentWaypointIndex = 1
 		lastPathTarget = nil
 		lastCharacterPosition = nil
-		stuckCheckTime = 0
+		lastStuckCheckTime = nil  -- V4.0修改：使用新变量名
 
 		-- V2.10新增：到达后面朝战场中心（观察战斗）
 		local lookAtPos = Vector3.new(center.X, hrp.Position.Y, center.Z)
@@ -352,20 +354,25 @@ local function updateCharacterFollow(center, targetCFrame)
 		return
 	end
 
-	-- V2.10新增：卡住检测
+	-- V4.0重构：卡住检测 - 移除Wait()，使用时间戳计算
 	local currentPos = hrp.Position
 	local isStuck = false
+	local currentTime = tick()
 
 	if lastCharacterPosition then
 		local movedDistance = (currentPos - lastCharacterPosition).Magnitude
 		if movedDistance < STUCK_DISTANCE_THRESHOLD then
-			stuckCheckTime = stuckCheckTime + RunService.RenderStepped:Wait()
-			if stuckCheckTime >= STUCK_TIME_THRESHOLD then
+			-- 使用时间戳累计而非Wait()
+			if not lastStuckCheckTime then
+				lastStuckCheckTime = currentTime
+			end
+			local elapsedStuckTime = currentTime - lastStuckCheckTime
+			if elapsedStuckTime >= STUCK_TIME_THRESHOLD then
 				isStuck = true
-				stuckCheckTime = 0
+				lastStuckCheckTime = nil  -- 重置
 			end
 		else
-			stuckCheckTime = 0
+			lastStuckCheckTime = nil  -- 移动了，重置计时
 		end
 	end
 	lastCharacterPosition = currentPos
@@ -451,13 +458,14 @@ local function stopCharacterFollow()
 		return
 	end
 	humanoid:Move(Vector3.zero, false)
-	-- V2.10新增：清理寻路状态
-	currentPath = nil
-	currentWaypoints = nil
+	-- V4.0修改：清理寻路状态（不再清空路径，避免频繁重建）
+	-- 只有在真正需要停止时才清理，而不是每帧都清理
+	-- currentPath = nil  -- V4.0注释：不再每帧清空
+	-- currentWaypoints = nil
 	currentWaypointIndex = 1
-	lastPathTarget = nil
+	-- lastPathTarget = nil
 	lastCharacterPosition = nil
-	stuckCheckTime = 0
+	lastStuckCheckTime = nil  -- V4.0修改：使用新变量名
 end
 
 local function updateCamera()
@@ -525,11 +533,17 @@ local function updateCamera()
 		currentState == "StageClear"
 	)
 
+	-- V4.0修复：优化跟随逻辑，避免每帧调用stopCharacterFollow导致路径被清空
+	-- 只有在状态真正变化时才调用stop
 	if shouldCharacterFollow and centerIsMoving then
 		updateCharacterFollow(center, targetCFrame)
-	else
+		characterFollowActive = true  -- 标记正在跟随
+	elseif characterFollowActive then
+		-- 只有之前在跟随，现在不跟随了，才调用stop
 		stopCharacterFollow()
+		characterFollowActive = false
 	end
+	-- 如果从未跟随过，不需要调用stop
 end
 
 local function stopCameraLock()
@@ -542,6 +556,7 @@ local function stopCameraLock()
 	allowCharacterFollow = false
 	centerIsMoving = false
 	initialCenterPosition = nil
+	characterFollowActive = false  -- V4.0新增：重置跟随标记
 	-- V2.11新增：重置解锁标记
 	isCameraUnlocked = false
 	if characterFollowDelayTimer then

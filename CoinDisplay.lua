@@ -160,8 +160,8 @@ local function UpdateCoinDisplay(newAmount, useAnimation)
             end
         })
     else
-        -- 直接更新（无动画）
-        local formattedText = FormatHelper.FormatCoins(newAmount)
+        -- 直接更新（无动画）- 使用大数值格式化
+        local formattedText = FormatHelper.FormatCoinsShort(newAmount, true)
         CoinNumLabel.Text = formattedText
     end
 

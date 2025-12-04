@@ -220,9 +220,10 @@ end
 @param player Player - 玩家对象
 @param taskType number - 任务类型
 @param amount number - 增加数量（默认1）
+@param extraParams table|nil - 额外参数（用于特定任务类型验证，如 {unitId = "10001", level = 2}）
 @return boolean - 是否成功增加（任务类型匹配）
 ]]
-local function AddTaskProgress(player, taskType, amount)
+local function AddTaskProgress(player, taskType, amount, extraParams)
     amount = amount or 1
 
     local taskData = GetPlayerTaskData(player)
@@ -251,6 +252,21 @@ local function AddTaskProgress(player, taskType, amount)
     -- 检查任务类型是否匹配
     if taskConfig.TaskType ~= taskType then
         return false
+    end
+
+    -- 对于类型6（合成2级兵种），需要额外验证目标兵种ID
+    if taskType == TaskConfig.TaskType.MERGE_LEVEL2_UNIT then
+        if not extraParams or not extraParams.unitId or not extraParams.level then
+            return false
+        end
+        -- 检查合成的兵种ID是否匹配任务配置的目标兵种
+        if taskConfig.TargetUnitId and tostring(extraParams.unitId) ~= tostring(taskConfig.TargetUnitId) then
+            return false
+        end
+        -- 检查合成后的等级是否为2级
+        if extraParams.level ~= 2 then
+            return false
+        end
     end
 
     -- 检查任务是否已完成但未领取奖励（此时不应继续增加进度）
@@ -462,12 +478,15 @@ function TaskSystem.InitializePlayerTask(player)
         end
 
         -- V3.3: 检查是否有新任务（运营更新后可能添加新任务）
-        if taskData.AllTasksCompleted and taskData.CurrentTaskId == nil then
+        -- 条件：全部任务已完成 或 当前任务ID为nil
+        if taskData.AllTasksCompleted or taskData.CurrentTaskId == nil then
             -- 检查是否有未完成的新任务
             local allTaskIds = TaskConfig.GetAllTaskIds()
+            local foundNewTask = false
+
             for _, taskId in ipairs(allTaskIds) do
                 local isCompleted = false
-                for _, completedId in ipairs(taskData.CompletedTaskIds) do
+                for _, completedId in ipairs(taskData.CompletedTaskIds or {}) do
                     if completedId == taskId then
                         isCompleted = true
                         break
@@ -479,6 +498,7 @@ function TaskSystem.InitializePlayerTask(player)
                     taskData.CurrentTaskId = taskId
                     taskData.CurrentProgress = 0
                     taskData.AllTasksCompleted = false
+                    foundNewTask = true
 
                     if DEBUG_MODE then
                         print(string.format(
@@ -490,6 +510,12 @@ function TaskSystem.InitializePlayerTask(player)
                     end
                     break
                 end
+            end
+
+            -- 如果没有找到新任务，确保状态正确
+            if not foundNewTask then
+                taskData.AllTasksCompleted = true
+                taskData.CurrentTaskId = nil
             end
         end
 
@@ -579,6 +605,26 @@ function TaskSystem.OnCollectIdleCoin(player)
     end)
     if not success then
         warn("[TaskSystem] OnCollectIdleCoin 错误: " .. tostring(err))
+    end
+end
+
+--[[
+玩家合成兵种时调用（任务类型6）
+当玩家合成出一个2级的指定兵种时触发
+@param player Player - 玩家对象
+@param unitId string - 合成后的兵种ID
+@param newLevel number - 合成后的等级
+]]
+function TaskSystem.OnMergeLevel2Unit(player, unitId, newLevel)
+    local success, err = pcall(function()
+        -- 传递额外参数用于验证
+        AddTaskProgress(player, TaskConfig.TaskType.MERGE_LEVEL2_UNIT, 1, {
+            unitId = unitId,
+            level = newLevel,
+        })
+    end)
+    if not success then
+        warn("[TaskSystem] OnMergeLevel2Unit 错误: " .. tostring(err))
     end
 end
 

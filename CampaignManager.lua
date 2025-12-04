@@ -619,6 +619,106 @@ local function PlayRespawnEffect(unitInstance, gridSize)
 	end
 end
 
+-- ==================== V3.4新增: 前进金币计算函数 ====================
+
+--[[
+计算战场中心位置(所有存活友军单位的质心)
+@param campaignData table - 战役数据
+@return Vector3|nil - 战场中心位置，无存活单位返回nil
+]]
+local function CalculateBattleCenter(campaignData)
+	if not campaignData or not campaignData.Units then
+		return nil
+	end
+
+	local totalPosition = Vector3.zero
+	local aliveCount = 0
+
+	for unitInstance, unitData in pairs(campaignData.Units) do
+		if not unitData.IsDead and unitInstance and unitInstance.Parent then
+			local rootPart = unitInstance:FindFirstChild("HumanoidRootPart")
+			if rootPart then
+				totalPosition = totalPosition + rootPart.Position
+				aliveCount = aliveCount + 1
+			end
+		end
+	end
+
+	if aliveCount == 0 then
+		return nil
+	end
+
+	return totalPosition / aliveCount
+end
+
+--[[
+检查并发放前进金币
+V3.4新增: 战场中心每前进AdvanceDistance studs获得AdvanceReward金币
+只计算前进(Z轴负方向)，不计算后退
+@param campaignData table - 战役数据
+]]
+local function CheckAndRewardAdvanceCoins(campaignData)
+	if not campaignData or not campaignData.Player then
+		return
+	end
+
+	-- 计算当前战场中心
+	local battleCenter = CalculateBattleCenter(campaignData)
+	if not battleCenter then
+		return
+	end
+
+	local currentZ = battleCenter.Z
+	local startZ = campaignData.StartZPosition
+
+	-- 注意: 在Roblox中，前进通常是Z轴负方向
+	-- 所以前进距离 = startZ - currentZ (当currentZ比startZ更小时表示前进了)
+	local advancedDistance = startZ - currentZ
+
+	-- 只有前进才计算，后退不计算
+	if advancedDistance <= 0 then
+		return
+	end
+
+	-- 检查是否创造了新的最远前进距离
+	local previousMaxZ = campaignData.MaxAdvancedZ
+	local previousAdvancedDistance = startZ - previousMaxZ
+
+	-- 如果没有超过之前的最远距离，不发放金币
+	if currentZ >= previousMaxZ then
+		return
+	end
+
+	-- 更新最远前进距离
+	campaignData.MaxAdvancedZ = currentZ
+
+	-- 计算应该获得的金币奖励次数
+	local advanceDistanceConfig = GameConfig.BattleCoin.AdvanceDistance
+	local advanceRewardConfig = GameConfig.BattleCoin.AdvanceReward
+
+	-- 计算从起点开始的累计前进距离
+	local currentTotalAdvance = startZ - currentZ
+	local lastRewardedDistance = campaignData.LastRewardedDistance or 0
+
+	-- 计算新获得奖励的次数
+	local currentRewardCount = math.floor(currentTotalAdvance / advanceDistanceConfig)
+	local lastRewardCount = math.floor(lastRewardedDistance / advanceDistanceConfig)
+	local newRewardCount = currentRewardCount - lastRewardCount
+
+	if newRewardCount > 0 then
+		local totalReward = newRewardCount * advanceRewardConfig
+
+		-- 发放金币
+		CurrencySystem.AddCoins(campaignData.Player, totalReward, "前进金币奖励")
+
+		-- 更新上次获得奖励时的距离
+		campaignData.LastRewardedDistance = currentRewardCount * advanceDistanceConfig
+
+		DebugLog(string.format("[V3.4] 前进金币: 玩家 %s 前进了 %.1f studs，获得 %d 金币 (累计前进: %.1f)",
+			campaignData.Player.Name, currentTotalAdvance - lastRewardedDistance, totalReward, currentTotalAdvance))
+	end
+end
+
 -- ==================== 公共接口 ====================
 
 --[[
@@ -668,6 +768,10 @@ function CampaignManager.StartCampaign(player)
 	DebugLog(string.format("[StartCampaign] 玩家 %s 开始章节 %d，关卡数: %d",
 		player.Name, currentChapter, totalStagesInChapter))
 
+	-- V3.4新增: 获取CommandPart作为前进金币计算的起点
+	local commandPart = GetCommandPart(homeId)
+	local startZPosition = commandPart and commandPart.Position.Z or 0
+
 	-- 初始化战役数据
 	local campaignData = {
 		PlayerId = playerId,
@@ -679,7 +783,11 @@ function CampaignManager.StartCampaign(player)
 		State = CampaignState.PREPARING,
 		Units = {},
 		StageInstances = {},
-		CurrentBattleId = nil
+		CurrentBattleId = nil,
+		-- V3.4新增: 前进金币追踪数据
+		StartZPosition = startZPosition,           -- 战斗开始时的起点Z坐标(CommandPart位置)
+		MaxAdvancedZ = startZPosition,             -- 已经前进过的最远Z坐标
+		LastRewardedDistance = 0,                  -- 上次获得奖励时的累计前进距离
 	}
 
 	-- 获取家园IdleFloor
@@ -809,9 +917,9 @@ function CampaignManager.StartCampaign(player)
 	-- [修复步骤 2]：显式预加载第一关，并强制等待 NavMesh 更新
 	local stage1 = StageService.GetOrCreateStage(playerId, 1, false)
 
-	-- ⭐⭐ 关键修复：强制等待 0.2~0.3 秒 ⭐⭐
-	-- 这段时间足够 Roblox 重新计算动态 NavMesh，识别出墙壁
-	task.wait(0.3)
+	-- ⭐⭐ V4.0修复：增加等待时间到 0.6 秒 ⭐⭐
+	-- NavMesh需要足够时间更新，避免首轮请求NoPath导致恶性循环
+	task.wait(0.6)
 
 	-- V2.8优化：延迟4秒显示战斗特效（RedLine）
 	task.delay(4, function()
@@ -930,9 +1038,11 @@ function CampaignManager.MarchToStage(campaignData, stageNum)
 		end
 	end
 
-	-- ⭐⭐ 关键修复：修改空气墙后等待一小会儿 ⭐⭐
-	-- AirWall 的 CanCollide 属性改变也会触发 NavMesh 更新，不等待的话可能会寻路失败
-	task.wait(0.1)
+	-- ⭐⭐ V4.0关键修复：修改空气墙后等待NavMesh稳定 ⭐⭐
+	-- AirWall 的 CanCollide 属性改变会触发 NavMesh 更新
+	-- 不等待的话首轮请求容易NoPath，导致部队卡死或直线冲刺
+	-- V4.0修复：增加等待时间到 0.6 秒，确保复杂地图的NavMesh也能更新完成
+	task.wait(0.6)
 
 	-- 获取目标IdleFloor
 	local targetIdleFloor = stageFolder:FindFirstChild("IdleFloor", true)
@@ -983,6 +1093,24 @@ function CampaignManager.MarchToStage(campaignData, stageNum)
 		local randomX = (math.sin(offsetSeed) * 2.0)  -- -2.0 到 2.0
 		local randomZ = (math.cos(offsetSeed) * 2.0)  -- -2.0 到 2.0
 		targetPosition = targetPosition + Vector3.new(randomX, 0, randomZ)
+
+		-- ✅ V3.2新增：使用 Raycast 向下检测目标点是否在地板上
+		-- 如果偏移后的点悬空（说明出界了）或者下面不是 Floor，就回退到原始中心点
+		do
+			local rayOrigin = targetPosition + Vector3.new(0, 5, 0)
+			local rayDir = Vector3.new(0, -10, 0)
+			local rayParams = RaycastParams.new()
+			rayParams.FilterType = Enum.RaycastFilterType.Include
+			rayParams.FilterDescendantsInstances = {targetIdleFloor} -- 只检测目标地板
+
+			local hit = workspace:Raycast(rayOrigin, rayDir, rayParams)
+
+			if not hit then
+				-- 射线没打中地板，说明偏移出界了，回退到原始位置（不带随机偏移）
+				targetPosition = targetPosition - Vector3.new(randomX, 0, randomZ)
+				DebugLog(string.format("  ⚠ %s 目标点偏移出界，已回退", unitData.UnitId))
+			end
+		end
 
 		-- 额外安全夹紧：确保目标点落在当前关卡IdleFloor可达范围内，避免贴在下一关空气墙后无法到达
 		do
@@ -1063,7 +1191,8 @@ function CampaignManager.MarchToStage(campaignData, stageNum)
 	end
 
 	-- 使用PathService进行批量寻路移动
-	DebugLog(string.format("[MarchToStage] 开始PathService寻路，目标数量: %d", #moveTargets))
+	-- V4.1修复：使用moveCount而非#moveTargets（字典取长度总是0）
+	DebugLog(string.format("[MarchToStage] 开始PathService寻路，目标数量: %d", moveCount))
 	local moveId = PathService.MoveUnitsToPositions(moveTargets, {
 		battleCenter = battleCenter,  -- V2.7新增：传递战场中心位置
 		onUnitArrived = function(unitInstance, status)
@@ -1109,6 +1238,23 @@ function CampaignManager.MarchToStage(campaignData, stageNum)
 	if moveId then
 		campaignData.CurrentMoveId = moveId
 	end
+
+	-- V3.4新增：启动前进金币检查循环
+	-- 在行军和战斗过程中持续检查战场中心位置变化
+	task.spawn(function()
+		while campaignData.State ~= CampaignState.IDLE
+			and campaignData.State ~= CampaignState.CLEANUP
+			and campaignData.State ~= CampaignState.VICTORY
+			and campaignData.State ~= CampaignState.DEFEAT do
+
+			-- 检查并发放前进金币
+			CheckAndRewardAdvanceCoins(campaignData)
+
+			-- 每0.5秒检查一次
+			task.wait(0.5)
+		end
+		DebugLog("[V3.4] 前进金币检查循环已结束")
+	end)
 end
 
 --[[
@@ -1364,6 +1510,18 @@ end
 function CampaignManager.OnBattleEnd(campaignData, stageNum, result)
 	DebugLog(string.format("✅ OnBattleEnd触发，stageNum=%d, Winner=%s",
 		stageNum, tostring(result.Winner)))
+
+	-- V3.3新增：通知任务系统完成战斗（战斗真正结束才算完成，中途退出不算）
+	local TaskSystem = nil
+	pcall(function()
+		TaskSystem = require(SystemsFolder:WaitForChild("TaskSystem"))
+	end)
+	if TaskSystem and campaignData.Player then
+		pcall(function()
+			TaskSystem.OnCompleteBattle(campaignData.Player)
+			DebugLog(string.format("✅ 已通知TaskSystem完成战斗，玩家: %s", campaignData.Player.Name))
+		end)
+	end
 
 	-- 更新所有单位血量
 	local aliveCount = 0

@@ -28,6 +28,9 @@ local RunService = game:GetService("RunService")  -- V2.1修复：用于实时�
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
 local UnitConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("UnitConfig"))  -- V2.1修复：用于读取兵种属性
 
+-- 引用格式化工具
+local FormatHelper = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("FormatHelper"))
+
 -- 本地玩家
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -209,19 +212,12 @@ local function GetQualityColor(quality)
 end
 
 --[[
-格式化金币显示（V2.1修复：手动实现千位分隔符）
+格式化金币显示（使用大数值缩写）
 @param amount number - 金币数量
 @return string - 格式化文本
 ]]
 local function FormatCoins(amount)
-    local formatted = tostring(math.floor(amount))
-    -- 手动添加千位分隔符
-    local k
-    while true do
-        formatted, k = string.gsub(formatted, "^(-?%d+)(%d%d%d)", '%1,%2')
-        if k == 0 then break end
-    end
-    return "$" .. formatted
+    return FormatHelper.FormatCoinsShort(amount, true)  -- 带$符号
 end
 
 --[[
@@ -305,7 +301,7 @@ local function CreateItemCard(itemData, index)
     local number = cardFrame:FindFirstChild("Number")
     if number and number:IsA("TextLabel") then
         if itemData.Stock and itemData.Stock <= 0 then
-            number.Text = "售罄"
+            number.Text = "Sold out"
             number.TextColor3 = Color3.fromRGB(255, 50, 50)
         else
             number.Text = "x" .. tostring(itemData.Stock or 999)
@@ -783,7 +779,7 @@ local function OnStockUpdate(shopId, stockData)
                 local numberLabel = card:FindFirstChild("Number")
                 if numberLabel and numberLabel:IsA("TextLabel") then
                     if stock <= 0 then
-                        numberLabel.Text = "售罄"
+                        numberLabel.Text = "Sold out"
                         numberLabel.TextColor3 = Color3.fromRGB(255, 50, 50)
                     else
                         numberLabel.Text = "x" .. stock

@@ -17,7 +17,7 @@ local FormatHelper = {}
 -- ==================== 金币格式化 ====================
 
 --[[
-格式化金币显示
+格式化金币显示（原始格式）
 @param amount number - 金币数量
 @return string - 格式化后的字符串,如 "$100"
 ]]
@@ -34,6 +34,74 @@ function FormatHelper.FormatCoins(amount)
 
     -- 格式化为 $XXXXX
     return string.format("$%d", math.floor(amount))
+end
+
+--[[
+格式化金币显示（大数值缩写版本）
+规则：
+- 0 ~ 9999: 原样显示，如 "1234"
+- 10000 ~ 999999: 显示为 X.XK，如 "12.3K"（万级）
+- 1000000 ~ 999999999: 显示为 X.XM，如 "1.5M"（百万级）
+- 1000000000+: 显示为 X.XB，如 "2.3B"（十亿级）
+
+@param amount number - 金币数量
+@param showDollarSign boolean - 是否显示$符号（默认false）
+@return string - 缩写后的字符串
+]]
+function FormatHelper.FormatCoinsShort(amount, showDollarSign)
+    if type(amount) ~= "number" then
+        return showDollarSign and "$0" or "0"
+    end
+
+    -- 确保金币不为负数
+    if amount < 0 then
+        amount = 0
+    end
+
+    local result
+
+    if amount >= 1e9 then
+        -- 十亿级 (Billion)
+        local shortened = amount / 1e9
+        if shortened >= 100 then
+            result = string.format("%.0fB", shortened)
+        elseif shortened >= 10 then
+            result = string.format("%.1fB", shortened)
+        else
+            result = string.format("%.2fB", shortened)
+        end
+    elseif amount >= 1e6 then
+        -- 百万级 (Million)
+        local shortened = amount / 1e6
+        if shortened >= 100 then
+            result = string.format("%.0fM", shortened)
+        elseif shortened >= 10 then
+            result = string.format("%.1fM", shortened)
+        else
+            result = string.format("%.2fM", shortened)
+        end
+    elseif amount >= 1e4 then
+        -- 万级 (Kilo)
+        local shortened = amount / 1e3
+        if shortened >= 100 then
+            result = string.format("%.0fK", shortened)
+        elseif shortened >= 10 then
+            result = string.format("%.1fK", shortened)
+        else
+            result = string.format("%.2fK", shortened)
+        end
+    else
+        -- 小于10000，原样显示
+        result = tostring(math.floor(amount))
+    end
+
+    -- 去除末尾多余的0和小数点，如 "1.00K" -> "1K", "1.50K" -> "1.5K"
+    result = result:gsub("%.?0+([KMBT])$", "%1")
+
+    if showDollarSign then
+        return "$" .. result
+    end
+    return result
 end
 
 -- ==================== 数字格式化 ====================

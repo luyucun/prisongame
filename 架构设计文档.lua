@@ -4,7 +4,7 @@
 =====================================================
 
 项目名称: Roblox 兵种塔防游戏
-当前版本: V3.3
+当前版本: V3.5
 最后更新: 2025-12-02
 
 =====================================================
@@ -453,6 +453,23 @@ ReplicatedStorage/
 - 数据持久化: DataManager.TaskData
 - 自动检测: 运营更新新任务后自动激活
 - TaskEvents: 新增事件文件夹
+
+【V3.4】战斗金币系统
+- UnitConfig.KillReward: 每个兵种的基础击杀金币配置
+- GetKillReward()/GetKillRewardByLevel(): 击杀金币计算接口
+- GameConfig.BattleCoin: 战斗金币配置(AdvanceDistance/AdvanceReward)
+- CombatSystem.KillUnit: 杀死敌方单位(Defense)发放击杀金币
+- CampaignManager: 前进金币追踪(StartZPosition/MaxAdvancedZ/LastRewardedDistance)
+- CalculateBattleCenter(): 计算战场中心(友军质心)
+- CheckAndRewardAdvanceCoins(): 检查并发放前进金币
+
+【V3.5】基于速度的卡住检测(行军阶段)
+- PathService_v3.lua: MoveUnitsToPositions行军卡住检测重构为基于WalkSpeed
+- 检测逻辑: 实际移动距离 < 预期移动距离(WalkSpeed * 0.5s * 50%)
+- 时间窗口: 0.5秒检测一次(与单位速度匹配)
+- 快速响应: 卡住1次就立即重寻路(无需等待多次确认)
+- 优势: 高速单位和低速单位都能准确检测卡住状态
+- 关键变量: data.LastStuckCheckPos记录上次位置用于计算实际移动距离
 
 =====================================================
 五、核心技术要点
@@ -1043,6 +1060,26 @@ UI结构：
   - ClaimButton (TextButton): 领取按钮
   - CompletedLabel (TextLabel): 完成标签(可选)
 
+【11.19 战斗金币系统】BattleCoin (V3.4新增)
+职责：战斗中获取金币(击杀金币+前进金币)
+
+击杀金币(CombatSystem.KillUnit):
+- 只有Defense队被击杀时触发
+- 金币数 = 兵种KillReward * 等级
+- 通过BattleManager.GetBattle获取PlayerId
+- 调用CurrencySystem.AddCoins发放
+
+前进金币(CampaignManager):
+- 每0.5秒计算一次战场中心位置(所有存活友军质心)
+- 计算从起点(CommandPart)到当前位置的Z轴前进距离
+- 每前进AdvanceDistance studs获得AdvanceReward金币
+- 只计算前进不计算后退，防止往返刷金币
+
+相关配置：
+- UnitConfig.Units[id].KillReward: 基础击杀金币(默认5)
+- GameConfig.BattleCoin.AdvanceDistance: 前进触发距离(默认30)
+- GameConfig.BattleCoin.AdvanceReward: 每次前进金币(默认5)
+
 =====================================================
 十二、核心数据结构
 =====================================================
@@ -1081,6 +1118,10 @@ UI结构：
     IsWaitingForConfirm = boolean?, -- V2.4
     IsVictory = boolean?,           -- V2.4
     PlayerMoveBackup = table?,      -- 玩家移动备份
+    -- V3.4新增: 前进金币追踪
+    StartZPosition = number,        -- 战斗起始Z坐标(CommandPart位置)
+    MaxAdvancedZ = number,          -- 最远前进Z坐标
+    LastRewardedDistance = number,  -- 上次获得奖励时的累计前进距离
 }
 ```
 
@@ -1142,10 +1183,13 @@ UI结构：
 21. V3.3+: 新增任务只需在TaskConfig.Tasks表中添加配置，无需修改其他代码
 22. V3.3+: 任务系统会在玩家加入时自动初始化和同步任务数据
 23. V3.3+: 各系统购买/放置/战斗完成时需调用TaskSystem对应方法通知进度
+24. V3.4+: 兵种配置需包含KillReward字段(基础击杀金币)
+25. V3.4+: 战斗金币配置在GameConfig.BattleCoin中(前进距离/奖励)
+26. V3.4+: 击杀金币=基础值*等级，只有杀死敌方单位(Defense队)才获得
 
 =====================================================
 架构设计文档完成
-版本: V3.3
-最后更新: 2025-12-02
+版本: V3.5
+最后更新: 2025-12-03
 =====================================================
 ]]

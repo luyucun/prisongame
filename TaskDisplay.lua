@@ -16,6 +16,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
+-- 引用格式化工具
+local FormatHelper = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("FormatHelper"))
+
 -- 事件引用
 local TaskEvents = nil
 local TaskProgressEvent = nil      -- 服务器→客户端：任务进度更新
@@ -163,9 +166,9 @@ local function UpdateUI(taskData)
         TaskText.Text = string.format("%s（%d/%d）", description, progress, required)
     end
 
-    -- 显示奖励金币数值
+    -- 显示奖励金币数值（使用大数值格式化）
     if RewardNumber then
-        RewardNumber.Text = tostring(taskData.RewardCoins or 0)
+        RewardNumber.Text = FormatHelper.FormatCoinsShort(taskData.RewardCoins or 0)
     end
 
     -- 更新红点状态 (任务完成但未领取时显示)

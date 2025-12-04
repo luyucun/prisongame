@@ -15,6 +15,7 @@ TaskConfig.TaskType = {
     PURCHASE_SKILL = 3,      -- 类型3：购买N次技能
     COMPLETE_BATTLE = 4,     -- 类型4：完成一场战斗
     COLLECT_IDLE_COIN = 5,   -- 类型5：领取一次挂机金币奖励
+    MERGE_LEVEL2_UNIT = 6,   -- 类型6：合成一个2级的指定兵种（需要TargetUnitId参数）
 }
 
 -- 任务类型名称映射（用于描述生成）
@@ -24,6 +25,7 @@ TaskConfig.TaskTypeName = {
     [3] = "购买技能",
     [4] = "完成战斗",
     [5] = "领取挂机奖励",
+    [6] = "合成2级兵种",
 }
 
 -- ==================== 任务列表配置 ====================
@@ -35,6 +37,7 @@ TaskConfig.TaskTypeName = {
 --   Description: 任务描述文本
 --   RewardCoins: 奖励金币数量
 --   Sort: 排序（对应任务顺序，越小越靠前）
+--   TargetUnitId: [仅类型6需要] 目标兵种ID，用于指定需要合成的兵种
 
 TaskConfig.Tasks = {
     -- 任务1001: 购买任意一个囚犯
@@ -126,6 +129,16 @@ TaskConfig.Tasks = {
         Description = "领取一次挂机奖励",
         RewardCoins = 100,
         Sort = 10,
+    },
+    -- 任务1011: 合成一个2级菜鸟
+    {
+        TaskId = 1011,
+        TaskType = TaskConfig.TaskType.MERGE_LEVEL2_UNIT,
+        RequiredCount = 1,
+        Description = "合成一个2级菜鸟",
+        RewardCoins = 100,
+        Sort = 11,
+        TargetUnitId = "10001",  -- Noob的UnitId（字符串格式）
     },
 }
 

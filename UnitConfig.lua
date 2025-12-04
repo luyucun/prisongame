@@ -127,6 +127,7 @@ UnitConfig.Units = {
 		BaseLevel = 1,
 		Price = 200,
 		GridSize = 1,
+		KillReward = 5,  -- V3.4: 基础击杀金币奖励
 		Description = "最基础的近战单位",
 		Icon = "rbxassetid://98616255072587",
 		Quality = "Common",
@@ -172,6 +173,7 @@ UnitConfig.Units = {
 		BaseLevel = 1,
 		Price = 200,
 		GridSize = 1,
+		KillReward = 5,  -- V3.4: 基础击杀金币奖励
 		Description = "使用棍棒的近战单位",
 		Icon = "rbxassetid://133527593486392",
 		Quality = "Common",
@@ -211,6 +213,7 @@ UnitConfig.Units = {
 		BaseLevel = 1,
 		Price = 200,
 		GridSize = 1,
+		KillReward = 5,  -- V3.4: 基础击杀金币奖励
 		Description = "手枪远程单位",
 		Icon = "rbxassetid://80744151898936",
 		Quality = "Common",
@@ -250,6 +253,7 @@ UnitConfig.Units = {
 		BaseLevel = 1,
 		Price = 200,
 		GridSize = 1,
+		KillReward = 5,  -- V3.4: 基础击杀金币奖励
 		Description = "步枪远程单位",
 		Icon = "rbxassetid://123162348831885",
 		Quality = "Common",
@@ -289,6 +293,7 @@ UnitConfig.Units = {
 		BaseLevel = 1,
 		Price = 300,
 		GridSize = 1,
+		KillReward = 5,  -- V3.4: 基础击杀金币奖励
 		Description = "基础近战单位",
 		Icon = "rbxassetid://80710637196540",
 		Quality = "Common",
@@ -334,6 +339,7 @@ UnitConfig.Units = {
 		BaseLevel = 1,
 		Price = 300,
 		GridSize = 1,
+		KillReward = 5,  -- V3.4: 基础击杀金币奖励
 		Description = "使用棍棒的近战单位",
 		Icon = "rbxassetid://96910755166910",
 		Quality = "Common",
@@ -373,6 +379,7 @@ UnitConfig.Units = {
 		BaseLevel = 1,
 		Price = 300,
 		GridSize = 1,
+		KillReward = 5,  -- V3.4: 基础击杀金币奖励
 		Description = "手枪远程单位",
 		Icon = "rbxassetid://140057693756084",
 		Quality = "Common",
@@ -412,6 +419,7 @@ UnitConfig.Units = {
 		BaseLevel = 1,
 		Price = 300,
 		GridSize = 1,
+		KillReward = 5,  -- V3.4: 基础击杀金币奖励
 		Description = "步枪远程单位",
 		Icon = "rbxassetid://109694053639716",
 		Quality = "Common",
@@ -451,6 +459,7 @@ UnitConfig.Units = {
 		BaseLevel = 1,
 		Price = 400,
 		GridSize = 1,
+		KillReward = 5,  -- V3.4: 基础击杀金币奖励
 		Description = "基础近战单位",
 		Icon = "rbxassetid://129425310745524",
 		Quality = "Common",
@@ -496,6 +505,7 @@ UnitConfig.Units = {
 		BaseLevel = 1,
 		Price = 400,
 		GridSize = 1,
+		KillReward = 5,  -- V3.4: 基础击杀金币奖励
 		Description = "使用棍棒的近战单位",
 		Icon = "rbxassetid://123524507681699",
 		Quality = "Common",
@@ -535,6 +545,7 @@ UnitConfig.Units = {
 		BaseLevel = 1,
 		Price = 400,
 		GridSize = 1,
+		KillReward = 5,  -- V3.4: 基础击杀金币奖励
 		Description = "手枪远程单位",
 		Icon = "rbxassetid://78069816818003",
 		Quality = "Common",
@@ -574,6 +585,7 @@ UnitConfig.Units = {
 		BaseLevel = 1,
 		Price = 400,
 		GridSize = 1,
+		KillReward = 5,  -- V3.4: 基础击杀金币奖励
 		Description = "步枪远程单位",
 		Icon = "rbxassetid://96684518109328",
 		Quality = "Common",
@@ -613,6 +625,7 @@ UnitConfig.Units = {
 		BaseLevel = 1,
 		Price = 500,
 		GridSize = 1,
+		KillReward = 5,  -- V3.4: 基础击杀金币奖励
 		Description = "基础近战单位",
 		Icon = "rbxassetid://102001177844916",
 		Quality = "Common",
@@ -658,6 +671,7 @@ UnitConfig.Units = {
 		BaseLevel = 1,
 		Price = 500,
 		GridSize = 1,
+		KillReward = 5,  -- V3.4: 基础击杀金币奖励
 		Description = "使用棍棒的近战单位",
 		Icon = "rbxassetid://127241024884061",
 		Quality = "Common",
@@ -697,6 +711,7 @@ UnitConfig.Units = {
 		BaseLevel = 1,
 		Price = 500,
 		GridSize = 1,
+		KillReward = 5,  -- V3.4: 基础击杀金币奖励
 		Description = "手枪远程单位",
 		Icon = "rbxassetid://96284212262078",
 		Quality = "Common",
@@ -736,6 +751,7 @@ UnitConfig.Units = {
 		BaseLevel = 1,
 		Price = 500,
 		GridSize = 1,
+		KillReward = 5,  -- V3.4: 基础击杀金币奖励
 		Description = "步枪远程单位",
 		Icon = "rbxassetid://86449419798698",
 		Quality = "Common",
@@ -775,6 +791,7 @@ UnitConfig.Units = {
 		BaseLevel = 1,
 		Price = 600,
 		GridSize = 1,
+		KillReward = 5,  -- V3.4: 基础击杀金币奖励
 		Description = "使用棍棒的近战单位",
 		Icon = "rbxassetid://130658905780133",
 		Quality = "Common",
@@ -816,6 +833,7 @@ UnitConfig.Units = {
 		GridSize = 2,
 		GridWidth = 2,
 		GridDepth = 1,
+		KillReward = 8,  -- V3.4: 基础击杀金币奖励(Tank型)
 		Description = "坦克型近战单位",
 		Icon = "rbxassetid://74819350235405",
 		Quality = "Common",
@@ -857,6 +875,7 @@ UnitConfig.Units = {
 		GridSize = 2,
 		GridWidth = 2,
 		GridDepth = 1,
+		KillReward = 8,  -- V3.4: 基础击杀金币奖励(Tank型)
 		Description = "坦克型近战单位",
 		Icon = "rbxassetid://75652304417710",
 		Quality = "Common",
@@ -898,6 +917,7 @@ UnitConfig.Units = {
 		GridSize = 2,
 		GridWidth = 2,
 		GridDepth = 1,
+		KillReward = 8,  -- V3.4: 基础击杀金币奖励(Tank型)
 		Description = "坦克型近战单位",
 		Icon = "rbxassetid://107612488818992",
 		Quality = "Common",
@@ -939,6 +959,7 @@ UnitConfig.Units = {
 		GridSize = 2,
 		GridWidth = 2,
 		GridDepth = 1,
+		KillReward = 8,  -- V3.4: 基础击杀金币奖励(Tank型)
 		Description = "坦克型近战单位",
 		Icon = "rbxassetid://105156254180465",
 		Quality = "Common",
@@ -978,6 +999,7 @@ UnitConfig.Units = {
 		BaseLevel = 1,
 		Price = 800,
 		GridSize = 1,
+		KillReward = 10,  -- V3.4: 基础击杀金币奖励(Guard型)
 		Description = "守卫型近战单位",
 		Icon = "rbxassetid://114892183819195",
 		Quality = "Common",
@@ -1017,6 +1039,7 @@ UnitConfig.Units = {
 		BaseLevel = 1,
 		Price = 800,
 		GridSize = 1,
+		KillReward = 10,  -- V3.4: 基础击杀金币奖励(Guard型)
 		Description = "守卫型近战单位",
 		Icon = "rbxassetid://87038735300763",
 		Quality = "Common",
@@ -1056,6 +1079,7 @@ UnitConfig.Units = {
 		BaseLevel = 1,
 		Price = 800,
 		GridSize = 1,
+		KillReward = 10,  -- V3.4: 基础击杀金币奖励(Guard型)
 		Description = "守卫型近战单位",
 		Icon = "rbxassetid://88477019377142",
 		Quality = "Common",
@@ -1095,6 +1119,7 @@ UnitConfig.Units = {
 		BaseLevel = 1,
 		Price = 800,
 		GridSize = 1,
+		KillReward = 10,  -- V3.4: 基础击杀金币奖励(Guard型)
 		Description = "守卫型近战单位",
 		Icon = "rbxassetid://102620601082371",
 		Quality = "Common",
@@ -1763,6 +1788,35 @@ function UnitConfig.GetQuality(unitId)
 		return "Common"  -- 默认品质
 	end
 	return unitData.Quality
+end
+
+-- ==================== V3.4新增: 击杀金币奖励接口 ====================
+
+--[[
+获取兵种的基础击杀金币奖励
+V3.4新增: 杀死敌方兵种时获得的金币
+@param unitId string - 兵种ID
+@return number - 基础击杀金币奖励,默认5
+]]
+function UnitConfig.GetKillReward(unitId)
+	local unitData = UnitConfig.GetUnitById(unitId)
+	if not unitData or not unitData.KillReward then
+		return 5  -- 默认击杀金币
+	end
+	return unitData.KillReward
+end
+
+--[[
+获取兵种的击杀金币奖励(根据等级计算)
+V3.4新增: 1级兵就是基础值,2级兵就是金币基础数*2,3级兵就是金币基础数*3
+@param unitId string - 兵种ID
+@param level number - 兵种等级
+@return number - 实际击杀金币奖励
+]]
+function UnitConfig.GetKillRewardByLevel(unitId, level)
+	local baseReward = UnitConfig.GetKillReward(unitId)
+	local unitLevel = level or 1
+	return baseReward * unitLevel
 end
 
 -- ==================== V1.6新增: 寻路配置接口 ====================

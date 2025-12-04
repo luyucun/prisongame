@@ -786,6 +786,44 @@ function CombatSystem.KillUnit(unitModel, killer)
 	-- 保存unitId用于后续日志
 	local unitId = state.UnitId
 	local battleId = state.BattleId
+	local unitLevel = state.Level or 1
+
+	-- V3.4新增: 发放击杀金币奖励
+	-- 只有敌方单位(Defense队)被击杀时才发放奖励给玩家
+	if state.Team == "Defense" and battleId then
+		-- 计算击杀金币（基础值 * 等级）
+		local killReward = UnitConfig.GetKillRewardByLevel(unitId, unitLevel)
+
+		-- 通过BattleManager获取战斗实例和玩家ID
+		local BattleManager = nil
+		local bmModule = ServerScriptService:FindFirstChild("Systems") and ServerScriptService.Systems:FindFirstChild("BattleManager")
+		if bmModule then
+			BattleManager = require(bmModule :: ModuleScript)
+		end
+
+		if BattleManager and BattleManager.GetBattle then
+			local battle = BattleManager.GetBattle(battleId)
+			if battle and battle.PlayerId then
+				-- 获取玩家实例
+				local Players = game:GetService("Players")
+				local player = Players:GetPlayerByUserId(battle.PlayerId)
+				if player then
+					-- 加载CurrencySystem发放金币
+					local CurrencySystem = nil
+					local csModule = ServerScriptService:FindFirstChild("Systems") and ServerScriptService.Systems:FindFirstChild("CurrencySystem")
+					if csModule then
+						CurrencySystem = require(csModule :: ModuleScript)
+					end
+
+					if CurrencySystem then
+						CurrencySystem.AddCoins(player, killReward, "击杀金币奖励")
+						DebugLog(string.format("[V3.4] 击杀金币: 玩家 %s 击杀 %s(Lv.%d) 获得 %d 金币",
+							player.Name, unitId, unitLevel, killReward))
+					end
+				end
+			end
+		end
+	end
 
 	-- V2.9.3新增：立即隐藏死亡单位头顶的所有UI（血条、等级等）
 	local head = unitModel:FindFirstChild("Head")

@@ -15,6 +15,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 -- 引用配置
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
 
+-- 引用格式化工具
+local FormatHelper = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("FormatHelper"))
+
 -- 默认配置
 local DEFAULT_DURATION = GameConfig.UI.CoinRollDuration or 0.8
 
@@ -41,12 +44,12 @@ local function CleanupAnimation(textLabel)
 end
 
 --[[
-格式化金币显示文本
+格式化金币显示文本（使用大数值缩写）
 @param amount number - 金币数量
 @return string - 格式化后的文本
 ]]
 local function FormatCoinText(amount)
-	return string.format(GameConfig.COIN_DISPLAY_FORMAT, math.floor(amount))
+	return FormatHelper.FormatCoinsShort(amount, true)  -- 带$符号
 end
 
 --[[

@@ -133,6 +133,19 @@ GameConfig.IdleCoin = {
 	ParticleEffectDuration = 1,          -- 粒子特效持续时长(秒)
 }
 
+-- ==================== 战斗金币配置 (V3.4) ====================
+GameConfig.BattleCoin = {
+	-- 前进金币配置
+	AdvanceDistance = 30,                -- 战场中心每前进多少studs获得一次金币
+	AdvanceReward = 5,                   -- 每次前进获得的金币数
+
+	-- 击杀金币说明(实际在UnitConfig中配置每个兵种的KillReward)
+	-- 1级兵就是配置的基础值
+	-- 2级兵就是金币基础数*2
+	-- 3级兵就是金币基础数*3
+	DefaultKillReward = 5,               -- 默认击杀金币(如果兵种未配置KillReward)
+}
+
 -- ==================== 调试配置 ====================
 -- 是否启用调试模式
 GameConfig.DEBUG_MODE = false

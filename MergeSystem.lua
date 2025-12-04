@@ -30,6 +30,9 @@ local DataManager = require(ServerScriptService.Core.DataManager)  -- 🔥修复
 local InventorySystem = require(ServerScriptService.Systems.InventorySystem)
 local PlacementSystem = require(ServerScriptService.Systems.PlacementSystem)
 
+-- 延迟加载系统模块（避免循环依赖）
+local TaskSystem = nil
+
 -- 远程事件(延迟获取)
 local MergeEvents = nil
 
@@ -285,6 +288,17 @@ function MergeSystem.MergeUnits(player, instanceIdA, instanceIdB)
         newInstance.InstanceId,
         newLevel
     ))
+
+    -- V3.3新增：通知任务系统（合成2级兵种任务）
+    if not TaskSystem then
+        local taskModule = ServerScriptService.Systems:FindFirstChild("TaskSystem")
+        if taskModule then
+            TaskSystem = require(taskModule)
+        end
+    end
+    if TaskSystem and TaskSystem.OnMergeLevel2Unit then
+        TaskSystem.OnMergeLevel2Unit(player, newInstance.UnitId, newLevel)
+    end
 
     return true, "合成成功", {
         InstanceId = newInstance.InstanceId,
