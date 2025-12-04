@@ -32,7 +32,8 @@ ReplicatedStorage
         ├──AttachHealthBars（RemoteEvent） 【V2.3新增】 - 服务器→客户端：挂载血条(unitModels)
         ├──DetachHealthBars（RemoteEvent） 【V2.3新增】 - 服务器→客户端：移除血条(unitModels)
         ├──VictoryPopup（RemoteEvent） 【V2.4新增】 - 服务器→客户端：显示战斗结算弹窗(battleId, result, stageNum, extraRewards)
-        └──VictoryConfirm（RemoteEvent） 【V2.4新增】 - 客户端→服务器：确认战斗结算(battleId)
+        ├──VictoryConfirm（RemoteEvent） 【V2.4新增】 - 客户端→服务器：确认战斗结算(battleId)
+        └──CoinEarnedEffect（RemoteEvent） 【V3.4.1新增】 - 服务器→客户端：战斗金币获取表现通知(amount)
     └──CampaignEvents（Folder）/  【V2.0新增】
         ├──RequestStartCampaign（RemoteEvent） - 客户端→服务器：请求开始战役
         ├──RequestRetreat（RemoteEvent） - 客户端→服务器：请求撤退
@@ -486,3 +487,52 @@ UI配置说明（MainGui）：
    - 购买技能: SkillShopSystem.OnPurchaseSkill()
    - 完成战斗: CampaignManager.OnCampaignEnd()
    - 领取挂机金币: IdleCoinSystem.OnCollectRequest()
+
+
+【V3.4.1战斗金币表现系统RemoteEvent创建说明】
+位置：ReplicatedStorage/Events/BattleEvents/
+🆕 CoinEarnedEffect (RemoteEvent) - 需在Studio中手动创建（或由服务端自动创建）
+
+功能说明：
+- CoinEarnedEffect：服务器→客户端：战斗金币获取表现通知
+  参数：(amount: number) 获得的金币数量
+  触发时机：玩家在战斗中获得金币时（击杀敌人/前进奖励）
+
+客户端效果：
+- 在屏幕中央区域显示金币数值
+- 金币数字做抛物线运动（烟花效果）
+- 每次获得金币都会触发一次表现
+
+创建步骤：
+1. 打开Roblox Studio
+2. 导航到 ReplicatedStorage > Events > BattleEvents
+3. 右键点击 BattleEvents 文件夹
+4. 选择 "Insert Object" > "RemoteEvent"
+5. 将新建的 RemoteEvent 重命名为 "CoinEarnedEffect"
+6. 保存游戏
+
+注意：服务端CurrencySystem.lua会在初始化时自动创建这个事件（如果不存在），
+但建议手动创建以确保事件在系统初始化前就存在。
+
+
+【V3.4.1战斗金币表现系统其他资源创建说明】
+
+1. 客户端控制器位置：StarterPlayer/StarterPlayerScripts/UI/CoinNumShowController
+
+2. 金币显示模板位置：ReplicatedStorage/CoinNumShow/
+   └── CoinNumShow (TextLabel) - 金币数字模板
+       - Visible: false
+       - BackgroundTransparency: 1
+       - Font: GothamBold
+       - TextColor3: (255, 215, 0) 金色
+       - TextStrokeColor3: (139, 69, 19) 棕色
+       - TextStrokeTransparency: 0
+
+3. 如果模板不存在，客户端会自动创建默认模板
+
+4. 表现效果配置（在CoinNumShowController.lua中可调整）：
+   - 抛洒区域：屏幕中央偏上
+   - 初始速度：随机X方向，向上Y方向
+   - 重力加速度：400像素/秒²
+   - 动画时长：1.2秒
+   - 淡出时间：0.8秒开始淡出

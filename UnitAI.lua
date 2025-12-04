@@ -1,8 +1,15 @@
 --[[
-脚本名称: UnitAI (V3.0重构版)
+脚本名称: UnitAI (V4.5重构版)
 脚本类型: ModuleScript (服务端系统)
 脚本位置: ServerScriptService/Systems/UnitAI
-版本: V3.0 - 彻底重构，修复寻路问题
+版本: V4.5 - 与PathService保持一致的宽松位移检测
+
+V4.5更新内容：
+1. ✅ 提高最小位移阈值：0.3→0.5 studs
+2. ✅ 降低容差系数：0.25→0.2（更宽松）
+3. ✅ 提高卡住次数阈值：2→3次（约1.5秒）
+4. ✅ 延长重寻路冷却：0.8→1.5秒
+5. ✅ 与PathService V4.5保持参数一致
 
 重构要点（参考重构指南）：
 1. ✅ 移除HasLineOfSight的Raycast，改用Blockcast检测体积碰撞
@@ -16,6 +23,7 @@
 - 只有距离<10 studs且无障碍才直线移动，否则一律寻路
 - 分离力让重叠的兵慢慢推开
 - 状态机简洁：SEEKING找目标→MOVING走路→ATTACKING打架
+- V4.4新增：智能位移检测，避免拥堵时误判卡住
 ]]
 
 local UnitAI = {}
@@ -54,6 +62,14 @@ local MOVEMENT_CONFIG = {
 	-- MoveTo节流
 	MOVETO_THROTTLE_INTERVAL = 0.3,  -- 相同目标的MoveTo间隔
 	MOVETO_POSITION_THRESHOLD = 1.0,  -- 位置变化阈值
+
+	-- V4.5修改：路径模式位移检测配置（更宽松，与PathService保持一致）
+	PATH_DISPLACEMENT_CHECK_INTERVAL = 0.5,  -- 位移检测间隔（秒）
+	PATH_STUCK_MIN_DISTANCE = 0.5,           -- 提高到0.5 studs
+	PATH_STUCK_TOLERANCE = 0.2,              -- 降低到0.2（更宽松）
+	PATH_STUCK_THRESHOLD = 3,                -- 提高到3次（约1.5秒）才重寻路
+	PATH_MIN_DISTANCE_FOR_CHECK = 5,         -- 最小检测距离：离目标太近就不检测了
+	PATH_REPATH_COOLDOWN = 1.5,              -- 延长到1.5秒
 }
 
 -- ==================== 调试日志 ====================
@@ -745,17 +761,83 @@ local function HandleMoving(unitModel, aiData, state)
 			-- 有路径（完整或部分），沿路径走
 			local isPartialPath = (pathStatus == "Partial")
 
-			-- ✅ V4.2新增：撞墙检测 - 有路径但速度极低说明被卡住
+			-- ==================== V4.5重构：智能位移检测 ====================
+			-- 目标：避免拥堵/战斗时的误判，只在真正卡死时才重寻路
+			-- V4.5更新：阈值放宽到0.5，冷却延长到1.5秒，需要3次才确认
+			local now = tick()
+			local checkInterval = MOVEMENT_CONFIG.PATH_DISPLACEMENT_CHECK_INTERVAL
+			local lastCheck = aiData.PathDisplacementCheckTime or 0
+
+			if now - lastCheck >= checkInterval then
+				aiData.PathDisplacementCheckTime = now
+
+				-- 1. 检查重寻路冷却
+				local lastRepathTime = aiData.LastRepathTriggerTime or 0
+				local canRepath = (now - lastRepathTime) >= MOVEMENT_CONFIG.PATH_REPATH_COOLDOWN
+
+				-- 2. 计算实际位移（XZ平面）
+				local currentPos = aiData.HumanoidRootPart.Position
+				local lastPos = aiData.PathLastCheckPos or currentPos
+				local actualDistance = math.sqrt(
+					(currentPos.X - lastPos.X)^2 + (currentPos.Z - lastPos.Z)^2
+				)
+				aiData.PathLastCheckPos = currentPos
+
+				-- 3. 记录距离变化（检查是否在向目标前进）
+				local prevDistToTarget = aiData.PrevDistanceToTarget or distance
+				local isProgressingToTarget = distance < (prevDistToTarget - 0.1)  -- 距离在减少
+				aiData.PrevDistanceToTarget = distance
+
+				-- 4. 智能卡住判定
+				-- 只有同时满足以下条件才算真正卡住：
+				-- a) 实际位移几乎为0（低于最小阈值）
+				-- b) 且距离目标没有在减少
+				-- c) 且离目标还有一定距离
+				-- d) 且冷却时间已过
+				local isReallyStuck = actualDistance < MOVEMENT_CONFIG.PATH_STUCK_MIN_DISTANCE
+					and not isProgressingToTarget
+					and distance > MOVEMENT_CONFIG.PATH_MIN_DISTANCE_FOR_CHECK
+					and canRepath
+
+				if isReallyStuck then
+					aiData.PathDisplacementStuckCount = (aiData.PathDisplacementStuckCount or 0) + 1
+					DebugLog(string.format("⚠️ %s 疑似卡住: 位移%.2f, 距离%.1f→%.1f, 次数%d",
+						state.UnitId, actualDistance, prevDistToTarget, distance, aiData.PathDisplacementStuckCount))
+
+					-- V4.5：需要连续3次（约1.5秒）才确认卡住
+					if aiData.PathDisplacementStuckCount >= MOVEMENT_CONFIG.PATH_STUCK_THRESHOLD then
+						DebugLog(string.format("🔄 %s 确认卡住，触发重寻路", state.UnitId))
+						aiData.PathDisplacementStuckCount = 0
+						aiData.LastRepathTriggerTime = now
+						aiData.Humanoid:Move(Vector3.zero)  -- 先停下
+						PathService.ClearPath(unitModel)
+						PathService.ForceRepath(unitModel)
+						return  -- 本帧不继续移动，等下一帧重新寻路
+					end
+				else
+					-- 在移动中，重置计数
+					if actualDistance > MOVEMENT_CONFIG.PATH_STUCK_MIN_DISTANCE then
+						aiData.PathDisplacementStuckCount = 0
+					end
+				end
+			end
+			-- ==================== V4.5智能位移检测结束 ====================
+
+			-- 瞬时速度检测（作为快速兜底，但也要检查冷却）
 			local velocity = aiData.HumanoidRootPart.AssemblyLinearVelocity
 			local speed = Vector3.new(velocity.X, 0, velocity.Z).Magnitude
-			if aiData.Humanoid.MoveDirection.Magnitude > 0.1 and speed < 0.3 then
+			local lastRepathTime = aiData.LastRepathTriggerTime or 0
+			local canQuickRepath = (now - lastRepathTime) >= MOVEMENT_CONFIG.PATH_REPATH_COOLDOWN
+
+			if aiData.Humanoid.MoveDirection.Magnitude > 0.1 and speed < 0.3 and canQuickRepath then
 				aiData.PathStuckCount = (aiData.PathStuckCount or 0) + 1
-				-- 连续卡住10帧（约0.17秒）触发重寻路
-				if aiData.PathStuckCount > 10 then
-					DebugLog(string.format("⚠️ %s 有路径但撞墙(速度%.2f)，清除路径触发重寻", state.UnitId, speed))
+				-- 收紧到8帧（约0.13秒）
+				if aiData.PathStuckCount > 8 then
+					DebugLog(string.format("⚠️ %s 有路径但速度为0，清除路径触发重寻", state.UnitId))
 					PathService.ClearPath(unitModel)
 					PathService.ForceRepath(unitModel)
 					aiData.PathStuckCount = 0
+					aiData.LastRepathTriggerTime = now
 					aiData.Humanoid:Move(Vector3.zero)
 					return
 				end
@@ -1033,6 +1115,12 @@ function UnitAI.StartAI(unitModel)
 		CurrentAnimState = nil,
 		Tracks = {},
 		AnimationConnections = {},
+		-- V4.4更新：位移检测相关
+		PathDisplacementCheckTime = 0,
+		PathLastCheckPos = nil,
+		PathDisplacementStuckCount = 0,
+		PrevDistanceToTarget = nil,
+		LastRepathTriggerTime = 0,
 	}
 
 	activeAIs[unitModel] = aiData

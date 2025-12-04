@@ -816,7 +816,8 @@ function CombatSystem.KillUnit(unitModel, killer)
 					end
 
 					if CurrencySystem then
-						CurrencySystem.AddCoins(player, killReward, "击杀金币奖励")
+						-- V3.4.1修改：使用AddCoinsFromBattle触发金币表现效果
+						CurrencySystem.AddCoinsFromBattle(player, killReward, battleId)
 						DebugLog(string.format("[V3.4] 击杀金币: 玩家 %s 击杀 %s(Lv.%d) 获得 %d 金币",
 							player.Name, unitId, unitLevel, killReward))
 					end

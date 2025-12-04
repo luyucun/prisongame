@@ -2,6 +2,7 @@
 脚本名称: CurrencySystem
 脚本类型: ModuleScript (服务端系统)
 脚本位置: ServerScriptService/Systems/CurrencySystem
+版本: V3.4.1 - 新增战斗金币表现通知
 ]]
 
 --[[
@@ -11,6 +12,7 @@
 2. 验证货币操作的合法性
 3. 通知客户端货币变化
 4. 为不同的货币获取渠道提供接口
+5. V3.4.1新增：战斗金币获取时触发客户端表现效果
 ]]
 
 local CurrencySystem = {}
@@ -25,6 +27,9 @@ local DataManager = require(ServerScriptService.Core.DataManager)
 
 -- 远程事件(延迟获取,避免循环依赖)
 local CurrencyEvents = nil
+
+-- V3.4.1新增：战斗金币表现事件
+local CoinEarnedEffectEvent = nil
 
 -- ==================== 私有函数 ====================
 
@@ -300,10 +305,19 @@ end
 @param amount number - 金币数量
 @param stageId number - 关卡ID(可选)
 @return boolean, number - 是否成功, 新的金币数量
+
+V3.4.1更新：添加战斗金币获取表现效果
 ]]
 function CurrencySystem.AddCoinsFromBattle(player, amount, stageId)
     local reason = string.format("战斗获得(关卡:%s)", tostring(stageId or "未知"))
-    return CurrencySystem.AddCoins(player, amount, reason)
+    local success, newAmount = CurrencySystem.AddCoins(player, amount, reason)
+
+    -- V3.4.1新增：战斗中获得金币时触发客户端表现效果
+    if success and amount > 0 then
+        CurrencySystem.NotifyBattleCoinEffect(player, amount)
+    end
+
+    return success, newAmount
 end
 
 --[[
@@ -442,6 +456,89 @@ function CurrencySystem.PushInitialCurrency(player)
     end)
 
     return true
+end
+
+-- ==================== V3.4.1新增：战斗金币表现系统 ====================
+
+--[[
+初始化战斗金币表现事件
+@return boolean - 是否成功
+]]
+local function InitializeBattleCoinEffectEvent()
+    if CoinEarnedEffectEvent then
+        return true
+    end
+
+    local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
+    if not eventsFolder then
+        return false
+    end
+
+    local battleEventsFolder = eventsFolder:FindFirstChild("BattleEvents")
+    if not battleEventsFolder then
+        return false
+    end
+
+    CoinEarnedEffectEvent = battleEventsFolder:FindFirstChild("CoinEarnedEffect")
+    if not CoinEarnedEffectEvent then
+        -- 如果事件不存在，尝试创建（仅在服务端）
+        if game:GetService("RunService"):IsServer() then
+            CoinEarnedEffectEvent = Instance.new("RemoteEvent")
+            CoinEarnedEffectEvent.Name = "CoinEarnedEffect"
+            CoinEarnedEffectEvent.Parent = battleEventsFolder
+            print(GameConfig.LOG_PREFIX, "[CurrencySystem] ✅ 自动创建CoinEarnedEffect事件")
+        end
+    end
+
+    return CoinEarnedEffectEvent ~= nil
+end
+
+--[[
+V3.4.1新增：通知客户端战斗金币获取表现效果
+在战斗中获得金币时调用，触发客户端的抛洒烟花效果
+@param player Player - 玩家对象
+@param amount number - 获得的金币数量
+@return boolean - 是否成功发送通知
+]]
+function CurrencySystem.NotifyBattleCoinEffect(player: Player, amount: number): boolean
+    if not player or not player.Parent then
+        return false
+    end
+
+    if not amount or amount <= 0 then
+        return false
+    end
+
+    -- 确保事件已初始化
+    if not CoinEarnedEffectEvent then
+        InitializeBattleCoinEffectEvent()
+    end
+
+    if not CoinEarnedEffectEvent then
+        -- 事件不存在，静默失败（不影响主流程）
+        return false
+    end
+
+    -- 发送金币获取表现事件给客户端
+    local success, errorMsg = pcall(function()
+        CoinEarnedEffectEvent:FireClient(player, amount)
+    end)
+
+    if success then
+        -- 调试日志（可选）
+        if GameConfig.DEBUG_MODE then
+            print(string.format(
+                "%s [CurrencySystem] 🎉 发送金币表现事件：玩家 %s 获得 %d 金币",
+                GameConfig.LOG_PREFIX,
+                player.Name,
+                amount
+            ))
+        end
+        return true
+    else
+        warn(GameConfig.LOG_PREFIX, "[CurrencySystem] 发送金币表现事件失败:", errorMsg)
+        return false
+    end
 end
 
 return CurrencySystem

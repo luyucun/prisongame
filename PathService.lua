@@ -2,7 +2,12 @@
 脚本名称: PathService
 脚本类型: ModuleScript (服务端系统)
 脚本位置: ServerScriptService/Systems/PathService
-版本: V3.0 - 彻底重构，简化设计
+版本: V4.3 - 收紧行军位移检测阈值
+
+V4.3更新内容：
+1. ✅ 收紧卡住检测阈值：1次卡住就立即重寻路（原来需要2次）
+2. ✅ MoveToFinished reached=false 立即触发重寻路
+3. ✅ 与UnitAI位移检测逻辑保持一致
 
 重构要点（参考重构指南）：
 1. ✅ 移除复杂的三段式优先级队列
@@ -55,8 +60,27 @@ local CONFIG = {
 	DEFAULT_AGENT_HEIGHT = 5,
 	DEFAULT_AGENT_CAN_JUMP = false,
 
-	-- V3.0新增：时间预算（毫秒）
-	TIME_BUDGET_MS = 4,  -- 每帧4ms时间预算
+	-- V4.5修改：动态时间预算
+	TIME_BUDGET_MS = 12,           -- 基础预算
+	TIME_BUDGET_MAX_MS = 20,       -- 队列堆积时的最大预算
+	QUEUE_THRESHOLD_FOR_BOOST = 15, -- 超过此队列长度时提高预算
+
+	-- V4.5修改：行军卡住检测配置（更宽松）
+	MARCH_STUCK_MIN_DISTANCE = 0.5,        -- 提高到0.5 studs
+	MARCH_STUCK_TOLERANCE = 0.2,           -- 降低到0.2（更宽松）
+	MARCH_REPATH_COOLDOWN = 1.5,           -- 延长到1.5秒
+	MARCH_STUCK_COUNT_THRESHOLD = 3,       -- 需要连续3次（约1.5秒）才确认卡住
+	MARCH_DISTANCE_PROGRESS_CHECK = true,  -- 是否检查距离是否在减少
+
+	-- V4.5新增：拥挤豁免配置
+	MARCH_CROWD_CHECK_RADIUS = 5,          -- 拥挤检测半径
+	MARCH_CROWD_THRESHOLD = 3,             -- 周围超过此数量友军时豁免
+
+	-- V4.5新增：MoveToFinished配置
+	MARCH_MOVETO_FAIL_THRESHOLD = 3,       -- 连续失败3次才重寻路
+
+	-- V4.5新增：分散重寻路配置
+	MARCH_REPATH_RANDOM_DELAY_MAX = 0.2,   -- 随机延迟最大值（秒）
 
 	-- 调试选项
 	DEBUG_SHOW_PATH = false,
@@ -390,7 +414,15 @@ local function ProcessQueueWithTimeBudget()
 	end
 
 	isProcessing = true
-	local budgetEndTime = tick() + (CONFIG.TIME_BUDGET_MS / 1000)  -- 转换为秒
+
+	-- V4.5：动态时间预算 - 队列堆积时提高预算
+	local budgetMs = CONFIG.TIME_BUDGET_MS
+	if #pathQueue > CONFIG.QUEUE_THRESHOLD_FOR_BOOST then
+		budgetMs = CONFIG.TIME_BUDGET_MAX_MS
+		DebugLog(string.format("队列堆积(%d)，提高预算到%dms", #pathQueue, budgetMs))
+	end
+
+	local budgetEndTime = tick() + (budgetMs / 1000)  -- 转换为秒
 	local processedCount = 0
 
 	while #pathQueue > 0 and tick() < budgetEndTime do
@@ -769,6 +801,40 @@ local function IsPathClearForMarch(unitInstance, targetPos)
 	return true
 end
 
+-- ==================== V4.5新增：拥挤检测辅助函数 ====================
+
+--[[
+检测单位周围是否有足够多的友军（用于拥挤豁免）
+@param unitInstance Model - 单位模型
+@param moveData table - 所有行军单位数据
+@return boolean - true表示周围拥挤，应该豁免卡住判定
+]]
+local function IsInCrowdedArea(unitInstance, moveData)
+	local root = unitInstance:FindFirstChild("HumanoidRootPart") or unitInstance.PrimaryPart
+	if not root then return false end
+
+	local myPos = root.Position
+	local nearbyCount = 0
+	local checkRadius = CONFIG.MARCH_CROWD_CHECK_RADIUS
+
+	for otherUnit, otherData in pairs(moveData) do
+		if otherUnit ~= unitInstance and not otherData.Arrived then
+			local otherRoot = otherUnit:FindFirstChild("HumanoidRootPart") or otherUnit.PrimaryPart
+			if otherRoot then
+				local dist = (otherRoot.Position - myPos).Magnitude
+				if dist < checkRadius then
+					nearbyCount = nearbyCount + 1
+					if nearbyCount >= CONFIG.MARCH_CROWD_THRESHOLD then
+						return true  -- 周围足够拥挤
+					end
+				end
+			end
+		end
+	end
+
+	return false
+end
+
 -- ==================== V3.0简化版批量移动（战役系统）====================
 
 local activeMoves = {}
@@ -922,21 +988,54 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 						pcall(function() onUnitArrived(unitInstance, "Arrived") end)
 					end
 				else
-					-- ✅ V4.2关键修复：处理reached==false（撞墙/无法到达waypoint）
+					-- ==================== V4.4优化：MoveToFinished处理 ====================
 					if not reached then
-						-- MoveTo超时但未到达waypoint，说明被墙挡住了
-						-- 立即停止并触发重寻路
-						DebugLog(string.format("⚠️ [行军] %s MoveToFinished reached=false，可能撞墙，触发重寻路", unitInstance.Name))
-						humanoid:Move(Vector3.zero)  -- 先停下
-						PathService.ClearPath(unitInstance)  -- 清除错误路径
-						data.ForceRepath = true  -- 标记需要重寻路
-						data.WallHitCount = (data.WallHitCount or 0) + 1
+						-- MoveTo超时或被阻挡，检查是否需要重寻路
+						local now = tick()
+						local lastRepathTime = data.LastRepathTriggerTime or 0
+						local canRepath = (now - lastRepathTime) >= CONFIG.MARCH_REPATH_COOLDOWN
+
+						data.MoveToFailCount = (data.MoveToFailCount or 0) + 1
+
+						-- V4.5修改：连续失败3次且冷却已过才触发重寻路（更保守）
+						if data.MoveToFailCount >= CONFIG.MARCH_MOVETO_FAIL_THRESHOLD and canRepath then
+							DebugLog(string.format("⚠️ [行军] %s MoveToFinished连续失败%d次，重寻路",
+								unitInstance.Name, data.MoveToFailCount))
+							humanoid:Move(Vector3.zero)
+							PathService.ClearPath(unitInstance)
+							data.ForceRepath = true
+							data.LastRepathTriggerTime = now
+							data.MoveToFailCount = 0
+							return
+						end
+
+						-- 否则继续尝试下一个waypoint
+						local pathStatus = PathService.GetPathStatus(unitInstance)
+						if pathStatus == PathStatus.SUCCESS or pathStatus == PathStatus.PARTIAL then
+							-- 尝试前进到下一个waypoint
+							if PathService.AdvancePath(unitInstance) then
+								local nextWaypoint = PathService.GetNextWaypoint(unitInstance)
+								if nextWaypoint then
+									humanoid:MoveTo(nextWaypoint)
+									return
+								end
+							end
+						end
+
+						-- 没有下一个waypoint，尝试直接去目标（仅SUCCESS路径）
+						if pathStatus == PathStatus.SUCCESS and distanceXZ < 10 then
+							humanoid:MoveTo(targetPos)
+						else
+							-- 其他情况停下等待重寻路
+							humanoid:Move(Vector3.zero)
+						end
 						return
 					end
+					-- ==================== V4.4优化结束 ====================
 
-					-- 未到达但reached==true，继续移动
+					-- reached=true但未到达，正常继续
+					data.MoveToFailCount = 0  -- 重置失败计数
 					local pathStatus = PathService.GetPathStatus(unitInstance)
-					-- ✅ V4.1修复：同时处理SUCCESS和PARTIAL状态
 					if pathStatus == PathStatus.SUCCESS or pathStatus == PathStatus.PARTIAL then
 						local isPartial = (pathStatus == PathStatus.PARTIAL)
 
@@ -947,7 +1046,7 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 						else
 							-- 路径点用完
 							if isPartial then
-								-- ✅ PARTIAL路径走完，停在最近可达点，不要直线冲刺！
+								-- PARTIAL路径走完，停在最近可达点
 								humanoid:Move(Vector3.zero)
 								DebugLog(string.format("⚠️ [行军] %s PARTIAL路径走完，停在最近可达点", unitInstance.Name))
 							else
@@ -1042,77 +1141,109 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 							data.StuckCount = 0
 							data.WrongWayCount = 0
 						else
-							-- 1. 卡住检测 (V3.5重构：基于WalkSpeed的距离对比检测)
-							-- 获取单位的实际WalkSpeed
-							local humanoid = unitInstance:FindFirstChild("Humanoid")
-							local walkSpeed = humanoid and humanoid.WalkSpeed or 16  -- 默认16 studs/s
+							-- ==================== V4.5重构：智能卡住检测 ====================
+							-- 目标：避免拥堵时的误判，只在真正卡死时才重寻路
 
-							-- 计算预期移动距离 = 移动速度 * 时间 * 容差系数(0.5表示只要移动不到预期的一半就算卡住)
-							local expectedDistance = walkSpeed * checkInterval * 0.5
+							-- 1. 检查重寻路冷却
+							local lastRepathTime = data.LastRepathTriggerTime or 0
+							local repathCooldown = CONFIG.MARCH_REPATH_COOLDOWN
+							local canRepath = (now - lastRepathTime) >= repathCooldown
 
-							-- 计算实际移动距离
+							-- 2. 计算位移
 							local currentPos = rootPart.Position
 							local lastPos = data.LastStuckCheckPos or currentPos
 							local actualDistance = (Vector3.new(currentPos.X, 0, currentPos.Z) - Vector3.new(lastPos.X, 0, lastPos.Z)).Magnitude
-
-							-- 更新位置记录
 							data.LastStuckCheckPos = currentPos
 
-							-- 如果实际移动距离 < 预期移动距离 且 离目标还有距离，判定为卡住
-							-- V4.0修复：增加重试退避机制
-							if actualDistance < expectedDistance and distanceXZ > 5 then
-								data.StuckCount = (data.StuckCount or 0) + 1
-								DebugLog(string.format("⚠️ [行军] %s 卡住检测: 实际%.2f < 预期%.2f (速度%.0f, 次数%d)",
-									unitInstance.Name, actualDistance, expectedDistance, walkSpeed, data.StuckCount))
+							-- 3. 计算预期位移（使用更宽松的容差）
+							local humanoid = unitInstance:FindFirstChild("Humanoid")
+							local walkSpeed = humanoid and humanoid.WalkSpeed or 16
+							-- V4.5：使用 max(0.5, WalkSpeed*interval*0.2) 作为阈值
+							local minDistThreshold = math.max(CONFIG.MARCH_STUCK_MIN_DISTANCE, walkSpeed * checkInterval * CONFIG.MARCH_STUCK_TOLERANCE)
 
-								-- V4.0修复：卡住2次才触发重寻路（增加容忍度，避免频繁重寻）
-								if data.StuckCount >= 2 then
-									DebugLog(string.format("⚠️ [行军] %s 确认卡住，触发重新寻路", unitInstance.Name))
+							-- 4. 记录距离变化（检查是否在向目标前进）
+							local prevDistToTarget = data.PrevDistanceToTarget or distanceXZ
+							local isProgressingToTarget = distanceXZ < (prevDistToTarget - 0.1)  -- 距离在减少
+							data.PrevDistanceToTarget = distanceXZ
+
+							-- 5. V4.5新增：拥挤豁免检测
+							local isInCrowd = IsInCrowdedArea(unitInstance, moveData)
+
+							-- 6. 智能卡住判定
+							-- 只有同时满足以下条件才算真正卡住：
+							-- a) 实际位移几乎为0（低于阈值）
+							-- b) 且距离目标没有在减少
+							-- c) 且离目标还有一定距离
+							-- d) 且冷却时间已过
+							-- e) V4.5新增：且周围不拥挤
+							local isReallyStuck = actualDistance < minDistThreshold
+								and not isProgressingToTarget
+								and distanceXZ > 5
+								and canRepath
+
+							if isReallyStuck then
+								-- V4.5：拥挤时豁免，只重置计数不触发重寻
+								if isInCrowd then
 									data.StuckCount = 0
-									data.ForceRepath = true
+									DebugLog(string.format("⚠️ [行军] %s 疑似卡住但周围拥挤，豁免", unitInstance.Name))
+								else
+									data.StuckCount = (data.StuckCount or 0) + 1
+									DebugLog(string.format("⚠️ [行军] %s 疑似卡住: 位移%.2f < %.2f, 距离%.1f→%.1f, 次数%d",
+										unitInstance.Name, actualDistance, minDistThreshold, prevDistToTarget, distanceXZ, data.StuckCount))
+
+									-- V4.5：需要连续3次（约1.5秒）才确认卡住
+									if data.StuckCount >= CONFIG.MARCH_STUCK_COUNT_THRESHOLD then
+										DebugLog(string.format("🔄 [行军] %s 确认卡住，触发重寻路", unitInstance.Name))
+										data.StuckCount = 0
+										data.ForceRepath = true
+										data.LastRepathTriggerTime = now
+									end
 								end
 							else
-								data.StuckCount = 0
+								-- 在移动中，重置计数
+								if actualDistance > minDistThreshold then
+									data.StuckCount = 0
+								end
 							end
 
-							-- 2. 障碍检测 (Blockcast)
-							-- V4.0修复：只有在没有有效路径且不在等待时才检测障碍
-							local pathStatus = PathService.GetPathStatus(unitInstance)
-							-- V4.0修复：PARTIAL状态也算有路径，不要触发障碍检测
-							if pathStatus ~= "Success" and pathStatus ~= "Partial" and not IsPathClearForMarch(unitInstance, targetPos) then
-								DebugLog(string.format("⚠️ [行军] %s 检测到障碍，请求寻路", unitInstance.Name))
-								data.ForceRepath = true
-							end
-
-							-- 3. 走错路检测 (距离越来越远)
-							-- 记录上次距离，如果连续3次检测距离都在增加，说明走错路了
-							local lastDistance = data.LastDistanceToTarget or distanceXZ
-							if distanceXZ > lastDistance + 1 then  -- 距离增加超过1 stud
+							-- 7. 走错路检测（距离连续增加）
+							if distanceXZ > prevDistToTarget + 2 then  -- 距离增加超过2 stud
 								data.WrongWayCount = (data.WrongWayCount or 0) + 1
-								if data.WrongWayCount >= 3 then  -- 连续3次（约1.5秒）距离增加
-									DebugLog(string.format("⚠️ [行军] %s 走错路(距离增加 %.1f→%.1f)，强制重寻路",
-										unitInstance.Name, lastDistance, distanceXZ))
+								if data.WrongWayCount >= 3 and canRepath then  -- 连续3次（约1.5秒）
+									DebugLog(string.format("⚠️ [行军] %s 走错路(距离%.1f→%.1f)，重寻路",
+										unitInstance.Name, prevDistToTarget, distanceXZ))
 									data.WrongWayCount = 0
 									data.ForceRepath = true
-									PathService.ClearPath(unitInstance)  -- 清除错误路径
+									data.LastRepathTriggerTime = now
+									PathService.ClearPath(unitInstance)
 								end
 							else
 								data.WrongWayCount = 0
 							end
-							data.LastDistanceToTarget = distanceXZ
 
-							-- 4. 周期性重寻路 (每5秒强制重算一次)
-							-- V4.0修复：延长周期到8秒，减少不必要的重寻
-							local timeSinceStart = now - data.StartTime
-							local lastRepath = data.LastRepathTime or 0
-							if timeSinceStart > 3 and (now - lastRepath) > 8 then  -- 开始3秒后，每8秒检查
-								if distanceXZ > 10 then  -- 还没接近目标
-									DebugLog(string.format("⚠️ [行军] %s 周期性重寻路检查(距离=%.1f)", unitInstance.Name, distanceXZ))
-									data.LastRepathTime = now
+							-- 8. 障碍检测（只在没有路径时检测）
+							local pathStatus = PathService.GetPathStatus(unitInstance)
+							if pathStatus ~= "Success" and pathStatus ~= "Partial" and canRepath then
+								if not IsPathClearForMarch(unitInstance, targetPos) then
+									DebugLog(string.format("⚠️ [行军] %s 检测到障碍，请求寻路", unitInstance.Name))
 									data.ForceRepath = true
+									data.LastRepathTriggerTime = now
+								end
+							end
+
+							-- 9. 周期性重寻路（延长到15秒，进一步减少不必要的重寻）
+							local timeSinceStart = now - data.StartTime
+							local lastPeriodicRepath = data.LastPeriodicRepathTime or 0
+							if timeSinceStart > 5 and (now - lastPeriodicRepath) > 15 then
+								if distanceXZ > 15 then  -- 还没接近目标
+									DebugLog(string.format("⚠️ [行军] %s 周期性重寻路(距离=%.1f)", unitInstance.Name, distanceXZ))
+									data.LastPeriodicRepathTime = now
+									data.ForceRepath = true
+									data.LastRepathTriggerTime = now
 									PathService.ClearPath(unitInstance)
 								end
 							end
+							-- ==================== V4.5智能卡住检测结束 ====================
 						end -- end of if not data.PathRequested
 					end
 
@@ -1124,11 +1255,13 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 						-- 清理旧路径
 						PathService.ClearPath(unitInstance)
 
-						-- V4.0修复：增加重试退避计数
+						-- V4.5修复：增加重试退避计数 + 随机延迟分散请求
 						data.RepathRetryCount = (data.RepathRetryCount or 0) + 1
-						local retryDelay = math.min(0.1 * data.RepathRetryCount, 1.0)  -- 最大1秒退避
+						local baseDelay = math.min(0.1 * data.RepathRetryCount, 1.0)  -- 基础退避最大1秒
+						local randomDelay = math.random() * CONFIG.MARCH_REPATH_RANDOM_DELAY_MAX  -- 随机延迟最大0.2秒
+						local retryDelay = baseDelay + randomDelay  -- 总延迟 = 退避 + 随机
 
-						-- 稍微延迟后再发起寻路请求（避免狂刷队列）
+						-- 延迟后再发起寻路请求（避免狂刷队列+分散请求时机）
 						task.delay(retryDelay, function()
 							if data.Arrived then return end  -- 如果已到达则跳过
 

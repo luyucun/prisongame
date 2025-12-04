@@ -708,8 +708,8 @@ local function CheckAndRewardAdvanceCoins(campaignData)
 	if newRewardCount > 0 then
 		local totalReward = newRewardCount * advanceRewardConfig
 
-		-- 发放金币
-		CurrencySystem.AddCoins(campaignData.Player, totalReward, "前进金币奖励")
+		-- V3.4.1修改：使用AddCoinsFromBattle触发金币表现效果
+		CurrencySystem.AddCoinsFromBattle(campaignData.Player, totalReward, campaignData.CurrentStage)
 
 		-- 更新上次获得奖励时的距离
 		campaignData.LastRewardedDistance = currentRewardCount * advanceDistanceConfig
@@ -1686,9 +1686,9 @@ function CampaignManager.OnVictory(campaignData)
 		end
 	end
 
-	-- 发放奖励金币
+	-- V3.4.1修改：使用AddCoinsFromBattle触发金币表现效果
 	if totalReward > 0 then
-		CurrencySystem.AddCoins(campaignData.Player, totalReward, "战役胜利奖励")
+		CurrencySystem.AddCoinsFromBattle(campaignData.Player, totalReward, campaignData.CurrentStage)
 	end
 
 	-- V2.8新增: 更新章节进度
