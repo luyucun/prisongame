@@ -44,7 +44,7 @@ end
 
 -- V2.7新增：获取关卡Z轴间距（从GameConfig读取）
 local function GetStageOffsetZ()
-	return GameConfigModule.Campaign.StageGenerateOffset or 169  -- 默认169
+	return GameConfigModule.Campaign.StageGenerateOffset or 170  -- 默认170
 end
 
 --[[

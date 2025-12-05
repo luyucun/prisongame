@@ -203,6 +203,7 @@ end
 切换到战斗模式（特写）
 - 镜头往前推进、往低推进
 - 给战斗一个特写效果
+- 硬切，无过渡
 ]]
 local function setCombatMode()
 	if cameraMode == "Combat" then
@@ -210,13 +211,15 @@ local function setCombatMode()
 	end
 	cameraMode = "Combat"
 	targetOffset = COMBAT_MODE_OFFSET
-	print("[CameraController] 切换到战斗特写模式")
+	currentOffset = COMBAT_MODE_OFFSET  -- 硬切：立即应用
+	print("[CameraController] 切换到战斗特写模式(硬切)")
 end
 
 --[[
 切换到跟随模式
 - 镜头抬高、拉远
 - 用于行军跟随
+- 硬切，无过渡
 ]]
 local function setFollowMode()
 	if cameraMode == "Follow" then
@@ -224,7 +227,8 @@ local function setFollowMode()
 	end
 	cameraMode = "Follow"
 	targetOffset = FOLLOW_MODE_OFFSET
-	print("[CameraController] 切换到跟随模式")
+	currentOffset = FOLLOW_MODE_OFFSET  -- 硬切：立即应用
+	print("[CameraController] 切换到跟随模式(硬切)")
 end
 
 --[[
@@ -387,9 +391,17 @@ local function updateCharacterFollow(center, targetCFrame)
 	elseif currentWaypointIndex > #currentWaypoints then
 		needNewPath = true
 	elseif isStuck then
-		-- 卡住了，强制重新计算路径
-		needNewPath = true
-		print("[CameraController] 检测到角色卡住，重新规划路径")
+		-- V5.2修改：卡住时直接瞬移到目的地，而非重新规划路径
+		print("[CameraController] 🚀 检测到主角卡住，直接瞬移到目的地")
+		hrp.CFrame = CFrame.new(followTarget.X, hrp.Position.Y, followTarget.Z)
+		-- 清理寻路状态
+		currentPath = nil
+		currentWaypoints = nil
+		currentWaypointIndex = 1
+		lastPathTarget = nil
+		lastCharacterPosition = nil
+		lastStuckCheckTime = nil
+		return
 	end
 
 	if needNewPath then

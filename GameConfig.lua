@@ -62,7 +62,7 @@ GameConfig.PUT_CONFIRM_GUI_NAME = "PutConfirm"
 -- 战役关卡配置
 GameConfig.Campaign = {
 	MaxStages = 3,                       -- 最大关卡数
-	StageGenerateOffset = 169,           -- 关卡Z轴间距(studs)
+	StageGenerateOffset = 170,           -- 关卡Z轴间距(studs)
 	MoveTimeout = 30,                    -- 移动超时(秒)
 	ArrivalThreshold = 8,                -- 到达阈值(studs) - V2.0修复：放宽到8，避免因敌人存在导致无法到达
 	RespawnEffectDuration = 0.3,         -- 重生特效时长(秒)
@@ -74,7 +74,7 @@ GameConfig.Campaign = {
 
 	-- V2.0.1新增：Stage001初始坐标配置（Base的Position）
 	Stage001Positions = {
-		[1] = Vector3.new(0, 0.5, -185.999),
+		[1] = Vector3.new(0, 0.5, -184),
 		[2] = Vector3.new(-120, 0.5, -184),
 		[3] = Vector3.new(-240, 0.5, -184),
 		[4] = Vector3.new(-360, 0.5, -184),
