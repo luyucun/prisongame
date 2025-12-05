@@ -60,6 +60,8 @@ local SkillSystem = require(ServerScriptService.Systems.SkillSystem)
 local LoadingSystem = require(ServerScriptService.Systems.LoadingSystem)
 -- V3.3新增 - 任务系统
 local TaskSystem = require(ServerScriptService.Systems.TaskSystem)
+-- V3.5新增 - 新手引导系统
+local GuideSystem = require(ServerScriptService.Systems.GuideSystem)
 
 -- ==================== 系统初始化顺序 ====================
 
@@ -342,6 +344,16 @@ local function InitializeServer()
         warn(GameConfig.LOG_PREFIX, "任务系统初始化失败(返回false)")
     end
 
+    -- 13. 初始化新手引导系统 (V3.5新增)
+    success, result = pcall(function()
+        return GuideSystem.Initialize()
+    end)
+    if not success then
+        warn(GameConfig.LOG_PREFIX, "新手引导系统初始化失败(异常):", result)
+    elseif result == false then
+        warn(GameConfig.LOG_PREFIX, "新手引导系统初始化失败(返回false)")
+    end
+
     -- 检查是否有关键系统初始化失败
     if initializationFailed then
         warn("==========================================")
@@ -521,6 +533,16 @@ Players.PlayerAdded:Connect(function(player)
 		end)
 		LoadingSystem.NotifyDataSync(player, 0.75)
 
+		-- V3.5新增：初始化玩家新手引导
+		pcall(function()
+			GuideSystem.InitializePlayerGuide(player)
+			print(string.format(
+				"%s [MainServer] 玩家 %s 新手引导系统已初始化",
+				GameConfig.LOG_PREFIX,
+				player.Name
+			))
+		end)
+
 		-- V3.2: 通知数据同步完成（这会尝试完成加载流程）
 		LoadingSystem.NotifyDataSyncComplete(player)
 	end)
@@ -554,6 +576,11 @@ Players.PlayerRemoving:Connect(function(player)
 	-- 3. V2.6新增：记录玩家登出时间（用于挂机金币计算）
 	pcall(function()
 		IdleCoinSystem.OnPlayerLeave(player)
+	end)
+
+	-- 4. V3.5新增：清理玩家引导状态
+	pcall(function()
+		GuideSystem.CleanupPlayer(player)
 	end)
 end)
 

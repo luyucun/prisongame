@@ -60,7 +60,8 @@ ServerScriptService/
 │   ├── SkillSystem.lua          (技能系统 V3.0新增)
 │   ├── SkillShopSystem.lua      (技能商店系统 V3.1新增)
 │   ├── LoadingSystem.lua        (加载系统 V3.2新增)
-│   └── TaskSystem.lua           (任务系统 V3.3新增)
+│   ├── TaskSystem.lua           (任务系统 V3.3新增)
+│   └── GuideSystem.lua          (新手引导系统 V3.5新增)
 
 StarterPlayer/StarterPlayerScripts/
 ├── UI/
@@ -80,7 +81,8 @@ StarterPlayer/StarterPlayerScripts/
 │   ├── CameraController.lua     (战斗相机控制 V2.11增强)
 │   ├── IdleCoinController.lua   (挂机金币控制 V2.6新增)
 │   ├── MainGuiController.lua    (主界面控制 V2.11新增)
-│   └── SkillController.lua      (技能控制器 V3.0新增)
+│   ├── SkillController.lua      (技能控制器 V3.0新增)
+│   └── GuideController.lua      (引导控制器 V3.5新增)
 ├── Triggers/                        (V3.1新增)
 │   └── SkillShopTrigger.lua     (技能商店触发器 V3.1新增)
 ├── Utils/
@@ -112,7 +114,8 @@ ReplicatedStorage/
 │   ├── LevelColorConfig.lua     (等级颜色配置)
 │   ├── SkillConfig.lua          (技能配置 V3.0新增 V3.1增强)
 │   ├── SkillShopConfig.lua      (技能商店配置 V3.1新增)
-│   └── TaskConfig.lua           (任务配置 V3.3新增)
+│   ├── TaskConfig.lua           (任务配置 V3.3新增)
+│   └── GuideConfig.lua          (引导配置 V3.5新增)
 ├── Events/                      (RemoteEvent事件)
 │   ├── CurrencyEvents/
 │   ├── PlayerEvents/
@@ -127,7 +130,8 @@ ReplicatedStorage/
 │   ├── SkillEvents/             (V3.0新增)
 │   ├── SkillShopEvents/         (V3.1新增)
 │   ├── LoadingEvents/           (V3.2新增)
-│   └── TaskEvents/              (V3.3新增)
+│   ├── TaskEvents/              (V3.3新增)
+│   └── GuideEvents/             (V3.5新增)
 └── Modules/
     └── FormatHelper.lua         (格式化工具)
 
@@ -312,6 +316,16 @@ ReplicatedStorage/
 - 数据持久化(DataManager.TaskData)
 - 支持运营更新新任务(自动检测未完成任务)
 
+【3.30 新手引导系统】GuideSystem/GuideController (V3.5新增)
+- 服务端GuideSystem管理玩家引导数据和触发逻辑
+- 客户端GuideController显示引导箭头和检测到达
+- 引导类型: 前往兵种商店(KeepShoper01)/前往挂机邮箱(Mail)
+- 触发条件: 首次进入游戏/有挂机金币可领取
+- 引导表现: Guide01绑定玩家+Guide02放目标位置+Beam连线
+- 数据持久化(DataManager.GuideData)
+- GM命令: /triggerguide /resetguide /resetallguides /listguides
+- 可扩展设计,便于添加新引导
+
 =====================================================
 四、版本历史
 =====================================================
@@ -471,6 +485,18 @@ ReplicatedStorage/
 - 优势: 高速单位和低速单位都能准确检测卡住状态
 - 关键变量: data.LastStuckCheckPos记录上次位置用于计算实际移动距离
 
+【V3.5】新手引导系统
+- GuideConfig: 引导配置表(数据驱动)
+- GuideSystem: 服务端引导处理系统
+- GuideController: 客户端引导控制器
+- 引导类型: 前往兵种商店(SHOP)/前往挂机邮箱(MAIL)
+- 触发条件: 首次进入游戏(FIRST_JOIN)/有挂机金币(HAS_IDLE_COINS)
+- 引导表现: Guide01绑定玩家躯干+Guide02放目标位置
+- 到达检测: 客户端每帧检测距离,到达后通知服务端
+- 数据持久化: DataManager.GuideData.CompletedGuides
+- GM命令: /triggerguide /resetguide /resetallguides /listguides
+- GuideEvents: 新增事件文件夹
+
 =====================================================
 五、核心技术要点
 =====================================================
@@ -598,6 +624,14 @@ ReplicatedStorage/
 - 任务属性: TaskId/TaskType/RequiredCount/Description/RewardCoins/Sort
 - 公共接口: GetTaskById()/GetFirstTaskId()/GetNextTaskId()/IsValidTask()/GetAllTaskIds()/GetTaskCount()/IsLastTask()/GetTaskTypeName()
 
+【GuideConfig】引导配置 (V3.5新增)
+- 引导类型枚举: GuideType (SHOP/MAIL)
+- 引导列表: Guides[guideId] = 引导配置
+- 引导属性: GuideId/GuideType/Name/TargetName/TriggerCondition/ArrivalDistance/Sort/Enabled
+- 触发条件: FIRST_JOIN(首次进入)/HAS_IDLE_COINS(有挂机金币)
+- 显示配置: GuideStartPartName/GuideEndPartName/CheckInterval/EffectFolderPath
+- 公共接口: GetGuideById()/IsValidGuide()/GetAllGuideIds()/GetGuideByType()/GetEnabledGuides()/GetGuideCount()
+
 =====================================================
 七、RemoteEvent事件列表
 =====================================================
@@ -685,6 +719,13 @@ ReplicatedStorage/
 - TaskComplete: Server → Client (任务完成通知: taskInfo)
 - ClaimTaskReward: Client → Server (领取任务奖励)
 - ClaimRewardResult: Server → Client (领取结果: success, message, rewardCoins)
+
+【GuideEvents】V3.5
+- StartGuide: Server → Client (开始引导: guideId, targetPosition)
+- CompleteGuide: Server → Client (完成引导: guideId)
+- GuideArrived: Client → Server (到达目标: guideId)
+- SyncGuideData: Server → Client (同步引导数据: guideData)
+- RequestGuideSync: Client → Server (请求同步引导数据)
 
 =====================================================
 八、最佳实践
@@ -1080,6 +1121,51 @@ UI结构：
 - GameConfig.BattleCoin.AdvanceDistance: 前进触发距离(默认30)
 - GameConfig.BattleCoin.AdvanceReward: 每次前进金币(默认5)
 
+【11.20 新手引导系统】GuideSystem (V3.5新增)
+职责：服务端引导状态管理
+
+核心API：
+- Initialize()                    初始化引导系统
+- InitializePlayerGuide(player)   初始化玩家引导
+- CheckAndTriggerGuides(player)   检查并触发引导
+- TriggerGuide(player, guideId)   触发指定引导
+- OnGuideArrived(player, guideId) 玩家到达目标时调用
+- CleanupPlayer(player)           清理玩家引导状态
+- GetActiveGuideId(player)        获取当前激活的引导ID
+- IsGuideCompleted(player, guideId) 检查引导是否已完成
+- GetCompletedGuides(player)      获取所有已完成的引导
+- GMTriggerGuide(player, guideId) GM命令：触发引导
+- GMResetGuide(player, guideId)   GM命令：重置引导
+- GMResetAllGuides(player)        GM命令：重置所有引导
+- GMCompleteGuide(player, guideId) GM命令：完成引导
+
+内部机制：
+- playerGuideStates存储每个玩家的激活引导状态
+- 延迟加载DataManager/IdleCoinSystem避免循环依赖
+- 自动创建GuideEvents文件夹和RemoteEvent
+- 触发条件检查: FIRST_JOIN(未完成即触发)/HAS_IDLE_COINS(有待领取金币)
+- 完成引导后自动检查并触发下一个引导
+
+【11.21 引导控制器】GuideController (V3.5新增)
+职责：客户端引导显示与到达检测
+
+核心API：
+- Initialize()                    初始化引导控制器
+- GetCurrentGuideId()             获取当前引导ID
+- HasActiveGuide()                检查是否有激活的引导
+- ClearGuide()                    手动清除引导(调试用)
+
+内部机制：
+- 从Workspace/Effect克隆Guide01(起点)/Guide02(终点)
+- Guide01绑定到玩家躯干(UpperTorso/Torso/HumanoidRootPart)
+- Guide02放在目标位置并Anchored
+- RenderStepped每帧更新Guide01位置
+- 检测玩家与目标距离,到达后发送GuideArrived事件
+- 监听StartGuide/CompleteGuide事件
+- 角色重生时自动请求同步引导数据
+
+全局访问：_G.GuideController
+
 =====================================================
 十二、核心数据结构
 =====================================================
@@ -1153,6 +1239,9 @@ UI结构：
         CompletedTaskIds = {taskId, ...}, -- 已完成的任务ID列表
         AllTasksCompleted = boolean,    -- 是否全部任务完成
     },
+    GuideData = {                   -- V3.5 引导数据
+        CompletedGuides = {[guideId] = true}, -- 已完成的引导ID
+    },
 }
 ```
 
@@ -1186,10 +1275,13 @@ UI结构：
 24. V3.4+: 兵种配置需包含KillReward字段(基础击杀金币)
 25. V3.4+: 战斗金币配置在GameConfig.BattleCoin中(前进距离/奖励)
 26. V3.4+: 击杀金币=基础值*等级，只有杀死敌方单位(Defense队)才获得
+27. V3.5+: 引导资源(Guide01/Guide02)需在Workspace/Effect下创建
+28. V3.5+: 引导目标(KeepShoper01/Mail)需在各玩家家园下创建
+29. V3.5+: 新增引导只需在GuideConfig.Guides表中添加配置
 
 =====================================================
 架构设计文档完成
 版本: V3.5
-最后更新: 2025-12-03
+最后更新: 2025-12-05
 =====================================================
 ]]

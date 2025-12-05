@@ -24,6 +24,10 @@ GM命令系统模块
 - /clearskills : 清空技能背包 (V3.0)
 - /listskills : 列出技能背包 (V3.0)
 - /skilllist : 列出所有可用技能 (V3.0)
+- /triggerguide <guideId> : 触发指定引导 (V3.5)
+- /resetguide <guideId> : 重置指定引导 (V3.5)
+- /resetallguides : 重置所有引导 (V3.5)
+- /listguides : 列出所有引导状态 (V3.5)
 ]]
 
 local GMCommandSystem = {}
@@ -38,6 +42,7 @@ local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild
 local UnitConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("UnitConfig"))
 local BattleConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("BattleConfig"))
 local SkillConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("SkillConfig"))  -- V3.0新增
+local GuideConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GuideConfig"))  -- V3.5新增
 local DataManager = require(ServerScriptService.Core.DataManager)
 local InventorySystem = require(ServerScriptService.Systems.InventorySystem)
 local CurrencySystem = require(ServerScriptService.Systems.CurrencySystem)
@@ -46,6 +51,7 @@ local BattleTestSystem = nil  -- 延迟加载，避免循环依赖
 local BattleManager = nil     -- 延迟加载，避免循环依赖
 local IdleCoinSystem = nil    -- V2.6新增：延迟加载，避免循环依赖
 local SkillSystem = nil       -- V3.0新增：延迟加载，避免循环依赖
+local GuideSystem = nil       -- V3.5新增：延迟加载，避免循环依赖
 
 -- ==================== 配置 ====================
 
@@ -318,6 +324,12 @@ local function CMD_Help(player, args)
 /listskills - 查看技能背包
 /clearskills - 清空技能背包
 /skilllist - 查看所有可用技能
+
+新手引导(V3.5):
+/triggerguide <guideId> - 触发指定引导
+/resetguide <guideId> - 重置指定引导
+/resetallguides - 重置所有引导
+/listguides - 查看所有引导状态
 
 数据管理(V2.9):
 /resetdata - 重置所有玩家数据(需二次确认)
@@ -867,6 +879,199 @@ local function CMD_SkillList(player, args)
     SendMessage(player, message)
 end
 
+-- ==================== V3.5 新手引导系统命令 ====================
+
+--[[
+命令: /triggerguide <guideId>
+触发指定引导 V3.5
+]]
+local function CMD_TriggerGuide(player, args)
+    if #args < 1 then
+        SendMessage(player, "用法: /triggerguide <guideId>")
+        SendMessage(player, "例如: /triggerguide 1001")
+        return
+    end
+
+    -- 延迟加载GuideSystem
+    if not GuideSystem then
+        local systemsFolder = ServerScriptService:FindFirstChild("Systems")
+        if systemsFolder then
+            local gs = systemsFolder:FindFirstChild("GuideSystem")
+            if gs then
+                GuideSystem = require(gs)
+            end
+        end
+    end
+
+    local guideId = tonumber(args[1])
+    if not guideId then
+        SendMessage(player, "错误: 引导ID必须是数字")
+        return
+    end
+
+    -- 验证引导ID
+    if not GuideConfig.IsValidGuide(guideId) then
+        SendMessage(player, "错误: 无效的引导ID: " .. tostring(args[1]))
+        SendMessage(player, "使用 /listguides 查看所有引导")
+        return
+    end
+
+    -- 触发引导
+    local success = false
+    if GuideSystem then
+        success = GuideSystem.GMTriggerGuide(player, guideId)
+    end
+
+    if success then
+        local guideData = GuideConfig.GetGuideById(guideId)
+        SendMessage(player, string.format("成功触发引导: %d (%s)", guideId, guideData.Name))
+    else
+        SendMessage(player, "触发引导失败(可能已完成或找不到目标)")
+    end
+end
+
+--[[
+命令: /resetguide <guideId>
+重置指定引导 V3.5
+]]
+local function CMD_ResetGuide(player, args)
+    if #args < 1 then
+        SendMessage(player, "用法: /resetguide <guideId>")
+        SendMessage(player, "例如: /resetguide 1001")
+        return
+    end
+
+    -- 延迟加载GuideSystem
+    if not GuideSystem then
+        local systemsFolder = ServerScriptService:FindFirstChild("Systems")
+        if systemsFolder then
+            local gs = systemsFolder:FindFirstChild("GuideSystem")
+            if gs then
+                GuideSystem = require(gs)
+            end
+        end
+    end
+
+    local guideId = tonumber(args[1])
+    if not guideId then
+        SendMessage(player, "错误: 引导ID必须是数字")
+        return
+    end
+
+    -- 验证引导ID
+    if not GuideConfig.IsValidGuide(guideId) then
+        SendMessage(player, "错误: 无效的引导ID: " .. tostring(args[1]))
+        return
+    end
+
+    -- 重置引导
+    local success = false
+    if GuideSystem then
+        success = GuideSystem.GMResetGuide(player, guideId)
+    end
+
+    if success then
+        local guideData = GuideConfig.GetGuideById(guideId)
+        SendMessage(player, string.format("成功重置引导: %d (%s)", guideId, guideData.Name))
+        SendMessage(player, "使用 /triggerguide " .. guideId .. " 可以重新触发")
+    else
+        SendMessage(player, "重置引导失败")
+    end
+end
+
+--[[
+命令: /resetallguides
+重置所有引导 V3.5
+]]
+local function CMD_ResetAllGuides(player, args)
+    -- 延迟加载GuideSystem
+    if not GuideSystem then
+        local systemsFolder = ServerScriptService:FindFirstChild("Systems")
+        if systemsFolder then
+            local gs = systemsFolder:FindFirstChild("GuideSystem")
+            if gs then
+                GuideSystem = require(gs)
+            end
+        end
+    end
+
+    -- 重置所有引导
+    local success = false
+    if GuideSystem then
+        success = GuideSystem.GMResetAllGuides(player)
+    end
+
+    if success then
+        SendMessage(player, "成功重置所有引导")
+        SendMessage(player, "重新进入游戏或使用 /triggerguide 可触发引导")
+    else
+        SendMessage(player, "重置引导失败")
+    end
+end
+
+--[[
+命令: /listguides
+列出所有引导及其状态 V3.5
+]]
+local function CMD_ListGuides(player, args)
+    -- 延迟加载GuideSystem
+    if not GuideSystem then
+        local systemsFolder = ServerScriptService:FindFirstChild("Systems")
+        if systemsFolder then
+            local gs = systemsFolder:FindFirstChild("GuideSystem")
+            if gs then
+                GuideSystem = require(gs)
+            end
+        end
+    end
+
+    local message = "=== 引导列表 ===\n"
+
+    -- 获取所有引导配置
+    local allGuideIds = GuideConfig.GetAllGuideIds()
+    local completedGuides = {}
+
+    if GuideSystem then
+        completedGuides = GuideSystem.GetCompletedGuides(player)
+    end
+
+    -- 构建已完成的引导ID集合
+    local completedSet = {}
+    for _, guideId in ipairs(completedGuides) do
+        completedSet[guideId] = true
+    end
+
+    -- 获取当前激活的引导
+    local activeGuideId = nil
+    if GuideSystem then
+        activeGuideId = GuideSystem.GetActiveGuideId(player)
+    end
+
+    for _, guideId in ipairs(allGuideIds) do
+        local guideData = GuideConfig.GetGuideById(guideId)
+        if guideData then
+            local status = "❌ 未完成"
+            if completedSet[guideId] then
+                status = "✅ 已完成"
+            elseif activeGuideId == guideId then
+                status = "🔄 进行中"
+            end
+
+            message = message .. string.format(
+                "  - ID:%d %s (%s)\n    目标: %s | %s\n",
+                guideId,
+                guideData.Name,
+                guideData.GuideType,
+                guideData.TargetName,
+                status
+            )
+        end
+    end
+
+    message = message .. string.format("\n总计: %d 个引导", #allGuideIds)
+    SendMessage(player, message)
+end
+
 -- 命令映射表
 local COMMAND_HANDLERS = {
     ["addunit"] = CMD_AddUnit,
@@ -891,6 +1096,10 @@ local COMMAND_HANDLERS = {
     ["clearskills"] = CMD_ClearSkills,    -- V3.0新增
     ["listskills"] = CMD_ListSkills,      -- V3.0新增
     ["skilllist"] = CMD_SkillList,        -- V3.0新增
+    ["triggerguide"] = CMD_TriggerGuide,  -- V3.5新增
+    ["resetguide"] = CMD_ResetGuide,      -- V3.5新增
+    ["resetallguides"] = CMD_ResetAllGuides,  -- V3.5新增
+    ["listguides"] = CMD_ListGuides,      -- V3.5新增
     ["help"] = CMD_Help,
 }
 

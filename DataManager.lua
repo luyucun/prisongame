@@ -79,6 +79,9 @@ PlayerData = {
         CompletedTaskIds = {},     -- 已完成的任务ID列表
         AllTasksCompleted = boolean, -- 是否全部任务完成
     },
+    GuideData = {              -- V3.5新手引导系统
+        CompletedGuides = {},  -- 已完成的引导 {[guideId] = true}
+    },
     LastSaveTime = number,     -- 最后保存时间
 }
 ]]
@@ -194,6 +197,9 @@ local function LoadFromDataStore(player)
 		if data.TaskData then
 			data.TaskData = RestoreFromDataStore(data.TaskData)  -- V3.3：恢复任务数据
 		end
+		if data.GuideData then
+			data.GuideData = RestoreFromDataStore(data.GuideData)  -- V3.5：恢复引导数据
+		end
 		return data
 	elseif not success then
 		warn(string.format(
@@ -230,6 +236,7 @@ local function SaveToDataStore(player, playerData, userId)
 		ChapterProgress = SanitizeForDataStore(playerData.ChapterProgress),  -- V2.8：保存章节进度数据
 		SkillInventory = SanitizeForDataStore(playerData.SkillInventory),  -- V3.0：保存技能背包
 		TaskData = SanitizeForDataStore(playerData.TaskData),  -- V3.3：保存任务数据
+		GuideData = SanitizeForDataStore(playerData.GuideData),  -- V3.5：保存引导数据
 		LastSaveTime = os.time(),
 	}
 
@@ -282,6 +289,9 @@ local function CreateDefaultData(player)
             CurrentProgress = 0,
             CompletedTaskIds = {},
             AllTasksCompleted = false,
+        },
+        GuideData = {  -- V3.5新手引导系统：初始化
+            CompletedGuides = {},
         },
         LastSaveTime = os.time(),
     }
@@ -364,6 +374,13 @@ function DataManager.InitializePlayerData(player)
                 CurrentProgress = 0,
                 CompletedTaskIds = {},
                 AllTasksCompleted = false,
+            }
+        end
+
+        -- V3.5新手引导系统：确保GuideData字段存在（向后兼容）
+        if not playerData.GuideData then
+            playerData.GuideData = {
+                CompletedGuides = {},
             }
         end
 

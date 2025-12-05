@@ -39,6 +39,8 @@ local currentOffset = FOLLOW_MODE_OFFSET
 local targetOffset = FOLLOW_MODE_OFFSET
 -- 当前镜头模式: "Follow" 或 "Combat"
 local cameraMode = "Follow"
+-- 硬切标志：为true时下一帧立即切换相机位置，不使用Lerp
+local needHardCut = false
 
 local CAMERA_OFFSET = Vector3.new(0, 18, 35)  -- 保留兼容（实际使用currentOffset）
 local SMOOTHNESS = 0.12
@@ -212,6 +214,7 @@ local function setCombatMode()
 	cameraMode = "Combat"
 	targetOffset = COMBAT_MODE_OFFSET
 	currentOffset = COMBAT_MODE_OFFSET  -- 硬切：立即应用
+	needHardCut = true  -- 标记需要硬切相机位置
 	print("[CameraController] 切换到战斗特写模式(硬切)")
 end
 
@@ -228,6 +231,7 @@ local function setFollowMode()
 	cameraMode = "Follow"
 	targetOffset = FOLLOW_MODE_OFFSET
 	currentOffset = FOLLOW_MODE_OFFSET  -- 硬切：立即应用
+	needHardCut = true  -- 标记需要硬切相机位置
 	print("[CameraController] 切换到跟随模式(硬切)")
 end
 
@@ -495,9 +499,8 @@ local function updateCamera()
 		return
 	end
 
-	-- V2.10新增：平滑过渡镜头偏移量
-	-- 使用Lerp让currentOffset平滑趋近targetOffset
-	currentOffset = currentOffset:Lerp(targetOffset, MODE_TRANSITION_SPEED)
+	-- V2.10注释：已改为硬切，不再使用Lerp过渡
+	-- currentOffset = currentOffset:Lerp(targetOffset, MODE_TRANSITION_SPEED)
 
 	-- V2.10修改：使用currentOffset代替固定的CAMERA_OFFSET
 	local dynamicZoom = math.min(count * DYNAMIC_ZOOM_PER_UNIT, DYNAMIC_ZOOM_MAX)
@@ -505,7 +508,14 @@ local function updateCamera()
 	local targetPosition = center + offset
 	local targetCFrame = CFrame.new(targetPosition, center)
 
-	camera.CFrame = camera.CFrame:Lerp(targetCFrame, SMOOTHNESS)
+	-- 硬切判断：如果needHardCut为true，直接设置相机位置，否则平滑过渡
+	if needHardCut then
+		camera.CFrame = targetCFrame
+		needHardCut = false
+		print("[CameraController] 执行硬切")
+	else
+		camera.CFrame = camera.CFrame:Lerp(targetCFrame, SMOOTHNESS)
+	end
 
 	-- V2.8修复：检测质心累计移动距离
 	-- 只有当质心从初始位置移动超过阈值后才允许主角跟随
@@ -612,6 +622,8 @@ local function startCameraLock()
 	isActive = true
 	-- V2.8修复：跟随由状态事件控制，启动时默认关闭
 	allowCharacterFollow = false
+	-- 启动时硬切到战场视角，不使用Lerp过渡
+	needHardCut = true
 
 	cachedCameraType = camera.CameraType
 	cachedCameraSubject = camera.CameraSubject

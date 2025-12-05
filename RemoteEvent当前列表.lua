@@ -75,6 +75,12 @@ ReplicatedStorage
         ├──TaskComplete（RemoteEvent） - 服务器→客户端：任务完成通知(taskInfo)
         ├──ClaimTaskReward（RemoteEvent） - 客户端→服务器：领取任务奖励
         └──ClaimRewardResult（RemoteEvent） - 服务器→客户端：领取结果(success, message, rewardCoins)
+    └──GuideEvents（Folder）/  【V3.5新增】
+        ├──StartGuide（RemoteEvent） - 服务器→客户端：开始引导(guideId, targetPosition)
+        ├──CompleteGuide（RemoteEvent） - 服务器→客户端：完成引导(guideId)
+        ├──GuideArrived（RemoteEvent） - 客户端→服务器：到达目标(guideId)
+        ├──SyncGuideData（RemoteEvent） - 服务器→客户端：同步引导数据(guideData)
+        └──RequestGuideSync（RemoteEvent） - 客户端→服务器：请求同步引导数据
 
 
 如果需要补充新的RemoteEvent或者Remotefunction，请在这里列出来，我会自己去创建
@@ -536,3 +542,77 @@ UI配置说明（MainGui）：
    - 重力加速度：400像素/秒²
    - 动画时长：1.2秒
    - 淡出时间：0.8秒开始淡出
+
+
+【V3.5新手引导系统RemoteEvent创建说明】
+位置：ReplicatedStorage/Events/GuideEvents/ （新建文件夹）
+🆕 StartGuide (RemoteEvent) - 服务器→客户端：开始引导
+🆕 CompleteGuide (RemoteEvent) - 服务器→客户端：完成引导
+🆕 GuideArrived (RemoteEvent) - 客户端→服务器：到达目标
+🆕 SyncGuideData (RemoteEvent) - 服务器→客户端：同步引导数据
+🆕 RequestGuideSync (RemoteEvent) - 客户端→服务器：请求同步
+
+创建步骤：
+1. 打开Roblox Studio
+2. 导航到 ReplicatedStorage > Events
+3. 右键点击 Events 文件夹
+4. 选择 "Insert Object" > "Folder"
+5. 将新建的 Folder 重命名为 "GuideEvents"
+6. 右键点击 GuideEvents 文件夹
+7. 选择 "Insert Object" > "RemoteEvent"
+8. 将新建的 RemoteEvent 重命名为 "StartGuide"
+9. 重复步骤7-8，创建 "CompleteGuide"
+10. 重复步骤7-8，创建 "GuideArrived"
+11. 重复步骤7-8，创建 "SyncGuideData"
+12. 重复步骤7-8，创建 "RequestGuideSync"
+13. 保存游戏
+
+功能说明：
+- StartGuide：服务器→客户端：开始引导
+  参数：(guideId: number, targetPosition: Vector3) 引导ID和目标位置
+- CompleteGuide：服务器→客户端：完成引导
+  参数：(guideId: number) 引导ID (0表示清除所有引导)
+- GuideArrived：客户端→服务器：到达目标
+  参数：(guideId: number) 引导ID
+- SyncGuideData：服务器→客户端：同步引导数据
+  参数：(guideData: table) 引导数据 {CompletedGuides = {[guideId] = true}}
+- RequestGuideSync：客户端→服务器：请求同步引导数据
+  参数：无（服务器根据玩家身份处理）
+
+注意：服务端GuideSystem.lua会在初始化时自动创建这些事件（如果不存在），
+但建议手动创建以确保事件在系统初始化前就存在。
+
+
+【V3.5新手引导系统其他资源创建说明】
+
+1. 引导配置模块位置：ReplicatedStorage/Config/GuideConfig
+
+2. 服务端系统位置：ServerScriptService/Systems/GuideSystem
+
+3. 客户端控制器位置：StarterPlayer/StarterPlayerScripts/Controllers/GuideController
+
+4. 引导资源位置：Workspace/Effect/
+   - Guide01 (Part/Model) - 起始点，绑定到玩家躯干
+   - Guide02 (Part/Model) - 终点，放在目标位置
+   - 两个Part之间可以设置Beam连线形成引导箭头效果
+
+5. 引导目标位置（每个玩家家园下需要存在）：
+   - Home/PlayerHomeX/KeepShoper01 - 兵种商店NPC
+   - Home/PlayerHomeX/Mail - 挂机金币邮箱
+
+6. 引导配置说明（GuideConfig.lua）：
+   - GuideId: 引导唯一ID (1001, 1002...)
+   - GuideType: 引导类型 (SHOP/MAIL)
+   - TargetName: 目标对象名称
+   - TriggerCondition: 触发条件 (FIRST_JOIN/HAS_IDLE_COINS)
+   - ArrivalDistance: 到达判定距离(studs)
+
+7. GM命令：
+   - /triggerguide <guideId> - 触发指定引导
+   - /resetguide <guideId> - 重置指定引导
+   - /resetallguides - 重置所有引导
+   - /listguides - 查看所有引导状态
+
+8. 数据存储：
+   - DataManager.GuideData.CompletedGuides 记录已完成的引导
+   - 完成的引导ID存储为 {[guideId] = true} 格式
