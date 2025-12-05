@@ -879,6 +879,49 @@ function CombatSystem.KillUnit(unitModel, killer)
 	local removalTime = os.clock() + 2.9
 	unitModel:SetAttribute("DeathRemovalTime", removalTime)
 
+	-- V3.8新增：死亡后渐隐效果（倒地后逐渐变透明）
+	-- 渐隐开始延迟1.5秒（让死亡动画先播放完大部分），渐隐持续1.4秒
+	local fadeStartDelay = 1.5
+	local fadeDuration = 1.4
+
+	task.delay(fadeStartDelay, function()
+		if not unitModel or not unitModel.Parent then return end
+
+		-- 收集所有需要渐隐的对象，并保存原始透明度
+		local fadeTargets = {}
+		for _, inst in ipairs(unitModel:GetDescendants()) do
+			if inst:IsA("BasePart") then
+				inst:SetAttribute("_OrigTrans", inst.Transparency)
+				table.insert(fadeTargets, inst)
+			elseif inst:IsA("Decal") or inst:IsA("Texture") then
+				inst:SetAttribute("_OrigTrans", inst.Transparency)
+				table.insert(fadeTargets, inst)
+			end
+		end
+
+		-- 使用TweenService实现平滑渐隐
+		-- 先创建所有Tween，再同时播放，确保整体同步
+		local TweenService = game:GetService("TweenService")
+		local tweenInfo = TweenInfo.new(fadeDuration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out)
+
+		local tweens = {}
+		for _, inst in ipairs(fadeTargets) do
+			local success, tween = pcall(function()
+				return TweenService:Create(inst, tweenInfo, {Transparency = 1})
+			end)
+			if success and tween then
+				table.insert(tweens, tween)
+			end
+		end
+
+		-- 同时播放所有Tween
+		for _, tween in ipairs(tweens) do
+			tween:Play()
+		end
+
+		DebugLog(string.format("%s 开始渐隐效果，共%d个对象", unitId, #fadeTargets))
+	end)
+
 	-- V2.0.1修复：战役单位死亡时保留实例用于重生
 	task.delay(2.9, function()
 		if unitModel and unitModel.Parent then
