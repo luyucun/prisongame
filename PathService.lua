@@ -2,7 +2,14 @@
 脚本名称: PathService
 脚本类型: ModuleScript (服务端系统)
 脚本位置: ServerScriptService/Systems/PathService
-版本: V5.1 - 修复潜在问题版
+版本: V5.2 - 丝滑寻路优化版
+
+V5.2更新内容：
+1. ✅ 实现切角机制 - 中间路点距离<5时立即切换，不等MoveToFinished
+2. ✅ 放宽卡住检测 - 降低检测频率(0.5→1.0秒)和最小速度阈值(0.5→0.1)
+3. ✅ 提高容错次数 - 卡住阈值从3次增加到5次
+4. ✅ 定时刷新MoveTo - 每0.5秒刷新当前目标，防止MoveTo超时
+5. ✅ 优化Heartbeat频率 - 从0.1秒提高到0.05秒，确保切角及时
 
 V5.1更新内容：
 1. ✅ 恢复agentRadius上限为8（支持大型单位）
@@ -24,6 +31,7 @@ V5.1更新内容：
 - Partial不是Success：调用方必须知道目标不可达
 - 拥挤豁免：周围友军多时放宽卡住判定
 - slot站位：每个单位有自己的目标点，不争抢
+- 切角移动：不等MoveToFinished，动态检测距离立即切换路点
 ]]
 
 local PathService = {}
@@ -67,9 +75,9 @@ local CONFIG = {
 	QUEUE_THRESHOLD_FOR_BOOST = 10,  -- 超过此队列长度时提高预算
 
 	-- 行军卡住检测配置
-	MARCH_STUCK_CHECK_INTERVAL = 0.5,   -- 检测间隔（秒）
-	MARCH_STUCK_MIN_VELOCITY = 0.5,     -- 最小速度阈值（studs）
-	MARCH_STUCK_COUNT_THRESHOLD = 3,    -- 连续卡住次数阈值
+	MARCH_STUCK_CHECK_INTERVAL = 1.0,   -- 检测间隔（秒）- 降低检测频率
+	MARCH_STUCK_MIN_VELOCITY = 0.1,     -- 最小速度阈值（studs）- 只要还在动就不算卡住
+	MARCH_STUCK_COUNT_THRESHOLD = 5,    -- 连续卡住次数阈值 - 给更多容错机会
 	MARCH_REPATH_COOLDOWN = 1.5,        -- 重寻路冷却（秒）
 
 	-- V5.1新增：走错路检测配置
@@ -914,7 +922,8 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 			end
 		end)
 
-		-- 监听MoveToFinished
+		-- V5.2优化：不再依赖MoveToFinished来驱动中间路点，改用Heartbeat切角机制
+		-- MoveToFinished只用于检测失败情况（reached=false）
 		local humanoid = unitInstance:FindFirstChild("Humanoid")
 		if humanoid then
 			data.MoveConnection = humanoid.MoveToFinished:Connect(function(reached)
@@ -928,7 +937,7 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 				local distanceXZ = GetHorizontalDistance(currentPos, targetPos)
 				local arrivalThreshold = GameConfig.Campaign and GameConfig.Campaign.ArrivalThreshold or 8
 
-				-- 检查是否到达
+				-- 检查是否到达最终目标
 				if distanceXZ < arrivalThreshold then
 					data.Arrived = true
 					if data.MoveConnection then
@@ -947,9 +956,8 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 					return
 				end
 
-				-- ==================== V5.1新增：处理 reached=false ====================
+				-- 只处理 reached=false 的情况（MoveTo超时或被阻挡）
 				if not reached then
-					-- MoveTo超时或被阻挡
 					local now = tick()
 					local canRepath = (now - data.LastRepathTime) >= CONFIG.MARCH_REPATH_COOLDOWN
 
@@ -982,61 +990,10 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 								end
 							end)
 						end)
-						return
-					end
-
-					-- 否则继续尝试下一个waypoint
-					local pathStatus = PathService.GetPathStatus(unitInstance)
-					if pathStatus == PathStatus.SUCCESS or pathStatus == PathStatus.PARTIAL then
-						if PathService.AdvancePath(unitInstance) then
-							local nextWaypoint = PathService.GetNextWaypoint(unitInstance)
-							if nextWaypoint then
-								humanoid:MoveTo(nextWaypoint)
-								return
-							end
-						end
-					end
-
-					-- 没有下一个waypoint，尝试直接去目标（仅SUCCESS路径）
-					if pathStatus == PathStatus.SUCCESS and distanceXZ < 10 then
-						humanoid:MoveTo(targetPos)
-					else
-						humanoid:Move(Vector3.zero)
-					end
-					return
-				end
-				-- ==================== V5.1 reached=false 处理结束 ====================
-
-				-- reached=true但未到达，正常继续
-				data.MoveToFailCount = 0  -- 重置失败计数
-
-				local pathStatus = PathService.GetPathStatus(unitInstance)
-				if pathStatus == PathStatus.SUCCESS or pathStatus == PathStatus.PARTIAL then
-					local isPartial = (pathStatus == PathStatus.PARTIAL)
-
-					if PathService.AdvancePath(unitInstance) then
-						local nextWaypoint = PathService.GetNextWaypoint(unitInstance)
-						if nextWaypoint then
-							humanoid:MoveTo(nextWaypoint)
-							return
-						end
-					end
-
-					-- 路径点用完
-					if isPartial then
-						-- PARTIAL路径走完，停下等待
-						humanoid:Move(Vector3.zero)
-						DebugLog(string.format("⚠️ [行军] %s PARTIAL路径走完", unitInstance.Name))
-					else
-						-- SUCCESS路径走完，尝试直接去目标
-						if distanceXZ < 10 then
-							humanoid:MoveTo(targetPos)
-						else
-							humanoid:Move(Vector3.zero)
-						end
 					end
 				else
-					humanoid:Move(Vector3.zero)
+					-- reached=true，重置失败计数
+					data.MoveToFailCount = 0
 				end
 			end)
 		end
@@ -1049,7 +1006,8 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 
 	checkConnection = RunService.Heartbeat:Connect(function()
 		local now = tick()
-		if now - lastCheckTime < 0.1 then return end
+		-- V5.2优化：提高检测频率到0.05秒，确保切角及时
+		if now - lastCheckTime < 0.05 then return end
 		lastCheckTime = now
 
 		local allDone = true
@@ -1075,12 +1033,54 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 				local rootPart = unitInstance:FindFirstChild("HumanoidRootPart") or unitInstance.PrimaryPart
 				if not rootPart or not rootPart.Parent then continue end
 
+				local humanoid = unitInstance:FindFirstChild("Humanoid")
+				if not humanoid then continue end
+
 				local currentPos = rootPart.Position
 				local targetPos = data.TargetCFrame.Position
 				local distanceXZ = GetHorizontalDistance(currentPos, targetPos)
 				local arrivalThreshold = GameConfig.Campaign and GameConfig.Campaign.ArrivalThreshold or 8
 
-				-- 到达检测
+				-- ==================== V5.2核心优化：丝滑切角寻路 ====================
+
+				-- 获取路径状态
+				local pathStatus = PathService.GetPathStatus(unitInstance)
+
+				-- 如果有有效路径，检查是否到达了"当前路点"(Waypoints[index])
+				if pathStatus == PathStatus.SUCCESS or pathStatus == PathStatus.PARTIAL then
+					local nextWaypoint = PathService.GetNextWaypoint(unitInstance)
+
+					if nextWaypoint then
+						local distToWaypoint = GetHorizontalDistance(currentPos, nextWaypoint)
+
+						-- [关键优化] 切角阈值：如果是中间点，距离 < 5 就切向下一个点
+						-- 如果是最后一个点，还是需要精确到达
+						local pathState = GetPathState(unitInstance)
+						local isFinalPoint = pathState and (pathState.Index >= #pathState.Waypoints)
+						local reachThreshold = isFinalPoint and 1.5 or 5.0  -- 中间点放宽到 5 studs
+
+						if distToWaypoint < reachThreshold then
+							-- 到达当前路点，推进到下一个
+							if PathService.AdvancePath(unitInstance) then
+								local newTarget = PathService.GetNextWaypoint(unitInstance)
+								if newTarget then
+									humanoid:MoveTo(newTarget)  -- 立即前往下一个，不刹车
+								end
+							end
+						end
+
+						-- 持续刷新 MoveTo，防止 MoveTo 超时（默认8秒）导致发呆
+						-- 每0.5秒强制MoveTo一次当前目标，确保单位持续移动
+						local lastMoveToTime = data.LastMoveToUpdateTime or 0
+						if now - lastMoveToTime > 0.5 then
+							humanoid:MoveTo(nextWaypoint)
+							data.LastMoveToUpdateTime = now
+						end
+					end
+				end
+				-- ==============================================================
+
+				-- 到达最终目标检测
 				if distanceXZ < arrivalThreshold then
 					data.Arrived = true
 					if data.MoveConnection then
@@ -1099,7 +1099,7 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 					continue
 				end
 
-				-- 卡住检测（每0.5秒）
+				-- 卡住检测（保持原有逻辑，但频率已降低）
 				if now - data.LastStuckCheckTime >= CONFIG.MARCH_STUCK_CHECK_INTERVAL then
 					data.LastStuckCheckTime = now
 
