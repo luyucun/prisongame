@@ -144,7 +144,9 @@ end
 ]]
 local function IsGuideCompleted(player, guideId)
 	local guideData = GetPlayerGuideData(player)
+	-- 🔥修复：DataStore加载后number key会变成string key，需要同时检查两种类型
 	return guideData.CompletedGuides[guideId] == true
+		or guideData.CompletedGuides[tostring(guideId)] == true
 end
 
 --[[
@@ -470,7 +472,11 @@ function GuideSystem.GetCompletedGuides(player)
 	local guideData = GetPlayerGuideData(player)
 	local completed = {}
 	for guideId, _ in pairs(guideData.CompletedGuides) do
-		table.insert(completed, guideId)
+		-- 🔥修复：统一转换为number类型返回
+		local numId = tonumber(guideId)
+		if numId then
+			table.insert(completed, numId)
+		end
 	end
 	return completed
 end
@@ -504,8 +510,9 @@ function GuideSystem.GMResetGuide(player, guideId)
 		return false
 	end
 
-	-- 移除完成标记
+	-- 🔥修复：同时移除number和string两种key的完成标记
 	playerData.GuideData.CompletedGuides[guideId] = nil
+	playerData.GuideData.CompletedGuides[tostring(guideId)] = nil
 
 	-- 保存数据
 	dm.SavePlayerDataThrottled(player)

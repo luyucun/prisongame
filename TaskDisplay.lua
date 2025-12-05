@@ -143,20 +143,8 @@ local function UpdateUI(taskData)
         return
     end
 
-    -- 战斗中隐藏任务界面 (根据需求文档V3.3)
-    if IsInBattle then
-        TaskBg.Visible = false
-        return
-    end
-
-    -- 显示任务界面
-    TaskBg.Visible = true
-
-    -- 隐藏红点 (默认)
-    if RedPoint then
-        RedPoint.Visible = false
-    end
-
+    -- V3.3.1 Bug修复：即使在战斗中也要更新UI内容（只是不显示）
+    -- 这样当战斗结束后，UI会显示最新的进度
     -- 显示任务描述 (格式: XXXXX（M/N）)
     local progress = taskData.CurrentProgress or 0
     local required = taskData.RequiredCount or 1
@@ -172,11 +160,23 @@ local function UpdateUI(taskData)
     end
 
     -- 更新红点状态 (任务完成但未领取时显示)
-    if taskData.IsCompleted then
-        if RedPoint then
+    if RedPoint then
+        if taskData.IsCompleted then
             RedPoint.Visible = true
+        else
+            RedPoint.Visible = false
         end
     end
+
+    -- 战斗中隐藏任务界面 (根据需求文档V3.3)
+    -- 注意：这个判断移到最后，这样UI内容已经更新，只是不显示而已
+    if IsInBattle then
+        TaskBg.Visible = false
+        return
+    end
+
+    -- 显示任务界面
+    TaskBg.Visible = true
 end
 
 --[[

@@ -4,8 +4,8 @@
 =====================================================
 
 项目名称: Roblox 兵种塔防游戏
-当前版本: V3.5
-最后更新: 2025-12-02
+当前版本: V3.7
+最后更新: 2025-12-05
 
 =====================================================
 一、架构设计原则
@@ -49,7 +49,7 @@ ServerScriptService/
 │   ├── BattleTestSystem.lua     (战斗测试)
 │   ├── GMCommandSystem.lua      (GM命令)
 │   ├── PathService.lua          (寻路服务 V2.7增强)
-│   ├── StageService.lua         (关卡服务 V2.8章节系统)
+│   ├── StageService.lua         (关卡服务 V3.7章节地图替换)
 │   ├── GridPositionSystem.lua   (网格坐标系统)
 │   ├── CampaignManager.lua      (战役管理器 V2.11增强)
 │   ├── CampaignUnitHelper.lua   (战役单位辅助)
@@ -108,7 +108,7 @@ ReplicatedStorage/
 │   ├── PlacementConfig.lua      (放置配置)
 │   ├── BattleConfig.lua         (战斗配置)
 │   ├── ShopConfig.lua           (商店配置 V2.1新增)
-│   ├── StageConfig.lua          (关卡配置 V2.8章节系统)
+│   ├── StageConfig.lua          (关卡配置 V3.7章节地图替换)
 │   ├── EnemyConfig.lua          (敌人配置)
 │   ├── HouseConfig.lua          (房屋配置 V2.8新增)
 │   ├── LevelColorConfig.lua     (等级颜色配置)
@@ -497,6 +497,14 @@ ReplicatedStorage/
 - GM命令: /triggerguide /resetguide /resetallguides /listguides
 - GuideEvents: 新增事件文件夹
 
+【V3.7】章节关卡地图替换
+- StageConfig增强: 章节配置新增StageTemplateStyle字段
+- StageService增强: SetPlayerChapter()/ClearPlayerChapter()接口
+- StageService增强: GetTemplateStyle()根据玩家章节获取模板风格
+- CampaignManager增强: StartCampaign时调用StageService.SetPlayerChapter()
+- 支持不同章节使用不同风格的关卡模板(如Style01/Style02)
+- 关卡模板路径: ReplicatedStorage/StageTemplate/[Style]/StageMiddle|StageEnd
+
 =====================================================
 五、核心技术要点
 =====================================================
@@ -585,9 +593,10 @@ ReplicatedStorage/
 - 商品属性: UnitId/Price/Stock
 - 刷新时间: RefreshInterval
 
-【StageConfig】关卡配置 (V2.8章节系统)
+【StageConfig】关卡配置 (V3.7章节地图替换)
 - 章节列表: Chapters
-- 章节属性: StagesPerChapter/Style/Rewards
+- 章节属性: StagesPerChapter/StageTemplateStyle/Rewards
+- StageTemplateStyle: 章节使用的关卡模板风格 (如 "Style01", "Style02")
 - 关卡奖励: Coins
 
 【EnemyConfig】敌人配置
@@ -832,15 +841,24 @@ ReplicatedStorage/
 - RespawnUnits(...)               单位复生
 - ReturnToHome(player)            传送回家园 (V2.11)
 
-【11.2 关卡服务】StageService (V2.0/V2.8)
+【11.2 关卡服务】StageService (V2.0/V3.7)
 职责：动态生成和管理关卡
 
 核心API：
 - GetOrCreateStage(playerId, n)   获取或创建关卡
 - GenerateStage(playerId, n)      生成新关卡
+- GenerateStage001(homeId, playerId) 生成第一关 (V3.7: 增加playerId参数)
 - LoadEnemyData(stage, n)         加载敌人配置
 - CleanupStages(playerId)         清理关卡
 - SetAirWallState(stage, enabled) 设置空气墙
+- SetPlayerChapter(playerId, chapterId)  设置玩家章节 (V3.7新增)
+- ClearPlayerChapter(playerId)    清除玩家章节缓存 (V3.7新增)
+
+V3.7章节地图替换机制：
+- CampaignManager.StartCampaign调用SetPlayerChapter缓存玩家章节
+- GetTemplateStyle(playerId)根据章节ID获取StageTemplateStyle
+- 从StageConfig.GetChapterStyle(chapterId)读取配置
+- CleanupStages时自动清除章节缓存
 
 【11.3 商店系统】ShopSystem (V2.1)
 职责：商店购买与库存管理
@@ -1278,10 +1296,13 @@ UI结构：
 27. V3.5+: 引导资源(Guide01/Guide02)需在Workspace/Effect下创建
 28. V3.5+: 引导目标(KeepShoper01/Mail)需在各玩家家园下创建
 29. V3.5+: 新增引导只需在GuideConfig.Guides表中添加配置
+30. V3.7+: 章节关卡地图替换需在StageConfig.Chapters中配置StageTemplateStyle字段
+31. V3.7+: 关卡模板需按ReplicatedStorage/StageTemplate/[StyleName]/StageMiddle|StageEnd结构创建
+32. V3.7+: 新增关卡风格只需创建对应的模板文件夹并在StageConfig中配置
 
 =====================================================
 架构设计文档完成
-版本: V3.5
+版本: V3.7
 最后更新: 2025-12-05
 =====================================================
 ]]

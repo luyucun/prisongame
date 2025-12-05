@@ -37,7 +37,7 @@ ReplicatedStorage
     └──CampaignEvents（Folder）/  【V2.0新增】
         ├──RequestStartCampaign（RemoteEvent） - 客户端→服务器：请求开始战役
         ├──RequestRetreat（RemoteEvent） - 客户端→服务器：请求撤退
-        ├──CampaignStateUpdate（RemoteEvent） - 服务器→客户端：战役状态更新(state, stageNum)
+        ├──CampaignStateUpdate（RemoteEvent） - 服务器→客户端：战役状态更新(state, stageNum, chapter?, totalStagesInChapter?) 【V3.6修改：新增chapter和totalStagesInChapter参数用于进度条显示】
         ├──StageProgress（RemoteEvent） - 服务器→客户端：关卡进度更新(stageNum, status)
         └──LockHomeOperations（RemoteEvent） - 服务器→客户端：锁定/解锁基地操作(locked)
     └──ShopEvents（Folder）/  【V2.1新增】
@@ -616,3 +616,48 @@ UI配置说明（MainGui）：
 8. 数据存储：
    - DataManager.GuideData.CompletedGuides 记录已完成的引导
    - 完成的引导ID存储为 {[guideId] = true} 格式
+
+
+【V3.6战场进度系统说明】
+
+功能描述：
+- 在挑战过程中实时显示玩家的关卡进度
+- 以玩家家里的IdleFloor为起点，最后一关的IdleFloor为终点
+- 进度条上的玩家头像位置随战场中心移动而实时更新
+
+UI结构（需要在Studio中创建）：
+1. StarterGui/Distance/Bg (Frame) - 进度条背景容器
+   - 初始Visible: false
+   - 战斗开始时显示，战斗结束时隐藏
+
+2. StarterGui/Distance/Bg/ProgressBg (Frame) - 进度条背景
+   - 代表整个关卡的总长度(Size.X.Scale = 1)
+
+3. StarterGui/Distance/Bg/ProgressBg/PlayerIcon (ImageLabel) - 玩家头像
+   - 初始Position: {0, 0}, {0.5, 0}
+   - X坐标使用Scale: 0代表起点，1代表终点
+   - Y坐标固定为0.5
+   - 图片会自动设置为玩家的头像
+
+客户端控制器位置：
+- StarterPlayer/StarterPlayerScripts/Controllers/DistanceProgressController
+
+CampaignStateUpdate事件变更（V3.6）：
+- 原参数：(state, stageNum)
+- 新参数：(state, stageNum, chapter?, totalStagesInChapter?)
+- 新增参数仅在state="Preparing"时发送
+- chapter: 当前章节ID
+- totalStagesInChapter: 该章节的总关卡数
+
+进度计算逻辑：
+1. 起点：玩家家园的IdleFloor位置(Z坐标)
+2. 终点：最后一关的IdleFloor位置(Z坐标，根据配置估算)
+3. 当前位置：所有友军单位的质心位置
+4. 进度 = (起点Z - 当前Z) / (起点Z - 终点Z)
+5. 进度范围：0到1，对应X轴Position.Scale
+
+注意事项：
+- 本功能不需要新增RemoteEvent
+- 复用现有的CampaignStateUpdate事件，仅新增可选参数
+- 客户端通过监听战役状态变化来控制UI显示/隐藏
+- 进度更新使用RenderStepped实现平滑过渡

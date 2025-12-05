@@ -3,6 +3,7 @@
 脚本名称: StageService
 脚本类型: ModuleScript (服务端)
 脚本位置: ServerScriptService/Systems/StageService.lua
+版本: V3.7
 =====================================================
 
 功能描述:
@@ -10,6 +11,7 @@
 - 从EnemyConfig配置表加载敌人数据
 - 关卡缓存管理
 - 关卡清理
+- V3.7新增: 支持根据章节ID获取不同的关卡模板风格
 
 ]]
 
@@ -20,6 +22,7 @@ local Workspace = game:GetService("Workspace")
 -- 引用配置和系统
 local EnemyConfig = require(ReplicatedStorage.Config.EnemyConfig)
 local UnitConfig = require(ReplicatedStorage.Config.UnitConfig)
+local StageConfig = require(ReplicatedStorage.Config.StageConfig)  -- V3.7新增
 local GridPositionSystem = require(ServerScriptService.Systems.GridPositionSystem)
 -- V2.2新增：等级显示辅助工具
 local LevelDisplayHelper = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("LevelDisplayHelper"))
@@ -37,9 +40,59 @@ StageService.StageCache = {}
 -- V2.7修复：统一从GameConfig读取配置，避免硬编码
 local GameConfigModule = require(ReplicatedStorage.Config.GameConfig)
 
--- 获取模板风格（支持配置）
-local function GetTemplateStyle()
-	return GameConfigModule.Campaign.StageTemplateStyle or "Style01"  -- 默认Style01
+-- V3.7重构：玩家当前章节缓存，用于获取正确的模板风格
+-- [playerId] = chapterId
+StageService.PlayerChapterCache = {}
+
+--[[
+V3.7新增：设置玩家当前章节
+@param playerId number - 玩家ID
+@param chapterId number - 章节ID
+说明: 由CampaignManager在StartCampaign时调用
+]]
+function StageService.SetPlayerChapter(playerId, chapterId)
+	StageService.PlayerChapterCache[playerId] = chapterId
+	-- V3.7调试：强制打印设置章节缓存
+	print(string.format("[StageService V3.7] SetPlayerChapter: playerId=%s, chapterId=%s",
+		tostring(playerId), tostring(chapterId)))
+end
+
+--[[
+V3.7新增：清除玩家章节缓存
+@param playerId number - 玩家ID
+说明: 在CleanupStages时调用
+]]
+function StageService.ClearPlayerChapter(playerId)
+	StageService.PlayerChapterCache[playerId] = nil
+end
+
+--[[
+获取模板风格（V3.7增强：支持根据玩家章节获取）
+@param playerId number|nil - 玩家ID（可选）
+@return string - 模板风格名称
+说明:
+- 如果提供playerId且有章节缓存，从StageConfig获取该章节的StageTemplateStyle
+- 否则使用GameConfig.Campaign.StageTemplateStyle作为默认值
+]]
+local function GetTemplateStyle(playerId)
+	-- V3.7: 优先从玩家章节缓存获取
+	if playerId and StageService.PlayerChapterCache[playerId] then
+		local chapterId = StageService.PlayerChapterCache[playerId]
+		local chapterStyle = StageConfig.GetChapterStyle(chapterId)
+		-- V3.7调试：强制打印章节模板信息
+		print(string.format("[StageService V3.7] GetTemplateStyle: playerId=%s, chapterId=%s, chapterStyle=%s",
+			tostring(playerId), tostring(chapterId), tostring(chapterStyle)))
+		if chapterStyle then
+			return chapterStyle
+		end
+	else
+		-- V3.7调试：打印缓存缺失信息
+		print(string.format("[StageService V3.7] GetTemplateStyle: 缓存缺失! playerId=%s, cache=%s",
+			tostring(playerId), tostring(StageService.PlayerChapterCache[playerId])))
+	end
+
+	-- 回退到GameConfig默认值
+	return GameConfigModule.Campaign.StageTemplateStyle or "Style01"
 end
 
 -- V2.7新增：获取关卡Z轴间距（从GameConfig读取）
@@ -222,7 +275,7 @@ function StageService.GetOrCreateStage(playerId, stageNum, resetAirWall)
         end
 
         -- 2. 场景中不存在，动态生成Stage001
-        local stage001 = StageService.GenerateStage001(homeId)
+        local stage001 = StageService.GenerateStage001(homeId, playerId)  -- V3.7: 传递playerId
         if stage001 then
             -- 缓存
             if not StageService.StageCache[playerId] then
@@ -248,11 +301,12 @@ function StageService.GetOrCreateStage(playerId, stageNum, resetAirWall)
 end
 
 --[[
-    生成Stage001（V2.0.1新增）
+    生成Stage001（V2.0.1新增, V3.7增强）
     @param homeId number - 基地ID (1-6)
+    @param playerId number|nil - 玩家ID（V3.7新增，用于获取章节模板风格）
     @return Folder - 生成的Stage001文件夹
 ]]
-function StageService.GenerateStage001(homeId)
+function StageService.GenerateStage001(homeId, playerId)
     local success, result = pcall(function()
         -- 1. 获取目标坐标
         local GameConfig = require(ReplicatedStorage.Config.GameConfig)
@@ -270,7 +324,8 @@ function StageService.GenerateStage001(homeId)
             return nil
         end
 
-        local templateStyle = GetTemplateStyle()
+        -- V3.7: 传递playerId以获取章节对应的模板风格
+        local templateStyle = GetTemplateStyle(playerId)
         local templatePath = stageTemplateRoot:FindFirstChild(templateStyle)
         if not templatePath then
             warn("[StageService] 模板风格未找到:", templateStyle)
@@ -340,7 +395,7 @@ function StageService.GenerateStage001(homeId)
 end
 
 --[[
-    生成关卡（Stage002及以后）
+    生成关卡（Stage002及以后，V3.7增强）
     @param playerId number - 玩家ID
     @param stageNum number - 关卡编号
     @return Folder - 生成的关卡文件夹
@@ -373,8 +428,8 @@ function StageService.GenerateStage(playerId, stageNum)
             return nil
         end
 
-        -- V2.0修复：从配置读取模板风格，支持策划动态配置
-        local templateStyle = GetTemplateStyle()
+        -- V3.7增强：传递playerId以获取章节对应的模板风格
+        local templateStyle = GetTemplateStyle(playerId)
         local templatePath = stageTemplateRoot:FindFirstChild(templateStyle)
         if not templatePath then
             warn("[StageService] 模板风格未找到:", templateStyle, "请检查ReplicatedStorage/StageTemplate路径")
@@ -606,13 +661,15 @@ function StageService.LoadEnemyData(stageFolder, stageNum)
 end
 
 --[[
-    清理玩家的所有动态关卡（V2.0.1修改：清理所有关卡包括Stage001）
+    清理玩家的所有动态关卡（V2.0.1修改：清理所有关卡包括Stage001, V3.7增强：清除章节缓存）
     @param playerId number - 玩家ID
 ]]
 function StageService.CleanupStages(playerId)
     local success, err = pcall(function()
         local cache = StageService.StageCache[playerId]
         if not cache then
+            -- V3.7: 即使没有关卡缓存，也要清除章节缓存
+            StageService.ClearPlayerChapter(playerId)
             return
         end
 
@@ -625,6 +682,9 @@ function StageService.CleanupStages(playerId)
 
         -- 完全清除该玩家的缓存
         StageService.StageCache[playerId] = nil
+
+        -- V3.7新增：清除玩家章节缓存
+        StageService.ClearPlayerChapter(playerId)
     end)
 
     if not success then

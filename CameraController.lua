@@ -27,7 +27,7 @@ local camera = Workspace.CurrentCamera
 -- V2.10新增：镜头模式配置
 -- ============================================
 -- 跟随模式（行军时）：高俯视角度，看整体阵型
-local FOLLOW_MODE_OFFSET = Vector3.new(0, 28, 18)  -- Y大Z小 = 俯视
+local FOLLOW_MODE_OFFSET = Vector3.new(0, 12, 25)  -- Y大Z小 = 俯视
 -- 战斗模式（接战时）：低平视角度，特写效果
 local COMBAT_MODE_OFFSET = Vector3.new(0, 12, 25)  -- Y小Z大 = 平视特写
 -- 镜头切换过渡速度（0-1，越大越快）

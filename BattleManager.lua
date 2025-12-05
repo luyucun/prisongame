@@ -732,10 +732,18 @@ function BattleManager.CompleteBattle(battleId, winner)
 		DebugLog(string.format("🏰 战役战斗结束，保持血条显示: BattleId=%d", battleId))
 	end
 
-	-- 延迟清理战场
-	task.delay(BattleConfig.CLEANUP_DELAY, function()
-		BattleManager.CleanupBattle(battleId)
-	end)
+	-- V4.0修复：战役模式下不设置延迟清理，由CampaignManager完全控制清理时机
+	-- 这样避免延迟清理与RespawnUnits产生竞态条件
+	if battle.BattleType ~= "Campaign" then
+		-- 延迟清理战场（仅非战役模式）
+		task.delay(BattleConfig.CLEANUP_DELAY, function()
+			BattleManager.CleanupBattle(battleId)
+		end)
+		DebugLog(string.format("⏰ 已设置延迟清理: BattleId=%d, Delay=%.1f秒", battleId, BattleConfig.CLEANUP_DELAY))
+	else
+		-- 战役模式：清理由CampaignManager.CompleteCampaignEnd负责
+		DebugLog(string.format("🏰 战役模式：跳过延迟清理，等待CampaignManager手动清理: BattleId=%d", battleId))
+	end
 
 	return true
 end

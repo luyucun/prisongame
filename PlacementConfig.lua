@@ -71,8 +71,9 @@ PlacementConfig.PLACEMENT_INITIAL_SCALE = 0.5
 -- ==================== 位置计算配置 ====================
 
 -- 模型放置时的Y轴偏移 (相对于IdleFloor表面)
--- 标准Roblox人物腰部到脚底约3-3.5 studs,这里用3确保站立在地板上
-PlacementConfig.PLACEMENT_Y_OFFSET = 3
+-- 注意: 由于所有兵种模型的Pivot已经设置到脚底,所以Y偏移改为0
+-- 之前腰部Pivot需要+3才能让脚落地,现在脚底Pivot直接对齐地板即可
+PlacementConfig.PLACEMENT_Y_OFFSET = 0
 
 -- ==================== 验证配置 ====================
 

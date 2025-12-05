@@ -34,7 +34,7 @@ function LevelDisplayHelper.UpdateLevelDisplay(unitModel, level, maxLevel)
         return false
     end
 
-    -- 查找等级显示UI结构
+    -- 查找等级显示UI结构: Head - BillboardGui - Bg - TextLabel
     local head = unitModel:FindFirstChild("Head")
     if not head then
         -- 容错：没有Head则安全返回
@@ -49,7 +49,14 @@ function LevelDisplayHelper.UpdateLevelDisplay(unitModel, level, maxLevel)
         return false
     end
 
-    local textLabel = billboardGui:FindFirstChild("TextLabel")
+    local bg = billboardGui:FindFirstChild("Bg")
+    if not bg then
+        -- 容错：没有Bg则安全返回
+        warn("[LevelDisplayHelper] UpdateLevelDisplay: 找不到Bg，model=" .. tostring(unitModel.Name))
+        return false
+    end
+
+    local textLabel = bg:FindFirstChild("TextLabel")
     if not textLabel then
         -- 容错：没有TextLabel则安全返回
         warn("[LevelDisplayHelper] UpdateLevelDisplay: 找不到TextLabel，model=" .. tostring(unitModel.Name))
@@ -140,7 +147,12 @@ function LevelDisplayHelper.GetCurrentDisplayLevel(unitModel)
         return nil
     end
 
-    local textLabel = billboardGui:FindFirstChild("TextLabel")
+    local bg = billboardGui:FindFirstChild("Bg")
+    if not bg then
+        return nil
+    end
+
+    local textLabel = bg:FindFirstChild("TextLabel")
     if not textLabel then
         return nil
     end
@@ -180,7 +192,12 @@ function LevelDisplayHelper.CheckLevelDisplayStructure(unitModel)
         return false, "缺少BillboardGui"
     end
 
-    local textLabel = billboardGui:FindFirstChild("TextLabel")
+    local bg = billboardGui:FindFirstChild("Bg")
+    if not bg then
+        return false, "缺少Bg"
+    end
+
+    local textLabel = bg:FindFirstChild("TextLabel")
     if not textLabel then
         return false, "缺少TextLabel"
     end

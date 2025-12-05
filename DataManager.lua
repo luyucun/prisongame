@@ -19,6 +19,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local DataStoreService = game:GetService("DataStoreService")  -- V2.1：添加DataStore服务
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
+local StageConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("StageConfig"))  -- V3.7.1：章节配置
 
 -- DataStore实例（V2.1库存系统：添加真正的持久化）
 local PlayerDataStore = DataStoreService:GetDataStore("PlayerData_V2.1")
@@ -1220,7 +1221,10 @@ end
 ]]
 function DataManager.GetCurrentChapter(player)
     local progress = DataManager.GetChapterProgress(player)
-    return progress.CurrentChapter or 1
+    local chapter = progress.CurrentChapter or 1
+    -- V3.7.1修复：确保章节ID不超过配置的最大章节数（兼容已有的错误数据）
+    local maxChapters = StageConfig.TotalChapters
+    return math.min(chapter, maxChapters)
 end
 
 --[[
@@ -1285,8 +1289,10 @@ function DataManager.CompleteChapter(player, chapterId)
         if chapterId > playerData.ChapterProgress.CompletedChapters then
             playerData.ChapterProgress.CompletedChapters = chapterId
         end
-        -- 自动进入下一章
-        playerData.ChapterProgress.CurrentChapter = chapterId + 1
+        -- V3.7.1修复：自动进入下一章，但不超过最大章节数
+        -- 如果已打通最后一章，则保持在最后一章继续挑战
+        local maxChapters = StageConfig.TotalChapters
+        playerData.ChapterProgress.CurrentChapter = math.min(chapterId + 1, maxChapters)
     end
 
     return true, playerData.ChapterProgress.CompletedChapters

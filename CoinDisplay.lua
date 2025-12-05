@@ -2,7 +2,7 @@
 脚本名称: CoinDisplay
 脚本类型: LocalScript (客户端脚本)
 脚本位置: StarterPlayer/StarterPlayerScripts/UI/CoinDisplay
-版本: V2.1（集成金币滚动动画）
+版本: V3.5（战斗金币累计显示）
 ]]
 
 --[[
@@ -12,11 +12,13 @@
 2. 实时更新UI显示玩家金币数量
 3. 使用格式化工具显示金币($XXXXX格式)
 4. V2.1新增：金币变化时播放滚动动画
+5. V3.5新增：战斗中显示累计获得金币（CoinEarn）
 ]]
 
 -- 等待必要的服务和对象加载
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
 local LocalPlayer = Players.LocalPlayer
 
 -- 调试模式和日志前缀(必须在最前面定义)
@@ -54,9 +56,16 @@ end
 -- UI元素引用(会在重生后重新获取)
 local MainGui = nil
 local CoinNumLabel = nil
+local CoinEarnLabel = nil  -- V3.5新增：战斗金币累计显示
 
 -- 当前金币数量(用于客户端缓存)
 local currentCoins = 0
+
+-- V3.5新增：战斗状态相关
+local isInBattle = false           -- 是否在战斗中
+local battleEarnedCoins = 0        -- 本场战斗累计获得金币
+local isAnimatingScale = false     -- 是否正在播放放大缩小动画
+local currentScaleTween = nil      -- 当前的缩放Tween
 
 -- ==================== 私有函数 ====================
 
@@ -117,6 +126,15 @@ local function RefreshUIReferences()
 
         if DEBUG_MODE then
             print(LOG_PREFIX, "CoinNumLabel引用已刷新")
+        end
+    end
+
+    -- V3.5新增：尝试获取CoinEarnLabel
+    if not CoinEarnLabel or not CoinEarnLabel.Parent then
+        CoinEarnLabel = MainGui:FindFirstChild("CoinEarn")
+        -- CoinEarn不是必须的，不影响返回值
+        if CoinEarnLabel and DEBUG_MODE then
+            print(LOG_PREFIX, "CoinEarnLabel引用已刷新")
         end
     end
 
@@ -186,6 +204,193 @@ local function OnCurrencyChanged(currencyType, newAmount)
     end
 end
 
+-- ==================== V3.5新增：战斗金币累计显示 ====================
+
+--[[
+播放CoinEarn放大缩小动画
+]]
+local function PlayCoinEarnScaleAnimation()
+    -- 如果正在播放动画，跳过本次
+    if isAnimatingScale then
+        if DEBUG_MODE then
+            print(LOG_PREFIX, "跳过动画：上一次动画尚未完成")
+        end
+        return
+    end
+
+    if not CoinEarnLabel or not CoinEarnLabel.Parent then
+        return
+    end
+
+    isAnimatingScale = true
+
+    -- 保存原始大小
+    local originalSize = CoinEarnLabel.Size
+
+    -- 放大到1.3倍
+    local scaleUp = TweenService:Create(
+        CoinEarnLabel,
+        TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+        {
+            Size = UDim2.new(
+                originalSize.X.Scale * 1.3,
+                originalSize.X.Offset * 1.3,
+                originalSize.Y.Scale * 1.3,
+                originalSize.Y.Offset * 1.3
+            )
+        }
+    )
+
+    -- 缩小回原始大小
+    local scaleDown = TweenService:Create(
+        CoinEarnLabel,
+        TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+        {Size = originalSize}
+    )
+
+    -- 播放放大动画
+    currentScaleTween = scaleUp
+    scaleUp:Play()
+
+    -- 放大完成后播放缩小动画
+    scaleUp.Completed:Connect(function()
+        if CoinEarnLabel and CoinEarnLabel.Parent then
+            currentScaleTween = scaleDown
+            scaleDown:Play()
+
+            scaleDown.Completed:Connect(function()
+                isAnimatingScale = false
+                currentScaleTween = nil
+            end)
+        else
+            isAnimatingScale = false
+            currentScaleTween = nil
+        end
+    end)
+end
+
+--[[
+更新战斗累计金币显示
+@param amount number - 新增的金币数量
+]]
+local function UpdateBattleEarnedCoins(amount)
+    if not isInBattle then
+        return
+    end
+
+    battleEarnedCoins = battleEarnedCoins + amount
+
+    -- 更新CoinEarn显示
+    if CoinEarnLabel and CoinEarnLabel.Parent then
+        CoinEarnLabel.Text = "+" .. tostring(battleEarnedCoins) .. "$"
+
+        -- 播放放大缩小动画
+        PlayCoinEarnScaleAnimation()
+
+        if DEBUG_MODE then
+            print(LOG_PREFIX, "战斗金币累计:", battleEarnedCoins, "(+", amount, ")")
+        end
+    end
+end
+
+--[[
+进入战斗状态
+]]
+local function EnterBattleMode()
+    if isInBattle then
+        return
+    end
+
+    isInBattle = true
+    battleEarnedCoins = 0
+
+    -- 刷新UI引用
+    RefreshUIReferences()
+
+    -- 隐藏CoinNum，显示CoinEarn
+    if CoinNumLabel and CoinNumLabel.Parent then
+        CoinNumLabel.Visible = false
+    end
+
+    if CoinEarnLabel and CoinEarnLabel.Parent then
+        CoinEarnLabel.Text = "+0$"
+        CoinEarnLabel.Visible = true
+    end
+
+    if DEBUG_MODE then
+        print(LOG_PREFIX, "进入战斗模式，切换到CoinEarn显示")
+    end
+end
+
+--[[
+退出战斗状态
+]]
+local function ExitBattleMode()
+    if not isInBattle then
+        return
+    end
+
+    isInBattle = false
+
+    -- 取消正在进行的动画
+    if currentScaleTween then
+        currentScaleTween:Cancel()
+        currentScaleTween = nil
+    end
+    isAnimatingScale = false
+
+    -- 刷新UI引用
+    RefreshUIReferences()
+
+    -- 隐藏CoinEarn，显示CoinNum
+    if CoinEarnLabel and CoinEarnLabel.Parent then
+        CoinEarnLabel.Visible = false
+    end
+
+    if CoinNumLabel and CoinNumLabel.Parent then
+        CoinNumLabel.Visible = true
+    end
+
+    if DEBUG_MODE then
+        print(LOG_PREFIX, "退出战斗模式，本场累计获得:", battleEarnedCoins, "金币")
+    end
+
+    -- 重置累计金币
+    battleEarnedCoins = 0
+end
+
+--[[
+处理战斗中金币获取事件
+@param amount number - 获取的金币数量
+]]
+local function OnBattleCoinEarned(amount)
+    if not amount or type(amount) ~= "number" or amount <= 0 then
+        return
+    end
+
+    UpdateBattleEarnedCoins(amount)
+end
+
+--[[
+处理战役状态变化事件
+@param state string - 战役状态
+@param stageNum number - 关卡编号（可选）
+]]
+local function OnCampaignStateUpdate(state, stageNum)
+    if DEBUG_MODE then
+        print(LOG_PREFIX, "收到战役状态变化:", state, stageNum)
+    end
+
+    -- 战斗开始（Preparing、Marching、PrepareBattle、Fighting状态）
+    -- 注意：服务端传来的是首字母大写的字符串
+    if state == "Preparing" or state == "Marching" or state == "Fighting" or state == "PrepareBattle" then
+        EnterBattleMode()
+    -- 战斗结束（Victory、Defeat、Idle、Cleanup状态）
+    elseif state == "Victory" or state == "Defeat" or state == "Idle" or state == "Cleanup" then
+        ExitBattleMode()
+    end
+end
+
 -- ==================== 初始化 ====================
 
 --[[
@@ -223,6 +428,7 @@ local function Initialize()
             -- 重置引用以便下次UpdateCoinDisplay时重新获取
             MainGui = nil
             CoinNumLabel = nil
+            CoinEarnLabel = nil  -- V3.5新增
 
             -- 等待一帧确保GUI完全加载
             task.wait()
@@ -230,6 +436,17 @@ local function Initialize()
             -- 刷新引用并更新显示（不使用动画）
             if RefreshUIReferences() then
                 UpdateCoinDisplay(currentCoins, false)
+
+                -- V3.5新增：如果当前在战斗中，恢复战斗模式显示
+                if isInBattle then
+                    if CoinNumLabel and CoinNumLabel.Parent then
+                        CoinNumLabel.Visible = false
+                    end
+                    if CoinEarnLabel and CoinEarnLabel.Parent then
+                        CoinEarnLabel.Text = "+" .. tostring(battleEarnedCoins) .. "$"
+                        CoinEarnLabel.Visible = true
+                    end
+                end
             end
         end
     end)
@@ -294,6 +511,58 @@ local function Initialize()
                 warn(LOG_PREFIX, "多次请求货币数据失败，客户端可能显示不正确的金币数")
                 responseConnection:Disconnect()
             end
+        end
+    end)
+
+    -- V3.5新增：监听战役状态变化事件
+    task.spawn(function()
+        local campaignEventsFolder = Events:FindFirstChild("CampaignEvents")
+        if not campaignEventsFolder then
+            campaignEventsFolder = Events:WaitForChild("CampaignEvents", 10)
+        end
+
+        if campaignEventsFolder then
+            local stateUpdateEvent = campaignEventsFolder:FindFirstChild("CampaignStateUpdate")
+            if not stateUpdateEvent then
+                stateUpdateEvent = campaignEventsFolder:WaitForChild("CampaignStateUpdate", 10)
+            end
+
+            if stateUpdateEvent then
+                stateUpdateEvent.OnClientEvent:Connect(OnCampaignStateUpdate)
+                if DEBUG_MODE then
+                    print(LOG_PREFIX, "已连接战役状态变化事件")
+                end
+            else
+                warn(LOG_PREFIX, "找不到CampaignStateUpdate事件")
+            end
+        else
+            warn(LOG_PREFIX, "找不到CampaignEvents文件夹")
+        end
+    end)
+
+    -- V3.5新增：监听战斗金币获取事件
+    task.spawn(function()
+        local battleEventsFolder = Events:FindFirstChild("BattleEvents")
+        if not battleEventsFolder then
+            battleEventsFolder = Events:WaitForChild("BattleEvents", 10)
+        end
+
+        if battleEventsFolder then
+            local coinEarnedEvent = battleEventsFolder:FindFirstChild("CoinEarnedEffect")
+            if not coinEarnedEvent then
+                coinEarnedEvent = battleEventsFolder:WaitForChild("CoinEarnedEffect", 10)
+            end
+
+            if coinEarnedEvent then
+                coinEarnedEvent.OnClientEvent:Connect(OnBattleCoinEarned)
+                if DEBUG_MODE then
+                    print(LOG_PREFIX, "已连接战斗金币获取事件")
+                end
+            else
+                warn(LOG_PREFIX, "找不到CoinEarnedEffect事件")
+            end
+        else
+            warn(LOG_PREFIX, "找不到BattleEvents文件夹")
         end
     end)
 
