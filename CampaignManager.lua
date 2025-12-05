@@ -3,7 +3,7 @@
 脚本名称: CampaignManager
 脚本类型: ModuleScript (服务端核心)
 脚本位置: ServerScriptService/Systems/CampaignManager.lua
-版本: V2.8.3
+版本: V2.8.4 (修复复生半透明问题)
 =====================================================
 
 功能描述:
@@ -2370,6 +2370,17 @@ function CampaignManager.RespawnUnits(campaignData)
 		-- V3.8修复：最终确保透明度已重置（防止死亡渐隐效果残留）
 		if UnitAI.ResetModelTransparency then
 			UnitAI.ResetModelTransparency(currentInstance)
+
+			-- [关键修复 V2.8.4] 双重保险：强制遍历所有部件重置透明度
+			-- 防止CombatSystem的Tween延迟取消导致的半透明残留
+			-- 配合CombatSystem.lua的事件监听修复效果最佳
+			for _, part in ipairs(currentInstance:GetDescendants()) do
+				if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+					part.Transparency = 0
+				elseif part:IsA("Decal") or part:IsA("Texture") then
+					part.Transparency = 0
+				end
+			end
 		end
 
 		-- V3.8修复：恢复头顶UI（死亡时被隐藏的BillboardGui）

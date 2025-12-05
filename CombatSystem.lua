@@ -2,7 +2,7 @@
 脚本名称: CombatSystem
 脚本类型: ModuleScript (服务端系统)
 脚本位置: ServerScriptService/Systems/CombatSystem
-版本: V1.5.1 - 重构为动画事件驱动
+版本: V1.5.11 - 修复复生透明度竞态问题
 ]]
 
 --[[
@@ -26,6 +26,7 @@ local CombatSystem = {}
 local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService") -- 显式引用TweenService
 
 -- 引用配置（从ReplicatedStorage获取共享配置）
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
@@ -539,7 +540,7 @@ function CombatSystem.OnRangedDamageEvent(unitModel, target)
 		end
 	end
 
-	-- ⭐⭐⭐ V1.5.4 播放远程武器特效 ⭐⭐⭐
+	-- ⭐⭐ V1.5.4 播放远程武器特效 ⭐⭐
 	-- 在发射子弹前播放枪口特效（Beam、PointLight、ParticleEmitter）
 	if not WeaponEffectSystem then
 		local effectModule = ServerScriptService:WaitForChild("Systems"):FindFirstChild("WeaponEffectSystem")
@@ -554,7 +555,7 @@ function CombatSystem.OnRangedDamageEvent(unitModel, target)
 		WeaponEffectSystem.PlayWeaponEffect(unitModel, weaponName)
 	end
 
-	-- ⭐⭐⭐ 发射子弹 ⭐⭐⭐
+	-- ⭐⭐ 发射子弹 ⭐⭐
 	local projectile = ProjectileSystem.CreateProjectile(
 		unitModel,     -- 攻击者
 		target,        -- 目标
@@ -749,19 +750,16 @@ function CombatSystem.Heal(unitModel, amount)
 end
 
 --[[
-杀死兵种 - V1.5.10无缝死亡动画版
+杀死兵种 - V1.5.11 修复复生透明度竞态版本
 @param unitModel Model - 兵种模型
 @param killer Model - 击杀者模型(可选)
 
 流程（关键：先播死亡动画再停AI，确保无缝过渡）：
 1. 标记死亡状态
 2. 从系统中注销 → 触发死亡事件
-3. 播放死亡动画（立刻禁用Animate，高优先级Fade=0）
-4. 停止AI（瞬停Fade=0，禁用Animate，无MoveTo）
-5. 2.9秒后销毁
-
-无缝过渡效果：
-当前动作（攻击/移动/待机）→ 立刻播放死亡动画（无"傻站"间隙）
+3. 播放死亡动画
+4. 停止AI
+5. 2.9秒后销毁/隐藏
 ]]
 function CombatSystem.KillUnit(unitModel, killer)
 	local state = unitStates[unitModel]
@@ -860,9 +858,6 @@ function CombatSystem.KillUnit(unitModel, killer)
 	local UnitAI = require(unitAIModule :: ModuleScript)
 	local deathAnimationId = UnitConfig.GetDeathAnimationId(unitId)
 
-	-- 关键步骤顺序：先播死亡动画再停AI
-	-- 这样死亡动画会立刻播放，避免被StopAI的动画清理杀死
-
 	-- 步骤1: 播放死亡动画（立刻禁用Animate，高优先级Fade=0确保立即生效）
 	UnitAI.BeginDeathAnimation(unitModel, deathAnimationId, unitId)
 
@@ -884,88 +879,85 @@ function CombatSystem.KillUnit(unitModel, killer)
 	local fadeStartDelay = 1.5
 	local fadeDuration = 1.4
 
+	-- V1.5.11 [修复核心]: 使用任务延迟执行渐隐，并添加事件监听以支持中途取消
 	task.delay(fadeStartDelay, function()
 		if not unitModel or not unitModel.Parent then return end
 
-		-- V3.8.1修复：检查是否已被复生（复生时会清除PendingDeathHide标记）
-		-- 如果单位已复生，跳过渐隐效果，避免复生后的单位变透明
+		-- 1. 检查是否已经被复生（如果复生，PendingDeathHide 会被 CampaignManager 置为 nil）
 		local pendingHide = unitModel:GetAttribute("PendingDeathHide")
 		if not pendingHide then
 			DebugLog(string.format("%s 跳过渐隐：单位已被复生", unitId))
 			return
 		end
 
-		-- 收集所有需要渐隐的对象，并保存原始透明度
+		-- 2. 收集所有需要渐隐的对象，并保存原始透明度
 		local fadeTargets = {}
 		for _, inst in ipairs(unitModel:GetDescendants()) do
-			if inst:IsA("BasePart") then
-				inst:SetAttribute("_OrigTrans", inst.Transparency)
-				table.insert(fadeTargets, inst)
-			elseif inst:IsA("Decal") or inst:IsA("Texture") then
-				inst:SetAttribute("_OrigTrans", inst.Transparency)
+			if inst:IsA("BasePart") or inst:IsA("Decal") or inst:IsA("Texture") then
+				-- 只记录一次原始透明度，避免重复覆盖
+				if inst:GetAttribute("_OrigTrans") == nil then
+					inst:SetAttribute("_OrigTrans", inst.Transparency)
+				end
 				table.insert(fadeTargets, inst)
 			end
 		end
 
-		-- 使用TweenService实现平滑渐隐
-		-- 先创建所有Tween，再同时播放，确保整体同步
-		local TweenService = game:GetService("TweenService")
+		-- 3. 创建 Tweens
 		local tweenInfo = TweenInfo.new(fadeDuration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out)
-
 		local tweens = {}
+
 		for _, inst in ipairs(fadeTargets) do
 			local success, tween = pcall(function()
 				return TweenService:Create(inst, tweenInfo, {Transparency = 1})
 			end)
 			if success and tween then
 				table.insert(tweens, tween)
+				tween:Play()
 			end
 		end
 
-		-- 同时播放所有Tween
-		for _, tween in ipairs(tweens) do
-			tween:Play()
-		end
+		DebugLog(string.format("%s 开始渐隐效果，共%d个对象", unitId, #fadeTargets))
 
-		-- V3.8.2修复：启动监视协程，如果PendingDeathHide被清除则立即取消所有渐隐Tween
-		-- 这防止了复活后单位仍被渐隐的问题（Tween开始后再清除标记也能生效）
-		task.spawn(function()
-			while true do
-				task.wait(0.1)  -- 每0.1秒检查一次
-
-				-- 检查模型是否还存在
-				if not unitModel or not unitModel.Parent then
-					break
-				end
-
-				-- 检查渐隐是否应该被取消（复活时会清除PendingDeathHide）
-				local stillPending = unitModel:GetAttribute("PendingDeathHide")
-				if not stillPending then
-					-- 立即取消所有渐隐Tween
-					for _, tween in ipairs(tweens) do
-						pcall(function()
-							tween:Cancel()
-						end)
-					end
-					DebugLog(string.format("%s 渐隐Tween已取消：单位已被复生", unitId))
-					break
-				end
-
-				-- 检查所有Tween是否都已完成
-				local allCompleted = true
+		-- 4. [关键修复] 使用 GetAttributeChangedSignal 监听取消信号
+		-- 这样当 CampaignManager 执行 SetAttribute("PendingDeathHide", nil) 时，渐隐会立即停止
+		local connection
+		connection = unitModel:GetAttributeChangedSignal("PendingDeathHide"):Connect(function()
+			local stillPending = unitModel:GetAttribute("PendingDeathHide")
+			if not stillPending then
+				-- 复生发生了！立即停止所有 Tween
 				for _, tween in ipairs(tweens) do
-					if tween.PlaybackState == Enum.PlaybackState.Playing then
-						allCompleted = false
-						break
-					end
+					pcall(function()
+						tween:Cancel()
+						-- Cancel后Transparency会停留在当前值，由CampaignManager负责设回0
+					end)
 				end
-				if allCompleted then
-					break
+
+				-- 断开连接，防止内存泄漏
+				if connection then
+					connection:Disconnect()
+					connection = nil
 				end
+				DebugLog(string.format("%s 渐隐Tween已立即取消：单位已被复生", unitId))
 			end
 		end)
 
-		DebugLog(string.format("%s 开始渐隐效果，共%d个对象", unitId, #fadeTargets))
+		-- 5. 如果模型被销毁，也要断开连接
+		local destroyConnection
+		destroyConnection = unitModel.AncestryChanged:Connect(function()
+			if not unitModel.Parent then
+				if connection then connection:Disconnect() connection = nil end
+				if destroyConnection then destroyConnection:Disconnect() destroyConnection = nil end
+				-- 停止Tweens
+				for _, tween in ipairs(tweens) do pcall(function() tween:Cancel() end) end
+			end
+		end)
+
+		-- 6. 双重保险：如果在连接事件之前标记就已经没了（极少数并发情况）
+		if not unitModel:GetAttribute("PendingDeathHide") then
+			for _, tween in ipairs(tweens) do pcall(function() tween:Cancel() end) end
+			if connection then connection:Disconnect() connection = nil end
+			if destroyConnection then destroyConnection:Disconnect() destroyConnection = nil end
+		end
 	end)
 
 	-- V2.0.1修复：战役单位死亡时保留实例用于重生
