@@ -2173,6 +2173,19 @@ function CampaignManager.RespawnUnits(campaignData)
 						currentInstance = unitInstance
 						instanceValid = true
 						DebugLog(string.format("    ✅ %s 原始实例重新挂载成功", safeUnitId))
+
+						-- V3.8修复：挂载后立即重置透明度和UI
+						if UnitAI.ResetModelTransparency then
+							UnitAI.ResetModelTransparency(currentInstance)
+						end
+						local head = currentInstance:FindFirstChild("Head")
+						if head then
+							for _, child in ipairs(head:GetChildren()) do
+								if child:IsA("BillboardGui") then
+									child.Enabled = true
+								end
+							end
+						end
 					end
 				end
 			end
@@ -2202,6 +2215,19 @@ function CampaignManager.RespawnUnits(campaignData)
 								currentInstance = pModel
 								instanceValid = true
 								DebugLog(string.format("    ✅ %s 从PlacementSystem恢复并重新挂载成功", safeUnitId))
+
+								-- V3.8修复：挂载后立即重置透明度和UI
+								if UnitAI.ResetModelTransparency then
+									UnitAI.ResetModelTransparency(currentInstance)
+								end
+								local head = currentInstance:FindFirstChild("Head")
+								if head then
+									for _, child in ipairs(head:GetChildren()) do
+										if child:IsA("BillboardGui") then
+											child.Enabled = true
+										end
+									end
+								end
 							end
 						end
 					end
@@ -2221,11 +2247,12 @@ function CampaignManager.RespawnUnits(campaignData)
 		-- 执行复生流程
 		local teleportSuccess = false
 
-		-- 重置透明度
-		if UnitAI.ResetModelTransparency then
-			pcall(function()
+		-- V3.8修复：重置透明度（确保模型可见）
+		if currentInstance then
+			-- 立即重置一次
+			if UnitAI.ResetModelTransparency then
 				UnitAI.ResetModelTransparency(currentInstance)
-			end)
+			end
 		end
 
 		-- 创建目标CFrame
@@ -2313,6 +2340,11 @@ function CampaignManager.RespawnUnits(campaignData)
 			currentInstance:SetAttribute("CampaignKeepInstance", false)
 		end)
 
+		-- V3.8修复：清除PendingDeathHide标记，防止延迟隐藏任务把复生后的单位又隐藏掉
+		pcall(function()
+			currentInstance:SetAttribute("PendingDeathHide", nil)
+		end)
+
 		-- V2.8.2: 如果使用了不同的实例(currentInstance != unitInstance),更新PlacementSystem
 		if currentInstance ~= unitInstance and PlacementSystem then
 			local instanceId = unitData.InstanceId
@@ -2334,6 +2366,22 @@ function CampaignManager.RespawnUnits(campaignData)
 
 		-- 播放展示动画
 		PlayShowAnimation(currentInstance, safeUnitId)
+
+		-- V3.8修复：最终确保透明度已重置（防止死亡渐隐效果残留）
+		if UnitAI.ResetModelTransparency then
+			UnitAI.ResetModelTransparency(currentInstance)
+		end
+
+		-- V3.8修复：恢复头顶UI（死亡时被隐藏的BillboardGui）
+		local head = currentInstance:FindFirstChild("Head")
+		if head then
+			for _, child in ipairs(head:GetChildren()) do
+				if child:IsA("BillboardGui") then
+					child.Enabled = true
+				end
+			end
+			DebugLog(string.format("    %s 头顶UI已恢复", safeUnitId))
+		end
 
 		-- 延迟后重新锚定(展示模式)
 		if unitData.WasAnchored then

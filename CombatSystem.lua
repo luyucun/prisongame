@@ -887,6 +887,14 @@ function CombatSystem.KillUnit(unitModel, killer)
 	task.delay(fadeStartDelay, function()
 		if not unitModel or not unitModel.Parent then return end
 
+		-- V3.8.1修复：检查是否已被复生（复生时会清除PendingDeathHide标记）
+		-- 如果单位已复生，跳过渐隐效果，避免复生后的单位变透明
+		local pendingHide = unitModel:GetAttribute("PendingDeathHide")
+		if not pendingHide then
+			DebugLog(string.format("%s 跳过渐隐：单位已被复生", unitId))
+			return
+		end
+
 		-- 收集所有需要渐隐的对象，并保存原始透明度
 		local fadeTargets = {}
 		for _, inst in ipairs(unitModel:GetDescendants()) do
@@ -919,12 +927,60 @@ function CombatSystem.KillUnit(unitModel, killer)
 			tween:Play()
 		end
 
+		-- V3.8.2修复：启动监视协程，如果PendingDeathHide被清除则立即取消所有渐隐Tween
+		-- 这防止了复活后单位仍被渐隐的问题（Tween开始后再清除标记也能生效）
+		task.spawn(function()
+			while true do
+				task.wait(0.1)  -- 每0.1秒检查一次
+
+				-- 检查模型是否还存在
+				if not unitModel or not unitModel.Parent then
+					break
+				end
+
+				-- 检查渐隐是否应该被取消（复活时会清除PendingDeathHide）
+				local stillPending = unitModel:GetAttribute("PendingDeathHide")
+				if not stillPending then
+					-- 立即取消所有渐隐Tween
+					for _, tween in ipairs(tweens) do
+						pcall(function()
+							tween:Cancel()
+						end)
+					end
+					DebugLog(string.format("%s 渐隐Tween已取消：单位已被复生", unitId))
+					break
+				end
+
+				-- 检查所有Tween是否都已完成
+				local allCompleted = true
+				for _, tween in ipairs(tweens) do
+					if tween.PlaybackState == Enum.PlaybackState.Playing then
+						allCompleted = false
+						break
+					end
+				end
+				if allCompleted then
+					break
+				end
+			end
+		end)
+
 		DebugLog(string.format("%s 开始渐隐效果，共%d个对象", unitId, #fadeTargets))
 	end)
 
 	-- V2.0.1修复：战役单位死亡时保留实例用于重生
+	-- V3.8修复：使用属性标记来防止复生后被错误隐藏（竞态条件）
+	unitModel:SetAttribute("PendingDeathHide", true)
+
 	task.delay(2.9, function()
 		if unitModel and unitModel.Parent then
+			-- V3.8修复：检查是否已被复生（复生时会清除PendingDeathHide标记）
+			local pendingHide = unitModel:GetAttribute("PendingDeathHide")
+			if not pendingHide then
+				DebugLog(string.format("%s 跳过隐藏：单位已被复生", unitId))
+				return
+			end
+
 			-- 检查是否是战役单位
 			local isCampaignUnit = unitModel:GetAttribute("CampaignKeepInstance")
 

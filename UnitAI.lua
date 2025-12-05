@@ -1385,12 +1385,25 @@ end
 function UnitAI.ResetModelTransparency(unitModel)
 	if not unitModel then return end
 	for _, inst in ipairs(unitModel:GetDescendants()) do
-		local orig = inst:GetAttribute("_OrigTrans")
-		if orig ~= nil then
-			if inst:IsA("BasePart") or inst:IsA("Decal") or inst:IsA("Texture") then
+		if inst:IsA("BasePart") then
+			local orig = inst:GetAttribute("_OrigTrans")
+			if orig ~= nil then
+				-- 有保存的原始透明度，恢复它
 				inst.Transparency = orig
+				inst:SetAttribute("_OrigTrans", nil)
+			elseif inst.Transparency > 0 and inst.Name ~= "HumanoidRootPart" then
+				-- V3.8修复：没有保存原始透明度但当前是透明的，重置为0
+				-- 排除HumanoidRootPart因为它通常是透明的
+				inst.Transparency = 0
 			end
-			inst:SetAttribute("_OrigTrans", nil)
+		elseif inst:IsA("Decal") or inst:IsA("Texture") then
+			local orig = inst:GetAttribute("_OrigTrans")
+			if orig ~= nil then
+				inst.Transparency = orig
+				inst:SetAttribute("_OrigTrans", nil)
+			elseif inst.Transparency > 0 then
+				inst.Transparency = 0
+			end
 		end
 	end
 end
