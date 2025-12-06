@@ -2,7 +2,7 @@
 脚本名称: CombatSystem
 脚本类型: ModuleScript (服务端系统)
 脚本位置: ServerScriptService/Systems/CombatSystem
-版本: V1.5.11 - 修复复生透明度竞态问题
+版本: V1.5.12 - 集中管理死亡渐隐Tween，修复战役复活透明度竞态
 ]]
 
 --[[
@@ -49,6 +49,10 @@ local HitboxService = nil
 local UnitManager = nil
 local ProjectileSystem = nil  -- V1.5远程攻击支持
 local WeaponEffectSystem = nil  -- V1.5.4远程武器特效支持
+
+-- V1.5.12新增：集中管理死亡渐隐Tween，用于战役复活时一键取消
+-- [unitModel] = { tweens = {Tween...}, connections = {RBXScriptConnection...} }
+local activeDeathFades = {}
 
 -- ==================== 数据结构 ====================
 
@@ -879,7 +883,13 @@ function CombatSystem.KillUnit(unitModel, killer)
 	local fadeStartDelay = 1.5
 	local fadeDuration = 1.4
 
-	-- V1.5.11 [修复核心]: 使用任务延迟执行渐隐，并添加事件监听以支持中途取消
+	-- V2.0.1修复：战役单位死亡时保留实例用于重生
+	-- V3.8修复：使用属性标记来防止复生后被错误隐藏（竞态条件）
+	-- V1.5.12修复：必须在task.delay之前设置标记，防止竞态
+	unitModel:SetAttribute("PendingDeathHide", true)
+
+	-- V1.5.12 [修复核心]: 使用任务延迟执行渐隐，并添加事件监听以支持中途取消
+	-- 同时将Tween注册到集中管理表，支持CancelDeathFade一键取消
 	task.delay(fadeStartDelay, function()
 		if not unitModel or not unitModel.Parent then return end
 
@@ -905,6 +915,7 @@ function CombatSystem.KillUnit(unitModel, killer)
 		-- 3. 创建 Tweens
 		local tweenInfo = TweenInfo.new(fadeDuration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out)
 		local tweens = {}
+		local connections = {}
 
 		for _, inst in ipairs(fadeTargets) do
 			local success, tween = pcall(function()
@@ -937,9 +948,12 @@ function CombatSystem.KillUnit(unitModel, killer)
 					connection:Disconnect()
 					connection = nil
 				end
+				-- 从集中管理表移除
+				CombatSystem.UnregisterDeathFade(unitModel)
 				DebugLog(string.format("%s 渐隐Tween已立即取消：单位已被复生", unitId))
 			end
 		end)
+		table.insert(connections, connection)
 
 		-- 5. 如果模型被销毁，也要断开连接
 		local destroyConnection
@@ -949,20 +963,45 @@ function CombatSystem.KillUnit(unitModel, killer)
 				if destroyConnection then destroyConnection:Disconnect() destroyConnection = nil end
 				-- 停止Tweens
 				for _, tween in ipairs(tweens) do pcall(function() tween:Cancel() end) end
+				-- 从集中管理表移除
+				CombatSystem.UnregisterDeathFade(unitModel)
 			end
 		end)
+		table.insert(connections, destroyConnection)
+
+		-- V1.5.12新增：将Tween和连接注册到集中管理表
+		CombatSystem.RegisterDeathFade(unitModel, tweens, connections)
 
 		-- 6. 双重保险：如果在连接事件之前标记就已经没了（极少数并发情况）
+		-- V1.5.12关键修复：不仅要取消Tween，还要立即重置透明度！
+		-- 因为Tween.Play()可能已经让透明度开始变化了
 		if not unitModel:GetAttribute("PendingDeathHide") then
+			-- 取消所有Tween
 			for _, tween in ipairs(tweens) do pcall(function() tween:Cancel() end) end
+
+			-- 立即重置透明度到原始值
+			for _, inst in ipairs(fadeTargets) do
+				pcall(function()
+					local origTrans = inst:GetAttribute("_OrigTrans")
+					if origTrans ~= nil then
+						inst.Transparency = origTrans
+					elseif inst:IsA("BasePart") and inst.Name ~= "HumanoidRootPart" then
+						inst.Transparency = 0
+					elseif inst:IsA("Decal") or inst:IsA("Texture") then
+						inst.Transparency = 0
+					end
+					-- 清除临时属性
+					inst:SetAttribute("_OrigTrans", nil)
+				end)
+			end
+
+			-- 断开连接
 			if connection then connection:Disconnect() connection = nil end
 			if destroyConnection then destroyConnection:Disconnect() destroyConnection = nil end
+			CombatSystem.UnregisterDeathFade(unitModel)
+			DebugLog(string.format("%s 双重保险触发：Tween已取消，透明度已重置", unitId))
 		end
 	end)
-
-	-- V2.0.1修复：战役单位死亡时保留实例用于重生
-	-- V3.8修复：使用属性标记来防止复生后被错误隐藏（竞态条件）
-	unitModel:SetAttribute("PendingDeathHide", true)
 
 	task.delay(2.9, function()
 		if unitModel and unitModel.Parent then
@@ -972,6 +1011,9 @@ function CombatSystem.KillUnit(unitModel, killer)
 				DebugLog(string.format("%s 跳过隐藏：单位已被复生", unitId))
 				return
 			end
+
+			-- V1.5.12新增：正常死亡流程结束，清理集中管理表
+			CombatSystem.UnregisterDeathFade(unitModel)
 
 			-- 检查是否是战役单位
 			local isCampaignUnit = unitModel:GetAttribute("CampaignKeepInstance")
@@ -1099,6 +1141,117 @@ end
 ]]
 function CombatSystem.GetAllUnitStates()
 	return unitStates
+end
+
+-- ==================== V1.5.12新增：死亡渐隐集中管理 ====================
+
+--[[
+取消单位的死亡渐隐效果，并立即重置透明度
+在战役复活时调用，一键终止所有渐隐Tween并恢复可见性
+@param unitModel Model - 单位模型
+]]
+function CombatSystem.CancelDeathFade(unitModel)
+	if not unitModel then return end
+
+	-- 1. 清除PendingDeathHide标记（触发已存在的监听器取消Tween）
+	pcall(function()
+		unitModel:SetAttribute("PendingDeathHide", nil)
+	end)
+
+	-- 2. 从集中管理表中取出并清理
+	local fadeData = activeDeathFades[unitModel]
+	if fadeData then
+		-- 取消所有Tween
+		if fadeData.tweens then
+			for _, tween in ipairs(fadeData.tweens) do
+				pcall(function()
+					tween:Cancel()
+				end)
+			end
+		end
+
+		-- 断开所有连接
+		if fadeData.connections then
+			for _, conn in ipairs(fadeData.connections) do
+				pcall(function()
+					conn:Disconnect()
+				end)
+			end
+		end
+
+		activeDeathFades[unitModel] = nil
+		DebugLog(string.format("[CancelDeathFade] 已取消 %s 的渐隐效果", unitModel.Name or "Unknown"))
+	end
+
+	-- 3. 加载UnitAI并重置透明度（兜底清理）
+	local unitAIModule = ServerScriptService:FindFirstChild("Systems") and ServerScriptService.Systems:FindFirstChild("UnitAI")
+	if unitAIModule then
+		local UnitAI = require(unitAIModule :: ModuleScript)
+		if UnitAI.ResetModelTransparency then
+			UnitAI.ResetModelTransparency(unitModel)
+		end
+	end
+
+	-- 4. 双重保险：强制遍历所有部件重置透明度为0
+	-- 确保即使ResetModelTransparency出现问题，透明度也能被正确重置
+	for _, part in ipairs(unitModel:GetDescendants()) do
+		if part:IsA("BasePart") then
+			-- HumanoidRootPart通常是透明的，保持不变
+			if part.Name ~= "HumanoidRootPart" then
+				part.Transparency = 0
+			end
+			-- 清除临时保存的原始透明度属性
+			pcall(function()
+				part:SetAttribute("_OrigTrans", nil)
+			end)
+		elseif part:IsA("Decal") or part:IsA("Texture") then
+			part.Transparency = 0
+			pcall(function()
+				part:SetAttribute("_OrigTrans", nil)
+			end)
+		end
+	end
+
+	DebugLog(string.format("[CancelDeathFade] %s 透明度已完全重置", unitModel.Name or "Unknown"))
+end
+
+--[[
+注册死亡渐隐数据到集中管理表
+@param unitModel Model - 单位模型
+@param tweens table - Tween数组
+@param connections table - 连接数组
+]]
+function CombatSystem.RegisterDeathFade(unitModel, tweens, connections)
+	if not unitModel then return end
+
+	-- 先清理可能存在的旧数据
+	local oldData = activeDeathFades[unitModel]
+	if oldData then
+		if oldData.tweens then
+			for _, tween in ipairs(oldData.tweens) do
+				pcall(function() tween:Cancel() end)
+			end
+		end
+		if oldData.connections then
+			for _, conn in ipairs(oldData.connections) do
+				pcall(function() conn:Disconnect() end)
+			end
+		end
+	end
+
+	activeDeathFades[unitModel] = {
+		tweens = tweens or {},
+		connections = connections or {}
+	}
+end
+
+--[[
+从集中管理表中移除死亡渐隐数据（渐隐正常完成时调用）
+@param unitModel Model - 单位模型
+]]
+function CombatSystem.UnregisterDeathFade(unitModel)
+	if not unitModel then return end
+	activeDeathFades[unitModel] = nil
 end
 
 return CombatSystem

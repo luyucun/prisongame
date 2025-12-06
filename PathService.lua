@@ -2,36 +2,20 @@
 脚本名称: PathService
 脚本类型: ModuleScript (服务端系统)
 脚本位置: ServerScriptService/Systems/PathService
-版本: V5.2 - 丝滑寻路优化版
+版本: V5.4 - 修复行军/战斗MoveTo冲突
+
+V5.4更新内容：
+1. ✅ 关键修复：ClearPath增强 - 同时清理activeMoves中的行军任务数据
+   - 从所有activeMoves中移除单位，断开MoveConnection
+   - 防止行军Heartbeat继续发送MoveTo指令与战斗AI冲突
+   - 这是解决"卡顿/回头"问题的核心修复之一
+
+V5.3更新内容：
+1. ✅ 修复"走错路"误判：放宽阈值并忽略终点附近(15 studs内)的后退检测
 
 V5.2更新内容：
 1. ✅ 实现切角机制 - 中间路点距离<5时立即切换，不等MoveToFinished
 2. ✅ 放宽卡住检测 - 降低检测频率(0.5→1.0秒)和最小速度阈值(0.5→0.1)
-3. ✅ 提高容错次数 - 卡住阈值从3次增加到5次
-4. ✅ 定时刷新MoveTo - 每0.5秒刷新当前目标，防止MoveTo超时
-5. ✅ 优化Heartbeat频率 - 从0.1秒提高到0.05秒，确保切角及时
-
-V5.1更新内容：
-1. ✅ 恢复agentRadius上限为8（支持大型单位）
-2. ✅ 添加走错路检测（WrongWayCount）
-3. ✅ 添加周期性重寻路兜底（15秒）
-4. ✅ 完善MoveToFinished reached=false处理
-5. ✅ 增加rootPart有效性检查
-
-重构目标（参考寻路逻辑重写方案.lua）：
-1. ✅ 集中化路径请求处理（队列 + 时间预算）
-2. ✅ 动态Agent尺寸（基于模型/配置表/GridWidth）
-3. ✅ Partial路径正确处理（返回最近可达点，不伪装成Success）
-4. ✅ Blocked事件监听 + 缩小半径重试
-5. ✅ 拥挤豁免机制（避免群体拥堵时频繁重算）
-6. ✅ 批量移动支持slot站位（避免所有单位挤同一点）
-
-核心设计原则：
-- 简单就是力量：单一FIFO队列，时间预算控制
-- Partial不是Success：调用方必须知道目标不可达
-- 拥挤豁免：周围友军多时放宽卡住判定
-- slot站位：每个单位有自己的目标点，不争抢
-- 切角移动：不等MoveToFinished，动态检测距离立即切换路点
 ]]
 
 local PathService = {}
@@ -80,9 +64,9 @@ local CONFIG = {
 	MARCH_STUCK_COUNT_THRESHOLD = 5,    -- 连续卡住次数阈值 - 给更多容错机会
 	MARCH_REPATH_COOLDOWN = 1.5,        -- 重寻路冷却（秒）
 
-	-- V5.1新增：走错路检测配置
-	MARCH_WRONG_WAY_THRESHOLD = 3,      -- 连续走错路次数阈值
-	MARCH_WRONG_WAY_DISTANCE = 2,       -- 距离增加阈值（studs）
+	-- V5.1/V5.3 走错路检测配置
+	MARCH_WRONG_WAY_THRESHOLD = 5,      -- [修改] 增加容错次数 (3->5)
+	MARCH_WRONG_WAY_DISTANCE = 5,       -- [修改] 增加距离阈值 (2->5)，防止被挤退时误判
 
 	-- V5.1新增：周期性重寻路配置
 	MARCH_PERIODIC_REPATH_DELAY = 15,   -- 周期性重寻路间隔（秒）
@@ -681,6 +665,7 @@ end
 
 --[[
 清理路径
+⭐⭐ V5.0增强：同时清理activeMoves中的行军任务数据 ⭐⭐
 ]]
 function PathService.ClearPath(unitModel)
 	ClearPathData(unitModel)
@@ -690,6 +675,33 @@ function PathService.ClearPath(unitModel)
 		if pathQueue[i].unitModel == unitModel then
 			table.remove(pathQueue, i)
 			break
+		end
+	end
+
+	-- ⭐⭐ V5.0关键修复：从所有activeMoves中移除该单位 ⭐⭐
+	-- 这是防止行军和战斗MoveTo冲突的核心修复
+	for moveId, moveTask in pairs(activeMoves) do
+		if moveTask.moveData and moveTask.moveData[unitModel] then
+			local data = moveTask.moveData[unitModel]
+
+			-- 标记为已到达，停止后续处理
+			data.Arrived = true
+
+			-- 断开MoveToFinished监听
+			if data.MoveConnection then
+				data.MoveConnection:Disconnect()
+				data.MoveConnection = nil
+			end
+
+			-- 销毁目标Part
+			if data.TargetPart and data.TargetPart.Parent then
+				data.TargetPart:Destroy()
+			end
+
+			-- 从moveData中移除
+			moveTask.moveData[unitModel] = nil
+
+			DebugLog(string.format("🛑 [V5.0] 从行军任务 %s 中移除单位", tostring(moveId)))
 		end
 	end
 end
@@ -1181,9 +1193,10 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 						end
 					end
 
-					-- ==================== V5.1新增：走错路检测 ====================
+					-- ==================== V5.3新增：走错路检测修正 ====================
 					-- 距离连续增加说明可能走错方向
-					if distanceXZ > prevDist + CONFIG.MARCH_WRONG_WAY_DISTANCE then
+					-- [修复] 增加 distanceXZ > 15 判断，忽略终点附近的回退
+					if distanceXZ > 15 and distanceXZ > prevDist + CONFIG.MARCH_WRONG_WAY_DISTANCE then
 						data.WrongWayCount = (data.WrongWayCount or 0) + 1
 						if data.WrongWayCount >= CONFIG.MARCH_WRONG_WAY_THRESHOLD and canRepath then
 							DebugLog(string.format("🚀 [行军] %s 走错路(距离%.1f→%.1f)，直接瞬移到目的地",
@@ -1292,6 +1305,21 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 		-- 所有单位完成
 		if allDone then
 			checkConnection:Disconnect()
+
+			-- ⭐⭐ V5.4关键修复：在删除activeMoves前，清理所有单位的MoveConnection ⭐⭐
+			-- 之前只是 activeMoves[moveId] = nil，但各单位的 MoveConnection 还在监听
+			-- 这会导致延迟的 task.delay 回调在战斗开始后仍然发送 MoveTo 指令
+			for unitInstance, data in pairs(moveData) do
+				if data.MoveConnection then
+					data.MoveConnection:Disconnect()
+					data.MoveConnection = nil
+				end
+				-- 销毁目标Part（如果还没销毁）
+				if data.TargetPart and data.TargetPart.Parent then
+					data.TargetPart:Destroy()
+				end
+			end
+
 			activeMoves[moveId] = nil
 
 			DebugLog(string.format("[MoveUnitsToPositions] 完成 - 到达:%d, 超时:%d, 失败:%d",

@@ -2,29 +2,20 @@
 脚本名称: UnitAI
 脚本类型: ModuleScript (服务端系统)
 脚本位置: ServerScriptService/Systems/UnitAI
-版本: V5.1 - 修复潜在问题版
+版本: V5.4 - 修复行军/战斗MoveTo冲突
 
-V5.1更新内容：
-1. ✅ 移除对MovementController的无效引用（使用内置移动逻辑）
-2. ✅ 与PathService V5.1保持参数一致
-3. ✅ 完善代码注释
+V5.4更新内容：
+1. ✅ 关键修复：StartAI前彻底清理残留状态
+   - 清理PathService残留（行军阶段遗留的路径状态）
+   - 立即停止残留移动指令
+   - 清理旧AI实例的动画
+2. ✅ 网络所有权完整设置：SetNetworkOwner设置整个模型所有部件
+   - 之前只设置rootPart，其他部件可能还是客户端控制
+   - 导致物理同步冲突和"拉回"效果
 
-重构目标（参考寻路逻辑重写方案.lua）：
-1. ✅ 简化状态机：SEEKING -> MOVING -> ATTACKING
-2. ✅ 内置移动逻辑：直接调用PathService，不依赖MovementController
-3. ✅ Blockcast检测：体积检测替代细射线
-4. ✅ 清晰的距离策略：远程/近战分开处理
-5. ✅ 动画控制：独立模块，不影响AI逻辑
-
-核心改进：
-- 状态机只负责状态切换，不做复杂移动逻辑
-- 移动交给PathService（内置逻辑，不用MovementController）
-- PARTIAL路径正确处理：停在最近可达点
-- 拥挤场景不误判卡住
-
-注意：MovementController.lua 是一个可选的独立移动控制器，
-本文件使用内置的HandleMoving逻辑，两者可以并存但互不依赖。
-如需使用MovementController，请在上层调用方自行整合。
+V5.3更新内容：
+1. ✅ 优化移动逻辑：增加"死区"判断。如果单位已被挤入攻击范围（比最佳距离更近），禁止转身后退，直接原地准备攻击。
+2. ✅ 修复"假性卡住"：在HandleMoving中增加距离判断，终点附近(15 studs内)不再触发低速重寻路。
 ]]
 
 local UnitAI = {}
@@ -57,7 +48,6 @@ local function LoadSystems()
 	if not PathService then
 		PathService = require(ServerScriptService:WaitForChild("Systems"):WaitForChild("PathService"))
 	end
-	-- 注意：不再加载MovementController，使用内置移动逻辑
 end
 
 -- ==================== 配置常量 ====================
@@ -636,9 +626,9 @@ local function HandleSeeking(unitModel, aiData, state)
 	end
 end
 
--- MOVING: ???????????????
+-- MOVING: 移动向目标
 local function HandleMoving(unitModel, aiData, state)
-	-- ????????????
+	-- 验证目标有效性
 	local target = ValidateTarget(unitModel)
 	if not target then
 		CombatSystem.SetTarget(unitModel, nil)
@@ -649,20 +639,20 @@ local function HandleMoving(unitModel, aiData, state)
 		return
 	end
 
-	-- ??????????????????
+	-- 播放移动动画
 	AnimationController.SwitchToMove(unitModel, aiData, state)
 
 	local distance = GetDistance(unitModel, target)
 	local targetState = CombatSystem.GetUnitState(target)
 	local dockingDistance = UnitAIRangePolicy.GetDockingDistance(state, targetState)
 
-	-- ??????????????????????????????
+	-- 距离足够近，进入攻击状态
 	if UnitAIRangePolicy.ShouldEnterAttack(distance, state) then
 		aiData.Humanoid:Move(Vector3.zero, true)
 		PathService.ClearPath(unitModel)
 
 		CombatSystem.SetAIState(unitModel, BattleConfig.AIState.ATTACKING)
-		DebugLog(string.format("%s MOVING->ATTACKING ??????=%.1f", state.UnitId, distance))
+		DebugLog(string.format("%s MOVING->ATTACKING 距离=%.1f", state.UnitId, distance))
 
 		if aiData.Tracks.Move then
 			SafeStopAnimation(aiData.Tracks.Move)
@@ -672,7 +662,7 @@ local function HandleMoving(unitModel, aiData, state)
 		return
 	end
 
-	-- ?????????????????????
+	-- 计算移动目标位置
 	local targetPart = target:FindFirstChild("HumanoidRootPart") or target.PrimaryPart
 	if not targetPart then return end
 
@@ -683,9 +673,26 @@ local function HandleMoving(unitModel, aiData, state)
 	direction = Vector3.new(direction.X, 0, direction.Z)
 	if direction.Magnitude < 0.1 then return end
 	direction = direction.Unit
-	local moveTargetPos = targetPos - direction * dockingDistance
 
-	-- ?????????????????????????????????
+	-- [关键修复] 计算移动目标点时的“死区”逻辑
+	-- 防止兵种因为被挤到小于 dockingDistance 的位置而转身后退
+	local moveTargetPos
+	if distance < dockingDistance then
+		-- 如果已经进入了攻击距离（可能是被挤进去的）
+		if distance < dockingDistance * 0.7 then
+			-- 太贴脸了(小于70%距离)，才允许后退
+			moveTargetPos = targetPos - direction * dockingDistance
+		else
+			-- 在 70%~100% 距离之间，属于“死区”
+			-- 不移动，保持原位，等待进入攻击状态
+			moveTargetPos = myPos 
+		end
+	else
+		-- 距离还远，正常移动到射程边缘
+		moveTargetPos = targetPos - direction * dockingDistance
+	end
+
+	-- 决定是否使用寻路
 	local shouldUsePath = false
 
 	if distance > CONFIG.MAX_DIRECT_MOVE_DISTANCE then
@@ -694,15 +701,16 @@ local function HandleMoving(unitModel, aiData, state)
 		shouldUsePath = true
 	end
 
-	-- ??????????????????????????????
+	-- [修复] 只有在距离目标较远时才检测低速卡住，防止终点前拥挤导致反复重寻路
 	if not shouldUsePath then
 		local velocity = aiData.HumanoidRootPart.AssemblyLinearVelocity
 		local speed = Vector3.new(velocity.X, 0, velocity.Z).Magnitude
 
-		if aiData.Humanoid.MoveDirection.Magnitude > 0.1 and speed < 0.5 then
+		-- 修改点：增加 distance > 15 判断
+		if aiData.Humanoid.MoveDirection.Magnitude > 0.1 and speed < 0.5 and distance > 15 then
 			aiData.StuckAccumulator = (aiData.StuckAccumulator or 0) + 1
 			if aiData.StuckAccumulator > 5 then
-				DebugLog(string.format("%s ?????????????????????????????????", state.UnitId))
+				DebugLog(string.format("%s 低速卡住(终点远)，触发重寻路", state.UnitId))
 				aiData.StuckAccumulator = 0
 				shouldUsePath = true
 				PathService.ClearPath(unitModel)
@@ -714,14 +722,14 @@ local function HandleMoving(unitModel, aiData, state)
 	end
 
 	if shouldUsePath then
-		-- ????????????
+		-- 使用PathService
 		local pathStatus = PathService.GetPathStatus(unitModel)
 
 		if pathStatus == "Success" or pathStatus == "Partial" then
 			local isPartialPath = (pathStatus == "Partial")
 			local now = tick()
 
-			-- ????????????
+			-- 位移检测（判断是否真的卡住）
 			local checkInterval = CONFIG.STUCK_CHECK_INTERVAL
 			local lastCheck = aiData.PathDisplacementCheckTime or 0
 
@@ -749,7 +757,7 @@ local function HandleMoving(unitModel, aiData, state)
 					aiData.PathDisplacementStuckCount = (aiData.PathDisplacementStuckCount or 0) + 1
 
 					if aiData.PathDisplacementStuckCount >= CONFIG.STUCK_COUNT_THRESHOLD then
-						DebugLog(string.format("%s ????????????????????????", state.UnitId))
+						DebugLog(string.format("%s 路径跟随卡住，强制重寻", state.UnitId))
 						aiData.PathDisplacementStuckCount = 0
 						aiData.LastRepathTriggerTime = now
 						aiData.Humanoid:Move(Vector3.zero)
@@ -765,19 +773,19 @@ local function HandleMoving(unitModel, aiData, state)
 				end
 			end
 
-			-- ?????????????????????
+			-- 推进路点
 			if PathService.HasReachedWaypoint(unitModel) then
 				if not PathService.AdvancePath(unitModel) then
-					-- ????????????
+					-- 路径走完了
 					if isPartialPath then
-						-- PARTIAL????????????????????????????????????
+						-- PARTIAL路径走完，清除路径，等待下一次直连或重寻
 						PathService.ClearPath(unitModel)
-						DebugLog(string.format("?????? %s PARTIAL??????????????????????????????", state.UnitId))
+						DebugLog(string.format("⚠️ %s PARTIAL路径终点到达，切换直连尝试", state.UnitId))
 						aiData.Humanoid:Move(Vector3.zero)
 						aiData.LastUpdateTime = tick() + 0.3
 						return
 					else
-						-- SUCCESS?????????????????????????????????
+						-- SUCCESS路径走完
 						PathService.ClearPath(unitModel)
 						shouldUsePath = false
 					end
@@ -803,11 +811,11 @@ local function HandleMoving(unitModel, aiData, state)
 			end
 
 		elseif pathStatus == "Computing" or pathStatus == "Queued" then
-			-- ????????????
+			-- 等待计算
 			return
 
 		else
-			-- ???????????????????????????
+			-- 请求新路径
 			if not aiData.PathRequested then
 				aiData.PathRequested = true
 
@@ -824,8 +832,8 @@ local function HandleMoving(unitModel, aiData, state)
 							aiData.Humanoid:Move(Vector3.zero)
 						end
 					else
-						-- ???????????????????????????
-						DebugLog(string.format("?????? %s ????????????", state.UnitId))
+						-- 寻路彻底失败
+						DebugLog(string.format("⚠️ %s 寻路失败，暂停移动", state.UnitId))
 						aiData.Humanoid:Move(Vector3.zero)
 						aiData.LastUpdateTime = tick() + 0.5
 					end
@@ -835,7 +843,7 @@ local function HandleMoving(unitModel, aiData, state)
 		end
 	end
 
-	-- ????????????
+	-- 直连移动 (使用计算好的安全目标点)
 	local distanceToTarget = (moveTargetPos - myPos).Magnitude
 	if distanceToTarget > 0.5 then
 		ThrottledMoveTo(aiData, moveTargetPos)
@@ -945,7 +953,7 @@ function UnitAI.Initialize()
 
 	LoadSystems()
 
-	DebugLog("正在初始化AI系统(V5.0)...")
+	DebugLog("正在初始化AI系统(V5.3)...")
 
 	updateConnection = RunService.Heartbeat:Connect(function(dt)
 		accumulatedTime = accumulatedTime + dt
@@ -968,7 +976,7 @@ function UnitAI.Initialize()
 	end
 
 	isInitialized = true
-	DebugLog("AI系统(V5.0)初始化完成")
+	DebugLog("AI系统(V5.3)初始化完成")
 	return true
 end
 
@@ -1000,6 +1008,23 @@ function UnitAI.StartAI(unitModel)
 
 	if not humanoid or not rootPart then
 		return false
+	end
+
+	-- ⭐⭐ V5.0关键修复：启动战斗AI前彻底清理残留状态 ⭐⭐
+	-- 这是防止"卡顿/回头"的重要保障
+	-- 1. 清理PathService残留（行军阶段可能遗留的路径状态）
+	pcall(function()
+		PathService.ClearPath(unitModel)
+	end)
+
+	-- 2. 立即停止任何残留的移动指令
+	humanoid:Move(Vector3.zero)
+
+	-- 3. 如果之前有AI实例，先彻底清理
+	local oldAiData = activeAIs[unitModel]
+	if oldAiData then
+		oldAiData.IsActive = false
+		AnimationController.StopAllAnimations(oldAiData)
 	end
 
 	local aiData = {
@@ -1047,10 +1072,17 @@ function UnitAI.StartAI(unitModel)
 		animateScript.Enabled = false
 	end
 
-	-- 设置网络所有权
-	pcall(function()
-		rootPart:SetNetworkOwner(nil)
-	end)
+	-- ⭐⭐ V5.0修复：设置整个模型的网络所有权为服务器 ⭐⭐
+	-- 之前只设置rootPart，其他部件可能还是客户端控制，导致物理同步冲突
+	for _, part in ipairs(unitModel:GetDescendants()) do
+		if part:IsA("BasePart") then
+			pcall(function()
+				if part:CanSetNetworkOwnership() then
+					part:SetNetworkOwner(nil)
+				end
+			end)
+		end
+	end
 
 	-- 初始寻敌
 	task.defer(function()
@@ -1230,9 +1262,16 @@ function UnitAI.SetMode(unitModel, mode)
 
 	aiData.Mode = mode
 
-	if mode == AIMode.MARCH then
-		PathService.ClearPath(unitModel)
-		aiData.PathRequested = false
+	-- ⭐⭐ V5.4修复：切换到任何模式时都清理PathService状态 ⭐⭐
+	-- 之前只在MARCH模式清理，导致从MARCH切到COMBAT时PathService残留
+	PathService.ClearPath(unitModel)
+	aiData.PathRequested = false
+
+	-- 切换到战斗模式时，停止当前移动
+	if mode == AIMode.COMBAT then
+		if aiData.Humanoid then
+			aiData.Humanoid:Move(Vector3.zero)
+		end
 	end
 
 	return true

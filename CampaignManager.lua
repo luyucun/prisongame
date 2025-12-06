@@ -3,7 +3,7 @@
 脚本名称: CampaignManager
 脚本类型: ModuleScript (服务端核心)
 脚本位置: ServerScriptService/Systems/CampaignManager.lua
-版本: V2.8.4 (修复复生半透明问题)
+版本: V2.8.5 (集中管理死亡渐隐，彻底修复复生半透明问题)
 =====================================================
 
 功能描述:
@@ -1269,6 +1269,31 @@ end
 function CampaignManager.BeginBattlePrep(campaignData, stageNum, arrivedList, timedOutList, failedList)
 	campaignData.State = CampaignState.PREPARE_BATTLE
 
+	-- ⭐⭐ V5.0关键修复：在战斗准备前强制取消行军任务 ⭐⭐
+	-- 这是解决"卡顿/回头"问题的核心修复点
+	-- PathService的行军Heartbeat循环和UnitAI的战斗循环会冲突，
+	-- 两者同时发送MoveTo命令导致单位左右摇摆
+	if campaignData.CurrentMoveId then
+		DebugLog(string.format("🛑 [V5.0修复] 强制取消行军任务: %s", tostring(campaignData.CurrentMoveId)))
+		PathService.CancelGroupMove(campaignData.CurrentMoveId)
+		campaignData.CurrentMoveId = nil
+	end
+
+	-- 额外保险：清理所有友军单位的PathService残留状态
+	for unitInstance, unitData in pairs(campaignData.Units) do
+		if unitInstance and unitInstance.Parent and not unitData.IsDead then
+			PathService.ClearPath(unitInstance)
+			-- 立即停止任何残留的移动指令
+			local humanoid = unitInstance:FindFirstChild("Humanoid")
+			if humanoid then
+				humanoid:Move(Vector3.zero)
+			end
+		end
+	end
+
+	-- 等待一帧确保PathService的Heartbeat完全停止处理这些单位
+	task.wait()
+
 	-- 通知客户端状态更新
 	if InitializeEvents() then
 		local stateUpdate = CampaignEvents:FindFirstChild("CampaignStateUpdate")
@@ -2096,6 +2121,28 @@ function CampaignManager.RespawnUnits(campaignData)
 	for unitInstance, unitData in pairs(campaignData.Units) do
 		local safeUnitId = tostring(unitData.UnitId or "Unknown")
 
+		-- V1.5.12关键修复：在循环最前面立即取消死亡渐隐，防止竞态条件
+		-- 必须在任何其他操作之前执行，即使后续有continue也要确保渐隐被取消
+		if unitInstance then
+			-- 尝试访问实例，即使Parent=nil也可能有效
+			local canAccess = pcall(function() return unitInstance.Name end)
+			if canAccess then
+				-- 1. 立即清除PendingDeathHide标记，抢在任何延迟回调前
+				pcall(function()
+					unitInstance:SetAttribute("PendingDeathHide", nil)
+				end)
+
+				-- 2. 调用CombatSystem.CancelDeathFade一键终止渐隐并重置透明度
+				local combatModule = SystemsFolder:FindFirstChild("CombatSystem")
+				if combatModule then
+					local CombatSystem = require(combatModule :: ModuleScript)
+					if CombatSystem.CancelDeathFade then
+						CombatSystem.CancelDeathFade(unitInstance)
+					end
+				end
+			end
+		end
+
 		DebugLog(string.format("  处理单位 %s (IsDead=%s)",
 			safeUnitId,
 			tostring(unitData.IsDead)))
@@ -2340,7 +2387,8 @@ function CampaignManager.RespawnUnits(campaignData)
 			currentInstance:SetAttribute("CampaignKeepInstance", false)
 		end)
 
-		-- V3.8修复：清除PendingDeathHide标记，防止延迟隐藏任务把复生后的单位又隐藏掉
+		-- V1.5.12修复：PendingDeathHide标记已在循环开头通过CancelDeathFade清除
+		-- 这里保留双保险，处理currentInstance != unitInstance的情况
 		pcall(function()
 			currentInstance:SetAttribute("PendingDeathHide", nil)
 		end)
@@ -2367,20 +2415,10 @@ function CampaignManager.RespawnUnits(campaignData)
 		-- 播放展示动画
 		PlayShowAnimation(currentInstance, safeUnitId)
 
-		-- V3.8修复：最终确保透明度已重置（防止死亡渐隐效果残留）
+		-- V1.5.12修复：透明度已在循环开头通过CancelDeathFade重置
+		-- 这里保留兜底清理，处理任何遗漏情况
 		if UnitAI.ResetModelTransparency then
 			UnitAI.ResetModelTransparency(currentInstance)
-
-			-- [关键修复 V2.8.4] 双重保险：强制遍历所有部件重置透明度
-			-- 防止CombatSystem的Tween延迟取消导致的半透明残留
-			-- 配合CombatSystem.lua的事件监听修复效果最佳
-			for _, part in ipairs(currentInstance:GetDescendants()) do
-				if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
-					part.Transparency = 0
-				elseif part:IsA("Decal") or part:IsA("Texture") then
-					part.Transparency = 0
-				end
-			end
 		end
 
 		-- V3.8修复：恢复头顶UI（死亡时被隐藏的BillboardGui）
