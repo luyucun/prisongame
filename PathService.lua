@@ -2,7 +2,26 @@
 脚本名称: PathService
 脚本类型: ModuleScript (服务端系统)
 脚本位置: ServerScriptService/Systems/PathService
-版本: V5.4 - 修复行军/战斗MoveTo冲突
+版本: V5.6 - 彻底修复行军/战斗MoveTo冲突
+
+V5.6更新内容：
+1. ✅ 关键修复：MoveUnitsToPositions支持isStillMarching状态检查函数
+   - 调用方可传入检查函数，Heartbeat每帧检查战役状态
+   - 如果状态不是MARCHING，立即终止整个行军任务（不瞬移、不触发回调）
+   - 这是最顶层的保护，即使属性漏写也不会在战斗期触发任何MoveTo/瞬移
+
+V5.5更新内容：
+1. ✅ 关键修复：为行军任务添加"身份"标记(_ActiveMoveId属性)
+   - MoveUnitsToPositions创建任务时，为每个单位写入_ActiveMoveId
+   - Heartbeat循环检查：若_ActiveMoveId不匹配或单位进入战斗模式，立即停止处理
+   - 防止跨阶段控制和行军/战斗MoveTo冲突
+2. ✅ 瞬移兜底只在行军阶段生效
+   - 卡住/走错路/周期兜底分支增加条件检查
+   - 若单位不再属于当前行军任务或已进入战斗，则只清理不瞬移
+3. ✅ 新增CancelAllMoves()接口
+   - 一次性取消所有活跃的行军任务
+   - 用于战斗开始前强制清理
+4. ✅ ClearPath增强：同时清除_ActiveMoveId属性
 
 V5.4更新内容：
 1. ✅ 关键修复：ClearPath增强 - 同时清理activeMoves中的行军任务数据
@@ -666,6 +685,7 @@ end
 --[[
 清理路径
 ⭐⭐ V5.0增强：同时清理activeMoves中的行军任务数据 ⭐⭐
+⭐⭐ V5.5增强：同时清除_ActiveMoveId属性 ⭐⭐
 ]]
 function PathService.ClearPath(unitModel)
 	ClearPathData(unitModel)
@@ -677,6 +697,12 @@ function PathService.ClearPath(unitModel)
 			break
 		end
 	end
+
+	-- ⭐⭐ V5.5关键修复：清除行军身份标记 ⭐⭐
+	-- 防止残留的_ActiveMoveId导致后续误判
+	pcall(function()
+		unitModel:SetAttribute("_ActiveMoveId", nil)
+	end)
 
 	-- ⭐⭐ V5.0关键修复：从所有activeMoves中移除该单位 ⭐⭐
 	-- 这是防止行军和战斗MoveTo冲突的核心修复
@@ -701,7 +727,7 @@ function PathService.ClearPath(unitModel)
 			-- 从moveData中移除
 			moveTask.moveData[unitModel] = nil
 
-			DebugLog(string.format("🛑 [V5.0] 从行军任务 %s 中移除单位", tostring(moveId)))
+			DebugLog(string.format("🛑 [V5.5] 从行军任务 %s 中移除单位并清除_ActiveMoveId", tostring(moveId)))
 		end
 	end
 end
@@ -810,7 +836,9 @@ end
 支持slot站位系统，每个单位有自己的目标点
 
 @param moveTargets table - {[unitModel] = CFrame}
-@param callbacks table|function - {onUnitArrived, onAllSettled} 或单个回调函数
+@param callbacks table|function - {onUnitArrived, onAllSettled, isStillMarching} 或单个回调函数
+       - isStillMarching: function() -> boolean，可选，用于检查是否仍在行军状态
+         如果返回false，整个行军任务会被立即终止（不瞬移、不触发回调）
 @return string|nil - moveId
 ]]
 function PathService.MoveUnitsToPositions(moveTargets, callbacks)
@@ -820,12 +848,14 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 
 	local onUnitArrived = nil
 	local onAllSettled = nil
+	local isStillMarching = nil  -- ⭐⭐ V5.6新增：战役状态检查函数 ⭐⭐
 
 	if type(callbacks) == "function" then
 		onAllSettled = callbacks
 	elseif type(callbacks) == "table" then
 		onUnitArrived = callbacks.onUnitArrived
 		onAllSettled = callbacks.onAllSettled
+		isStillMarching = callbacks.isStillMarching  -- V5.6新增
 	end
 
 	local moveId = "Move_" .. tostring(nextMoveId)
@@ -844,6 +874,12 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 		local rootPart = unitInstance and (unitInstance:FindFirstChild("HumanoidRootPart") or unitInstance.PrimaryPart)
 
 		if humanoid and rootPart then
+			-- ⭐⭐ V5.5关键修复：设置行军身份标记 ⭐⭐
+			-- 在Heartbeat循环中检查该标记，如不匹配或单位进入战斗则立即停止处理
+			pcall(function()
+				unitInstance:SetAttribute("_ActiveMoveId", moveId)
+			end)
+
 			-- 创建目标Part
 			local targetPart = Instance.new("Part")
 			targetPart.Size = Vector3.new(1, 1, 1)
@@ -915,6 +951,17 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 		PathService.RequestPathAsync(unitInstance, data.TargetPart, unitId, function(success, pathState)
 			data.PathRequested = false
 			if data.Arrived then return end
+
+			-- ⭐⭐ V5.5修复：初始寻路回调也验证行军身份 ⭐⭐
+			local stillValid = true
+			pcall(function()
+				local currentMoveId = unitInstance:GetAttribute("_ActiveMoveId")
+				local aiMode = unitInstance:GetAttribute("UnitAIMode")
+				if currentMoveId ~= moveId or aiMode == "CombatMode" or aiMode == "Combat" then
+					stillValid = false
+				end
+			end)
+			if not stillValid then return end
 
 			local humanoid = unitInstance:FindFirstChild("Humanoid")
 			if not humanoid then return end
@@ -988,9 +1035,37 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 						local delay = math.random() * CONFIG.REPATH_RANDOM_DELAY_MAX
 						task.delay(delay, function()
 							if data.Arrived then return end
+
+							-- ⭐⭐ V5.5关键修复：延迟回调中也要验证行军身份 ⭐⭐
+							-- 防止单位已进入战斗后，这个延迟回调仍然发送MoveTo
+							local shouldSkip = false
+							pcall(function()
+								local currentMoveId = unitInstance:GetAttribute("_ActiveMoveId")
+								local aiMode = unitInstance:GetAttribute("UnitAIMode")
+								if currentMoveId ~= moveId or aiMode == "CombatMode" or aiMode == "Combat" then
+									shouldSkip = true
+								end
+							end)
+							if shouldSkip then
+								DebugLog(string.format("🛑 [V5.5] %s MoveToFinished延迟回调跳过：已进入战斗", unitInstance.Name))
+								return
+							end
+
 							data.PathRequested = true
 							PathService.RequestPathAsync(unitInstance, data.TargetPart, unitInstance.Name, function(success, pathState)
 								data.PathRequested = false
+								-- 再次检查，因为寻路是异步的
+								if data.Arrived then return end
+								local stillValid = true
+								pcall(function()
+									local currentMoveId = unitInstance:GetAttribute("_ActiveMoveId")
+									local aiMode = unitInstance:GetAttribute("UnitAIMode")
+									if currentMoveId ~= moveId or aiMode == "CombatMode" or aiMode == "Combat" then
+										stillValid = false
+									end
+								end)
+								if not stillValid then return end
+
 								local humanoid = unitInstance:FindFirstChild("Humanoid")
 								if success and pathState and (pathState.Status == PathStatus.SUCCESS or pathState.Status == PathStatus.PARTIAL) and humanoid then
 									local nextWaypoint = PathService.GetNextWaypoint(unitInstance)
@@ -1015,6 +1090,7 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 	local checkConnection
 	local lastCheckTime = tick()
 	local moveTimeout = GameConfig.Campaign and GameConfig.Campaign.MoveTimeout or 30
+	local hasTerminatedByState = false  -- V5.6新增：标记是否因状态检查而终止
 
 	checkConnection = RunService.Heartbeat:Connect(function()
 		local now = tick()
@@ -1022,11 +1098,117 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 		if now - lastCheckTime < 0.05 then return end
 		lastCheckTime = now
 
+		-- ⭐⭐ V5.6关键修复：战役状态检查短路 ⭐⭐
+		-- 如果传入了isStillMarching检查函数，且返回false，则立即终止整个行军任务
+		-- 这是最顶层的保护，即使属性漏写也不会在战斗期触发任何MoveTo/瞬移
+		if isStillMarching and not hasTerminatedByState then
+			local stillMarching = false
+			pcall(function()
+				stillMarching = isStillMarching()
+			end)
+
+			if not stillMarching then
+				hasTerminatedByState = true
+				DebugLog(string.format("🛑 [V5.6] 行军任务 %s 因战役状态检查而终止（非MARCHING状态）", moveId))
+
+				-- 立即清理所有单位，不触发任何MoveTo/瞬移
+				for unitInstance, data in pairs(moveData) do
+					if not data.Arrived then
+						data.Arrived = true
+
+						if data.MoveConnection then
+							data.MoveConnection:Disconnect()
+							data.MoveConnection = nil
+						end
+
+						PathService.ClearPath(unitInstance)
+
+						local humanoid = unitInstance:FindFirstChild("Humanoid")
+						if humanoid then
+							humanoid:Move(Vector3.zero)
+						end
+
+						if data.TargetPart and data.TargetPart.Parent then
+							data.TargetPart:Destroy()
+						end
+
+						-- 清除行军身份标记
+						pcall(function()
+							unitInstance:SetAttribute("_ActiveMoveId", nil)
+						end)
+					end
+				end
+
+				-- 断开Heartbeat连接
+				checkConnection:Disconnect()
+				activeMoves[moveId] = nil
+
+				-- 不触发onAllSettled回调，因为这是异常终止
+				return
+			end
+		end
+
 		local allDone = true
 
 		for unitInstance, data in pairs(moveData) do
 			if not data.Arrived then
 				allDone = false
+
+				-- ⭐⭐ V5.5关键修复：行军身份验证 ⭐⭐
+				-- 检查单位是否仍属于当前行军任务，以及是否已进入战斗模式
+				-- 如果不匹配，立即清理并停止处理该单位，防止行军/战斗MoveTo冲突
+				local shouldSkipUnit = false
+				local skipReason = nil
+
+				pcall(function()
+					local currentMoveId = unitInstance:GetAttribute("_ActiveMoveId")
+					if currentMoveId ~= moveId then
+						shouldSkipUnit = true
+						skipReason = string.format("MoveId不匹配(当前:%s, 期望:%s)", tostring(currentMoveId), moveId)
+					end
+				end)
+
+				-- 检查UnitAI模式是否已切换到战斗
+				if not shouldSkipUnit then
+					pcall(function()
+						local aiMode = unitInstance:GetAttribute("UnitAIMode")
+						if aiMode == "CombatMode" or aiMode == "Combat" then
+							shouldSkipUnit = true
+							skipReason = "单位已进入战斗模式"
+						end
+					end)
+				end
+
+				if shouldSkipUnit then
+					DebugLog(string.format("🛑 [V5.5] %s 从行军任务 %s 中移除: %s", unitInstance.Name, moveId, skipReason or "未知原因"))
+
+					-- 标记为已到达，停止后续处理
+					data.Arrived = true
+
+					-- 断开MoveToFinished监听
+					if data.MoveConnection then
+						data.MoveConnection:Disconnect()
+						data.MoveConnection = nil
+					end
+
+					-- 清理路径但不发送MoveTo指令
+					PathService.ClearPath(unitInstance)
+
+					-- 停止移动（让UnitAI接管）
+					local humanoid = unitInstance:FindFirstChild("Humanoid")
+					if humanoid then
+						humanoid:Move(Vector3.zero)
+					end
+
+					-- 销毁目标Part
+					if data.TargetPart and data.TargetPart.Parent then
+						data.TargetPart:Destroy()
+					end
+
+					-- 从moveData中移除（不计入到达/失败列表，由战斗系统接管）
+					moveData[unitInstance] = nil
+					continue
+				end
 
 				-- 检查实例有效性
 				if not unitInstance or not unitInstance.Parent then
@@ -1155,15 +1337,99 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 							data.StuckCount = data.StuckCount + 1
 
 							if data.StuckCount >= CONFIG.MARCH_STUCK_COUNT_THRESHOLD then
-								DebugLog(string.format("🚀 [行军] %s 确认卡住，直接瞬移到目的地", unitInstance.Name))
-								data.StuckCount = 0
+								-- ⭐⭐ V5.5关键修复：瞬移前再次验证行军身份 ⭐⭐
+								-- 如果单位已切换到战斗模式或不属于当前行军任务，则只清理不瞬移
+								local canTeleport = true
+								pcall(function()
+									local currentMoveId = unitInstance:GetAttribute("_ActiveMoveId")
+									local aiMode = unitInstance:GetAttribute("UnitAIMode")
+									if currentMoveId ~= moveId or aiMode == "CombatMode" or aiMode == "Combat" then
+										canTeleport = false
+									end
+								end)
+
+								if canTeleport then
+									DebugLog(string.format("🚀 [行军] %s 确认卡住，直接瞬移到目的地", unitInstance.Name))
+									data.StuckCount = 0
+									data.LastRepathTime = now
+
+									-- 停止移动
+									if humanoid then
+										humanoid:Move(Vector3.zero)
+									end
+									PathService.ClearPath(unitInstance)
+
+									-- 直接瞬移到目的地
+									local targetPos = data.TargetCFrame.Position
+									pcall(function()
+										rootPart.CFrame = CFrame.new(targetPos.X, rootPart.Position.Y, targetPos.Z)
+									end)
+
+									-- 标记为到达
+									data.Arrived = true
+									if data.MoveConnection then
+										data.MoveConnection:Disconnect()
+										data.MoveConnection = nil
+									end
+									if data.TargetPart and data.TargetPart.Parent then
+										data.TargetPart:Destroy()
+									end
+									table.insert(arrivedList, unitInstance)
+
+									if onUnitArrived then
+										pcall(function() onUnitArrived(unitInstance, "Teleported") end)
+									end
+								else
+									-- 不瞬移，只清理并停止处理
+									DebugLog(string.format("🛑 [V5.5] %s 卡住但已进入战斗，取消瞬移", unitInstance.Name))
+									data.Arrived = true
+									if data.MoveConnection then
+										data.MoveConnection:Disconnect()
+										data.MoveConnection = nil
+									end
+									PathService.ClearPath(unitInstance)
+									if humanoid then
+										humanoid:Move(Vector3.zero)
+									end
+									if data.TargetPart and data.TargetPart.Parent then
+										data.TargetPart:Destroy()
+									end
+								end
+							end
+						end
+					else
+						if actualDistance > minDistThreshold then
+							data.StuckCount = 0
+						end
+					end
+
+					-- ==================== V5.3新增：走错路检测修正 ====================
+					-- 距离连续增加说明可能走错方向
+					-- [修复] 增加 distanceXZ > 15 判断，忽略终点附近的回退
+					if distanceXZ > 15 and distanceXZ > prevDist + CONFIG.MARCH_WRONG_WAY_DISTANCE then
+						data.WrongWayCount = (data.WrongWayCount or 0) + 1
+						if data.WrongWayCount >= CONFIG.MARCH_WRONG_WAY_THRESHOLD and canRepath then
+							-- ⭐⭐ V5.5关键修复：瞬移前再次验证行军身份 ⭐⭐
+							local canTeleport = true
+							pcall(function()
+								local currentMoveId = unitInstance:GetAttribute("_ActiveMoveId")
+								local aiMode = unitInstance:GetAttribute("UnitAIMode")
+								if currentMoveId ~= moveId or aiMode == "CombatMode" or aiMode == "Combat" then
+									canTeleport = false
+								end
+							end)
+
+							if canTeleport then
+								DebugLog(string.format("🚀 [行军] %s 走错路(距离%.1f→%.1f)，直接瞬移到目的地",
+									unitInstance.Name, prevDist, distanceXZ))
+								data.WrongWayCount = 0
 								data.LastRepathTime = now
+								PathService.ClearPath(unitInstance)
 
 								-- 停止移动
 								if humanoid then
 									humanoid:Move(Vector3.zero)
 								end
-								PathService.ClearPath(unitInstance)
 
 								-- 直接瞬移到目的地
 								local targetPos = data.TargetCFrame.Position
@@ -1185,50 +1451,21 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 								if onUnitArrived then
 									pcall(function() onUnitArrived(unitInstance, "Teleported") end)
 								end
-							end
-						end
-					else
-						if actualDistance > minDistThreshold then
-							data.StuckCount = 0
-						end
-					end
-
-					-- ==================== V5.3新增：走错路检测修正 ====================
-					-- 距离连续增加说明可能走错方向
-					-- [修复] 增加 distanceXZ > 15 判断，忽略终点附近的回退
-					if distanceXZ > 15 and distanceXZ > prevDist + CONFIG.MARCH_WRONG_WAY_DISTANCE then
-						data.WrongWayCount = (data.WrongWayCount or 0) + 1
-						if data.WrongWayCount >= CONFIG.MARCH_WRONG_WAY_THRESHOLD and canRepath then
-							DebugLog(string.format("🚀 [行军] %s 走错路(距离%.1f→%.1f)，直接瞬移到目的地",
-								unitInstance.Name, prevDist, distanceXZ))
-							data.WrongWayCount = 0
-							data.LastRepathTime = now
-							PathService.ClearPath(unitInstance)
-
-							-- 停止移动
-							if humanoid then
-								humanoid:Move(Vector3.zero)
-							end
-
-							-- 直接瞬移到目的地
-							local targetPos = data.TargetCFrame.Position
-							pcall(function()
-								rootPart.CFrame = CFrame.new(targetPos.X, rootPart.Position.Y, targetPos.Z)
-							end)
-
-							-- 标记为到达
-							data.Arrived = true
-							if data.MoveConnection then
-								data.MoveConnection:Disconnect()
-								data.MoveConnection = nil
-							end
-							if data.TargetPart and data.TargetPart.Parent then
-								data.TargetPart:Destroy()
-							end
-							table.insert(arrivedList, unitInstance)
-
-							if onUnitArrived then
-								pcall(function() onUnitArrived(unitInstance, "Teleported") end)
+							else
+								-- 不瞬移，只清理并停止处理
+								DebugLog(string.format("🛑 [V5.5] %s 走错路但已进入战斗，取消瞬移", unitInstance.Name))
+								data.Arrived = true
+								if data.MoveConnection then
+									data.MoveConnection:Disconnect()
+									data.MoveConnection = nil
+								end
+								PathService.ClearPath(unitInstance)
+								if humanoid then
+									humanoid:Move(Vector3.zero)
+								end
+								if data.TargetPart and data.TargetPart.Parent then
+									data.TargetPart:Destroy()
+								end
 							end
 						end
 					else
@@ -1241,35 +1478,62 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 					local lastPeriodicRepath = data.LastPeriodicRepathTime or data.StartTime
 					if timeSinceStart > 5 and (now - lastPeriodicRepath) > CONFIG.MARCH_PERIODIC_REPATH_DELAY then
 						if distanceXZ > CONFIG.MARCH_PERIODIC_MIN_DISTANCE and canRepath then
-							DebugLog(string.format("🚀 [行军] %s 周期性检测仍未到达(距离=%.1f)，直接瞬移到目的地", unitInstance.Name, distanceXZ))
-							data.LastPeriodicRepathTime = now
-							data.LastRepathTime = now
-							PathService.ClearPath(unitInstance)
-
-							-- 停止移动
-							if humanoid then
-								humanoid:Move(Vector3.zero)
-							end
-
-							-- 直接瞬移到目的地
-							local targetPos = data.TargetCFrame.Position
+							-- ⭐⭐ V5.5关键修复：瞬移前再次验证行军身份 ⭐⭐
+							local canTeleport = true
 							pcall(function()
-								rootPart.CFrame = CFrame.new(targetPos.X, rootPart.Position.Y, targetPos.Z)
+								local currentMoveId = unitInstance:GetAttribute("_ActiveMoveId")
+								local aiMode = unitInstance:GetAttribute("UnitAIMode")
+								if currentMoveId ~= moveId or aiMode == "CombatMode" or aiMode == "Combat" then
+									canTeleport = false
+								end
 							end)
 
-							-- 标记为到达
-							data.Arrived = true
-							if data.MoveConnection then
-								data.MoveConnection:Disconnect()
-								data.MoveConnection = nil
-							end
-							if data.TargetPart and data.TargetPart.Parent then
-								data.TargetPart:Destroy()
-							end
-							table.insert(arrivedList, unitInstance)
+							if canTeleport then
+								DebugLog(string.format("🚀 [行军] %s 周期性检测仍未到达(距离=%.1f)，直接瞬移到目的地", unitInstance.Name, distanceXZ))
+								data.LastPeriodicRepathTime = now
+								data.LastRepathTime = now
+								PathService.ClearPath(unitInstance)
 
-							if onUnitArrived then
-								pcall(function() onUnitArrived(unitInstance, "Teleported") end)
+								-- 停止移动
+								if humanoid then
+									humanoid:Move(Vector3.zero)
+								end
+
+								-- 直接瞬移到目的地
+								local targetPos = data.TargetCFrame.Position
+								pcall(function()
+									rootPart.CFrame = CFrame.new(targetPos.X, rootPart.Position.Y, targetPos.Z)
+								end)
+
+								-- 标记为到达
+								data.Arrived = true
+								if data.MoveConnection then
+									data.MoveConnection:Disconnect()
+									data.MoveConnection = nil
+								end
+								if data.TargetPart and data.TargetPart.Parent then
+									data.TargetPart:Destroy()
+								end
+								table.insert(arrivedList, unitInstance)
+
+								if onUnitArrived then
+									pcall(function() onUnitArrived(unitInstance, "Teleported") end)
+								end
+							else
+								-- 不瞬移，只清理并停止处理
+								DebugLog(string.format("🛑 [V5.5] %s 周期性检测但已进入战斗，取消瞬移", unitInstance.Name))
+								data.Arrived = true
+								if data.MoveConnection then
+									data.MoveConnection:Disconnect()
+									data.MoveConnection = nil
+								end
+								PathService.ClearPath(unitInstance)
+								if humanoid then
+									humanoid:Move(Vector3.zero)
+								end
+								if data.TargetPart and data.TargetPart.Parent then
+									data.TargetPart:Destroy()
+								end
 							end
 						end
 					end
@@ -1343,12 +1607,15 @@ end
 
 --[[
 取消批量移动任务
+⭐⭐ V5.5增强：同时清除_ActiveMoveId属性 ⭐⭐
 ]]
 function PathService.CancelGroupMove(moveId)
 	local moveTask = activeMoves[moveId]
 	if not moveTask then
 		return false
 	end
+
+	DebugLog(string.format("🛑 [V5.5] 取消行军任务: %s", tostring(moveId)))
 
 	if moveTask.connection then
 		moveTask.connection:Disconnect()
@@ -1361,6 +1628,11 @@ function PathService.CancelGroupMove(moveId)
 			data.MoveConnection:Disconnect()
 			data.MoveConnection = nil
 		end
+
+		-- V5.5增强：清除行军身份标记
+		pcall(function()
+			unitInstance:SetAttribute("_ActiveMoveId", nil)
+		end)
 
 		PathService.ClearPath(unitInstance)
 
@@ -1376,6 +1648,34 @@ function PathService.CancelGroupMove(moveId)
 
 	activeMoves[moveId] = nil
 	return true
+end
+
+--[[
+⭐⭐ V5.5新增：取消所有活跃的批量移动任务 ⭐⭐
+用于战斗开始前强制清理所有残留的行军任务
+@return number - 取消的任务数量
+]]
+function PathService.CancelAllMoves()
+	local cancelCount = 0
+	local moveIdsToCancel = {}
+
+	-- 收集所有moveId（避免在遍历时修改表）
+	for moveId, _ in pairs(activeMoves) do
+		table.insert(moveIdsToCancel, moveId)
+	end
+
+	-- 逐个取消
+	for _, moveId in ipairs(moveIdsToCancel) do
+		if PathService.CancelGroupMove(moveId) then
+			cancelCount = cancelCount + 1
+		end
+	end
+
+	if cancelCount > 0 then
+		DebugLog(string.format("🛑 [V5.5] CancelAllMoves: 已取消 %d 个行军任务", cancelCount))
+	end
+
+	return cancelCount
 end
 
 -- ==================== 调试接口 ====================

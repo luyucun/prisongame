@@ -3,7 +3,7 @@
 脚本名称: CampaignManager
 脚本类型: ModuleScript (服务端核心)
 脚本位置: ServerScriptService/Systems/CampaignManager.lua
-版本: V2.8.5 (集中管理死亡渐隐，彻底修复复生半透明问题)
+版本: V2.8.7 (配合PathService V5.6彻底修复行军/战斗冲突)
 =====================================================
 
 功能描述:
@@ -12,6 +12,10 @@
 - 处理胜利/失败/清理逻辑
 - 管理单位血条继承
 - V2.8新增: 章节系统支持
+- V2.8.6新增: 配合PathService V5.5修复"扭头回来+瞬移"bug
+- V2.8.7新增:
+  - MoveUnitsToPositions传入isStillMarching状态检查函数
+  - OnDefeat/CompleteCampaignEnd调用CancelAllMoves兜底
 
 状态机:
 IDLE → PREPARING → MARCHING → FIGHTING → STAGE_CLEAR/DEFEAT → CLEANUP → IDLE
@@ -1195,6 +1199,14 @@ function CampaignManager.MarchToStage(campaignData, stageNum)
 	DebugLog(string.format("[MarchToStage] 开始PathService寻路，目标数量: %d", moveCount))
 	local moveId = PathService.MoveUnitsToPositions(moveTargets, {
 		battleCenter = battleCenter,  -- V2.7新增：传递战场中心位置
+
+		-- ⭐⭐ V5.6新增：战役状态检查函数 ⭐⭐
+		-- PathService的Heartbeat每帧调用此函数检查是否仍在行军状态
+		-- 如果返回false，整个行军任务会立即终止（不瞬移、不触发回调）
+		isStillMarching = function()
+			return campaignData.State == CampaignState.MARCHING
+		end,
+
 		onUnitArrived = function(unitInstance, status)
 			-- 单位到达时的回调(当前为空实现)
 		end,
@@ -1269,25 +1281,41 @@ end
 function CampaignManager.BeginBattlePrep(campaignData, stageNum, arrivedList, timedOutList, failedList)
 	campaignData.State = CampaignState.PREPARE_BATTLE
 
-	-- ⭐⭐ V5.0关键修复：在战斗准备前强制取消行军任务 ⭐⭐
-	-- 这是解决"卡顿/回头"问题的核心修复点
+	-- ⭐⭐ V5.5关键修复：在战斗准备前强制取消所有行军任务 ⭐⭐
+	-- 这是解决"卡顿/回头/瞬移"问题的核心修复点
 	-- PathService的行军Heartbeat循环和UnitAI的战斗循环会冲突，
 	-- 两者同时发送MoveTo命令导致单位左右摇摆
+
+	-- 步骤1：先取消当前玩家的行军任务（如果有CurrentMoveId）
 	if campaignData.CurrentMoveId then
-		DebugLog(string.format("🛑 [V5.0修复] 强制取消行军任务: %s", tostring(campaignData.CurrentMoveId)))
+		DebugLog(string.format("🛑 [V5.5修复] 强制取消当前行军任务: %s", tostring(campaignData.CurrentMoveId)))
 		PathService.CancelGroupMove(campaignData.CurrentMoveId)
 		campaignData.CurrentMoveId = nil
 	end
 
-	-- 额外保险：清理所有友军单位的PathService残留状态
+	-- 步骤2：额外保险 - 调用CancelAllMoves清理所有可能残留的行军任务
+	-- 防止因CurrentMoveId丢失或异常导致的遗漏
+	local cancelledCount = PathService.CancelAllMoves()
+	if cancelledCount > 0 then
+		DebugLog(string.format("🛑 [V5.5修复] CancelAllMoves额外清理了 %d 个残留行军任务", cancelledCount))
+	end
+
+	-- 步骤3：清理所有友军单位的PathService残留状态并清除_ActiveMoveId
 	for unitInstance, unitData in pairs(campaignData.Units) do
 		if unitInstance and unitInstance.Parent and not unitData.IsDead then
+			-- 清理路径状态（ClearPath已会清除_ActiveMoveId）
 			PathService.ClearPath(unitInstance)
+
 			-- 立即停止任何残留的移动指令
 			local humanoid = unitInstance:FindFirstChild("Humanoid")
 			if humanoid then
 				humanoid:Move(Vector3.zero)
 			end
+
+			-- 双保险：显式清除_ActiveMoveId属性
+			pcall(function()
+				unitInstance:SetAttribute("_ActiveMoveId", nil)
+			end)
 		end
 	end
 
@@ -1754,6 +1782,9 @@ function CampaignManager.OnDefeat(campaignData, options)
 	DebugLog("⚠ OnDefeat触发 - 友军战败")
 	campaignData.State = CampaignState.DEFEAT
 
+	-- ⭐⭐ V5.6新增：强制取消所有残留的行军任务 ⭐⭐
+	PathService.CancelAllMoves()
+
 	-- 通知客户端状态更新
 	if InitializeEvents() then
 		local stateUpdate = CampaignEvents:FindFirstChild("CampaignStateUpdate")
@@ -1837,6 +1868,9 @@ function CampaignManager.CompleteCampaignEnd(campaignData)
 	DebugLog(string.format("✅ CompleteCampaignEnd开始，PlayerId=%d", campaignData.PlayerId))
 
 	-- ==================== 修复核心：强制清理移动和AI ====================
+
+	-- ⭐⭐ V5.6新增：强制取消所有残留的行军任务 ⭐⭐
+	PathService.CancelAllMoves()
 
 	-- 1. 强制取消当前的批量行军任务（解决原地转圈和奔向第二关的问题）
 	if campaignData.CurrentMoveId then
