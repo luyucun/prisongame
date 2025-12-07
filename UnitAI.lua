@@ -1,7 +1,28 @@
 --=====================================================
 -- UnitAI.lua (Modified RTS/MOBA Smooth Combat Movement)
--- Version: V5.6-R (Revised by ChatGPT)
+-- Version: V5.7 (Multi-Ring Swarm System / 多层围攻系统)
 --=====================================================
+--[[
+V5.7 围攻系统更新:
+1. 自动多层围攻 (Adaptive Multi-Ring Swarm)
+   - 第一批士兵进入内圈(6人)
+   - 人多自动开启第二圈(12人)、第三圈(18人)...
+   - 每层都有自己的角度分布,永远不会挤成一团
+
+2. 单位智能角度分配 (Deterministic Angle Assignment)
+   - 每个单位根据 SpawnIndex/UnitIndex 自动分到一个"扇形位"
+   - 不抖动、不刷新、不重复随机
+
+3. 避免友军密堆 (Local Separation / Boids避让)
+   - 如果两单位距离太近 → 自动稍微改变偏移位置
+   - 类似《魔兽争霸》或 MOBA 中的近战 AI
+
+4. 动态扩圈 (Auto Radius Expansion)
+   - 如果目标周围过满,自动把环半径扩张
+   - 让30个兵围攻也能完美铺开
+
+5. 适配迟滞区追击系统,不回头、不抖动
+]]
 
 local UnitAI = {}
 
@@ -55,6 +76,32 @@ local CONFIG = {
 	MIN_DISTANCE_FOR_CHECK = 5,
 
 	DEBUG_LOGS = true,  -- 临时开启调试
+
+	-- ==================== V5.7 围攻系统配置 ====================
+	SURROUND = {
+		-- 基础环形配置
+		BASE_UNITS_PER_RING = 6,       -- 第一圈基础单位数
+		RING_UNIT_INCREMENT = 6,       -- 每圈增加的单位数
+		BASE_RING_RADIUS = 0.7,        -- 第一圈半径系数(相对于攻击距离)
+		RING_RADIUS_INCREMENT = 4,     -- 每圈半径增加(studs)
+
+		-- 动态扩圈配置
+		MAX_RINGS = 5,                 -- 最大圈数
+		CROWD_EXPANSION_THRESHOLD = 4, -- 过于拥挤时扩圈的单位数阈值(每圈)
+		RADIUS_EXPANSION_STEP = 1.5,   -- 拥挤时半径扩张步长
+
+		-- Boids避让配置
+		SEPARATION_DISTANCE = 3.5,     -- 友军避让触发距离(studs)
+		SEPARATION_STRENGTH = 0.4,     -- 避让力度系数
+		MAX_SEPARATION_OFFSET = 2.0,   -- 最大避让偏移(studs)
+
+		-- 角度抖动抑制
+		ANGLE_STABILITY_THRESHOLD = 0.3, -- 角度变化阈值(弧度),小于此值不更新
+		POSITION_UPDATE_COOLDOWN = 0.15, -- 位置更新冷却(秒)
+
+		-- 调试
+		DEBUG_SURROUND = false,        -- 是否输出围攻调试日志
+	},
 }
 
 if BattleConfig then
@@ -83,6 +130,12 @@ local updateConnection = nil
 local deathEventConnection = nil
 local accumulatedTime = 0
 
+-- V5.7 围攻系统状态
+local surroundTargetData = {}  -- [targetModel] = { units = {model=true}, lastUpdate = tick }
+
+-- 全局递增计数器,用于分配唯一SlotId (替代GetDebugId)
+local nextSlotIdCounter = 1
+
 -------------------------------------------------------
 -- Logging
 -------------------------------------------------------
@@ -92,16 +145,317 @@ local function DebugLog(...)
 	end
 end
 
+local function SurroundLog(...)
+	if CONFIG.SURROUND.DEBUG_SURROUND then
+		print("[UnitAI:Surround] ", ...)
+	end
+end
+
 -------------------------------------------------------
--- Helpers
+-- Helpers (前置定义,供围攻系统使用)
 -------------------------------------------------------
-local function GetDistance(modelA, modelB)
+local function GetDistance(modelA: Model, modelB: Model): number
 	local rootA = modelA:FindFirstChild("HumanoidRootPart") or modelA.PrimaryPart
 	local rootB = modelB:FindFirstChild("HumanoidRootPart") or modelB.PrimaryPart
 	if not rootA or not rootB then return 99999 end
-	return (rootA.Position - rootB.Position).Magnitude
+	return ((rootA :: BasePart).Position - (rootB :: BasePart).Position).Magnitude
 end
 
+-------------------------------------------------------
+-- V5.7 围攻系统核心模块 (Multi-Ring Swarm System)
+-------------------------------------------------------
+local SurroundSystem = {}
+
+-- 获取单位的唯一槽位ID (确定性分配,不随机)
+-- 优先使用SpawnIndex/UnitIndex属性,否则分配递增ID
+local function GetUnitSlotId(model)
+	-- 优先使用已存在的属性
+	local slotId = model:GetAttribute("SpawnIndex")
+		or model:GetAttribute("UnitIndex")
+		or model:GetAttribute("UID")
+		or model:GetAttribute("InstanceId")
+		or model:GetAttribute("_AISlotId")  -- 内部分配的ID
+
+	if slotId then
+		-- 如果是字符串,转换为数字hash
+		if type(slotId) == "string" then
+			local hash = 0
+			for i = 1, #slotId do
+				hash = (hash * 31 + string.byte(slotId, i)) % 1000000
+			end
+			return hash
+		end
+		return tonumber(slotId) or 0
+	end
+
+	-- 没有任何属性时,分配一个新的递增ID并保存到模型属性
+	-- 这样确保每个单位实例都有唯一的SlotId
+	local newId = nextSlotIdCounter
+	nextSlotIdCounter = nextSlotIdCounter + 1
+	model:SetAttribute("_AISlotId", newId)
+
+	return newId
+end
+
+-- 获取围攻同一目标的所有友军单位
+local function GetUnitsAttackingSameTarget(targetModel: Model, myTeam: string, battleId: string)
+	LoadSystems()
+
+	local attackers = {}
+	local count = 0
+
+	-- 遍历所有活跃AI,找出攻击同一目标的友军
+	for unitModel, aiData in pairs(activeAIs) do
+		if unitModel and unitModel.Parent and aiData.Mode == AIMode.COMBAT then
+			-- 检查是否是同队友军
+			local unitInfo = UnitManager.GetUnitBattleInfo(unitModel)
+			if unitInfo and unitInfo.Team == myTeam and unitInfo.BattleId == battleId then
+				-- 检查是否攻击同一目标
+				local currentTarget = CombatSystem.GetTarget(unitModel)
+				if currentTarget == targetModel then
+					count = count + 1
+					attackers[unitModel] = {
+						SlotId = GetUnitSlotId(unitModel),
+						Distance = GetDistance(unitModel, targetModel),
+						AttackRange = aiData.Stat.AttackRange or 6,
+					}
+				end
+			end
+		end
+	end
+
+	return attackers, count
+end
+
+-- 计算环形站位偏移 (核心算法)
+-- 参数:
+--   slotId: 单位唯一槽位ID
+--   attackRange: 攻击距离
+--   totalAttackers: 攻击同一目标的总单位数
+--   attackersList: 攻击者列表(用于计算在哪一层)
+-- 返回:
+--   Vector3 偏移量 (相对于目标位置)
+function SurroundSystem.ComputeRingOffset(slotId: number, attackRange: number, totalAttackers: number, attackersList)
+	local cfg = CONFIG.SURROUND
+
+	-- 对所有攻击者按SlotId排序,确定当前单位的排序位置
+	local sortedSlots = {}
+	for unitModel, data in pairs(attackersList) do
+		table.insert(sortedSlots, { SlotId = data.SlotId, Model = unitModel })
+	end
+	table.sort(sortedSlots, function(a, b) return a.SlotId < b.SlotId end)
+
+	-- 找到当前单位的排序索引(0-based)
+	local myIndex = 0
+	for i, entry in ipairs(sortedSlots) do
+		if entry.SlotId == slotId then
+			myIndex = i - 1
+			break
+		end
+	end
+
+	-- 计算所在环层和环内位置
+	-- 第1层: 0 ~ BASE_UNITS_PER_RING-1
+	-- 第2层: BASE_UNITS_PER_RING ~ BASE_UNITS_PER_RING+RING_UNIT_INCREMENT-1
+	-- ...
+	local ringIndex = 0        -- 第几圈(0-based)
+	local indexInRing = 0      -- 圈内第几个(0-based)
+	local unitsInCurrentRing = cfg.BASE_UNITS_PER_RING
+
+	local accumulated = 0
+	for ring = 0, cfg.MAX_RINGS - 1 do
+		local unitsInRing = cfg.BASE_UNITS_PER_RING + ring * cfg.RING_UNIT_INCREMENT
+		if myIndex < accumulated + unitsInRing then
+			ringIndex = ring
+			indexInRing = myIndex - accumulated
+			unitsInCurrentRing = unitsInRing
+			break
+		end
+		accumulated = accumulated + unitsInRing
+	end
+
+	-- 计算环半径
+	-- 第1圈: attackRange * BASE_RING_RADIUS
+	-- 后续圈: 第1圈半径 + ringIndex * RING_RADIUS_INCREMENT
+	local baseRadius = attackRange * cfg.BASE_RING_RADIUS
+	local radius = baseRadius + ringIndex * cfg.RING_RADIUS_INCREMENT
+
+	-- 动态扩圈: 如果当前圈太拥挤,稍微扩大半径
+	local crowdInRing = 0
+	for _, entry in ipairs(sortedSlots) do
+		local entryIndex = 0
+		local acc = 0
+		for r = 0, cfg.MAX_RINGS - 1 do
+			local uir = cfg.BASE_UNITS_PER_RING + r * cfg.RING_UNIT_INCREMENT
+			if entry.SlotId < acc + uir then
+				if r == ringIndex then
+					crowdInRing = crowdInRing + 1
+				end
+				break
+			end
+			acc = acc + uir
+		end
+	end
+	-- 实际用sortedSlots的位置来判断更准确
+	-- 重新计算当前圈的实际人数
+	crowdInRing = 0
+	for i, entry in ipairs(sortedSlots) do
+		local idx = i - 1
+		local acc = 0
+		for r = 0, cfg.MAX_RINGS - 1 do
+			local uir = cfg.BASE_UNITS_PER_RING + r * cfg.RING_UNIT_INCREMENT
+			if idx < acc + uir then
+				if r == ringIndex then
+					crowdInRing = crowdInRing + 1
+				end
+				break
+			end
+			acc = acc + uir
+		end
+	end
+
+	if crowdInRing > cfg.CROWD_EXPANSION_THRESHOLD then
+		local expansion = (crowdInRing - cfg.CROWD_EXPANSION_THRESHOLD) * cfg.RADIUS_EXPANSION_STEP * 0.3
+		radius = radius + expansion
+	end
+
+	-- 计算角度 (均匀分布在圆周上)
+	-- 使用黄金角度偏移,让多圈之间的单位错开
+	local goldenAngle = math.pi * (3 - math.sqrt(5))  -- ~137.5度
+	local baseAngle = (indexInRing / unitsInCurrentRing) * math.pi * 2
+	local ringOffset = ringIndex * goldenAngle  -- 每圈错开一个黄金角
+
+	local angle = baseAngle + ringOffset
+
+	-- 计算最终偏移
+	local offsetX = math.cos(angle) * radius
+	local offsetZ = math.sin(angle) * radius
+
+	SurroundLog(string.format("SlotId=%s, Ring=%d, IndexInRing=%d/%d, Radius=%.1f, Angle=%.1f",
+		tostring(slotId), ringIndex :: number, indexInRing :: number, unitsInCurrentRing :: number, radius :: number, math.deg(angle) :: number))
+
+	return Vector3.new(offsetX, 0, offsetZ)
+end
+
+-- Boids式友军避让 (Local Separation)
+-- 检测附近友军,计算避让偏移
+function SurroundSystem.ComputeSeparationOffset(model: Model, myPosition: Vector3, myTeam: string, battleId: string): Vector3
+	LoadSystems()
+	local cfg = CONFIG.SURROUND
+
+	local separationForce = Vector3.zero
+	local neighborCount = 0
+
+	-- 遍历活跃AI,找附近的友军
+	for otherModel, otherAiData in pairs(activeAIs) do
+		if otherModel ~= model and otherModel and otherModel.Parent then
+			-- 检查是否是同队友军
+			local unitInfo = UnitManager.GetUnitBattleInfo(otherModel)
+			if unitInfo and unitInfo.Team == myTeam and unitInfo.BattleId == battleId then
+				local otherRoot = otherModel:FindFirstChild("HumanoidRootPart")
+				if otherRoot then
+					local otherPos = (otherRoot :: BasePart).Position
+					local toOther = otherPos - myPosition
+					local dist = toOther.Magnitude
+
+					-- 如果太近,计算推开力
+					if dist > 0.1 and dist < cfg.SEPARATION_DISTANCE then
+						-- 距离越近,推力越大
+						local strength = (cfg.SEPARATION_DISTANCE - dist) / cfg.SEPARATION_DISTANCE
+						local pushDir = -toOther.Unit  -- 反方向
+						separationForce = separationForce + pushDir * strength
+						neighborCount = neighborCount + 1
+					end
+				end
+			end
+		end
+	end
+
+	-- 平均化并限制最大偏移
+	if neighborCount > 0 then
+		separationForce = separationForce / neighborCount
+		separationForce = separationForce * cfg.SEPARATION_STRENGTH
+
+		-- 限制最大偏移
+		if separationForce.Magnitude > cfg.MAX_SEPARATION_OFFSET then
+			separationForce = separationForce.Unit * cfg.MAX_SEPARATION_OFFSET
+		end
+
+		-- 只保留水平方向
+		separationForce = Vector3.new(separationForce.X, 0, separationForce.Z)
+	end
+
+	return separationForce
+end
+
+-- 计算围攻目标位置 (整合环形站位 + 避让)
+-- @param skipSeparation: 是否跳过避让计算(追击时跳过,微调时使用)
+function SurroundSystem.ComputeSurroundPosition(model: Model, aiData, target: Model, skipSeparation: boolean?): (Vector3?, boolean)
+	LoadSystems()
+
+	local myRoot = model:FindFirstChild("HumanoidRootPart") :: BasePart?
+	local tarRoot = target:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if not myRoot or not tarRoot then return nil, false end
+
+	local myPos = myRoot.Position
+	local targetPos = tarRoot.Position
+
+	-- 获取单位信息
+	local unitInfo = UnitManager.GetUnitBattleInfo(model)
+	if not unitInfo then return nil, false end
+
+	local myTeam = unitInfo.Team
+	local battleId = unitInfo.BattleId
+	local attackRange = aiData.Stat.AttackRange or 6
+	local slotId = GetUnitSlotId(model)
+
+	-- 获取攻击同一目标的所有友军
+	local attackers, totalAttackers = GetUnitsAttackingSameTarget(target, myTeam, battleId)
+
+	-- 如果只有自己,直接朝目标移动
+	if totalAttackers <= 1 then
+		local direction = (targetPos - myPos).Unit
+		local dockingDistance = attackRange * 0.8
+		return targetPos - direction * dockingDistance, false
+	end
+
+	-- 计算环形站位偏移
+	local ringOffset = SurroundSystem.ComputeRingOffset(slotId, attackRange, totalAttackers, attackers)
+
+	-- 计算避让偏移 (追击时跳过,只在微调时使用)
+	local separationOffset = Vector3.zero
+	if not skipSeparation then
+		separationOffset = SurroundSystem.ComputeSeparationOffset(model, myPos, myTeam, battleId)
+	end
+
+	-- 合成最终位置
+	local surroundPos = targetPos + ringOffset + separationOffset
+
+	-- 抖动抑制: 如果新位置与上次位置差异很小,保持不变
+	if aiData._LastSurroundPos then
+		local posDiff = (surroundPos - aiData._LastSurroundPos).Magnitude
+		local timeSinceUpdate = tick() - (aiData._LastSurroundTime or 0)
+
+		if posDiff < 1.5 and timeSinceUpdate < CONFIG.SURROUND.POSITION_UPDATE_COOLDOWN then
+			return aiData._LastSurroundPos, true
+		end
+	end
+
+	-- 更新缓存
+	aiData._LastSurroundPos = surroundPos
+	aiData._LastSurroundTime = tick()
+
+	SurroundLog(string.format("%s -> 围攻位置 (Total=%d, Ring偏移=%.1f,%.1f, 避让=%.1f,%.1f)",
+		model.Name, totalAttackers :: number,
+		ringOffset.X, ringOffset.Z,
+		separationOffset.X, separationOffset.Z))
+
+	return surroundPos, true
+end
+
+-------------------------------------------------------
+-- Helpers (其他辅助函数)
+-------------------------------------------------------
 local function SafeStopAnimation(track)
 	if track and track.IsPlaying then
 		pcall(function() track:Stop(0.15) end)
@@ -355,7 +709,8 @@ local function ShouldHoldAttackPosition(distance, dockingDistance, aiData)
 end
 
 -------------------------------------------------------
--- Combat Movement (with RTS/MOBA smoothing)
+-- Combat Movement (with RTS/MOBA smoothing + V5.7围攻系统)
+-- 注: 只有玩家方(Attack)使用围攻系统,敌方(Defense)使用简单追击
 -------------------------------------------------------
 
 local function HandleCombatMovement(model, aiData, deltaTime)
@@ -387,7 +742,10 @@ local function HandleCombatMovement(model, aiData, deltaTime)
 	local dockingDistance = stat.AttackRange or 6
 
 	local distance = (targetPos - myPos).Magnitude
-	local direction = (targetPos - myPos).Unit
+
+	-- 判断是否是玩家方单位(只有玩家方使用围攻系统)
+	local unitInfo = UnitManager.GetUnitBattleInfo(model)
+	local isPlayerUnit = unitInfo and unitInfo.Team == "Attack"
 
 	---------------------------------------------------
 	-- ① 使用"迟滞区"决定是否保持当前攻击位置
@@ -398,9 +756,35 @@ local function HandleCombatMovement(model, aiData, deltaTime)
 	-- ② 根据 holdPosition 选择移动策略
 	---------------------------------------------------
 	if holdPosition then
-		-- ★ 在攻击区间：保持当前位置，尝试攻击
-		humanoid:Move(Vector3.zero)
-		AnimationController.SwitchToAttack(model, aiData, target)
+		-- ★ 在攻击区间：尝试攻击
+		local attackStarted = AnimationController.SwitchToAttack(model, aiData, target)
+
+		if not attackStarted then
+			-- 攻击冷却中
+			if isPlayerUnit then
+				-- V5.7: 玩家方使用围攻位置微调 (此时使用避让)
+				local surroundPos, usingSurround = SurroundSystem.ComputeSurroundPosition(model, aiData, target, false)
+				if surroundPos and usingSurround then
+					local toSurround = surroundPos - myPos
+					local distToSurround = toSurround.Magnitude
+
+					-- 只有距离围攻位置较远时才微调
+					if distToSurround > 1.5 then
+						humanoid:MoveTo(surroundPos)
+					else
+						humanoid:Move(Vector3.zero)
+					end
+				else
+					humanoid:Move(Vector3.zero)
+				end
+			else
+				-- 敌方单位: 简单停止移动
+				humanoid:Move(Vector3.zero)
+			end
+		else
+			-- 正在攻击,停止移动
+			humanoid:Move(Vector3.zero)
+		end
 		return
 	end
 
@@ -409,15 +793,29 @@ local function HandleCombatMovement(model, aiData, deltaTime)
 	---------------------------------------------------
 	AnimationController.SwitchToMove(model, aiData)
 
-	-- 追击目标位置：射程边缘
-	local desiredPos = targetPos - direction * dockingDistance
+	local desiredPos
+
+	if isPlayerUnit then
+		-- V5.7: 玩家方使用围攻系统计算目标位置 (追击时跳过避让,避免蜗牛速度)
+		local surroundPos, usingSurround = SurroundSystem.ComputeSurroundPosition(model, aiData, target, true)
+		if surroundPos then
+			desiredPos = surroundPos
+		else
+			-- 围攻系统无法计算位置,使用传统方式
+			local direction = (targetPos - myPos).Unit
+			desiredPos = targetPos - direction * dockingDistance
+		end
+	else
+		-- 敌方单位: 简单直线追击
+		local direction = (targetPos - myPos).Unit
+		desiredPos = targetPos - direction * dockingDistance
+	end
 
 	-- MoveTo 节流（防抖）
 	aiData.LastMoveTo = aiData.LastMoveTo or 0
-	aiData.LastMoveTo -= deltaTime
+	aiData.LastMoveTo = aiData.LastMoveTo - deltaTime
 
 	if aiData.LastMoveTo <= 0 then
-		-- MoveTo（或 MoveToPosition）
 		humanoid:MoveTo(desiredPos)
 		aiData.LastMoveTo = CONFIG.MOVETO_THROTTLE_INTERVAL
 	end
@@ -440,7 +838,8 @@ local function HandleCombatMovement(model, aiData, deltaTime)
 
 		if aiData._stuckCount >= CONFIG.STUCK_COUNT_THRESHOLD then
 			aiData._stuckCount = 0
-			-- ★ 避免重寻路引起回头，仅做 MoveTo 重置
+			-- ★ 卡住时清除围攻位置缓存(仅玩家方有效)
+			aiData._LastSurroundPos = nil
 			humanoid:MoveTo(desiredPos)
 		end
 	end
@@ -530,6 +929,10 @@ function UnitAI.StartAI(model)
 		_InAttackHold = false, -- ★ 用于迟滞区
 		_stuckTimer = 0,
 		_stuckCount = 0,
+
+		-- V5.7 围攻系统状态
+		_LastSurroundPos = nil,    -- 上次围攻位置缓存
+		_LastSurroundTime = 0,     -- 上次围攻位置更新时间
 	}
 
 	DebugLog(string.format("StartAI: %s (UnitId: %s)", model.Name, unitId))
