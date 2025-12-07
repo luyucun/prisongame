@@ -32,6 +32,7 @@ local PlacementSystem = require(ServerScriptService.Systems.PlacementSystem)
 
 -- 延迟加载系统模块（避免循环依赖）
 local TaskSystem = nil
+local SoundSystem = nil  -- V3.8新增
 
 -- 远程事件(延迟获取)
 local MergeEvents = nil
@@ -298,6 +299,19 @@ function MergeSystem.MergeUnits(player, instanceIdA, instanceIdB)
     end
     if TaskSystem and TaskSystem.OnMergeLevel2Unit then
         TaskSystem.OnMergeLevel2Unit(player, newInstance.UnitId, newLevel)
+    end
+
+    -- V3.8新增：播放合成音效
+    if not SoundSystem then
+        local soundModule = ServerScriptService.Systems:FindFirstChild("SoundSystem")
+        if soundModule then
+            SoundSystem = require(soundModule)
+        end
+    end
+    if SoundSystem then
+        pcall(function()
+            SoundSystem.OnMerge(player)
+        end)
     end
 
     return true, "合成成功", {

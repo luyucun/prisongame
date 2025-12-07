@@ -25,6 +25,7 @@ local ShopConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild
 local CurrencySystem = nil
 local InventorySystem = nil
 local DataManager = nil  -- V2.1库存系统：添加DataManager引用
+local SoundSystem = nil  -- V3.8新增：音效系统
 
 -- 私有变量
 local PurchaseLocks = {}      -- 购买锁（防止并发购买）
@@ -867,6 +868,18 @@ local function OnPurchaseUnit(player, unitId)
 		if not CurrencySystem.HasEnoughCoins(player, price) then
 			PurchaseLocks[player] = false
 			SendFailure(player, string.format("金币不足，需要 %d 金币", price))
+			-- V3.8新增：播放错误音效
+			pcall(function()
+				if not SoundSystem then
+					local soundModule = ServerScriptService.Systems:FindFirstChild("SoundSystem")
+					if soundModule then
+						SoundSystem = require(soundModule)
+					end
+				end
+				if SoundSystem then
+					SoundSystem.OnPurchaseError(player)
+				end
+			end)
 			return
 		end
 

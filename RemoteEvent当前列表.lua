@@ -81,6 +81,11 @@ ReplicatedStorage
         ├──GuideArrived（RemoteEvent） - 客户端→服务器：到达目标(guideId)
         ├──SyncGuideData（RemoteEvent） - 服务器→客户端：同步引导数据(guideData)
         └──RequestGuideSync（RemoteEvent） - 客户端→服务器：请求同步引导数据
+    └──SoundEvents（Folder）/  【V3.8新增】
+        ├──PlayBGM（RemoteEvent） - 服务器→客户端：播放BGM(bgmKey)
+        ├──StopBGM（RemoteEvent） - 服务器→客户端：停止BGM
+        ├──PlaySFX（RemoteEvent） - 服务器→客户端：播放一次性音效(sfxKey)
+        └──StopSFX（RemoteEvent） - 服务器→客户端：停止一次性音效(sfxKey)
 
 
 如果需要补充新的RemoteEvent或者Remotefunction，请在这里列出来，我会自己去创建
@@ -661,3 +666,92 @@ CampaignStateUpdate事件变更（V3.6）：
 - 复用现有的CampaignStateUpdate事件，仅新增可选参数
 - 客户端通过监听战役状态变化来控制UI显示/隐藏
 - 进度更新使用RenderStepped实现平滑过渡
+
+
+【V3.8音效系统RemoteEvent创建说明】
+位置：ReplicatedStorage/Events/SoundEvents/ （新建文件夹）
+🆕 PlayBGM (RemoteEvent) - 服务器→客户端：播放BGM
+🆕 StopBGM (RemoteEvent) - 服务器→客户端：停止BGM
+🆕 PlaySFX (RemoteEvent) - 服务器→客户端：播放一次性音效
+🆕 StopSFX (RemoteEvent) - 服务器→客户端：停止一次性音效
+
+创建步骤：
+1. 打开Roblox Studio
+2. 导航到 ReplicatedStorage > Events
+3. 右键点击 Events 文件夹
+4. 选择 "Insert Object" > "Folder"
+5. 将新建的 Folder 重命名为 "SoundEvents"
+6. 右键点击 SoundEvents 文件夹
+7. 选择 "Insert Object" > "RemoteEvent"
+8. 将新建的 RemoteEvent 重命名为 "PlayBGM"
+9. 重复步骤7-8，创建 "StopBGM"
+10. 重复步骤7-8，创建 "PlaySFX"
+11. 重复步骤7-8，创建 "StopSFX"
+12. 保存游戏
+
+功能说明：
+- PlayBGM：服务器→客户端：播放BGM
+  参数：(bgmKey: string) BGM键名 ("Home" 或 "Battle")
+- StopBGM：服务器→客户端：停止BGM
+  参数：无
+- PlaySFX：服务器→客户端：播放一次性音效
+  参数：(sfxKey: string) SFX键名 ("CoinsTrigger"/"Victory"/"Merge"/"Error")
+- StopSFX：服务器→客户端：停止一次性音效
+  参数：(sfxKey: string) SFX键名
+
+注意：服务端SoundSystem.lua会在初始化时自动创建这些事件（如果不存在），
+但建议手动创建以确保事件在系统初始化前就存在。
+
+
+【V3.8音效系统其他资源创建说明】
+
+1. 音效配置模块位置：ReplicatedStorage/Config/SoundConfig
+
+2. 服务端系统位置：ServerScriptService/Systems/SoundSystem
+
+3. 客户端控制器位置：StarterPlayer/StarterPlayerScripts/SoundController
+
+4. 音效资源结构（由客户端自动创建）：
+   SoundService/
+   ├── BGM/
+   │   ├── Home/
+   │   │   └── Road To War (Underscore Version) (Sound)
+   │   └── Battle/
+   │       └── Urban Racer (Alt Vs) (Sound)
+   └── Audio/
+       └── Common/
+           ├── CoinsTrigger (Sound)
+           ├── Victory royale (Sound)
+           ├── Merge (Sound)
+           └── Error Sound 1 (Sound)
+
+5. 音效资源ID：
+   - 通用BGM: rbxassetid://1842908030
+   - 战斗BGM: rbxassetid://1838627590
+   - 领取金币音效: rbxassetid://99023919906775
+   - 胜利音效: rbxassetid://5205229311
+   - 合成音效: rbxassetid://7393525156
+   - 错误音效: rbxassetid://8400918001
+
+6. 音效触发点：
+   - 玩家加入游戏：MainServer → SoundSystem.OnPlayerJoin() → 播放Home BGM
+   - 战斗开始：CampaignManager.StartCampaign() → SoundSystem.OnBattleStart() → 切换到Battle BGM
+   - 战斗结束：CampaignManager.CompleteCampaignEnd() → SoundSystem.OnBattleEnd() → 切换回Home BGM
+   - 结算界面弹出：CampaignManager.OnCampaignEnd() → SoundSystem.OnVictoryShow() → 播放Victory音效
+   - 确认结算：CampaignManager.CompleteCampaignEnd() → SoundSystem.OnVictoryConfirm() → 停止Victory音效
+   - 领取挂机金币：IdleCoinSystem.OnCollectRequest() → SoundSystem.OnCollectIdleCoins() → 播放CoinsTrigger音效
+   - 兵种合成：MergeSystem.MergeUnits() → SoundSystem.OnMerge() → 播放Merge音效
+   - 购买失败（金币不足）：ShopSystem/SkillShopSystem → SoundSystem.OnPurchaseError() → 播放Error音效
+
+7. BGM切换特性：
+   - BGM切换带有淡入淡出效果（默认0.5秒）
+   - 如果已在播放相同BGM，不会重复播放
+   - 使用TweenService实现平滑音量过渡
+
+8. 客户端公共接口（通过_G.SoundController访问）：
+   - SoundController.PlayBGM(bgmKey) - 手动播放BGM
+   - SoundController.StopBGM() - 手动停止BGM
+   - SoundController.PlaySFX(sfxKey) - 手动播放SFX
+   - SoundController.StopSFX(sfxKey) - 手动停止SFX
+   - SoundController.IsInitialized() - 检查是否已初始化
+   - SoundController.GetCurrentBGMKey() - 获取当前BGM键名

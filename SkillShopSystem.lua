@@ -36,6 +36,7 @@ local SkillShopConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitFor
 -- 延迟加载系统模块（避免循环依赖）
 local CurrencySystem = nil
 local DataManager = nil
+local SoundSystem = nil  -- V3.8新增：音效系统
 
 -- 私有变量
 local PurchaseLocks = {}      -- 购买锁（防止并发购买）
@@ -696,6 +697,18 @@ local function OnPurchaseSkill(player, skillId)
 		if not CurrencySystem.HasEnoughCoins(player, validPrice) then
 			PurchaseLocks[player] = false
 			SendFailure(player, string.format("金币不足，需要 %d 金币", validPrice))
+			-- V3.8新增：播放错误音效
+			pcall(function()
+				if not SoundSystem then
+					local soundModule = ServerScriptService.Systems:FindFirstChild("SoundSystem")
+					if soundModule then
+						SoundSystem = require(soundModule)
+					end
+				end
+				if SoundSystem then
+					SoundSystem.OnPurchaseError(player)
+				end
+			end)
 			return
 		end
 

@@ -28,6 +28,7 @@ local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild
 local DataManager = nil
 local CurrencySystem = nil
 local PlayerManager = nil
+local SoundSystem = nil  -- V3.8新增
 
 -- 远程事件
 local IdleCoinEvents = nil
@@ -49,6 +50,10 @@ local function LoadModules()
 	end
 	if not PlayerManager then
 		PlayerManager = require(ServerScriptService.Core.PlayerManager)
+	end
+	-- V3.8新增：音效系统
+	if not SoundSystem then
+		SoundSystem = require(ServerScriptService.Systems.SoundSystem)
 	end
 end
 
@@ -498,6 +503,11 @@ function IdleCoinSystem.OnCollectRequest(player)
 		-- 立即播放领取特效（在发放金币之前）
 		PlayCollectEffect(homeId)
 	end
+
+	-- V3.8新增：播放领取金币音效
+	pcall(function()
+		SoundSystem.OnCollectIdleCoins(player)
+	end)
 
 	-- 发放金币
 	local success, newAmount = CurrencySystem.AddCoinsFromIdle(player, pendingCoins, pendingCoins * 60 / GameConfig.IdleCoin.CoinsPerMinute)

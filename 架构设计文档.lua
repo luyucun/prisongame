@@ -4,8 +4,8 @@
 =====================================================
 
 项目名称: Roblox 兵种塔防游戏
-当前版本: V3.7
-最后更新: 2025-12-05
+当前版本: V3.8
+最后更新: 2025-12-07
 
 =====================================================
 一、架构设计原则
@@ -61,7 +61,8 @@ ServerScriptService/
 │   ├── SkillShopSystem.lua      (技能商店系统 V3.1新增)
 │   ├── LoadingSystem.lua        (加载系统 V3.2新增)
 │   ├── TaskSystem.lua           (任务系统 V3.3新增)
-│   └── GuideSystem.lua          (新手引导系统 V3.5新增)
+│   ├── GuideSystem.lua          (新手引导系统 V3.5新增)
+│   └── SoundSystem.lua          (音效系统 V3.8新增)
 
 StarterPlayer/StarterPlayerScripts/
 ├── UI/
@@ -98,6 +99,7 @@ StarterPlayer/StarterPlayerScripts/
 │   ├── CoinAnimationHelper.lua  (金币动画辅助)
 │   └── UIEffectController.lua   (UI特效控制)
 ├── LoadingController.lua        (加载控制器 V3.2新增)
+├── SoundController.lua          (音效控制器 V3.8新增)
 ├── AnimationPreloader.lua       (动画预加载 V3.2集成)
 └── IconPreloader.lua            (图标预加载 V2.1新增 V3.2集成)
 
@@ -115,7 +117,8 @@ ReplicatedStorage/
 │   ├── SkillConfig.lua          (技能配置 V3.0新增 V3.1增强)
 │   ├── SkillShopConfig.lua      (技能商店配置 V3.1新增)
 │   ├── TaskConfig.lua           (任务配置 V3.3新增)
-│   └── GuideConfig.lua          (引导配置 V3.5新增)
+│   ├── GuideConfig.lua          (引导配置 V3.5新增)
+│   └── SoundConfig.lua          (音效配置 V3.8新增)
 ├── Events/                      (RemoteEvent事件)
 │   ├── CurrencyEvents/
 │   ├── PlayerEvents/
@@ -131,7 +134,8 @@ ReplicatedStorage/
 │   ├── SkillShopEvents/         (V3.1新增)
 │   ├── LoadingEvents/           (V3.2新增)
 │   ├── TaskEvents/              (V3.3新增)
-│   └── GuideEvents/             (V3.5新增)
+│   ├── GuideEvents/             (V3.5新增)
+│   └── SoundEvents/             (V3.8新增)
 └── Modules/
     └── FormatHelper.lua         (格式化工具)
 
@@ -326,6 +330,15 @@ ReplicatedStorage/
 - GM命令: /triggerguide /resetguide /resetallguides /listguides
 - 可扩展设计,便于添加新引导
 
+【3.31 音效系统】SoundSystem/SoundController (V3.8新增)
+- 服务端SoundSystem管理音效事件触发
+- 客户端SoundController处理音效播放
+- BGM类型: Home(通用BGM)/Battle(战斗BGM)
+- SFX类型: CoinsTrigger(领取金币)/Victory(胜利)/Merge(合成)/Error(错误)
+- BGM切换带有淡入淡出效果(0.5秒TweenService)
+- 支持循环BGM和一次性SFX
+- 音效资源自动创建到SoundService
+
 =====================================================
 四、版本历史
 =====================================================
@@ -505,6 +518,16 @@ ReplicatedStorage/
 - 支持不同章节使用不同风格的关卡模板(如Style01/Style02)
 - 关卡模板路径: ReplicatedStorage/StageTemplate/[Style]/StageMiddle|StageEnd
 
+【V3.8】音效系统
+- SoundConfig: 音效配置表(数据驱动)
+- SoundSystem: 服务端音效事件管理
+- SoundController: 客户端音效播放控制
+- BGM类型: Home(通用)/Battle(战斗)
+- SFX类型: CoinsTrigger/Victory/Merge/Error
+- BGM切换: TweenService淡入淡出效果(0.5秒)
+- 音效触发点: 玩家加入/战斗开始/战斗结束/结算弹窗/领取金币/合成/购买失败
+- SoundEvents: 新增事件文件夹
+
 =====================================================
 五、核心技术要点
 =====================================================
@@ -641,6 +664,13 @@ ReplicatedStorage/
 - 显示配置: GuideStartPartName/GuideEndPartName/CheckInterval/EffectFolderPath
 - 公共接口: GetGuideById()/IsValidGuide()/GetAllGuideIds()/GetGuideByType()/GetEnabledGuides()/GetGuideCount()
 
+【SoundConfig】音效配置 (V3.8新增)
+- BGM配置: BGM[key] = {Id, Name, Folder, Volume, Looped}
+- SFX配置: SFX[key] = {Id, Name, Folder, Volume, Looped}
+- 淡入淡出配置: BGMFadeIn/BGMFadeOut(默认0.5秒)
+- 默认音量: DefaultBGMVolume(0.5)/DefaultSFXVolume(0.8)
+- 公共接口: GetBGM(key)/GetSFX(key)/IsValidBGM(key)/IsValidSFX(key)
+
 =====================================================
 七、RemoteEvent事件列表
 =====================================================
@@ -735,6 +765,12 @@ ReplicatedStorage/
 - GuideArrived: Client → Server (到达目标: guideId)
 - SyncGuideData: Server → Client (同步引导数据: guideData)
 - RequestGuideSync: Client → Server (请求同步引导数据)
+
+【SoundEvents】V3.8
+- PlayBGM: Server → Client (播放BGM: bgmKey)
+- StopBGM: Server → Client (停止BGM)
+- PlaySFX: Server → Client (播放一次性音效: sfxKey)
+- StopSFX: Server → Client (停止一次性音效: sfxKey)
 
 =====================================================
 八、最佳实践
@@ -1184,6 +1220,58 @@ UI结构：
 
 全局访问：_G.GuideController
 
+【11.22 音效系统】SoundSystem (V3.8新增)
+职责：服务端音效事件管理
+
+核心API：
+- Initialize()                    初始化音效系统
+- OnPlayerJoin(player)            玩家加入时播放Home BGM
+- OnBattleStart(player)           战斗开始时切换到Battle BGM
+- OnBattleEnd(player)             战斗结束时切换回Home BGM
+- OnVictoryShow(player)           显示结算弹窗时播放Victory音效
+- OnVictoryConfirm(player)        确认结算时停止Victory音效
+- OnCollectIdleCoins(player)      领取挂机金币时播放CoinsTrigger音效
+- OnMerge(player)                 合成兵种时播放Merge音效
+- OnPurchaseError(player)         购买失败时播放Error音效
+- PlayBGM(player, bgmKey)         播放BGM(手动调用)
+- StopBGM(player)                 停止BGM(手动调用)
+- PlaySFX(player, sfxKey)         播放SFX(手动调用)
+- StopSFX(player, sfxKey)         停止SFX(手动调用)
+
+内部机制：
+- 自动创建SoundEvents文件夹和RemoteEvent
+- 通过RemoteEvent通知客户端播放音效
+- 每个API都包裹pcall防止异常
+
+【11.23 音效控制器】SoundController (V3.8新增)
+职责：客户端音效播放控制
+
+核心API：
+- SoundController.PlayBGM(bgmKey)     播放BGM
+- SoundController.StopBGM()           停止BGM
+- SoundController.PlaySFX(sfxKey)     播放SFX
+- SoundController.StopSFX(sfxKey)     停止SFX
+- SoundController.IsInitialized()     检查是否初始化完成
+- SoundController.GetCurrentBGMKey()  获取当前BGM键名
+
+内部机制：
+- 根据SoundConfig配置自动创建Sound对象到SoundService
+- BGM存储路径: SoundService/BGM/[Folder]/[Name]
+- SFX存储路径: SoundService/Audio/[Folder]/[Name]
+- BGM切换使用TweenService实现淡入淡出效果(0.5秒)
+- 如果已在播放相同BGM，不会重复播放
+- 监听SoundEvents下的PlayBGM/StopBGM/PlaySFX/StopSFX事件
+
+全局访问：_G.SoundController
+
+音效资源ID：
+- Home BGM: rbxassetid://1842908030
+- Battle BGM: rbxassetid://1838627590
+- CoinsTrigger SFX: rbxassetid://99023919906775
+- Victory SFX: rbxassetid://5205229311
+- Merge SFX: rbxassetid://7393525156
+- Error SFX: rbxassetid://8400918001
+
 =====================================================
 十二、核心数据结构
 =====================================================
@@ -1299,10 +1387,13 @@ UI结构：
 30. V3.7+: 章节关卡地图替换需在StageConfig.Chapters中配置StageTemplateStyle字段
 31. V3.7+: 关卡模板需按ReplicatedStorage/StageTemplate/[StyleName]/StageMiddle|StageEnd结构创建
 32. V3.7+: 新增关卡风格只需创建对应的模板文件夹并在StageConfig中配置
+33. V3.8+: 音效配置在SoundConfig中，支持BGM和SFX两种类型
+34. V3.8+: 音效触发需在对应系统中调用SoundSystem的方法
+35. V3.8+: SoundController会自动创建Sound对象，无需手动在SoundService中创建
 
 =====================================================
 架构设计文档完成
-版本: V3.7
-最后更新: 2025-12-05
+版本: V3.8
+最后更新: 2025-12-07
 =====================================================
 ]]

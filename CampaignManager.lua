@@ -50,6 +50,8 @@ local CurrencySystem = require(SystemsFolder:WaitForChild("CurrencySystem") :: M
 local UnitAI = require(SystemsFolder:WaitForChild("UnitAI") :: ModuleScript)
 local CampaignUnitHelper = require(SystemsFolder:WaitForChild("CampaignUnitHelper") :: ModuleScript)
 local DoorControlService = require(SystemsFolder:WaitForChild("DoorControlService") :: ModuleScript)
+-- V3.8新增 - 音效系统
+local SoundSystem = require(SystemsFolder:WaitForChild("SoundSystem") :: ModuleScript)
 
 -- 远程事件引用
 local CampaignEvents = nil
@@ -959,6 +961,11 @@ function CampaignManager.StartCampaign(player)
 		end
 	end
 
+	-- V3.8新增：战斗开始，切换到战斗BGM
+	pcall(function()
+		SoundSystem.OnBattleStart(player)
+	end)
+
 	-- V2.8修复：立即启动行军流程，跟随延迟由客户端CameraController根据状态控制
 	task.spawn(function()
 		CampaignManager.MarchToStage(campaignData, 1)
@@ -1841,6 +1848,11 @@ function CampaignManager.OnCampaignEnd(campaignData, isVictory)
 				victoryPopupEvent:FireClient(campaignData.Player, 0, result, currentStage, nil)
 				DebugLog(string.format("  ✅ 已发送结算弹窗，PlayerId=%d, Result=%s, Stage=%d",
 					campaignData.PlayerId, result, currentStage))
+
+				-- V3.8新增：弹出结算界面时播放胜利音效
+				pcall(function()
+					SoundSystem.OnVictoryShow(campaignData.Player)
+				end)
 			else
 				warn(GameConfig.LOG_PREFIX, "[CampaignManager] VictoryPopup事件不存在(请检查RemoteEvent创建)")
 				-- 事件不存在则10秒后自动完成清理
@@ -1876,6 +1888,12 @@ function CampaignManager.CompleteCampaignEnd(campaignData)
 	campaignData.IsWaitingForConfirm = false
 	RestorePlayerMovement(campaignData)
 	DebugLog(string.format("✅ CompleteCampaignEnd开始，PlayerId=%d", campaignData.PlayerId))
+
+	-- V3.8新增：玩家确认后停止胜利音效并切换回通用BGM
+	pcall(function()
+		SoundSystem.OnVictoryConfirm(campaignData.Player)
+		SoundSystem.OnBattleEnd(campaignData.Player)
+	end)
 
 	-- ==================== 修复核心：强制清理移动和AI ====================
 
