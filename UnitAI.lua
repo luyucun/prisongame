@@ -217,7 +217,7 @@ local function GetUnitsAttackingSameTarget(targetModel: Model, myTeam: string, b
 					attackers[unitModel] = {
 						SlotId = GetUnitSlotId(unitModel),
 						Distance = GetDistance(unitModel, targetModel),
-						AttackRange = aiData.Stat.AttackRange or 6,
+						AttackRange = aiData.Stat.BaseAttackRange or 6,
 					}
 				end
 			end
@@ -406,7 +406,7 @@ function SurroundSystem.ComputeSurroundPosition(model: Model, aiData, target: Mo
 
 	local myTeam = unitInfo.Team
 	local battleId = unitInfo.BattleId
-	local attackRange = aiData.Stat.AttackRange or 6
+	local attackRange = aiData.Stat.BaseAttackRange or 6
 	local slotId = GetUnitSlotId(model)
 
 	-- 获取攻击同一目标的所有友军
@@ -739,13 +739,17 @@ local function HandleCombatMovement(model, aiData, deltaTime)
 
 	-- 兵种攻击距离（含 docking）
 	local stat = aiData.Stat
-	local dockingDistance = stat.AttackRange or 6
+	local dockingDistance = stat.BaseAttackRange or 6
 
 	local distance = (targetPos - myPos).Magnitude
 
 	-- 判断是否是玩家方单位(只有玩家方使用围攻系统)
 	local unitInfo = UnitManager.GetUnitBattleInfo(model)
 	local isPlayerUnit = unitInfo and unitInfo.Team == "Attack"
+
+	-- 判断是否是近战单位(只有近战兵使用围攻系统，远程兵不需要找位置散开)
+	local isRangedUnit = UnitConfig.IsRangedUnit and UnitConfig.IsRangedUnit(aiData.UnitId)
+	local useSurroundSystem = isPlayerUnit and not isRangedUnit
 
 	---------------------------------------------------
 	-- ① 使用"迟滞区"决定是否保持当前攻击位置
@@ -761,8 +765,8 @@ local function HandleCombatMovement(model, aiData, deltaTime)
 
 		if not attackStarted then
 			-- 攻击冷却中
-			if isPlayerUnit then
-				-- V5.7: 玩家方使用围攻位置微调 (此时使用避让)
+			if useSurroundSystem then
+				-- V5.7: 玩家方近战兵使用围攻位置微调 (此时使用避让)
 				local surroundPos, usingSurround = SurroundSystem.ComputeSurroundPosition(model, aiData, target, false)
 				if surroundPos and usingSurround then
 					local toSurround = surroundPos - myPos
@@ -778,7 +782,7 @@ local function HandleCombatMovement(model, aiData, deltaTime)
 					humanoid:Move(Vector3.zero)
 				end
 			else
-				-- 敌方单位: 简单停止移动
+				-- 远程兵或敌方单位: 简单停止移动
 				humanoid:Move(Vector3.zero)
 			end
 		else
@@ -795,8 +799,8 @@ local function HandleCombatMovement(model, aiData, deltaTime)
 
 	local desiredPos
 
-	if isPlayerUnit then
-		-- V5.7: 玩家方使用围攻系统计算目标位置 (追击时跳过避让,避免蜗牛速度)
+	if useSurroundSystem then
+		-- V5.7: 玩家方近战兵使用围攻系统计算目标位置 (追击时跳过避让,避免蜗牛速度)
 		local surroundPos, usingSurround = SurroundSystem.ComputeSurroundPosition(model, aiData, target, true)
 		if surroundPos then
 			desiredPos = surroundPos
@@ -806,7 +810,7 @@ local function HandleCombatMovement(model, aiData, deltaTime)
 			desiredPos = targetPos - direction * dockingDistance
 		end
 	else
-		-- 敌方单位: 简单直线追击
+		-- 远程兵或敌方单位: 简单直线追击
 		local direction = (targetPos - myPos).Unit
 		desiredPos = targetPos - direction * dockingDistance
 	end
