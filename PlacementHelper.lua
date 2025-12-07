@@ -30,7 +30,8 @@ local UserInputService = game:GetService("UserInputService")
 local GRID_UNIT_SIZE = 4
 local IDLE_FLOOR_SIZE = Vector3.new(56, 1, 56)  -- IdleFloor实际大小
 -- 兵种脚底距离地板上表面的距离(studs)
-local PLACEMENT_Y_OFFSET = 3
+-- V2.1修复: 轴点已统一在脚底,不需要额外偏移
+local PLACEMENT_Y_OFFSET = 0
 local GRID_COUNT = 14  -- 56 / 4 = 14格
 
 -- ==================== 坐标转换函数 ====================

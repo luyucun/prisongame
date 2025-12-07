@@ -1689,7 +1689,7 @@ function CampaignManager.OnStageClear(campaignData, stageNum)
 
 	-- 更新当前关卡并继续行军
 	campaignData.CurrentStage = nextStage
-	task.wait(2)
+	task.wait(0.3)  -- 短暂等待确保状态切换完成,然后立即出发
 	CampaignManager.MarchToStage(campaignData, nextStage)
 end
 

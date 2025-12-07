@@ -968,6 +968,15 @@ function UnitAI.ClearBattleAIs(battleId)
 			-- 停止动画
 			SafeStopAnimation(aiData.Tracks.Move)
 			SafeStopAnimation(aiData.Tracks.Attack)
+			SafeStopAnimation(aiData.Tracks.Idle)
+
+			-- 停止Humanoid移动,防止抖动
+			if aiData.Humanoid then
+				pcall(function()
+					aiData.Humanoid:Move(Vector3.zero)
+				end)
+			end
+
 			activeAIs[model] = nil
 			clearedCount = clearedCount + 1
 		end
