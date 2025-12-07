@@ -436,6 +436,22 @@ local function CreateUnitModel(unitId, position, instanceId, level, gridWidth, g
 	-- 克隆模型
 	local model = modelTemplate:Clone()
 
+	-- V3.9新增：在模型克隆后立即保存所有部件的原始透明度
+	-- 这是保存透明度的最佳时机，因为此时模型的状态是最原始的
+	-- 用于后续复生时恢复到正确的透明度（避免隐藏的武器部件被错误显示）
+	for _, part in ipairs(model:GetDescendants()) do
+		if part:IsA("BasePart") then
+			pcall(function()
+				part:SetAttribute("_OriginalTransparency", part.Transparency)
+			end)
+		elseif part:IsA("Decal") or part:IsA("Texture") then
+			pcall(function()
+				part:SetAttribute("_OriginalTransparency", part.Transparency)
+			end)
+		end
+	end
+	model:SetAttribute("_TransparencySaved", true)
+
 	-- V1.3: 设置InstanceId属性，用于回收时识别
 	if instanceId then
 		model:SetAttribute("InstanceId", instanceId)

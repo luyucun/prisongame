@@ -889,6 +889,9 @@ function UnitAI.StartAI(model)
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
 	if not humanoid then return end
 
+	-- V3.9新增: 首次激活时保存原始透明度（用于复生时恢复）
+	UnitAI.SaveOriginalTransparency(model)
+
 	-- 获取UnitId: 优先从属性获取，其次从模型名解析，最后使用模型名
 	local unitId = model:GetAttribute("UnitId")
 	if not unitId then
@@ -1166,28 +1169,174 @@ function UnitAI.BeginDeathAnimation(model, deathAnimId, unitId)
 end
 
 -------------------------------------------------------
+-- Save Original Transparency (首次激活时保存原始透明度)
+-- V3.9.1: 只在模型未被修改时保存，避免保存死亡渐隐中的错误值
+-------------------------------------------------------
+
+function UnitAI.SaveOriginalTransparency(model)
+	if not model then return end
+
+	-- 检查是否已经保存过（避免重复保存覆盖原始值）
+	if model:GetAttribute("_TransparencySaved") then
+		return
+	end
+
+	-- V3.9.1新增：检查是否有死亡渐隐标记，如果有则跳过保存
+	-- 因为此时透明度可能已经被修改
+	if model:GetAttribute("PendingDeathHide") then
+		DebugLog(string.format("%s 跳过保存透明度：正在死亡渐隐中", model.Name))
+		return
+	end
+
+	-- V3.9.1新增：检查是否有_OrigTrans属性（死亡渐隐临时属性），如果有则跳过
+	-- 说明模型正在或刚经历过死亡渐隐
+	local hasDeathFadeAttr = false
+	for _, part in ipairs(model:GetDescendants()) do
+		if part:IsA("BasePart") and part:GetAttribute("_OrigTrans") ~= nil then
+			hasDeathFadeAttr = true
+			break
+		end
+	end
+	if hasDeathFadeAttr then
+		DebugLog(string.format("%s 跳过保存透明度：检测到死亡渐隐属性", model.Name))
+		return
+	end
+
+	for _, part in ipairs(model:GetDescendants()) do
+		if part:IsA("BasePart") then
+			-- 只在没有保存过的情况下保存
+			if part:GetAttribute("_OriginalTransparency") == nil then
+				pcall(function()
+					part:SetAttribute("_OriginalTransparency", part.Transparency)
+				end)
+			end
+		elseif part:IsA("Decal") or part:IsA("Texture") then
+			if part:GetAttribute("_OriginalTransparency") == nil then
+				pcall(function()
+					part:SetAttribute("_OriginalTransparency", part.Transparency)
+				end)
+			end
+		end
+	end
+
+	-- 标记已保存
+	model:SetAttribute("_TransparencySaved", true)
+	DebugLog(string.format("%s 原始透明度已保存", model.Name))
+end
+
+-------------------------------------------------------
 -- Reset Model Transparency (供CampaignManager/CombatSystem调用)
+-- V3.9.2修复: 恢复到原始透明度，如果没有保存则从模板读取
 -------------------------------------------------------
 
 function UnitAI.ResetModelTransparency(model)
 	if not model then return end
 
+	-- V3.9.2新增：如果没有保存原始透明度，尝试从模板获取
+	local hasSavedTransparency = model:GetAttribute("_TransparencySaved")
+	local templateTransparencyMap = nil
+
+	if not hasSavedTransparency then
+		-- 尝试从模板获取原始透明度
+		local unitId = model:GetAttribute("UnitId")
+		if unitId then
+			local unitConfig = UnitConfig.Units[unitId]
+			local modelPath = unitConfig and unitConfig.ModelPath
+
+			if modelPath and modelPath ~= "" then
+				-- 解析路径找到模板
+				local pathParts = string.split(tostring(modelPath), "/")
+				local currentFolder = ReplicatedStorage
+				for i = 1, #pathParts - 1 do
+					local nextFolder = currentFolder:FindFirstChild(pathParts[i])
+					if nextFolder then
+						currentFolder = nextFolder
+					else
+						currentFolder = nil
+						break
+					end
+				end
+
+				if currentFolder then
+					local modelName = pathParts[#pathParts]
+					local template = currentFolder:FindFirstChild(modelName)
+					if template then
+						-- 构建模板透明度映射表（按部件名称和路径）
+						templateTransparencyMap = {}
+						for _, part in ipairs(template:GetDescendants()) do
+							if part:IsA("BasePart") or part:IsA("Decal") or part:IsA("Texture") then
+								-- 使用完整路径作为key，避免同名部件冲突
+								local relativePath = part:GetFullName():sub(#template:GetFullName() + 2)
+								templateTransparencyMap[relativePath] = part.Transparency
+							end
+						end
+						DebugLog(string.format("%s 从模板获取透明度映射（%d个部件）", model.Name, 0))
+					end
+				end
+			end
+		end
+	end
+
 	for _, part in ipairs(model:GetDescendants()) do
 		if part:IsA("BasePart") then
 			-- HumanoidRootPart通常是透明的，保持不变
 			if part.Name ~= "HumanoidRootPart" then
-				part.Transparency = 0
+				-- V3.9修复: 优先恢复到原始透明度
+				local origTrans = part:GetAttribute("_OriginalTransparency")
+				if origTrans ~= nil then
+					part.Transparency = origTrans
+				elseif templateTransparencyMap then
+					-- V3.9.2: 从模板映射中获取
+					local relativePath = part:GetFullName():sub(#model:GetFullName() + 2)
+					local templateTrans = templateTransparencyMap[relativePath]
+					if templateTrans ~= nil then
+						part.Transparency = templateTrans
+						-- 同时保存到属性，避免下次再查找
+						pcall(function()
+							part:SetAttribute("_OriginalTransparency", templateTrans)
+						end)
+					else
+						-- 模板中也没有，使用0
+						part.Transparency = 0
+					end
+				else
+					-- 兼容旧代码：没有保存原始透明度时设为0
+					part.Transparency = 0
+				end
 			end
-			-- 清除临时保存的原始透明度属性
+			-- 清除临时保存的死亡渐隐透明度属性（_OrigTrans是死亡渐隐用的）
 			pcall(function()
 				part:SetAttribute("_OrigTrans", nil)
 			end)
 		elseif part:IsA("Decal") or part:IsA("Texture") then
-			part.Transparency = 0
+			-- V3.9修复: 优先恢复到原始透明度
+			local origTrans = part:GetAttribute("_OriginalTransparency")
+			if origTrans ~= nil then
+				part.Transparency = origTrans
+			elseif templateTransparencyMap then
+				-- V3.9.2: 从模板映射中获取
+				local relativePath = part:GetFullName():sub(#model:GetFullName() + 2)
+				local templateTrans = templateTransparencyMap[relativePath]
+				if templateTrans ~= nil then
+					part.Transparency = templateTrans
+					pcall(function()
+						part:SetAttribute("_OriginalTransparency", templateTrans)
+					end)
+				else
+					part.Transparency = 0
+				end
+			else
+				part.Transparency = 0
+			end
 			pcall(function()
 				part:SetAttribute("_OrigTrans", nil)
 			end)
 		end
+	end
+
+	-- 如果从模板获取了透明度，标记已保存
+	if templateTransparencyMap then
+		model:SetAttribute("_TransparencySaved", true)
 	end
 
 	DebugLog(string.format("%s 透明度已重置", model.Name))

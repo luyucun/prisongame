@@ -748,6 +748,10 @@ function CampaignManager.StartCampaign(player)
 	StageService.CleanupStages(playerId)
 	ClearPathCache(homeId)
 
+	-- V3.8修复：重启战斗前，先清理家园战斗特效（RedLine和Fighting标识）
+	-- 防止快速重启时特效残留
+	SetHomeFightingEffect(homeId, false)
+
 	-- [修复步骤 1]：清理后等待一帧，确保物理引擎处理完 Destroy
 	task.wait()
 
@@ -926,8 +930,14 @@ function CampaignManager.StartCampaign(player)
 	task.wait(0.6)
 
 	-- V2.8优化：延迟4秒显示战斗特效（RedLine）
+	-- V3.8修复：延迟任务执行前检查战役状态，防止竞态条件
+	-- 如果在4秒内玩家点击了Retreat/Restart，战役会被清理，此时不应该再显示特效
 	task.delay(4, function()
-		SetHomeFightingEffect(homeId, true)
+		-- 检查当前战役是否还存在且状态有效
+		local currentCampaign = CampaignManager.ActiveCampaigns[playerId]
+		if currentCampaign and currentCampaign.State ~= CampaignState.IDLE and currentCampaign.State ~= CampaignState.CLEANUP then
+			SetHomeFightingEffect(homeId, true)
+		end
 	end)
 
 	-- 预加载Stage002关卡(不阻塞主流程)
