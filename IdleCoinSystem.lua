@@ -110,6 +110,47 @@ local function GetMailModel(homeId)
 end
 
 --[[
+获取Mail模型的有效PrimaryPart（带多级回退机制）
+@param mailModel Model - Mail模型
+@return BasePart|nil - PrimaryPart
+]]
+local function GetMailPrimaryPart(mailModel)
+	-- 首选：使用Model的PrimaryPart属性
+	local primaryPart = mailModel.PrimaryPart
+	if primaryPart then
+		return primaryPart
+	end
+
+	-- 回退1：查找名为"PrimaryPart"的子Part（解决克隆时PrimaryPart引用丢失的问题）
+	local namedPart = mailModel:FindFirstChild("PrimaryPart")
+	if namedPart and namedPart:IsA("BasePart") then
+		mailModel.PrimaryPart = namedPart
+		print(GameConfig.LOG_PREFIX, "[IdleCoinSystem] 已通过名称'PrimaryPart'找到并设置Mail的PrimaryPart")
+		return namedPart
+	end
+
+	-- 回退2：递归查找名为"PrimaryPart"的Part（可能在更深层级）
+	for _, child in ipairs(mailModel:GetDescendants()) do
+		if child.Name == "PrimaryPart" and child:IsA("BasePart") then
+			mailModel.PrimaryPart = child
+			print(GameConfig.LOG_PREFIX, "[IdleCoinSystem] 已在子层级找到并设置Mail的PrimaryPart: " .. child:GetFullName())
+			return child
+		end
+	end
+
+	-- 回退3：使用Mail下的第一个BasePart（如IdleEarnings）
+	for _, child in ipairs(mailModel:GetChildren()) do
+		if child:IsA("BasePart") then
+			mailModel.PrimaryPart = child
+			print(GameConfig.LOG_PREFIX, "[IdleCoinSystem] 使用备用Part作为Mail的PrimaryPart: " .. child.Name)
+			return child
+		end
+	end
+
+	return nil
+end
+
+--[[
 更新Mail模型上的金币显示
 @param homeId number - 基地ID
 @param coins number - 待领取金币数量
@@ -258,10 +299,10 @@ local function CreateProximityPromptForHome(homeId)
 		return false
 	end
 
-	-- 使用Mail模型的PrimaryPart作为交互点
-	local primaryPart = mailModel.PrimaryPart
+	-- 使用Mail模型的PrimaryPart作为交互点（带回退机制）
+	local primaryPart = GetMailPrimaryPart(mailModel)
 	if not primaryPart then
-		warn(GameConfig.LOG_PREFIX, "[IdleCoinSystem] CreateProximityPrompt: Mail模型未设置PrimaryPart, homeId=" .. tostring(homeId) .. "，请在Studio中设置Mail的PrimaryPart")
+		warn(GameConfig.LOG_PREFIX, "[IdleCoinSystem] CreateProximityPrompt: Mail模型未设置PrimaryPart且未找到名为'PrimaryPart'的子Part, homeId=" .. tostring(homeId))
 		print(GameConfig.LOG_PREFIX, "[IdleCoinSystem] Mail模型子节点:")
 		for _, child in ipairs(mailModel:GetChildren()) do
 			print("  - " .. child.Name .. " (" .. child.ClassName .. ")")

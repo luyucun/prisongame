@@ -141,6 +141,55 @@ local function GetMailModel(waitForHomeId)
 end
 
 --[[
+获取Mail模型的有效PrimaryPart（带多级回退机制）
+@param mailModel Model - Mail模型
+@return BasePart|nil - PrimaryPart
+]]
+local function GetMailPrimaryPart(mailModel)
+	-- 首选：使用Model的PrimaryPart属性
+	local primaryPart = mailModel.PrimaryPart
+	if primaryPart then
+		return primaryPart
+	end
+
+	-- 回退1：查找名为"PrimaryPart"的子Part（解决克隆时PrimaryPart引用丢失的问题）
+	local namedPart = mailModel:FindFirstChild("PrimaryPart")
+	if namedPart and namedPart:IsA("BasePart") then
+		mailModel.PrimaryPart = namedPart
+		print("[IdleCoinController] 已通过名称'PrimaryPart'找到并设置PrimaryPart")
+		return namedPart
+	end
+
+	-- 回退2：递归查找名为"PrimaryPart"的Part（可能在更深层级）
+	local function FindPartRecursive(parent, name)
+		for _, child in ipairs(parent:GetDescendants()) do
+			if child.Name == name and child:IsA("BasePart") then
+				return child
+			end
+		end
+		return nil
+	end
+
+	local deepPart = FindPartRecursive(mailModel, "PrimaryPart")
+	if deepPart then
+		mailModel.PrimaryPart = deepPart
+		print("[IdleCoinController] 已在子层级找到并设置PrimaryPart: " .. deepPart:GetFullName())
+		return deepPart
+	end
+
+	-- 回退3：使用Mail下的第一个BasePart（如IdleEarnings）
+	for _, child in ipairs(mailModel:GetChildren()) do
+		if child:IsA("BasePart") then
+			mailModel.PrimaryPart = child
+			print("[IdleCoinController] 使用备用Part作为PrimaryPart: " .. child.Name)
+			return child
+		end
+	end
+
+	return nil
+end
+
+--[[
 创建ProximityPrompt
 @param parent Instance - 父节点
 @return ProximityPrompt - 创建的ProximityPrompt
@@ -204,10 +253,10 @@ local function SetupMailPrompt(waitForHomeId)
 		return
 	end
 
-	-- 使用Mail模型的PrimaryPart作为交互点
-	local primaryPart = mailModel.PrimaryPart
+	-- 使用Mail模型的PrimaryPart作为交互点（带回退机制）
+	local primaryPart = GetMailPrimaryPart(mailModel)
 	if not primaryPart then
-		warn("[IdleCoinController] Mail模型未设置PrimaryPart，请在Studio中设置")
+		warn("[IdleCoinController] Mail模型未设置PrimaryPart，且未找到名为'PrimaryPart'的子Part")
 		-- 列出Mail子节点便于排查
 		for _, child in ipairs(mailModel:GetChildren()) do
 			print("[IdleCoinController] Mail子节点: " .. child.Name .. " (" .. child.ClassName .. ")")
