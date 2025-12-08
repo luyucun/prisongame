@@ -190,11 +190,10 @@ local function GetMailPrimaryPart(mailModel)
 end
 
 --[[
-创建ProximityPrompt
-@param parent Instance - 父节点
-@return ProximityPrompt - 创建的ProximityPrompt
+🔥V2.6.1修复：ProximityPrompt已改为由服务端创建，客户端不再创建
+此函数保留用于调试，但不再被调用
 ]]
-local function CreateProximityPrompt(parent)
+local function CreateProximityPrompt_DEPRECATED(parent)
 	-- 检查是否已存在
 	local existingPrompt = parent:FindFirstChild("IdleCoinPrompt")
 	if existingPrompt then
@@ -242,10 +241,11 @@ local function UpdateCoinDisplay(coins)
 end
 
 --[[
-初始化Mail模型的ProximityPrompt
+🔥V2.6.1修复：连接服务端创建的ProximityPrompt事件
+不再由客户端创建ProximityPrompt，而是等待服务端创建后连接事件
 @param waitForHomeId boolean - 是否等待HomeId被设置（首次初始化时为true，重生时为false）
 ]]
-local function SetupMailPrompt(waitForHomeId)
+local function SetupMailPromptConnection(waitForHomeId)
 	-- 根据参数决定是否等待HomeSlot属性被设置
 	local mailModel = GetMailModel(waitForHomeId)
 	if not mailModel then
@@ -264,17 +264,23 @@ local function SetupMailPrompt(waitForHomeId)
 		return
 	end
 
-	local prompt = CreateProximityPrompt(primaryPart)
+	-- 🔥等待服务端创建的ProximityPrompt（最多等待10秒）
+	local prompt = primaryPart:WaitForChild("IdleCoinPrompt", 10)
+	if not prompt then
+		warn("[IdleCoinController] 服务端未创建ProximityPrompt，等待超时")
+		return
+	end
+
 	currentPrompt = prompt
 
-	-- 连接领取事件
+	-- 连接领取事件（服务端会验证玩家身份，这里只需要发送请求）
 	prompt.Triggered:Connect(function(triggerPlayer)
 		if triggerPlayer == player then
 			OnCollectCoins()
 		end
 	end)
 
-	print("[IdleCoinController] Mail ProximityPrompt已创建，挂载在PrimaryPart: " .. primaryPart.Name)
+	print("[IdleCoinController] 已连接Mail ProximityPrompt事件，PrimaryPart: " .. primaryPart.Name)
 end
 
 -- ==================== 初始化 ====================
@@ -306,15 +312,15 @@ local function Initialize()
 		end
 	end
 
-	-- 设置Mail的ProximityPrompt（首次初始化，需要等待HomeId）
+	-- 🔥V2.6.1修复：连接服务端创建的ProximityPrompt事件（首次初始化，需要等待HomeId）
 	task.spawn(function()
-		SetupMailPrompt(true)
+		SetupMailPromptConnection(true)
 	end)
 
-	-- 监听角色加载（重生后重新设置，不需要等待HomeId）
+	-- 🔥V2.6.1修复：角色重生时重新连接事件（不需要等待HomeId，因为已经分配过了）
 	player.CharacterAdded:Connect(function()
 		task.wait(1)
-		SetupMailPrompt(false)
+		SetupMailPromptConnection(false)
 	end)
 
 	print("[IdleCoinController] 初始化完成")

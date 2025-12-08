@@ -295,31 +295,33 @@ end
 --[[
 为指定基地创建ProximityPrompt
 @param homeId number - 基地ID
-@return boolean - 是否创建成功
+@return boolean, string - 是否创建成功, 错误信息（如果失败）
 ]]
 local function CreateProximityPromptForHome(homeId)
 	local mailModel = GetMailModel(homeId)
 	if not mailModel then
-		warn(GameConfig.LOG_PREFIX, "[IdleCoinSystem] CreateProximityPrompt: 未找到Mail模型, homeId=" .. tostring(homeId))
-		return false
+		local errMsg = "未找到Mail模型, homeId=" .. tostring(homeId)
+		warn(GameConfig.LOG_PREFIX, "[IdleCoinSystem] CreateProximityPrompt: " .. errMsg)
+		return false, errMsg
 	end
 
 	-- 使用Mail模型的PrimaryPart作为交互点（带回退机制）
 	local primaryPart = GetMailPrimaryPart(mailModel)
 	if not primaryPart then
-		warn(GameConfig.LOG_PREFIX, "[IdleCoinSystem] CreateProximityPrompt: Mail模型未设置PrimaryPart且未找到名为'PrimaryPart'的子Part, homeId=" .. tostring(homeId))
+		local errMsg = "Mail模型未设置PrimaryPart且未找到名为'PrimaryPart'的子Part, homeId=" .. tostring(homeId)
+		warn(GameConfig.LOG_PREFIX, "[IdleCoinSystem] CreateProximityPrompt: " .. errMsg)
 		print(GameConfig.LOG_PREFIX, "[IdleCoinSystem] Mail模型子节点:")
 		for _, child in ipairs(mailModel:GetChildren()) do
 			print("  - " .. child.Name .. " (" .. child.ClassName .. ")")
 		end
-		return false
+		return false, errMsg
 	end
 
 	-- 检查是否已存在
 	local existingPrompt = primaryPart:FindFirstChild("IdleCoinPrompt")
 	if existingPrompt then
 		print(GameConfig.LOG_PREFIX, "[IdleCoinSystem] ProximityPrompt已存在, homeId=" .. homeId)
-		return true
+		return true, "已存在"
 	end
 
 	-- 创建ProximityPrompt
@@ -347,36 +349,106 @@ local function CreateProximityPromptForHome(homeId)
 
 	promptConnections[homeId] = connection
 
-	print(GameConfig.LOG_PREFIX, "[IdleCoinSystem] 已为基地 " .. homeId .. " 在PrimaryPart: " .. primaryPart.Name .. " 上创建ProximityPrompt")
-	return true
+	print(GameConfig.LOG_PREFIX, "[IdleCoinSystem] ✅ 已为基地 " .. homeId .. " 在PrimaryPart: " .. primaryPart.Name .. " 上创建ProximityPrompt")
+	return true, "创建成功"
 end
 
 --[[
 为所有基地创建ProximityPrompt（带重试机制）
+🔥V2.6.1增强：增加更详细的错误日志和更长的重试时间
 ]]
 local function SetupAllProximityPrompts()
 	local maxRetries = 5
 	local retryDelay = 2  -- 秒
+
+	local successCount = 0
+	local failedHomes = {}
 
 	for homeId = 1, 6 do
 		local success = false
 		for attempt = 1, maxRetries do
 			success = CreateProximityPromptForHome(homeId)
 			if success then
+				successCount = successCount + 1
 				break
 			else
 				if attempt < maxRetries then
 					print(GameConfig.LOG_PREFIX, "[IdleCoinSystem] 基地 " .. homeId .. " ProximityPrompt创建失败, 将在 " .. retryDelay .. " 秒后重试 (尝试 " .. attempt .. "/" .. maxRetries .. ")")
 					task.wait(retryDelay)
 				else
-					warn(GameConfig.LOG_PREFIX, "[IdleCoinSystem] 基地 " .. homeId .. " ProximityPrompt创建失败, 已达到最大重试次数")
+					warn(GameConfig.LOG_PREFIX, "[IdleCoinSystem] ❌ 基地 " .. homeId .. " ProximityPrompt创建失败, 已达到最大重试次数")
+					table.insert(failedHomes, homeId)
 				end
 			end
 		end
 	end
+
+	-- 输出统计信息
+	print(GameConfig.LOG_PREFIX, string.format("[IdleCoinSystem] ProximityPrompt创建完成: 成功 %d/6", successCount))
+	if #failedHomes > 0 then
+		warn(GameConfig.LOG_PREFIX, "[IdleCoinSystem] ❌ 失败的基地: " .. table.concat(failedHomes, ", "))
+	end
 end
 
 -- ==================== 公共接口 ====================
+
+--[[
+🔥V2.6.1新增：为单个玩家的基地创建ProximityPrompt（用于Loading流程）
+在玩家加载流程中调用，确保ProximityPrompt在玩家进入游戏前已创建
+@param player Player - 玩家对象
+@return boolean, string - 是否成功, 消息
+]]
+function IdleCoinSystem.SetupPlayerMailPrompt(player)
+	LoadModules()
+
+	-- 获取玩家的基地ID
+	local homeId = PlayerManager.GetPlayerHomeId(player)
+	if not homeId or homeId <= 0 then
+		local errMsg = "玩家 " .. player.Name .. " 未分配基地"
+		warn(GameConfig.LOG_PREFIX, "[IdleCoinSystem] SetupPlayerMailPrompt: " .. errMsg)
+		return false, errMsg
+	end
+
+	-- 🔥类型断言：此时homeId必定是有效的number（已通过上面的检查）
+	local validHomeId = homeId :: number
+
+	-- 为该基地创建ProximityPrompt（带重试机制）
+	local maxRetries = 3
+	local retryDelay = 0.5
+
+	for attempt = 1, maxRetries do
+		local success, message = CreateProximityPromptForHome(validHomeId)
+		if success then
+			print(GameConfig.LOG_PREFIX, string.format(
+				"[IdleCoinSystem] ✅ 玩家 %s 的Mail ProximityPrompt已创建 (基地%d)",
+				player.Name,
+				validHomeId
+			))
+			return true, "创建成功"
+		else
+			if attempt < maxRetries then
+				print(GameConfig.LOG_PREFIX, string.format(
+					"[IdleCoinSystem] 玩家 %s 的ProximityPrompt创建失败，重试 %d/%d: %s",
+					player.Name,
+					attempt,
+					maxRetries,
+					message
+				))
+				task.wait(retryDelay)
+			else
+				local errMsg = string.format(
+					"玩家 %s 的ProximityPrompt创建失败，已达最大重试次数: %s",
+					player.Name,
+					message
+				)
+				warn(GameConfig.LOG_PREFIX, "[IdleCoinSystem] " .. errMsg)
+				return false, errMsg
+			end
+		end
+	end
+
+	return false, "未知错误"
+end
 
 --[[
 初始化挂机金币系统
@@ -407,8 +479,9 @@ function IdleCoinSystem.Initialize()
 		end)
 	end
 
-	-- 注意：ProximityPrompt由客户端创建，这样只有自己能看到自己家邮箱的交互提示
-	-- 服务端不再创建ProximityPrompt，避免其他玩家看到交互提示
+	-- 🔥V2.6.1修复：ProximityPrompt的创建已移至Loading流程
+	-- 每个玩家在加载时通过MainServer调用SetupPlayerMailPrompt创建
+	-- 不再使用全局延迟创建，确保初始化顺序可控
 
 	print(GameConfig.LOG_PREFIX, "[IdleCoinSystem] 挂机金币系统初始化完成")
 	return true

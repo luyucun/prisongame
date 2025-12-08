@@ -515,6 +515,27 @@ Players.PlayerAdded:Connect(function(player)
 				player.Name
 			))
 		end)
+		LoadingSystem.NotifySceneSetup(player, 0.65)
+
+		-- 🔥V2.6.1新增：在Loading流程中创建Mail的ProximityPrompt
+		-- 确保在玩家看到游戏界面前，ProximityPrompt已准备好
+		pcall(function()
+			local success, message = IdleCoinSystem.SetupPlayerMailPrompt(player)
+			if success then
+				print(string.format(
+					"%s [MainServer] ✅ 玩家 %s 的Mail交互已准备",
+					GameConfig.LOG_PREFIX,
+					player.Name
+				))
+			else
+				warn(string.format(
+					"%s [MainServer] ❌ 玩家 %s 的Mail交互创建失败: %s",
+					GameConfig.LOG_PREFIX,
+					player.Name,
+					message
+				))
+			end
+		end)
 		LoadingSystem.NotifySceneSetup(player, 0.75)
 
 		-- V3.2: 通知场景设置完成
