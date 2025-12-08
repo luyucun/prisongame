@@ -73,6 +73,7 @@ GameConfig.Campaign = {
 	DefeatWaitTime = 3,                  -- 失败后等待时间(秒)
 
 	-- V2.0.1新增：Stage001初始坐标配置（Base的Position）
+	-- 默认坐标（保留向后兼容），当Style未配置时使用
 	Stage001Positions = {
 		[1] = Vector3.new(0, 0.5, -184),
 		[2] = Vector3.new(-120, 0.5, -184),
@@ -80,6 +81,31 @@ GameConfig.Campaign = {
 		[4] = Vector3.new(-360, 0.5, -184),
 		[5] = Vector3.new(-480, 0.5, -184),
 		[6] = Vector3.new(-600, 0.5, -184),
+	},
+
+	-- V3.7扩展：每个Style风格独立的Stage001坐标配置
+	-- 键名为Style名称（如"Style01", "Style02"），值为与Stage001Positions相同格式的坐标表
+	-- 如果某个Style未配置，则回退使用默认的Stage001Positions
+	Stage001PositionsByStyle = {
+		-- Style01的坐标（与默认坐标相同）
+		["Style01"] = {
+			[1] = Vector3.new(0, 0.5, -184),
+			[2] = Vector3.new(-120, 0.5, -184),
+			[3] = Vector3.new(-240, 0.5, -184),
+			[4] = Vector3.new(-360, 0.5, -184),
+			[5] = Vector3.new(-480, 0.5, -184),
+			[6] = Vector3.new(-600, 0.5, -184),
+		},
+
+		-- Style02的坐标（请根据实际模板调整）
+		["Style02"] = {
+			[1] = Vector3.new(-0.316, 0.992, -158.269),
+			[2] = Vector3.new(-120.316, 0.992, -158.269),
+			[3] = Vector3.new(-240.316, 0.992, -158.269),
+			[4] = Vector3.new(-360.316, 0.992, -158.269),
+			[5] = Vector3.new(-480.316, 0.992, -158.269),
+			[6] = Vector3.new(-600.316, 0.992, -158.269),
+		},
 	},
 
 	-- V2.4新增：寻路卡住检测参数（Watchdog机制）
@@ -129,7 +155,7 @@ GameConfig.IdleCoin = {
 	MaxOfflineHours = 6,                 -- 最大离线产出小时数
 	MaxOfflineMinutes = 6 * 60,          -- 最大离线产出分钟数(6小时=360分钟)
 	ProximityTriggerDistance = 8,        -- 触发交互的距离(studs)
-	ProximityHoldDuration = 1,           -- 长按确认时长(秒)
+	ProximityHoldDuration = 0.6,           -- 长按确认时长(秒)
 	ParticleEffectDuration = 1,          -- 粒子特效持续时长(秒)
 }
 

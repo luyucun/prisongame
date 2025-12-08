@@ -69,9 +69,6 @@ function LevelDisplayHelper.UpdateLevelDisplay(unitModel, level, maxLevel)
         local levelText = LevelColorConfig.GetLevelText(level, maxLevel)
         local levelColors = LevelColorConfig.GetLevelColors(level, maxLevel)
 
-        -- V2.8.1调试：打印更新信息
-        print("[LevelDisplayHelper] 更新等级显示: model=" .. unitModel.Name .. ", level=" .. tostring(level) .. ", text=" .. levelText)
-
         -- 设置等级文本
         textLabel.Text = levelText
 

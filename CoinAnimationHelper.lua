@@ -157,11 +157,6 @@ function CoinAnimationHelper.AnimateCoinRoll(textLabel, fromAmount, toAmount, op
 		if onComplete then
 			onComplete()
 		end
-
-		print(string.format(
-			"[CoinAnimationHelper] 金币动画完成: %d → %d",
-			fromAmount, toAmount
-		))
 	end)
 
 	-- 存储动画数据
@@ -172,11 +167,6 @@ function CoinAnimationHelper.AnimateCoinRoll(textLabel, fromAmount, toAmount, op
 
 	-- 开始动画
 	tween:Play()
-
-	print(string.format(
-		"[CoinAnimationHelper] 开始金币动画: %d → %d (时长: %.1fs)",
-		fromAmount, toAmount, duration
-	))
 end
 
 --[[
@@ -224,7 +214,6 @@ function CoinAnimationHelper.StopAnimation(textLabel, snapToTarget)
 	end
 
 	CleanupAnimation(textLabel)
-	print(string.format("[CoinAnimationHelper] 停止金币动画: %s", textLabel.Name))
 end
 
 --[[
@@ -293,11 +282,6 @@ function CoinAnimationHelper.CreateCoinChangeEffect(parentGui, amount, startPosi
 	end)
 
 	moveTween:Play()
-
-	print(string.format(
-		"[CoinAnimationHelper] 创建金币变化特效: %s%d",
-		prefix, math.abs(amount)
-	))
 end
 
 --[[
@@ -307,7 +291,6 @@ function CoinAnimationHelper.CleanupAll()
 	for textLabel, _ in pairs(activeAnimations) do
 		CleanupAnimation(textLabel)
 	end
-	print("[CoinAnimationHelper] 清理所有活跃动画")
 end
 
 return CoinAnimationHelper

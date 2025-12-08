@@ -308,16 +308,7 @@ end
 ]]
 function StageService.GenerateStage001(homeId, playerId)
     local success, result = pcall(function()
-        -- 1. 获取目标坐标
-        local GameConfig = require(ReplicatedStorage.Config.GameConfig)
-        local targetPosition = GameConfig.Campaign.Stage001Positions[homeId]
-
-        if not targetPosition then
-            warn("[StageService] Stage001坐标配置未找到，homeId:", homeId)
-            return nil
-        end
-
-        -- 2. 获取模板（Stage001使用StageMiddle模板）
+        -- 1. V3.7: 先获取模板风格，用于读取对应的坐标
         local stageTemplateRoot = ReplicatedStorage:FindFirstChild("StageTemplate")
         if not stageTemplateRoot then
             warn("[StageService] StageTemplate文件夹不存在")
@@ -332,16 +323,40 @@ function StageService.GenerateStage001(homeId, playerId)
             return nil
         end
 
+        -- 2. V3.7扩展：根据Style风格获取对应的Stage001坐标
+        local GameConfig = require(ReplicatedStorage.Config.GameConfig)
+        local targetPosition = nil
+
+        -- 优先从Style专属配置中读取
+        if GameConfig.Campaign.Stage001PositionsByStyle and GameConfig.Campaign.Stage001PositionsByStyle[templateStyle] then
+            targetPosition = GameConfig.Campaign.Stage001PositionsByStyle[templateStyle][homeId]
+            print(string.format("[StageService V3.7] 使用Style专属坐标: style=%s, homeId=%d, position=%s",
+                templateStyle, homeId, tostring(targetPosition)))
+        end
+
+        -- 如果Style专属配置不存在，回退到默认配置
+        if not targetPosition then
+            targetPosition = GameConfig.Campaign.Stage001Positions[homeId]
+            print(string.format("[StageService V3.7] 使用默认坐标: homeId=%d, position=%s",
+                homeId, tostring(targetPosition)))
+        end
+
+        if not targetPosition then
+            warn("[StageService] Stage001坐标配置未找到，homeId:", homeId, "style:", templateStyle)
+            return nil
+        end
+
+        -- 3. 获取StageMiddle模板
         local template = templatePath:FindFirstChild("StageMiddle")
         if not template then
             warn("[StageService] StageMiddle模板未找到")
             return nil
         end
 
-        -- 3. 克隆模板
+        -- 4. 克隆模板
         local newStage = template:Clone()
 
-        -- 4. 找到模板中的Base
+        -- 5. 找到模板中的Base
         local templateBase = FindStagePart(newStage, "Base")
         if not templateBase then
             warn("[StageService] 模板中Base未找到（已递归搜索）")
@@ -349,7 +364,7 @@ function StageService.GenerateStage001(homeId, playerId)
             return nil
         end
 
-        -- 5. 计算偏移量并移动整个关卡
+        -- 6. 计算偏移量并移动整个关卡
         -- V2.0.1修复：正确的坐标变换逻辑
         -- 原理：让Base的Position移动到targetPosition，保持旋转不变
         local originalBaseCFrame = templateBase.CFrame
@@ -364,10 +379,10 @@ function StageService.GenerateStage001(homeId, playerId)
             end
         end
 
-        -- 6. 命名
+        -- 7. 命名
         newStage.Name = "Stage001"
 
-        -- 7. 放入场景
+        -- 8. 放入场景
         local stageContainer = Workspace.Home:FindFirstChild("PlayerHome" .. homeId):FindFirstChild("Stage")
         if not stageContainer then
             warn("[StageService] Stage容器未找到，homeId:", homeId)
@@ -377,7 +392,7 @@ function StageService.GenerateStage001(homeId, playerId)
 
         newStage.Parent = stageContainer
 
-        -- 8. 加载敌人数据
+        -- 9. 加载敌人数据
         StageService.LoadEnemyData(newStage, 1)
 
         -- V2.0.3：生成后默认锁定空气墙

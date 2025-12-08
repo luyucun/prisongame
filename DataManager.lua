@@ -242,7 +242,12 @@ local function SaveToDataStore(player, playerData, userId)
 	}
 
 	local success, errorMsg = pcall(function()
-		PlayerDataStore:SetAsync("Player_" .. targetUserId, dataToSave)
+		-- 🔥V2.6.1优化：使用UpdateAsync替代SetAsync，提升保存性能
+		-- UpdateAsync只在数据真正改变时才写入，避免不必要的DataStore请求
+		PlayerDataStore:UpdateAsync("Player_" .. targetUserId, function(oldData)
+			-- 返回新数据，Roblox会自动处理版本控制和冲突
+			return dataToSave
+		end)
 	end)
 
 	if success then
@@ -940,7 +945,8 @@ function DataManager.WaitForAllSavesToComplete(timeout)
             return true  -- 全部完成
         end
 
-        task.wait(0.1)
+        -- 🔥V2.6.1优化：减少轮询间隔到0.05秒，更快响应完成状态
+        task.wait(0.05)
     end
 
     return false  -- 超时

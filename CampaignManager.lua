@@ -775,6 +775,9 @@ function CampaignManager.StartCampaign(player)
 	local chapterConfig = StageConfig.GetChapterConfig(currentChapter)
 	local totalStagesInChapter = chapterConfig and chapterConfig.StagesPerChapter or GameConfig.Campaign.MaxStages
 
+	-- 🔥V3.7修复：设置玩家章节缓存，让StageService能获取正确的模板风格
+	StageService.SetPlayerChapter(playerId, currentChapter)
+
 	DebugLog(string.format("[StartCampaign] 玩家 %s 开始章节 %d，关卡数: %d",
 		player.Name, currentChapter, totalStagesInChapter))
 

@@ -75,7 +75,7 @@ local CONFIG = {
 	STUCK_COUNT_THRESHOLD = 3,
 	MIN_DISTANCE_FOR_CHECK = 5,
 
-	DEBUG_LOGS = true,  -- 临时开启调试
+	DEBUG_LOGS = false,  -- 关闭调试日志
 
 	-- ==================== V5.7 围攻系统配置 ====================
 	SURROUND = {
@@ -538,9 +538,6 @@ function AnimationController.SwitchToMove(model, aiData)
 			track.Looped = true
 			track:Play(0.2)
 			aiData.Tracks.Move = track
-			DebugLog(model.Name .. " 播放移动动画 (AnimId: " .. tostring(moveAnimId) .. ")")
-		else
-			DebugLog(model.Name .. " 移动动画加载失败 (AnimId: " .. tostring(moveAnimId) .. ")")
 		end
 	end
 end
@@ -600,8 +597,6 @@ function AnimationController.SwitchToAttack(model, aiData, target)
 				aiData.CurrentAnimState = AnimationState.IDLE
 				AnimationController.PlayIdleAnimation(model, aiData)
 			end)
-
-			DebugLog(string.format("%s 播放攻击动画", model.Name))
 		else
 			-- 如果没有攻击动画，直接触发伤害
 			task.delay(0.3, function()
@@ -638,7 +633,6 @@ function AnimationController.PlayIdleAnimation(model, aiData)
 			track.Looped = true
 			track:Play(0.15)
 			aiData.Tracks.Idle = track
-			DebugLog(string.format("%s 播放Idle动画", model.Name))
 		end
 	end
 end
@@ -942,7 +936,6 @@ function UnitAI.StartAI(model)
 		_LastSurroundTime = 0,     -- 上次围攻位置更新时间
 	}
 
-	DebugLog(string.format("StartAI: %s (UnitId: %s)", model.Name, unitId))
 	AnimationController.SwitchToIdle(model, activeAIs[model])
 end
 
@@ -988,8 +981,6 @@ function UnitAI.ClearBattleAIs(battleId)
 			clearedCount = clearedCount + 1
 		end
 	end
-
-	DebugLog(string.format("ClearBattleAIs: 清理了 %d 个AI (BattleId: %s)", clearedCount, tostring(battleId)))
 end
 
 -------------------------------------------------------
@@ -999,7 +990,6 @@ end
 function UnitAI.Initialize()
 	-- UnitAI的初始化逻辑已在模块顶层完成（Heartbeat连接和死亡事件绑定）
 	-- 此函数用于兼容MainServer的统一初始化流程
-	print("[UnitAI] 兵种AI系统初始化完成")
 	return true
 end
 
@@ -1015,7 +1005,6 @@ function UnitAI.SetMode(model, mode)
 		elseif mode == "CombatMode" or mode == AIMode.COMBAT then
 			aiData.Mode = AIMode.COMBAT
 		end
-		DebugLog(string.format("SetMode: %s -> %s", model.Name, mode))
 		return true
 	end
 	return false
@@ -1088,10 +1077,6 @@ function UnitAI.PlayMoveAnimation(model)
 			aiData.Tracks = aiData.Tracks or {}
 			aiData.Tracks.Move = track
 		end
-
-		print("[UnitAI] " .. model.Name .. " 播放移动动画 (UnitId: " .. tostring(unitId) .. ", AnimId: " .. tostring(moveAnimId) .. ")")
-	else
-		warn("[UnitAI] PlayMoveAnimation: 动画加载失败 -", model.Name, animationId)
 	end
 
 	anim:Destroy()
@@ -1113,8 +1098,6 @@ end
 
 function UnitAI.BeginDeathAnimation(model, deathAnimId, unitId)
 	if not model or not model.Parent then return end
-
-	print("[UnitAI] BeginDeathAnimation 调用: " .. model.Name .. ", AnimId: " .. tostring(deathAnimId))
 
 	-- 停止AI并清理动画
 	local aiData = activeAIs[model]
@@ -1161,7 +1144,6 @@ function UnitAI.BeginDeathAnimation(model, deathAnimId, unitId)
 			track.Priority = Enum.AnimationPriority.Action4
 			track.Looped = false
 			track:Play(0)
-			print("[UnitAI] " .. model.Name .. " 播放死亡动画成功 (AnimId: " .. tostring(deathAnimId) .. ")")
 		else
 			warn("[UnitAI] BeginDeathAnimation: 动画加载失败 -", model.Name, animationId)
 		end
@@ -1188,7 +1170,6 @@ function UnitAI.SaveOriginalTransparency(model)
 	-- V3.9.1新增：检查是否有死亡渐隐标记，如果有则跳过保存
 	-- 因为此时透明度可能已经被修改
 	if model:GetAttribute("PendingDeathHide") then
-		DebugLog(string.format("%s 跳过保存透明度：正在死亡渐隐中", model.Name))
 		return
 	end
 
@@ -1202,7 +1183,6 @@ function UnitAI.SaveOriginalTransparency(model)
 		end
 	end
 	if hasDeathFadeAttr then
-		DebugLog(string.format("%s 跳过保存透明度：检测到死亡渐隐属性", model.Name))
 		return
 	end
 
@@ -1225,7 +1205,6 @@ function UnitAI.SaveOriginalTransparency(model)
 
 	-- 标记已保存
 	model:SetAttribute("_TransparencySaved", true)
-	DebugLog(string.format("%s 原始透明度已保存", model.Name))
 end
 
 -------------------------------------------------------
@@ -1274,7 +1253,6 @@ function UnitAI.ResetModelTransparency(model)
 								templateTransparencyMap[relativePath] = part.Transparency
 							end
 						end
-						DebugLog(string.format("%s 从模板获取透明度映射（%d个部件）", model.Name, 0))
 					end
 				end
 			end
@@ -1342,8 +1320,6 @@ function UnitAI.ResetModelTransparency(model)
 	if templateTransparencyMap then
 		model:SetAttribute("_TransparencySaved", true)
 	end
-
-	DebugLog(string.format("%s 透明度已重置", model.Name))
 end
 
 -------------------------------------------------------
