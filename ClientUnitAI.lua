@@ -85,6 +85,23 @@ local CONFIG = {
 
 	-- 调试日志
 	DEBUG_LOGS = false,
+
+	-- V4.1新增：简化围攻系统配置
+	SURROUND = {
+		BASE_UNITS_PER_RING = 6,       -- 第一圈基础单位数
+		RING_UNIT_INCREMENT = 6,       -- 每圈增加的单位数
+		BASE_RING_RADIUS = 0.7,        -- 第一圈半径系数(相对于攻击距离)
+		RING_RADIUS_INCREMENT = 3,     -- 每圈半径增加(studs)
+		MAX_RINGS = 4,                 -- 最大圈数
+	},
+
+	-- V4.1新增：Y轴地面钳定配置
+	GROUND_CLAMP = {
+		ENABLED = true,                -- 是否启用地面钳定
+		CHECK_INTERVAL = 0.2,          -- 检测间隔（秒）
+		MAX_HEIGHT_DIFF = 3,           -- 最大允许高度差（studs）
+		RAYCAST_DISTANCE = 50,         -- 射线检测距离（studs）
+	},
 }
 
 if BattleConfig then
@@ -133,6 +150,235 @@ local function GetDockingDistance(aiData)
 	else
 		-- 远程：攻击距离 * 停靠系数
 		return attackRange * CONFIG.RANGED_DOCKING_RATIO
+	end
+end
+
+-- ==================== V4.1新增：简化围攻系统 ====================
+
+-- 全局递增计数器，用于分配唯一SlotId
+local nextSlotIdCounter = 1
+
+--[[
+获取单位的唯一槽位ID（确定性分配）
+@param model Model - 单位模型
+@return number - 槽位ID
+]]
+local function GetUnitSlotId(model)
+	-- 优先使用已存在的属性
+	local slotId = model:GetAttribute("SpawnIndex")
+		or model:GetAttribute("UnitIndex")
+		or model:GetAttribute("_ClientAISlotId")
+
+	if slotId then
+		if type(slotId) == "string" then
+			local hash = 0
+			for i = 1, #slotId do
+				hash = (hash * 31 + string.byte(slotId, i)) % 1000000
+			end
+			return hash
+		end
+		return tonumber(slotId) or 0
+	end
+
+	-- 分配新的递增ID
+	local newId = nextSlotIdCounter
+	nextSlotIdCounter = nextSlotIdCounter + 1
+	model:SetAttribute("_ClientAISlotId", newId)
+
+	return newId
+end
+
+--[[
+获取攻击同一目标的友军数量和列表
+@param targetModel Model - 目标模型
+@param myTeam string - 我方队伍
+@param battleId number - 战斗ID
+@return table, number - 攻击者列表, 总数
+]]
+local function GetUnitsAttackingSameTarget(targetModel, myTeam, battleId)
+	local attackers = {}
+	local count = 0
+
+	for unitModel, aiData in pairs(activeAIs) do
+		if unitModel and unitModel.Parent and aiData.Team == myTeam and aiData.BattleId == battleId then
+			if aiData.CurrentTarget == targetModel then
+				count = count + 1
+				attackers[unitModel] = {
+					SlotId = GetUnitSlotId(unitModel),
+					AttackRange = aiData.Stat.AttackRange or 6,
+				}
+			end
+		end
+	end
+
+	return attackers, count
+end
+
+--[[
+计算围攻位置偏移（简化版环形站位）
+@param slotId number - 单位槽位ID
+@param attackRange number - 攻击距离
+@param totalAttackers number - 攻击同一目标的总单位数
+@param attackersList table - 攻击者列表
+@return Vector3 - 偏移量
+]]
+local function ComputeSurroundOffset(slotId, attackRange, totalAttackers, attackersList)
+	local cfg = CONFIG.SURROUND
+
+	-- 对所有攻击者按SlotId排序
+	local sortedSlots = {}
+	for unitModel, data in pairs(attackersList) do
+		table.insert(sortedSlots, { SlotId = data.SlotId, Model = unitModel })
+	end
+	table.sort(sortedSlots, function(a, b) return a.SlotId < b.SlotId end)
+
+	-- 找到当前单位的排序索引
+	local myIndex = 0
+	for i, entry in ipairs(sortedSlots) do
+		if entry.SlotId == slotId then
+			myIndex = i - 1
+			break
+		end
+	end
+
+	-- 计算所在环层和环内位置
+	local ringIndex = 0
+	local indexInRing = 0
+	local unitsInCurrentRing = cfg.BASE_UNITS_PER_RING
+
+	local accumulated = 0
+	for ring = 0, cfg.MAX_RINGS - 1 do
+		local unitsInRing = cfg.BASE_UNITS_PER_RING + ring * cfg.RING_UNIT_INCREMENT
+		if myIndex < accumulated + unitsInRing then
+			ringIndex = ring
+			indexInRing = myIndex - accumulated
+			unitsInCurrentRing = unitsInRing
+			break
+		end
+		accumulated = accumulated + unitsInRing
+	end
+
+	-- 计算环半径
+	local baseRadius = attackRange * cfg.BASE_RING_RADIUS
+	local radius = baseRadius + ringIndex * cfg.RING_RADIUS_INCREMENT
+
+	-- 计算角度（黄金角度偏移让多圈错开）
+	local goldenAngle = math.pi * (3 - math.sqrt(5))
+	local baseAngle = (indexInRing / unitsInCurrentRing) * math.pi * 2
+	local ringOffset = ringIndex * goldenAngle
+
+	local angle = baseAngle + ringOffset
+
+	-- 计算最终偏移
+	local offsetX = math.cos(angle) * radius
+	local offsetZ = math.sin(angle) * radius
+
+	return Vector3.new(offsetX, 0, offsetZ)
+end
+
+--[[
+计算围攻目标位置
+@param aiData table - AI数据
+@param target Model - 目标模型
+@return Vector3|nil - 围攻位置
+]]
+local function ComputeSurroundPosition(aiData, target)
+	local myRoot = aiData.UnitModel:FindFirstChild("HumanoidRootPart")
+	local tarRoot = target:FindFirstChild("HumanoidRootPart")
+	if not myRoot or not tarRoot then return nil end
+
+	local targetPos = tarRoot.Position
+	local attackRange = aiData.Stat.AttackRange or 6
+	local slotId = GetUnitSlotId(aiData.UnitModel)
+
+	-- 获取攻击同一目标的所有友军
+	local attackers, totalAttackers = GetUnitsAttackingSameTarget(target, aiData.Team, aiData.BattleId)
+
+	-- 如果只有自己，直接朝目标移动
+	if totalAttackers <= 1 then
+		local myPos = myRoot.Position
+		local direction = (targetPos - myPos)
+		if direction.Magnitude > 0.1 then
+			direction = direction.Unit
+		else
+			direction = Vector3.new(1, 0, 0)
+		end
+		local dockingDistance = GetDockingDistance(aiData)
+		return targetPos - direction * dockingDistance
+	end
+
+	-- 计算环形站位偏移
+	local surroundOffset = ComputeSurroundOffset(slotId, attackRange, totalAttackers, attackers)
+
+	return targetPos + surroundOffset
+end
+
+-- ==================== V4.1新增：Y轴地面钳定 ====================
+
+--[[
+将单位钳定到地面（防止被顶起后沿空中移动）
+@param aiData table - AI数据
+]]
+local function ClampToGround(aiData)
+	if not CONFIG.GROUND_CLAMP.ENABLED then return end
+
+	local unitModel = aiData.UnitModel
+	local rootPart = unitModel:FindFirstChild("HumanoidRootPart")
+	if not rootPart then return end
+
+	-- 检测间隔控制
+	local now = tick()
+	if aiData._LastGroundClampTime and (now - aiData._LastGroundClampTime) < CONFIG.GROUND_CLAMP.CHECK_INTERVAL then
+		return
+	end
+	aiData._LastGroundClampTime = now
+
+	-- 记录初始地面高度（首次检测时）
+	if not aiData._BaseGroundY then
+		-- 向下射线检测地面
+		local rayOrigin = rootPart.Position
+		local rayDirection = Vector3.new(0, -CONFIG.GROUND_CLAMP.RAYCAST_DISTANCE, 0)
+
+		local rayParams = RaycastParams.new()
+		rayParams.FilterType = Enum.RaycastFilterType.Exclude
+		rayParams.FilterDescendantsInstances = {unitModel}
+
+		local result = workspace:Raycast(rayOrigin, rayDirection, rayParams)
+		if result then
+			aiData._BaseGroundY = result.Position.Y
+		else
+			aiData._BaseGroundY = rootPart.Position.Y
+		end
+	end
+
+	-- 检查当前高度是否异常
+	local currentY = rootPart.Position.Y
+	local baseY = aiData._BaseGroundY
+	local heightDiff = currentY - baseY
+
+	-- 如果高度差超过阈值，强制拉回地面
+	if heightDiff > CONFIG.GROUND_CLAMP.MAX_HEIGHT_DIFF then
+		-- 向下射线检测当前位置的地面
+		local rayOrigin = rootPart.Position + Vector3.new(0, 2, 0)
+		local rayDirection = Vector3.new(0, -CONFIG.GROUND_CLAMP.RAYCAST_DISTANCE, 0)
+
+		local rayParams = RaycastParams.new()
+		rayParams.FilterType = Enum.RaycastFilterType.Exclude
+		rayParams.FilterDescendantsInstances = {unitModel}
+
+		local result = workspace:Raycast(rayOrigin, rayDirection, rayParams)
+		if result then
+			local targetY = result.Position.Y + 3  -- 加上角色高度偏移
+			-- 平滑下降而非瞬移
+			local newY = currentY - math.min(heightDiff * 0.5, 2)
+			newY = math.max(newY, targetY)
+
+			rootPart.CFrame = CFrame.new(
+				rootPart.Position.X,
+				newY,
+				rootPart.Position.Z
+			) * CFrame.Angles(0, math.rad(rootPart.Orientation.Y), 0)
+		end
 	end
 end
 
@@ -269,6 +515,7 @@ end
 
 --[[
 MOVING状态：移动到攻击距离
+V4.1增强：使用围攻位置系统 + Y轴地面钳定
 ]]
 local function UpdateMovingState(aiData, deltaTime)
 	-- 检查目标是否有效
@@ -289,6 +536,9 @@ local function UpdateMovingState(aiData, deltaTime)
 		return
 	end
 
+	-- V4.1新增：Y轴地面钳定（防止被顶起后沿空中移动）
+	ClampToGround(aiData)
+
 	-- 播放移动动画
 	PlayAnimation(aiData, AnimationState.MOVE)
 
@@ -306,20 +556,32 @@ local function UpdateMovingState(aiData, deltaTime)
 		return
 	end
 
-	-- 持续移动到目标位置
-	local targetRoot = aiData.CurrentTarget:FindFirstChild("HumanoidRootPart")
-	if targetRoot then
-		local targetPos = targetRoot.Position
-		-- 简化移动：直接使用Humanoid:MoveTo（避免频繁寻路）
-		local humanoid = aiData.UnitModel:FindFirstChild("Humanoid")
-		if humanoid then
-			humanoid:MoveTo(targetPos)
+	-- V4.1增强：使用围攻位置系统计算目标位置
+	local humanoid = aiData.UnitModel:FindFirstChild("Humanoid")
+	if humanoid then
+		-- 计算围攻位置（近战兵使用围攻系统，远程兵直接朝目标）
+		local moveTarget = nil
+		if aiData.UnitType == UnitConfig.UnitType.MELEE then
+			moveTarget = ComputeSurroundPosition(aiData, aiData.CurrentTarget)
+		end
+
+		if not moveTarget then
+			-- 远程兵或围攻计算失败，使用传统方式
+			local targetRoot = aiData.CurrentTarget:FindFirstChild("HumanoidRootPart")
+			if targetRoot then
+				moveTarget = targetRoot.Position
+			end
+		end
+
+		if moveTarget then
+			humanoid:MoveTo(moveTarget)
 		end
 	end
 end
 
 --[[
 ATTACKING状态：在攻击距离内，执行攻击
+V4.1增强：添加Y轴地面钳定
 ]]
 local function UpdateAttackingState(aiData, deltaTime)
 	-- 检查目标是否有效
@@ -339,6 +601,9 @@ local function UpdateAttackingState(aiData, deltaTime)
 		aiData.IsAttacking = false
 		return
 	end
+
+	-- V4.1新增：Y轴地面钳定（防止被顶起后悬空攻击）
+	ClampToGround(aiData)
 
 	-- 计算距离
 	local distance = GetDistance(aiData.UnitModel, aiData.CurrentTarget)
@@ -634,6 +899,7 @@ end
 --[[
 标记单位死亡
 @param unitModel Model - 单位模型
+V4.2修复：立即停止所有移动和动画，冻结物理状态
 ]]
 function ClientUnitAI.MarkDead(unitModel)
 	local aiData = activeAIs[unitModel]
@@ -643,9 +909,51 @@ function ClientUnitAI.MarkDead(unitModel)
 
 	aiData.State = AIState.DEAD
 	aiData.CurrentTarget = nil
+	aiData.IsAttacking = false
 
-	-- 停止移动
+	-- 停止移动路径
 	ClientPathService.ClearPath(unitModel)
+
+	-- V4.2修复：立即停止所有动画（除了死亡动画由服务端控制）
+	if aiData.CurrentAnimTrack then
+		pcall(function()
+			aiData.CurrentAnimTrack:Stop(0)
+		end)
+		aiData.CurrentAnimTrack = nil
+	end
+
+	-- 停止Idle和Move动画
+	if aiData.AnimTrack then
+		if aiData.AnimTrack.Idle then
+			pcall(function() aiData.AnimTrack.Idle:Stop(0) end)
+		end
+		if aiData.AnimTrack.Move then
+			pcall(function() aiData.AnimTrack.Move:Stop(0) end)
+		end
+		if aiData.AnimTrack.Attack then
+			pcall(function() aiData.AnimTrack.Attack:Stop(0) end)
+		end
+	end
+
+	-- V4.6修复：客户端侧避免继续驱动物理/动画
+	local humanoid = unitModel:FindFirstChild("Humanoid")
+	if humanoid then
+		pcall(function()
+			humanoid:Move(Vector3.zero)
+			humanoid.WalkSpeed = 0
+			humanoid.JumpPower = 0
+			humanoid.AutoRotate = false
+		end)
+	end
+
+	-- 清除速度（服务端已收回NetworkOwner，这里做兜底）
+	local rootPart = unitModel:FindFirstChild("HumanoidRootPart")
+	if rootPart then
+		pcall(function()
+			rootPart.AssemblyLinearVelocity = Vector3.zero
+			rootPart.AssemblyAngularVelocity = Vector3.zero
+		end)
+	end
 
 	DebugLog("单位死亡:", unitModel.Name)
 end

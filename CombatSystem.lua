@@ -812,14 +812,78 @@ function CombatSystem.KillUnit(unitModel, killer)
 	state.CurrentHealth = 0
 	state.AttackPhase = BattleConfig.AttackPhase.IDLE
 
-	-- V4.1修复：设置Humanoid.Health=0，让客户端AI立即识别死亡
-	-- 同时设置IsDead属性作为防御性兜底
+	-- V4.6修复：死亡瞬间收回网络所有权 + 清理物理
 	local humanoid = unitModel:FindFirstChild("Humanoid")
+	local rootPart = unitModel:FindFirstChild("HumanoidRootPart")
+
+	-- 步骤1：立即收回网络所有权，确保死亡过程由服务端接管
+	if rootPart then
+		pcall(function()
+			rootPart:SetNetworkOwner(nil)
+		end)
+	end
+
+	-- 步骤2：清理所有BodyMover/Constraint推力，防止残余推力抬尸
+	for _, child in ipairs(unitModel:GetDescendants()) do
+		if child:IsA("BodyForce") or child:IsA("BodyVelocity") or child:IsA("BodyGyro")
+			or child:IsA("BodyPosition") or child:IsA("BodyAngularVelocity")
+			or child:IsA("VectorForce") or child:IsA("AlignPosition") or child:IsA("AlignOrientation")
+			or child:IsA("LinearVelocity") or child:IsA("AngularVelocity") then
+			pcall(function() child:Destroy() end)
+		end
+	end
+
+	-- 步骤3：设置Humanoid状态
 	if humanoid then
-		-- 防止Roblox默认死亡行为干扰自定义死亡流程
 		humanoid.BreakJointsOnDeath = false
 		humanoid.Health = 0
+		humanoid:Move(Vector3.zero)
+		humanoid.WalkSpeed = 0
+		humanoid.JumpPower = 0
+		humanoid.AutoRotate = false
 	end
+
+	-- 步骤4：禁用碰撞 + 清零速度（在SetNetworkOwner之后再做一遍兜底）
+	if rootPart then
+		rootPart.AssemblyLinearVelocity = Vector3.zero
+		rootPart.AssemblyAngularVelocity = Vector3.zero
+	end
+
+	for _, part in ipairs(unitModel:GetDescendants()) do
+		if part:IsA("BasePart") then
+			part.CanCollide = false
+		end
+	end
+
+	-- 步骤5：压回地面 - 做一次向下Raycast，将尸体放到地面上
+	if rootPart then
+		local rayOrigin = rootPart.Position
+		local rayDirection = Vector3.new(0, -100, 0)
+		local rayParams = RaycastParams.new()
+		rayParams.FilterType = Enum.RaycastFilterType.Exclude
+		rayParams.FilterDescendantsInstances = {unitModel}
+
+		local rayResult = workspace:Raycast(rayOrigin, rayDirection, rayParams)
+		if rayResult then
+			-- 将HRP放到地面上
+			-- HumanoidRootPart的中心点在角色腰部，需要加上到脚底的距离
+			-- 通常角色高度约5-6 studs，HRP在腰部，到脚底约2.5-3 studs
+			local hipHeight = humanoid and humanoid.HipHeight or 0
+			local groundY = rayResult.Position.Y + hipHeight + rootPart.Size.Y / 2
+			local currentPos = rootPart.Position
+			-- 保持朝向不变，只修改Y坐标
+			rootPart.CFrame = CFrame.new(currentPos.X, groundY, currentPos.Z) * CFrame.Angles(0, math.rad(rootPart.Orientation.Y), 0)
+		end
+		-- 若未命中地面，保持原位
+
+		-- 再次清零速度（压回地面后兜底）
+		rootPart.AssemblyLinearVelocity = Vector3.zero
+		rootPart.AssemblyAngularVelocity = Vector3.zero
+
+		-- 步骤6：立即锚定，防止被推动
+		rootPart.Anchored = true
+	end
+
 	unitModel:SetAttribute("IsDead", true)
 
 	DebugLog(string.format("%s [%s] 已死亡", state.UnitId, state.Team))
@@ -914,25 +978,29 @@ function CombatSystem.KillUnit(unitModel, killer)
 		end
 	end
 
-	-- ===== V1.5.10 无缝死亡动画版本 =====
-	local unitAIModule = ServerScriptService:WaitForChild("Systems"):FindFirstChild("UnitAI")
-	if not unitAIModule then
-		WarnLog("无法加载UnitAI模块，跳过死亡动画")
-		return
+	-- V4.6修复：客户端AI模式下，死亡动画由客户端播放，服务端不处理
+	-- 只有服务端AI模式才需要服务端播放死亡动画
+	if not BattleConfig.ENABLE_CLIENT_AI then
+		-- ===== 服务端AI模式：播放死亡动画 =====
+		local unitAIModule = ServerScriptService:WaitForChild("Systems"):FindFirstChild("UnitAI")
+		if not unitAIModule then
+			WarnLog("无法加载UnitAI模块，跳过死亡动画")
+			return
+		end
+		local UnitAI = require(unitAIModule :: ModuleScript)
+		local deathAnimationId = UnitConfig.GetDeathAnimationId(unitId)
+
+		-- 步骤1: 播放死亡动画（立刻禁用Animate，高优先级Fade=0确保立即生效）
+		UnitAI.BeginDeathAnimation(unitModel, deathAnimationId, unitId)
+
+		-- 步骤2: 停止AI（参数：瞬停Fade=0，禁用Animate，无MoveTo）
+		-- 此时死亡动画已在播放，StopAI只会清理AI的轨道，不会干扰死亡动画
+		UnitAI.StopAI(unitModel, {
+			skipMoveTo = true,        -- 防止MoveTo把尸体"拉起"
+			disableAnimate = true,    -- 再次确认禁用Animate
+			stopFadeTime = 0          -- 瞬停AI轨道，无淡出延迟
+		})
 	end
-	local UnitAI = require(unitAIModule :: ModuleScript)
-	local deathAnimationId = UnitConfig.GetDeathAnimationId(unitId)
-
-	-- 步骤1: 播放死亡动画（立刻禁用Animate，高优先级Fade=0确保立即生效）
-	UnitAI.BeginDeathAnimation(unitModel, deathAnimationId, unitId)
-
-	-- 步骤2: 停止AI（参数：瞬停Fade=0，禁用Animate，无MoveTo）
-	-- 此时死亡动画已在播放，StopAI只会清理AI的轨道，不会干扰死亡动画
-	UnitAI.StopAI(unitModel, {
-		skipMoveTo = true,        -- 防止MoveTo把尸体"拉起"
-		disableAnimate = true,    -- 再次确认禁用Animate
-		stopFadeTime = 0          -- 瞬停AI轨道，无淡出延迟
-	})
 
 	-- 步骤3: 固定2.9秒后销毁或隐藏模型
 	-- 记录预定移除时间供渐隐使用

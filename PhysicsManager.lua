@@ -57,11 +57,19 @@ end
 
 --[[
 创建必要的碰撞组（V2.2重构：Allies/Enemies分组）
+V4.1修复：客户端AI模式下关闭友军与敌军之间的碰撞，防止堆叠
 ]]
 function CreateCollisionGroups()
 	if groupsCreated then
 		return
 	end
+
+	-- 加载BattleConfig检查是否启用客户端AI
+	local BattleConfig = nil
+	pcall(function()
+		BattleConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("BattleConfig"))
+	end)
+	local isClientAIEnabled = BattleConfig and BattleConfig.ENABLE_CLIENT_AI
 
 	-- 创建玩家碰撞组
 	pcall(function()
@@ -91,8 +99,14 @@ function CreateCollisionGroups()
 		-- 禁用敌军之间碰撞
 		PhysicsService:CollisionGroupSetCollidable("Enemies", "Enemies", false)
 
-		-- 启用友军与敌军碰撞（战斗时需要）
-		PhysicsService:CollisionGroupSetCollidable("Allies", "Enemies", true)
+		-- V4.1修复：客户端AI模式下关闭友军与敌军之间的碰撞
+		-- 原因：多个Humanoid在同一NetworkOwner时，物理解算会相互顶起形成堆叠
+		if isClientAIEnabled then
+			PhysicsService:CollisionGroupSetCollidable("Allies", "Enemies", false)
+		else
+			-- 服务端AI模式：启用友军与敌军碰撞（战斗时需要）
+			PhysicsService:CollisionGroupSetCollidable("Allies", "Enemies", true)
+		end
 	end)
 
 	groupsCreated = true
@@ -101,7 +115,11 @@ function CreateCollisionGroups()
 		print(GameConfig.LOG_PREFIX, "✅ 碰撞组已创建：Players/Allies/Enemies")
 		print(GameConfig.LOG_PREFIX, "   - 友军↔友军: 不碰撞")
 		print(GameConfig.LOG_PREFIX, "   - 敌军↔敌军: 不碰撞")
-		print(GameConfig.LOG_PREFIX, "   - 友军↔敌军: 碰撞")
+		if isClientAIEnabled then
+			print(GameConfig.LOG_PREFIX, "   - 友军↔敌军: 不碰撞 (客户端AI模式)")
+		else
+			print(GameConfig.LOG_PREFIX, "   - 友军↔敌军: 碰撞")
+		end
 	end
 end
 

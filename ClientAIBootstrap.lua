@@ -229,6 +229,7 @@ end
 @param battleId number - 战斗ID
 @param unitModel Model - 死亡的单位模型
 @param killerModel Model|nil - 击杀者模型（可能为nil）
+V4.2修复：先冻结物理和停止动画，再播放死亡动画
 ]]
 local function OnServerUnitDeath(battleId, unitModel, killerModel)
 	if not unitModel then
@@ -238,24 +239,61 @@ local function OnServerUnitDeath(battleId, unitModel, killerModel)
 
 	DebugLog(string.format("单位死亡: %s (BattleId=%d)", unitModel.Name, battleId))
 
-	-- 标记AI为死亡状态
+	-- V4.2修复：首先标记AI为死亡状态（这会停止所有移动和动画）
 	ClientUnitAI.MarkDead(unitModel)
 
-	-- 播放死亡动画（如果有）
+	-- V4.2修复：获取Humanoid和RootPart引用
 	local humanoid = unitModel:FindFirstChild("Humanoid")
+	local rootPart = unitModel:FindFirstChild("HumanoidRootPart")
+	local animator = humanoid and humanoid:FindFirstChild("Animator")
+
+	-- V4.2修复：再次确保物理状态被冻结（双重保险）
 	if humanoid then
-		local animator = humanoid:FindFirstChild("Animator")
-		if animator then
-			local unitInfo = ClientUnitManager.GetUnitBattleInfo(unitModel)
-			if unitInfo then
-				local UnitConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("UnitConfig"))
-				local deathAnimId = UnitConfig.GetDeathAnimationId(unitInfo.UnitId)
-				if deathAnimId and deathAnimId ~= "" then
-					local anim = Instance.new("Animation")
-					anim.AnimationId = "rbxassetid://" .. deathAnimId
-					local animTrack = animator:LoadAnimation(anim)
-					animTrack:Play()
+		pcall(function()
+			humanoid:Move(Vector3.zero)
+			humanoid.WalkSpeed = 0
+			humanoid.JumpPower = 0
+			humanoid.AutoRotate = false
+		end)
+	end
+
+	-- V4.6修复：清除速度（服务端已收回NetworkOwner，这里做兜底）
+	if rootPart then
+		pcall(function()
+			rootPart.AssemblyLinearVelocity = Vector3.zero
+			rootPart.AssemblyAngularVelocity = Vector3.zero
+		end)
+	end
+
+	-- V4.2修复：停止所有正在播放的动画，为死亡动画让路
+	if animator then
+		pcall(function()
+			for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+				track:Stop(0)
+			end
+		end)
+	end
+
+	-- 播放死亡动画（如果有）
+	if animator then
+		local unitInfo = ClientUnitManager.GetUnitBattleInfo(unitModel)
+		if unitInfo then
+			local UnitConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("UnitConfig"))
+			local deathAnimId = UnitConfig.GetDeathAnimationId(unitInfo.UnitId)
+			if deathAnimId and deathAnimId ~= "" then
+				local anim = Instance.new("Animation")
+				anim.AnimationId = "rbxassetid://" .. deathAnimId
+				local success, animTrack = pcall(function()
+					return animator:LoadAnimation(anim)
+				end)
+				if success and animTrack then
+					-- V4.2修复：设置最高优先级，确保死亡动画不被其他动画覆盖
+					animTrack.Priority = Enum.AnimationPriority.Action4
+					animTrack.Looped = false
+					animTrack:Play(0)  -- 立即播放，无淡入
+					DebugLog(string.format("播放死亡动画: %s", unitModel.Name))
 				end
+				anim:Destroy()
 			end
 		end
 	end
