@@ -35,6 +35,7 @@ local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild
 local StageConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("StageConfig") :: ModuleScript)
 local PlacementConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("PlacementConfig") :: ModuleScript)
 local UnitConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("UnitConfig") :: ModuleScript)
+local BattleConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("BattleConfig") :: ModuleScript)
 
 -- 引用核心管理器
 local PlayerManager = require(ServerScriptService:WaitForChild("Core"):WaitForChild("PlayerManager") :: ModuleScript)
@@ -1540,6 +1541,9 @@ function CampaignManager.StartStageBattle(campaignData, stageNum, preparedAllies
 		end
 	end
 
+	-- 获取战场Folder（用于客户端AI）
+	local stageFolder = StageService.GetOrCreateStage(campaignData.PlayerId, stageNum, false)
+
 	-- 创建战斗实例
 	DebugLog("[StartStageBattle] 正在创建战斗实例...")
 	local battleId = BattleManager.CreateBattle({
@@ -1547,6 +1551,7 @@ function CampaignManager.StartStageBattle(campaignData, stageNum, preparedAllies
 		BattleType = "Campaign",
 		AttackTeam = preparedAllies,
 		DefenseTeam = preparedEnemies,
+		BattleField = stageFolder,  -- V4.0新增：传递战场Folder引用给客户端AI
 		OnBattleEnd = function(result)
 			CampaignManager.OnBattleEnd(campaignData, stageNum, result)
 		end
@@ -1583,6 +1588,16 @@ end
 function CampaignManager.OnBattleEnd(campaignData, stageNum, result)
 	DebugLog(string.format("✅ OnBattleEnd触发，stageNum=%d, Winner=%s",
 		stageNum, tostring(result.Winner)))
+
+	-- V4.0新增：如果启用客户端AI，通知客户端终止战斗
+	local enableClientAI: boolean = BattleConfig.ENABLE_CLIENT_AI
+	if enableClientAI then
+		local currentBattleId = campaignData.CurrentBattleId
+		if currentBattleId then
+			BattleManager.TerminateClientAI(currentBattleId, result.Winner or "Unknown")
+			DebugLog(string.format("[V4.0] 已通知客户端终止战斗，BattleId=%s", tostring(currentBattleId)))
+		end
+	end
 
 	-- V3.3新增：通知任务系统完成战斗（战斗真正结束才算完成，中途退出不算）
 	local TaskSystem = nil

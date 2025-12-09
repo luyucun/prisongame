@@ -884,6 +884,13 @@ end
 function UnitAI.StartAI(model)
 	LoadSystems()
 
+	-- V4.0修复：客户端AI模式下，攻守双方都由客户端AI控制
+	-- 服务端仅做伤害/死亡校验，不运行AI
+	if BattleConfig.ENABLE_CLIENT_AI then
+		DebugLog(string.format("[V4.0] 客户端AI已启用，跳过服务端AI启动: %s", model.Name))
+		return
+	end
+
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
 	if not humanoid then return end
 

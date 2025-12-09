@@ -317,6 +317,8 @@ function BattleManager.CreateBattle(playerId, attackUnits, defenseUnits)
 		-- V2.4新增字段
 		IsSettling = false,              -- 是否在结算中
 		SettlementData = nil,            -- 结算数据
+		-- V4.0新增字段
+		BattleField = config and config.BattleField or nil,    -- 战场Folder引用（用于客户端AI）
 	}
 
 	battles[battleId] = battle
@@ -409,6 +411,12 @@ function BattleManager.StartBattle(battleId)
     local finalDefenseUnits = {}
 
     -- ==================== 第一阶段：注册所有单位（不启动AI）====================
+    -- V4.0调试：输出攻击方单位列表
+    print(string.format("[V4.0调试] 开始初始化攻击方单位，总数: %d", #battle.AttackUnits))
+    for i, unit in ipairs(battle.AttackUnits) do
+        print(string.format("[V4.0调试] 攻击方单位[%d]: %s", i, unit.Name))
+    end
+
     -- 处理攻击方
     for i, unit in ipairs(battle.AttackUnits) do
         -- V2.5新增：标记阵营
@@ -419,12 +427,20 @@ function BattleManager.StartBattle(battleId)
         -- 2. 初始化CombatSystem状态
         local unitId = unit:GetAttribute("UnitId") or unit.Name
         local level = unit:GetAttribute("Level") or 1
+
+        -- V4.0调试：输出单位信息
+        DebugLog(string.format("[V4.0] 准备初始化攻击方单位: Name=%s, UnitId=%s, Level=%d, HasUnitIdAttr=%s",
+            unit.Name, tostring(unitId), level, tostring(unit:GetAttribute("UnitId") ~= nil)))
+
         local success = CombatSystem.InitializeUnit(unit, unitId, level, BattleConfig.Team.ATTACK, battleId)
 
         if success then
             PhysicsManager.ConfigureUnitPhysics(unit, "ally")
             -- V3.0修复：暂时不启动AI，等所有单位注册完成后再统一启动
             table.insert(finalAttackUnits, unit)
+            DebugLog(string.format("[V4.0] 攻击方单位初始化成功: %s (unitId=%s)", unit.Name, tostring(unitId)))
+        else
+            WarnLog(string.format("[V4.0] 攻击方单位初始化失败: %s (unitId=%s)", unit.Name, tostring(unitId)))
         end
     end
 
@@ -459,20 +475,33 @@ function BattleManager.StartBattle(battleId)
             PhysicsManager.ConfigureUnitPhysics(unit, "enemy")
             -- V3.0修复：暂时不启动AI，等所有单位注册完成后再统一启动
             table.insert(finalDefenseUnits, unit)
+            DebugLog(string.format("[V4.0] 防守方单位初始化成功: %s", unit.Name))
+        else
+            WarnLog(string.format("[V4.0] 防守方单位初始化失败: %s", unit.Name))
         end
     end
 
     -- ==================== 第二阶段：统一启动AI ====================
     -- V3.0修复：确保所有单位都已注册到UnitManager后再启动AI
     -- 这样FindNearestEnemy才能正确找到所有敌人
+    -- V4.0修改：根据配置选择启动服务端AI或客户端AI
     DebugLog(string.format("所有单位注册完成，开始启动AI - 攻击方:%d, 防守方:%d", #finalAttackUnits, #finalDefenseUnits))
 
-    for _, unit in ipairs(finalAttackUnits) do
-        UnitAI.StartAI(unit)
-    end
+    if BattleConfig.ENABLE_CLIENT_AI then
+        -- V4.0修复：客户端AI模式下，攻守双方都由客户端AI控制
+        -- 服务端仅做伤害/死亡校验
+        DebugLog("[V4.0] 客户端AI模式已启用，攻守双方都交给客户端AI")
+        BattleManager.InitializeClientAI(battleId, finalAttackUnits, finalDefenseUnits, battle)
+        -- 不再为任何一方启动服务端AI
+    else
+        -- 传统服务端AI模式
+        for _, unit in ipairs(finalAttackUnits) do
+            UnitAI.StartAI(unit)
+        end
 
-    for _, unit in ipairs(finalDefenseUnits) do
-        UnitAI.StartAI(unit)
+        for _, unit in ipairs(finalDefenseUnits) do
+            UnitAI.StartAI(unit)
+        end
     end
 
     -- 再次检查：如果有单位初始化失败，更新战斗列表
@@ -889,6 +918,201 @@ end
 ]]
 function BattleManager.GetAllBattles()
     return battles
+end
+
+-- ==================== V4.0 客户端AI支持 ====================
+
+--[[
+设置单位网络所有权给玩家（V4.0新增）
+@param model Model - 单位模型
+@param player Player - 目标玩家
+]]
+local function SetNetworkOwnerToPlayer(model, player)
+    if not model or not player then return end
+
+    for _, part in ipairs(model:GetDescendants()) do
+        if part:IsA("BasePart") and part:CanSetNetworkOwnership() then
+            pcall(function()
+                part:SetNetworkOwner(player)
+            end)
+        end
+    end
+end
+
+--[[
+设置单位网络所有权给服务端（V4.0新增）
+@param model Model - 单位模型
+]]
+local function SetNetworkOwnerToServer(model)
+    if not model then return end
+
+    for _, part in ipairs(model:GetDescendants()) do
+        if part:IsA("BasePart") and part:CanSetNetworkOwnership() then
+            pcall(function()
+                part:SetNetworkOwner(nil)  -- nil表示服务端
+            end)
+        end
+    end
+end
+
+--[[
+初始化客户端AI（V4.0新增）
+向客户端发送战斗初始化事件，下发所有单位信息
+@param battleId number - 战斗ID
+@param attackUnits table - 攻击方单位列表
+@param defenseUnits table - 防守方单位列表
+@param battle table - 战斗实例
+]]
+function BattleManager.InitializeClientAI(battleId, attackUnits, defenseUnits, battle)
+    local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
+    if not eventsFolder then
+        WarnLog("[V4.0] 未找到Events文件夹")
+        return
+    end
+
+    local clientAIEvents = eventsFolder:FindFirstChild("ClientAIEvents")
+    if not clientAIEvents then
+        WarnLog("[V4.0] 未找到ClientAIEvents文件夹")
+        return
+    end
+
+    local initializeBattleEvent = clientAIEvents:FindFirstChild("InitializeBattle")
+    if not initializeBattleEvent then
+        WarnLog("[V4.0] 未找到InitializeBattle事件")
+        return
+    end
+
+    -- 获取玩家实例
+    local player = Players:GetPlayerByUserId(battle.PlayerId)
+    if not player then
+        WarnLog("[V4.0] 找不到玩家，无法初始化客户端AI")
+        return
+    end
+
+    -- V4.0修复：设置攻守双方单位的网络所有权为客户端
+    -- 这样客户端才能流畅地控制单位移动
+    for _, unit in ipairs(attackUnits) do
+        SetNetworkOwnerToPlayer(unit, player)
+        DebugLog(string.format("[V4.0] 设置攻击方 %s 的NetworkOwner为玩家 %s", unit.Name, player.Name))
+    end
+    for _, unit in ipairs(defenseUnits) do
+        SetNetworkOwnerToPlayer(unit, player)
+        DebugLog(string.format("[V4.0] 设置防守方 %s 的NetworkOwner为玩家 %s", unit.Name, player.Name))
+    end
+
+    -- 获取战场Folder（用于客户端获取IdleFloorDefense/Enemy）
+    local battleField = battle.BattleField  -- 假设battle实例中存储了BattleField引用
+
+    -- 构建攻击方单位数据
+    local attackUnitsData = {}
+    for _, unit in ipairs(attackUnits) do
+        local unitId = unit:GetAttribute("UnitId") or unit.Name
+        local level = unit:GetAttribute("Level") or 1
+        table.insert(attackUnitsData, {
+            UnitModel = unit,
+            UnitId = unitId,
+            Level = level,
+            Team = BattleConfig.Team.ATTACK,
+        })
+    end
+
+    -- 构建防守方单位数据
+    local defenseUnitsData = {}
+    for _, unit in ipairs(defenseUnits) do
+        local unitId = unit:GetAttribute("UnitId") or unit.Name
+        local level = unit:GetAttribute("Level") or 1
+        table.insert(defenseUnitsData, {
+            UnitModel = unit,
+            UnitId = unitId,
+            Level = level,
+            Team = BattleConfig.Team.DEFENSE,
+        })
+    end
+
+    -- 向玩家客户端发送初始化事件
+    local player = Players:GetPlayerByUserId(battle.PlayerId)
+    if player then
+        initializeBattleEvent:FireClient(player, battleId, attackUnitsData, defenseUnitsData, battleField)
+        DebugLog(string.format("[V4.0] 已向玩家 %s 发送战斗初始化事件 (BattleId=%d, Attack=%d, Defense=%d)",
+            player.Name, battleId, #attackUnitsData, #defenseUnitsData))
+    else
+        WarnLog("[V4.0] 找不到玩家，无法发送初始化事件")
+    end
+
+    -- 监听客户端准备就绪事件
+    local clientBattleReadyEvent = clientAIEvents:FindFirstChild("ClientBattleReady")
+    if clientBattleReadyEvent then
+        -- 注意：这里应该使用一次性连接，避免重复监听
+        -- 实际实现中可能需要更复杂的连接管理
+        local connection
+        connection = clientBattleReadyEvent.OnServerEvent:Connect(function(clientPlayer, clientBattleId)
+            if clientPlayer == player and clientBattleId == battleId then
+                DebugLog(string.format("[V4.0] 客户端准备就绪: 玩家 %s, BattleId=%d", clientPlayer.Name, clientBattleId))
+                -- 断开连接，避免重复触发
+                if connection then
+                    connection:Disconnect()
+                end
+            end
+        end)
+    end
+end
+
+--[[
+终止客户端AI（V4.0新增）
+向客户端发送战斗终止事件
+@param battleId number - 战斗ID
+@param result string - 战斗结果
+]]
+function BattleManager.TerminateClientAI(battleId, result)
+    local battle = battles[battleId]
+    if not battle then
+        return
+    end
+
+    local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
+    if not eventsFolder then
+        return
+    end
+
+    local clientAIEvents = eventsFolder:FindFirstChild("ClientAIEvents")
+    if not clientAIEvents then
+        return
+    end
+
+    local terminateBattleEvent = clientAIEvents:FindFirstChild("TerminateBattle")
+    if not terminateBattleEvent then
+        WarnLog("[V4.0] 未找到TerminateBattle事件")
+        return
+    end
+
+    -- 向玩家客户端发送终止事件
+    local player = Players:GetPlayerByUserId(battle.PlayerId)
+    if player then
+        terminateBattleEvent:FireClient(player, battleId, result)
+        DebugLog(string.format("[V4.0] 已向玩家 %s 发送战斗终止事件 (BattleId=%d, Result=%s)",
+            player.Name, battleId, result))
+    end
+
+    -- V4.0关键：恢复攻守双方单位的网络所有权为服务端
+    -- 战斗结束后，单位控制权回归服务端
+    if battle.AttackUnits then
+        for _, unit in ipairs(battle.AttackUnits) do
+            if unit and unit.Parent then
+                SetNetworkOwnerToServer(unit)
+                DebugLog(string.format("[V4.0] 恢复攻击方 %s 的NetworkOwner为服务端", unit.Name))
+            end
+        end
+    end
+
+    -- V4.0修复：防守方也需要还原NetworkOwner（如果实例未销毁/复用）
+    if battle.DefenseUnits then
+        for _, unit in ipairs(battle.DefenseUnits) do
+            if unit and unit.Parent then
+                SetNetworkOwnerToServer(unit)
+                DebugLog(string.format("[V4.0] 恢复防守方 %s 的NetworkOwner为服务端", unit.Name))
+            end
+        end
+    end
 end
 
 return BattleManager

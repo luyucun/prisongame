@@ -295,4 +295,33 @@ BattleConfig.WEAPON_EFFECT_PARTICLE_DURATION = 0.5
 -- 是否显示武器特效调试日志
 BattleConfig.DEBUG_WEAPON_EFFECTS = false
 
+-- ==================== V4.0 客户端AI迁移配置 ====================
+-- 是否启用客户端AI（渐进式迁移开关）
+-- true: 使用客户端AI（AI计算在客户端，服务端只做校验）
+-- false: 使用服务端AI（传统模式，完全由服务端控制）
+BattleConfig.ENABLE_CLIENT_AI = true
+
+-- 客户端上报位置间隔（秒）
+-- 客户端定期向服务端报告单位位置，用于防作弊校验
+BattleConfig.CLIENT_POSITION_REPORT_INTERVAL = 0.5
+
+-- 服务端位置同步间隔（秒）
+-- 服务端定期向客户端同步位置（可选，用于强制矫正）
+BattleConfig.SERVER_POSITION_SYNC_INTERVAL = 1.0
+
+-- 位置校验容差（studs）
+-- 客户端报告的位置与服务端位置偏差超过此值时，服务端强制同步
+BattleConfig.POSITION_VALIDATION_TOLERANCE = 10
+
+-- 攻击请求超时时间（秒）
+-- 客户端发起攻击请求后，服务端必须在此时间内响应
+BattleConfig.ATTACK_REQUEST_TIMEOUT = 0.2
+
+-- 死亡动画持续时间（秒）
+-- 单位死亡后，动画播放完毕前不会销毁模型
+BattleConfig.DEATH_ANIMATION_DURATION = 3
+
+-- 是否启用伤害数字显示
+BattleConfig.ENABLE_DAMAGE_NUMBERS = true
+
 return BattleConfig

@@ -2,7 +2,7 @@
 脚本名称: CombatSystem
 脚本类型: ModuleScript (服务端系统)
 脚本位置: ServerScriptService/Systems/CombatSystem
-版本: V1.5.14 - 完善武器透明度恢复，支持从模板获取原始透明度
+版本: V4.0 - 客户端AI迁移支持
 ]]
 
 --[[
@@ -13,6 +13,12 @@
 3. 处理死亡流程
 4. 动画事件驱动的攻击系统(Idle→Attacking→Recovery)
 5. 发送死亡通知给攻击者
+
+V4.0 客户端AI迁移:
+- 新增客户端攻击请求处理（RequestAttack事件）
+- 新增位置校验逻辑（防作弊）
+- 保留完整的伤害计算和死亡流程
+- 支持服务端AI和客户端AI双模式运行
 
 V1.5.1 重要改动:
 - 攻击阶段从四阶段简化为三阶段(移除Windup和Release)
@@ -40,6 +46,8 @@ local unitStates = {}
 
 -- 死亡事件
 local unitDeathEvent = nil
+-- V4.0新增：客户端死亡通知事件
+local serverUnitDeathEvent = nil
 
 -- Update连接
 local updateConnection = nil
@@ -161,6 +169,15 @@ function CombatSystem.Initialize()
 		return false
 	end
 
+	-- V4.0新增：获取客户端死亡通知事件
+	local clientAIEvents = eventsFolder:FindFirstChild("ClientAIEvents")
+	if clientAIEvents then
+		serverUnitDeathEvent = clientAIEvents:FindFirstChild("ServerUnitDeath")
+		if not serverUnitDeathEvent then
+			WarnLog("未找到ServerUnitDeath事件,客户端AI死亡通知将无法工作")
+		end
+	end
+
 	-- 获取HitboxService和UnitManager引用（使用类型断言）
 	local SystemsFolder = ServerScriptService:WaitForChild("Systems")
 	HitboxService = require(SystemsFolder:WaitForChild("HitboxService") :: ModuleScript)
@@ -168,6 +185,12 @@ function CombatSystem.Initialize()
 
 	-- 启动Update循环(处理攻击阶段切换)
 	updateConnection = RunService.Heartbeat:Connect(UpdateAttackPhases)
+
+	-- V4.0新增：初始化客户端AI事件监听
+	if BattleConfig.ENABLE_CLIENT_AI then
+		CombatSystem.InitializeClientAIEvents()
+		DebugLog("客户端AI事件监听已启动")
+	end
 
 	DebugLog("战斗系统初始化完成")
 	return true
@@ -853,6 +876,28 @@ function CombatSystem.KillUnit(unitModel, killer)
 		unitDeathEvent:Fire(unitModel, killer, battleId)
 	end
 
+	-- V4.0新增：通知客户端单位死亡（客户端AI模式下）
+	if BattleConfig.ENABLE_CLIENT_AI and serverUnitDeathEvent then
+		-- 获取战斗对应的玩家
+		local BattleManager = nil
+		local bmModule = ServerScriptService:FindFirstChild("Systems") and ServerScriptService.Systems:FindFirstChild("BattleManager")
+		if bmModule then
+			BattleManager = require(bmModule :: ModuleScript)
+		end
+
+		if BattleManager and BattleManager.GetBattle then
+			local battle = BattleManager.GetBattle(battleId)
+			if battle and battle.PlayerId then
+				local Players = game:GetService("Players")
+				local player = Players:GetPlayerByUserId(battle.PlayerId)
+				if player then
+					serverUnitDeathEvent:FireClient(player, battleId, unitModel, killer)
+					DebugLog(string.format("[V4.0] 已通知客户端单位死亡: %s (BattleId=%d)", unitId, battleId))
+				end
+			end
+		end
+	end
+
 	-- ===== V1.5.10 无缝死亡动画版本 =====
 	local unitAIModule = ServerScriptService:WaitForChild("Systems"):FindFirstChild("UnitAI")
 	if not unitAIModule then
@@ -1335,6 +1380,219 @@ end
 function CombatSystem.UnregisterDeathFade(unitModel)
 	if not unitModel then return end
 	activeDeathFades[unitModel] = nil
+end
+
+-- ==================== V4.0 客户端AI支持 ====================
+
+--[[
+初始化客户端AI事件监听
+]]
+function CombatSystem.InitializeClientAIEvents()
+	local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
+	if not eventsFolder then
+		WarnLog("[V4.0] 未找到Events文件夹")
+		return
+	end
+
+	local clientAIEvents = eventsFolder:FindFirstChild("ClientAIEvents")
+	if not clientAIEvents then
+		WarnLog("[V4.0] 未找到ClientAIEvents文件夹，客户端AI将无法工作")
+		return
+	end
+
+	-- 监听客户端攻击请求
+	local requestAttackEvent = clientAIEvents:FindFirstChild("RequestAttack")
+	if requestAttackEvent then
+		requestAttackEvent.OnServerEvent:Connect(function(player, battleId, attackerModel, targetModel, attackType)
+			CombatSystem.OnClientAttackRequest(player, battleId, attackerModel, targetModel, attackType)
+		end)
+		DebugLog("[V4.0] RequestAttack事件监听已绑定")
+	else
+		WarnLog("[V4.0] 未找到RequestAttack事件")
+	end
+
+	-- 监听客户端位置上报（用于防作弊校验）
+	local reportPositionEvent = clientAIEvents:FindFirstChild("ReportUnitPosition")
+	if reportPositionEvent then
+		reportPositionEvent.OnServerEvent:Connect(function(player, battleId, unitModel, position, state)
+			CombatSystem.OnClientPositionReport(player, battleId, unitModel, position, state)
+		end)
+		DebugLog("[V4.0] ReportUnitPosition事件监听已绑定")
+	else
+		WarnLog("[V4.0] 未找到ReportUnitPosition事件")
+	end
+end
+
+--[[
+处理客户端攻击请求（V4.0核心接口）
+@param player Player - 发起请求的玩家
+@param battleId number - 战斗ID
+@param attackerModel Model - 攻击者模型
+@param targetModel Model - 目标模型
+@param attackType string - 攻击类型（"Melee"或"Ranged"）
+]]
+function CombatSystem.OnClientAttackRequest(player, battleId, attackerModel, targetModel, attackType)
+	-- 参数验证
+	if not player or not battleId or not attackerModel or not targetModel or not attackType then
+		WarnLog("[V4.0] 客户端攻击请求参数无效")
+		return
+	end
+
+	-- V4.0修复：客户端和服务端的模型引用不同，需要通过名字查找
+	-- 先尝试直接引用
+	local attackerState = unitStates[attackerModel]
+
+	-- 如果直接引用失败，通过名字和BattleId查找
+	if not attackerState then
+		print(string.format("[V4.0调试] 直接引用失败，尝试名字匹配: %s (BattleId=%s)", attackerModel.Name, tostring(battleId)))
+		for model, state in pairs(unitStates) do
+			print(string.format("[V4.0调试] 比较: 客户端=%s, 服务端=%s, BattleId匹配=%s",
+				attackerModel.Name, model.Name, tostring(state.BattleId == battleId)))
+			if model.Name == attackerModel.Name and state.BattleId == battleId then
+				attackerState = state
+				attackerModel = model  -- 更新为服务端的引用
+				print(string.format("[V4.0] 通过名字找到攻击者: %s", attackerModel.Name))
+				break
+			end
+		end
+	end
+
+	if not attackerState then
+		-- 统计unitStates数量
+		local totalCount = 0
+		for _ in pairs(unitStates) do
+			totalCount = totalCount + 1
+		end
+
+		-- 调试：列出所有已初始化的单位名字
+		local unitNames = {}
+		for model, state in pairs(unitStates) do
+			table.insert(unitNames, string.format("%s(B%d)", model.Name, state.BattleId))
+		end
+
+		WarnLog(string.format("[V4.0] 攻击者未初始化: %s (BattleId=%s, 当前unitStates数量=%d, 已有单位=[%s])",
+			attackerModel.Name, tostring(battleId), totalCount, table.concat(unitNames, ", ")))
+		return
+	end
+
+	if not attackerState.IsAlive then
+		DebugLog("[V4.0] 攻击者已死亡，拒绝攻击请求")
+		return
+	end
+
+	-- V4.0修复：同样需要为目标模型查找服务端引用
+	local targetState = unitStates[targetModel]
+	if not targetState then
+		for model, state in pairs(unitStates) do
+			if model.Name == targetModel.Name and state.BattleId == battleId then
+				targetState = state
+				targetModel = model  -- 更新为服务端的引用
+				DebugLog(string.format("[V4.0] 通过名字找到目标: %s", targetModel.Name))
+				break
+			end
+		end
+	end
+
+	-- 验证目标状态
+	if not targetState or not targetState.IsAlive then
+		print("[V4.0调试] 目标已死亡或不存在，拒绝攻击请求")
+		return
+	end
+
+	-- 验证攻击阶段（必须是Idle才能攻击）
+	if attackerState.AttackPhase ~= BattleConfig.AttackPhase.IDLE then
+		print(string.format("[V4.0调试] 攻击者 %s 不在Idle阶段(当前:%s)，拒绝攻击请求",
+			attackerModel.Name, tostring(attackerState.AttackPhase)))
+		return
+	end
+
+	-- 验证距离（防作弊）
+	local attackerRoot = attackerModel:FindFirstChild("HumanoidRootPart")
+	local targetRoot = targetModel:FindFirstChild("HumanoidRootPart")
+	if not attackerRoot or not targetRoot then
+		WarnLog("[V4.0] 攻击者或目标缺少HumanoidRootPart")
+		return
+	end
+
+	local distance = (attackerRoot.Position - targetRoot.Position).Magnitude
+	local maxValidDistance = attackerState.AttackRange * 1.5  -- 允许1.5倍容差
+
+	if distance > maxValidDistance then
+		print(string.format("[V4.0调试] 攻击距离校验失败: %.1f > %.1f (攻击者:%s)",
+			distance, maxValidDistance, attackerModel.Name))
+		return
+	end
+
+	-- 验证队伍（不能攻击友军）
+	if targetState.Team == attackerState.Team then
+		WarnLog("[V4.0] 不能攻击友军")
+		return
+	end
+
+	-- 校验通过，执行攻击
+	print(string.format("[V4.0调试] 客户端攻击请求通过: %s -> %s (距离:%.1f)",
+		attackerModel.Name, targetModel.Name, distance))
+
+	-- 进入Attacking阶段
+	if not CombatSystem.BeginAttack(attackerModel, targetModel) then
+		WarnLog("[V4.0] BeginAttack失败")
+		return
+	end
+
+	-- 设置当前目标
+	CombatSystem.SetTarget(attackerModel, targetModel)
+
+	-- 根据攻击类型执行伤害判定
+	if attackType == "Melee" then
+		-- 近战攻击：立即执行伤害判定
+		CombatSystem.OnDamageEvent(attackerModel)
+	elseif attackType == "Ranged" then
+		-- 远程攻击：发射子弹
+		CombatSystem.OnRangedDamageEvent(attackerModel, targetModel)
+	else
+		WarnLog("[V4.0] 未知的攻击类型:", attackType)
+	end
+end
+
+--[[
+处理客户端位置上报（V4.0防作弊）
+@param player Player - 发起请求的玩家
+@param battleId number - 战斗ID
+@param unitModel Model - 单位模型
+@param position Vector3 - 客户端报告的位置
+@param state string - 客户端报告的AI状态
+]]
+function CombatSystem.OnClientPositionReport(player, battleId, unitModel, position, state)
+	-- 简单的位置校验（可选）
+	-- 这里可以添加更复杂的防作弊逻辑
+	-- 例如：检查位置变化速度是否合理、是否穿墙等
+
+	-- 当前实现：仅记录日志，不做强制校验
+	-- 如果需要强制同步，可以在这里调用SyncUnitPosition事件
+
+	-- 示例：检查位置偏差
+	if unitModel and unitModel.Parent then
+		local rootPart = unitModel:FindFirstChild("HumanoidRootPart")
+		if rootPart then
+			local serverPos = rootPart.Position
+			local distance = (serverPos - position).Magnitude
+
+			-- 如果偏差过大，记录警告
+			if distance > (BattleConfig.POSITION_VALIDATION_TOLERANCE or 10) then
+				WarnLog(string.format("[V4.0] 位置偏差过大: %s (%.1f studs, 玩家:%s)",
+					unitModel.Name, distance, player.Name))
+
+				-- 可选：强制同步位置到客户端
+				-- local clientAIEvents = ReplicatedStorage:FindFirstChild("Events"):FindFirstChild("ClientAIEvents")
+				-- if clientAIEvents then
+				-- 	local syncEvent = clientAIEvents:FindFirstChild("SyncUnitPosition")
+				-- 	if syncEvent then
+				-- 		syncEvent:FireClient(player, battleId, unitModel, serverPos)
+				-- 	end
+				-- end
+			end
+		end
+	end
 end
 
 return CombatSystem

@@ -503,8 +503,8 @@ local function updateCamera()
 	-- currentOffset = currentOffset:Lerp(targetOffset, MODE_TRANSITION_SPEED)
 
 	-- V2.10修改：使用currentOffset代替固定的CAMERA_OFFSET
-	local dynamicZoom = math.min(count * DYNAMIC_ZOOM_PER_UNIT, DYNAMIC_ZOOM_MAX)
-	local offset = currentOffset + Vector3.new(0, dynamicZoom, dynamicZoom)
+	-- V4.0修改：禁用动态缩放，直接使用配置的偏移量
+	local offset = currentOffset
 	local targetPosition = center + offset
 	local targetCFrame = CFrame.new(targetPosition, center)
 
