@@ -238,9 +238,10 @@ local function UpdateSeekingState(aiData, deltaTime)
 		return
 	end
 
-	-- 检查目标是否死亡
+	-- 检查目标是否死亡（V4.1增强：同时检查IsDead属性作为兜底）
 	local targetHumanoid = aiData.CurrentTarget:FindFirstChild("Humanoid")
-	if not targetHumanoid or targetHumanoid.Health <= 0 then
+	local targetIsDead = aiData.CurrentTarget:GetAttribute("IsDead")
+	if not targetHumanoid or targetHumanoid.Health <= 0 or targetIsDead then
 		aiData.State = AIState.IDLE
 		aiData.CurrentTarget = nil
 		return
@@ -278,9 +279,10 @@ local function UpdateMovingState(aiData, deltaTime)
 		return
 	end
 
-	-- 检查目标是否死亡
+	-- 检查目标是否死亡（V4.1增强：同时检查IsDead属性作为兜底）
 	local targetHumanoid = aiData.CurrentTarget:FindFirstChild("Humanoid")
-	if not targetHumanoid or targetHumanoid.Health <= 0 then
+	local targetIsDead = aiData.CurrentTarget:GetAttribute("IsDead")
+	if not targetHumanoid or targetHumanoid.Health <= 0 or targetIsDead then
 		aiData.State = AIState.IDLE
 		aiData.CurrentTarget = nil
 		ClientPathService.StopMovement(aiData.UnitModel)
@@ -328,9 +330,10 @@ local function UpdateAttackingState(aiData, deltaTime)
 		return
 	end
 
-	-- 检查目标是否死亡
+	-- 检查目标是否死亡（V4.1增强：同时检查IsDead属性作为兜底）
 	local targetHumanoid = aiData.CurrentTarget:FindFirstChild("Humanoid")
-	if not targetHumanoid or targetHumanoid.Health <= 0 then
+	local targetIsDead = aiData.CurrentTarget:GetAttribute("IsDead")
+	if not targetHumanoid or targetHumanoid.Health <= 0 or targetIsDead then
 		aiData.State = AIState.IDLE
 		aiData.CurrentTarget = nil
 		aiData.IsAttacking = false

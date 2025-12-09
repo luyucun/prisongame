@@ -694,6 +694,12 @@ function CombatSystem.TakeDamage(unitModel, damage, attacker)
 	-- 扣除血量
 	state.CurrentHealth = state.CurrentHealth - damage
 
+	-- V4.1修复：同步血量到Humanoid.Health，让客户端AI能正确判断目标死亡
+	local humanoid = unitModel:FindFirstChild("Humanoid")
+	if humanoid then
+		humanoid.Health = math.max(0, state.CurrentHealth)
+	end
+
 	DebugLog(string.format("%s受到%d伤害, 剩余HP:%d/%d",
 		state.UnitId, damage, state.CurrentHealth, state.MaxHealth))
 
@@ -805,6 +811,16 @@ function CombatSystem.KillUnit(unitModel, killer)
 	state.State = BattleConfig.AIState.DEAD
 	state.CurrentHealth = 0
 	state.AttackPhase = BattleConfig.AttackPhase.IDLE
+
+	-- V4.1修复：设置Humanoid.Health=0，让客户端AI立即识别死亡
+	-- 同时设置IsDead属性作为防御性兜底
+	local humanoid = unitModel:FindFirstChild("Humanoid")
+	if humanoid then
+		-- 防止Roblox默认死亡行为干扰自定义死亡流程
+		humanoid.BreakJointsOnDeath = false
+		humanoid.Health = 0
+	end
+	unitModel:SetAttribute("IsDead", true)
 
 	DebugLog(string.format("%s [%s] 已死亡", state.UnitId, state.Team))
 
@@ -1444,34 +1460,16 @@ function CombatSystem.OnClientAttackRequest(player, battleId, attackerModel, tar
 
 	-- 如果直接引用失败，通过名字和BattleId查找
 	if not attackerState then
-		print(string.format("[V4.0调试] 直接引用失败，尝试名字匹配: %s (BattleId=%s)", attackerModel.Name, tostring(battleId)))
 		for model, state in pairs(unitStates) do
-			print(string.format("[V4.0调试] 比较: 客户端=%s, 服务端=%s, BattleId匹配=%s",
-				attackerModel.Name, model.Name, tostring(state.BattleId == battleId)))
 			if model.Name == attackerModel.Name and state.BattleId == battleId then
 				attackerState = state
 				attackerModel = model  -- 更新为服务端的引用
-				print(string.format("[V4.0] 通过名字找到攻击者: %s", attackerModel.Name))
 				break
 			end
 		end
 	end
 
 	if not attackerState then
-		-- 统计unitStates数量
-		local totalCount = 0
-		for _ in pairs(unitStates) do
-			totalCount = totalCount + 1
-		end
-
-		-- 调试：列出所有已初始化的单位名字
-		local unitNames = {}
-		for model, state in pairs(unitStates) do
-			table.insert(unitNames, string.format("%s(B%d)", model.Name, state.BattleId))
-		end
-
-		WarnLog(string.format("[V4.0] 攻击者未初始化: %s (BattleId=%s, 当前unitStates数量=%d, 已有单位=[%s])",
-			attackerModel.Name, tostring(battleId), totalCount, table.concat(unitNames, ", ")))
 		return
 	end
 
@@ -1495,14 +1493,11 @@ function CombatSystem.OnClientAttackRequest(player, battleId, attackerModel, tar
 
 	-- 验证目标状态
 	if not targetState or not targetState.IsAlive then
-		print("[V4.0调试] 目标已死亡或不存在，拒绝攻击请求")
 		return
 	end
 
 	-- 验证攻击阶段（必须是Idle才能攻击）
 	if attackerState.AttackPhase ~= BattleConfig.AttackPhase.IDLE then
-		print(string.format("[V4.0调试] 攻击者 %s 不在Idle阶段(当前:%s)，拒绝攻击请求",
-			attackerModel.Name, tostring(attackerState.AttackPhase)))
 		return
 	end
 
@@ -1518,8 +1513,6 @@ function CombatSystem.OnClientAttackRequest(player, battleId, attackerModel, tar
 	local maxValidDistance = attackerState.AttackRange * 1.5  -- 允许1.5倍容差
 
 	if distance > maxValidDistance then
-		print(string.format("[V4.0调试] 攻击距离校验失败: %.1f > %.1f (攻击者:%s)",
-			distance, maxValidDistance, attackerModel.Name))
 		return
 	end
 
@@ -1530,8 +1523,6 @@ function CombatSystem.OnClientAttackRequest(player, battleId, attackerModel, tar
 	end
 
 	-- 校验通过，执行攻击
-	print(string.format("[V4.0调试] 客户端攻击请求通过: %s -> %s (距离:%.1f)",
-		attackerModel.Name, targetModel.Name, distance))
 
 	-- 进入Attacking阶段
 	if not CombatSystem.BeginAttack(attackerModel, targetModel) then

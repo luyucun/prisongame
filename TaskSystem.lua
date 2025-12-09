@@ -23,6 +23,7 @@ local TaskConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild
 -- 延迟加载系统模块（避免循环依赖）
 local CurrencySystem = nil
 local DataManager = nil
+local SoundSystem = nil
 
 -- 事件引用
 local TaskEvents = nil
@@ -56,6 +57,14 @@ local function InitializeDependencies()
             warn("[TaskSystem] DataManager模块未找到")
             return false
         end
+    end
+
+    if not SoundSystem then
+        local soundModule = ServerScriptService.Systems:FindFirstChild("SoundSystem")
+        if soundModule then
+            SoundSystem = require(soundModule)
+        end
+        -- SoundSystem是可选的，不影响任务系统核心功能
     end
 
     return true
@@ -372,6 +381,11 @@ local function OnClaimTaskReward(player)
         local rewardCoins = taskConfig.RewardCoins
         if CurrencySystem then
             CurrencySystem.AddCoins(player, rewardCoins, "任务奖励: " .. taskConfig.Description)
+        end
+
+        -- 播放领取奖励音效
+        if SoundSystem then
+            SoundSystem.OnClaimTaskReward(player)
         end
 
         -- 记录已完成的任务
