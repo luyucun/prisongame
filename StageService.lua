@@ -646,21 +646,34 @@ function StageService.LoadEnemyData(stageFolder, stageNum)
 				warn("[StageService] 更新等级显示失败，unitId=" .. tostring(enemyData.UnitId) .. ", level=" .. tostring(level))
 			end
 
+			-- 添加到场景（先添加，让物理系统生效）
+			unitModel.Parent = idleFloorEnemy
+
 			-- V2.0修复：提前生成敌人但关闭碰撞，避免阻挡我方行军
-			-- 初始状态：锚定+关闭碰撞（仅用于展示）
-			-- 在StartStageBattle时会恢复碰撞并启动AI
+			-- 初始状态：先不锚定，让角色自然掉落到地面
+			-- 修复：先让角色掉落到地面，然后再锚定
 			for _, descendant in ipairs(unitModel:GetDescendants()) do
 				if descendant:IsA("BasePart") then
-					descendant.Anchored = true  -- 锚定，防止掉落
-					descendant.CanCollide = false  -- 关闭碰撞，不阻挡行军
+					descendant.Anchored = false  -- 先不锚定，让角色掉落
+					descendant.CanCollide = true  -- 临时开启碰撞，让角色能站在地面上
 				end
 			end
 
+			-- 等待0.5秒让角色掉落到地面并稳定
+			task.delay(0.5, function()
+				if unitModel and unitModel.Parent then
+					-- 掉落稳定后，锚定并关闭碰撞
+					for _, descendant in ipairs(unitModel:GetDescendants()) do
+						if descendant:IsA("BasePart") then
+							descendant.Anchored = true  -- 锚定，防止被推动
+							descendant.CanCollide = false  -- 关闭碰撞，不阻挡行军
+						end
+					end
+				end
+			end)
+
 			-- 标记为未激活状态（需要在战斗开始时激活）
 			unitModel:SetAttribute("IsActivated", false)
-
-			-- 添加到场景
-			unitModel.Parent = idleFloorEnemy
 
 			return unitModel
 		end)

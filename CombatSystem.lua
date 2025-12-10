@@ -841,6 +841,11 @@ function CombatSystem.KillUnit(unitModel, killer)
 		humanoid.WalkSpeed = 0
 		humanoid.JumpPower = 0
 		humanoid.AutoRotate = false
+		-- 强制设置为Physics状态，让角色像布娃娃一样倒下，防止飞天
+		humanoid.PlatformStand = true
+		pcall(function()
+			humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+		end)
 	end
 
 	-- 步骤4：禁用碰撞 + 清零速度（在SetNetworkOwner之后再做一遍兜底）
@@ -849,39 +854,57 @@ function CombatSystem.KillUnit(unitModel, killer)
 		rootPart.AssemblyAngularVelocity = Vector3.zero
 	end
 
+	-- 禁用除HumanoidRootPart外的所有部件碰撞，保留HRP碰撞让角色能倒在地上
 	for _, part in ipairs(unitModel:GetDescendants()) do
-		if part:IsA("BasePart") then
+		if part:IsA("BasePart") and part ~= rootPart then
 			part.CanCollide = false
 		end
 	end
 
-	-- 步骤5：压回地面 - 做一次向下Raycast，将尸体放到地面上
+	-- HumanoidRootPart保持碰撞开启，让角色能正常倒在地面上
 	if rootPart then
-		local rayOrigin = rootPart.Position
-		local rayDirection = Vector3.new(0, -100, 0)
-		local rayParams = RaycastParams.new()
-		rayParams.FilterType = Enum.RaycastFilterType.Exclude
-		rayParams.FilterDescendantsInstances = {unitModel}
+		rootPart.CanCollide = true
+	end
 
-		local rayResult = workspace:Raycast(rayOrigin, rayDirection, rayParams)
-		if rayResult then
-			-- 将HRP放到地面上
-			-- HumanoidRootPart的中心点在角色腰部，需要加上到脚底的距离
-			-- 通常角色高度约5-6 studs，HRP在腰部，到脚底约2.5-3 studs
-			local hipHeight = humanoid and humanoid.HipHeight or 0
-			local groundY = rayResult.Position.Y + hipHeight + rootPart.Size.Y / 2
-			local currentPos = rootPart.Position
-			-- 保持朝向不变，只修改Y坐标
-			rootPart.CFrame = CFrame.new(currentPos.X, groundY, currentPos.Z) * CFrame.Angles(0, math.rad(rootPart.Orientation.Y), 0)
-		end
-		-- 若未命中地面，保持原位
-
-		-- 再次清零速度（压回地面后兜底）
+	-- 步骤5：清零速度，让角色自然倒地
+	if rootPart then
+		-- 清零速度，防止残余推力
 		rootPart.AssemblyLinearVelocity = Vector3.zero
 		rootPart.AssemblyAngularVelocity = Vector3.zero
 
-		-- 步骤6：立即锚定，防止被推动
-		rootPart.Anchored = true
+		-- 不锚定，让死亡动画能正常播放（角色倒地）
+		-- 死亡动画会让角色自然倒在地上
+		rootPart.Anchored = false
+
+		-- 步骤6：持续监控速度，防止死亡动画或其他因素导致飞天
+		-- 在死亡后的前1秒内，每0.1秒检查一次速度，如果向上速度过大就清零
+		local velocityCheckCount = 0
+		local maxChecks = 10  -- 检查10次（1秒）
+		local checkInterval = 0.1
+
+		local function checkVelocity()
+			velocityCheckCount = velocityCheckCount + 1
+			if velocityCheckCount > maxChecks then
+				return  -- 停止检查
+			end
+
+			if not unitModel or not unitModel.Parent or not rootPart or not rootPart.Parent then
+				return  -- 单位已被移除
+			end
+
+			-- 检查向上速度，如果Y轴速度大于5就清零（防止飞天）
+			local velocity = rootPart.AssemblyLinearVelocity
+			if velocity.Y > 5 or velocity.Y < -20 then
+				rootPart.AssemblyLinearVelocity = Vector3.new(velocity.X * 0.5, 0, velocity.Z * 0.5)
+				rootPart.AssemblyAngularVelocity = Vector3.zero
+			end
+
+			-- 继续下一次检查
+			task.delay(checkInterval, checkVelocity)
+		end
+
+		-- 开始第一次检查
+		task.delay(checkInterval, checkVelocity)
 	end
 
 	unitModel:SetAttribute("IsDead", true)
