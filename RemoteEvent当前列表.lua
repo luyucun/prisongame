@@ -86,6 +86,9 @@ ReplicatedStorage
         ├──StopBGM（RemoteEvent） - 服务器→客户端：停止BGM
         ├──PlaySFX（RemoteEvent） - 服务器→客户端：播放一次性音效(sfxKey)
         └──StopSFX（RemoteEvent） - 服务器→客户端：停止一次性音效(sfxKey)
+    └──HouseUpgradeEvents（Folder）/  【V3.9新增】
+        ├──StartUpgradeSequence（RemoteEvent） - 服务器→客户端：开始房屋升级镜头表现(homeSlot)
+        └──ClientCameraReady（RemoteEvent） - 客户端→服务器：镜头就位通知
     └──ClientAIEvents（Folder）/  【V4.0新增 - 客户端AI迁移】
         ├──InitializeBattle（RemoteEvent） - 服务器→客户端：初始化战斗(battleId, attackUnits, defenseUnits, battleField)
         ├──SyncUnitPosition（RemoteEvent） - 服务器→客户端：同步单位位置(battleId, unitModel, position)
@@ -877,3 +880,74 @@ CampaignStateUpdate事件变更（V3.6）：
 
 6. 回滚方案：
    如果客户端AI出现问题，可以通过设置 BattleConfig.ENABLE_CLIENT_AI = false 快速回退到服务端AI模式
+
+
+【V3.9房屋升级镜头表现系统RemoteEvent创建说明】
+位置：ReplicatedStorage/Events/HouseUpgradeEvents/ （新建文件夹）
+🆕 StartUpgradeSequence (RemoteEvent) - 需在Studio中手动创建（或由服务端自动创建）
+🆕 ClientCameraReady (RemoteEvent) - 需在Studio中手动创建（或由服务端自动创建）
+
+创建步骤：
+1. 打开Roblox Studio
+2. 导航到 ReplicatedStorage > Events
+3. 右键点击 Events 文件夹
+4. 选择 "Insert Object" > "Folder"
+5. 将新建的 Folder 重命名为 "HouseUpgradeEvents"
+6. 右键点击 HouseUpgradeEvents 文件夹
+7. 选择 "Insert Object" > "RemoteEvent"
+8. 将新建的 RemoteEvent 重命名为 "StartUpgradeSequence"
+9. 重复步骤7-8，创建 "ClientCameraReady"
+10. 保存游戏
+
+功能说明：
+- StartUpgradeSequence：服务器→客户端：开始房屋升级镜头表现
+  参数：(homeSlot: number) 玩家基地编号(1-6)
+  触发时机：玩家通关章节后点击胜利弹窗确认，重生在基地时
+
+- ClientCameraReady：客户端→服务器：镜头就位通知
+  参数：无（服务器根据玩家身份处理）
+  触发时机：客户端镜头移动到位后通知服务端可以替换房屋
+
+注意：服务端HouseUpgradeSystem.lua会在初始化时自动创建这些事件（如果不存在），
+但建议手动创建以确保事件在系统初始化前就存在。
+
+
+【V3.9房屋升级镜头表现系统其他资源创建说明】
+
+1. 服务端系统位置：ServerScriptService/Systems/HouseUpgradeSystem
+   - V3.9新增：ReplaceHouseModelWithCinematic() 带镜头表现的房屋升级
+   - V3.9修改：OnChapterCompleted() 支持useCinematic参数
+
+2. 客户端控制器位置：StarterPlayer/StarterPlayerScripts/Controllers/HouseUpgradeCameraController
+   - 负责接收服务端通知并控制镜头表现
+   - 自动初始化，无需手动调用
+
+3. 房屋升级表现流程：
+   阶段1：玩家通关章节后点击胜利弹窗确认
+   阶段2：玩家重生在基地（传送到SpawnLocation）
+   阶段3：服务端通知客户端开始镜头表现（StartUpgradeSequence）
+   阶段4：客户端镜头拉高看向房屋（1秒Tween动画）
+   阶段5：等待1秒（让玩家看清楚旧房屋）
+   阶段6：服务端替换房屋（旧房屋消失，新房屋出现）
+   阶段7：等待1秒（让玩家看清楚新房屋）
+   阶段8：客户端恢复镜头控制
+
+4. 镜头参数配置（在HouseUpgradeCameraController.lua中可调整）：
+   - CAMERA_HEIGHT = 30 studs（镜头高度）
+   - CAMERA_DISTANCE = 40 studs（镜头距离房屋的距离）
+   - CAMERA_ANGLE = 30度（镜头俯视角度）
+   - TWEEN_DURATION = 1.0秒（镜头移动时长）
+   - WAIT_BEFORE_REPLACE = 1.0秒（房屋替换前等待时间）
+   - WAIT_AFTER_REPLACE = 1.0秒（房屋替换后等待时间）
+
+5. 与现有系统的集成：
+   - CampaignManager.OnVictory()：通关章节时标记PendingHouseUpgrade
+   - CampaignManager.CompleteCampaignEnd()：玩家确认后触发房屋升级表现
+   - HouseUpgradeSystem.OnChapterCompleted()：执行房屋升级逻辑
+   - 房屋模板路径：ReplicatedStorage/House/PrisonLv1, PrisonLv2...
+
+6. 注意事项：
+   - 房屋升级只在通关章节且满足升级条件时触发
+   - 镜头表现期间玩家无法控制镜头
+   - 房屋替换保持底部中心位置对齐
+   - 支持关闭镜头表现（useCinematic=false）用于调试

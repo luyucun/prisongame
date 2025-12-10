@@ -1790,15 +1790,12 @@ function CampaignManager.OnVictory(campaignData)
 			-- 保存数据
 			DataManager.SavePlayerDataThrottled(player, true)  -- 强制保存
 
-			-- V2.8: 触发房屋升级检查
-			local HouseUpgradeSystem = nil
-			pcall(function()
-				HouseUpgradeSystem = require(SystemsFolder:WaitForChild("HouseUpgradeSystem"))
-			end)
-
-			if HouseUpgradeSystem then
-				HouseUpgradeSystem.OnChapterCompleted(player, currentChapter)
-			end
+			-- V3.9修改: 将房屋升级标记保存到campaignData，在CompleteCampaignEnd中执行
+			-- 这样可以在玩家点击确认按钮后、重生在基地时触发镜头表现
+			campaignData.PendingHouseUpgrade = {
+				chapterId = currentChapter,
+				shouldUpgrade = true
+			}
 		end
 	end
 
@@ -1937,8 +1934,45 @@ function CampaignManager.CompleteCampaignEnd(campaignData)
 
 	-- =================================================================
 
-	-- 传送玩家回出生点
+	-- V3.9修改: 如果需要房屋升级，先启动镜头表现，再传送玩家
 	local player = campaignData.Player
+	local shouldUpgradeHouse = campaignData.PendingHouseUpgrade and campaignData.PendingHouseUpgrade.shouldUpgrade
+
+	if shouldUpgradeHouse then
+		DebugLog(string.format("✅ 检测到待处理的房屋升级，立即启动镜头表现..."))
+
+		-- 立即通知客户端锁定镜头（在传送之前）
+		local HouseUpgradeSystem = nil
+		pcall(function()
+			HouseUpgradeSystem = require(SystemsFolder:WaitForChild("HouseUpgradeSystem"))
+		end)
+
+		if HouseUpgradeSystem then
+			local homeSlot = DataManager.GetPlayerHomeSlot(player)
+			if homeSlot and homeSlot > 0 then
+				-- 类型断言：此时homeSlot一定不为nil且不为0
+				local validHomeSlot = homeSlot :: number
+
+				-- 立即通知客户端开始镜头表现（不等待）
+				local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
+				if eventsFolder then
+					local houseUpgradeEvents = eventsFolder:FindFirstChild("HouseUpgradeEvents")
+					if houseUpgradeEvents then
+						local startEvent = houseUpgradeEvents:FindFirstChild("StartUpgradeSequence")
+						if startEvent then
+							startEvent:FireClient(player, validHomeSlot)
+							DebugLog(string.format("✅ 已通知客户端立即锁定镜头，HomeSlot=%d", validHomeSlot))
+						end
+					end
+				end
+			end
+		end
+
+		-- 等待一小段时间让客户端锁定镜头
+		task.wait(0.1)
+	end
+
+	-- 传送玩家回出生点
 	if player and player.Character then
 		local homeId = campaignData.HomeId
 		local homeFolder = Workspace.Home:FindFirstChild("PlayerHome" .. homeId)
@@ -1949,6 +1983,36 @@ function CampaignManager.CompleteCampaignEnd(campaignData)
 				player.Character.HumanoidRootPart.CFrame = spawnLocation.CFrame + Vector3.new(0, 5, 0)
 			end
 		end
+	end
+
+	-- V3.9新增: 如果需要房屋升级，等待镜头移动完成后再替换房屋
+	if shouldUpgradeHouse then
+		-- 等待镜头移动到位（1秒移动 + 1秒观看）
+		task.wait(2.0)
+
+		-- 执行房屋替换
+		local HouseUpgradeSystem = nil
+		pcall(function()
+			HouseUpgradeSystem = require(SystemsFolder:WaitForChild("HouseUpgradeSystem"))
+		end)
+
+		if HouseUpgradeSystem then
+			local chapterId = campaignData.PendingHouseUpgrade.chapterId
+			DebugLog(string.format("✅ 开始替换房屋，章节=%d", chapterId))
+
+			-- 直接调用房屋替换（不再需要镜头表现，因为已经在上面处理了）
+			local completedChapters = DataManager.GetCompletedChapters(player)
+			local currentHouseModel = DataManager.GetCurrentHouseModel(player)
+			local shouldUpgrade, newModelName = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("HouseConfig")).ShouldUpgradeHouse(currentHouseModel, completedChapters)
+
+			if shouldUpgrade then
+				HouseUpgradeSystem.ReplaceHouseModel(player, newModelName)
+				DebugLog(string.format("✅ 房屋替换完成: %s", newModelName))
+			end
+		end
+
+		-- 清除标记
+		campaignData.PendingHouseUpgrade = nil
 	end
 
 	-- 关闭家园大门

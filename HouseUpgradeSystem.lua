@@ -2,7 +2,7 @@
 脚本名称: HouseUpgradeSystem
 脚本类型: ModuleScript (服务端系统)
 脚本位置: ServerScriptService/Systems/HouseUpgradeSystem
-版本: V2.8.1
+版本: V3.9
 ]]
 
 --[[
@@ -11,12 +11,23 @@
 1. 根据通关章节替换房屋模型
 2. 保持House文件夹结构不变，只替换里面的模型
 3. 协调DataManager保存房屋状态
+4. V3.9新增：房屋升级镜头表现控制
 
 结构说明：
 - Workspace/Home/PlayerHomeX/House (Folder) - 这是房屋文件夹，保持不变
 - Workspace/Home/PlayerHomeX/House/PrisonLv1 (Model) - 这是房屋模型，需要替换
 - ReplicatedStorage/House/PrisonLv1 (Model) - 房屋模板
 - ReplicatedStorage/House/PrisonLv2 (Model) - 升级后的房屋模板
+
+V3.9房屋升级表现流程：
+1. 玩家通关章节后点击胜利弹窗确认
+2. 玩家重生在基地
+3. 服务端通知客户端开始镜头表现
+4. 客户端镜头拉高看向房屋（1秒）
+5. 等待1秒
+6. 服务端替换房屋（旧房屋消失，新房屋出现）
+7. 等待1秒
+8. 客户端恢复镜头控制
 ]]
 
 local HouseUpgradeSystem = {}
@@ -35,6 +46,54 @@ local GameConfig
 -- 初始化标记
 local isInitialized = false
 
+-- RemoteEvent引用
+local HouseUpgradeEvents = nil
+
+--[[
+初始化RemoteEvent（V3.9新增）
+]]
+local function InitializeEvents()
+	if HouseUpgradeEvents then
+		return true
+	end
+
+	local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
+	if not eventsFolder then
+		warn("[HouseUpgradeSystem] Events文件夹不存在")
+		return false
+	end
+
+	-- 查找或创建HouseUpgradeEvents文件夹
+	local houseUpgradeFolder = eventsFolder:FindFirstChild("HouseUpgradeEvents")
+	if not houseUpgradeFolder then
+		houseUpgradeFolder = Instance.new("Folder")
+		houseUpgradeFolder.Name = "HouseUpgradeEvents"
+		houseUpgradeFolder.Parent = eventsFolder
+		print("[HouseUpgradeSystem] 已创建HouseUpgradeEvents文件夹")
+	end
+
+	-- 创建StartUpgradeSequence事件（服务端→客户端：开始升级表现）
+	local startEvent = houseUpgradeFolder:FindFirstChild("StartUpgradeSequence")
+	if not startEvent then
+		startEvent = Instance.new("RemoteEvent")
+		startEvent.Name = "StartUpgradeSequence"
+		startEvent.Parent = houseUpgradeFolder
+		print("[HouseUpgradeSystem] 已创建StartUpgradeSequence事件")
+	end
+
+	-- 创建ClientCameraReady事件（客户端→服务端：镜头就位）
+	local readyEvent = houseUpgradeFolder:FindFirstChild("ClientCameraReady")
+	if not readyEvent then
+		readyEvent = Instance.new("RemoteEvent")
+		readyEvent.Name = "ClientCameraReady"
+		readyEvent.Parent = houseUpgradeFolder
+		print("[HouseUpgradeSystem] 已创建ClientCameraReady事件")
+	end
+
+	HouseUpgradeEvents = houseUpgradeFolder
+	return true
+end
+
 --[[
 初始化系统（延迟加载依赖模块）
 ]]
@@ -44,6 +103,9 @@ local function EnsureInitialized()
 	DataManager = require(ServerScriptService:WaitForChild("Core"):WaitForChild("DataManager"))
 	HouseConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("HouseConfig"))
 	GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
+
+	-- 初始化RemoteEvent
+	InitializeEvents()
 
 	isInitialized = true
 end
@@ -266,29 +328,120 @@ function HouseUpgradeSystem.CheckAndUpgradeHouse(player)
 end
 
 --[[
-章节通关时触发的升级检查
+带镜头表现的房屋升级（V3.9新增）
 @param player Player - 玩家对象
-@param chapterId number - 通关的章节ID
+@param newModelName string - 新的房屋模型名称
+@return boolean - 是否升级成功
 ]]
-function HouseUpgradeSystem.OnChapterCompleted(player, chapterId)
+function HouseUpgradeSystem.ReplaceHouseModelWithCinematic(player, newModelName)
 	EnsureInitialized()
 
+	if not player then
+		warn("[HouseUpgradeSystem] ReplaceHouseModelWithCinematic: player为空")
+		return false
+	end
+
+	-- 获取玩家基地编号
+	local homeSlot = DataManager.GetPlayerHomeSlot(player)
+	if not homeSlot or homeSlot == 0 then
+		warn("[HouseUpgradeSystem] 玩家未分配基地")
+		return false
+	end
+
+	-- 类型断言：此时homeSlot一定不为nil且不为0
+	local validHomeSlot = homeSlot :: number
+
 	print(string.format(
-		"[HouseUpgradeSystem] 玩家 %s 通关章节 %d，检查房屋升级...",
+		"[HouseUpgradeSystem] 开始房屋升级镜头表现，玩家=%s, HomeSlot=%d, 新房屋=%s",
 		player.Name,
-		chapterId
+		validHomeSlot,
+		newModelName
+	))
+
+	-- 1. 通知客户端开始镜头表现
+	if InitializeEvents() then
+		local startEvent = HouseUpgradeEvents:FindFirstChild("StartUpgradeSequence")
+		if startEvent then
+			startEvent:FireClient(player, validHomeSlot)
+			print("[HouseUpgradeSystem] 已通知客户端开始镜头表现")
+		end
+	end
+
+	-- 2. 等待镜头移动到位（1秒移动 + 1秒等待）
+	task.wait(2.0)
+
+	-- 3. 执行房屋替换
+	print("[HouseUpgradeSystem] 开始替换房屋模型...")
+	local success = HouseUpgradeSystem.ReplaceHouseModel(player, newModelName)
+
+	if success then
+		print(string.format(
+			"[HouseUpgradeSystem] 房屋替换成功，等待镜头恢复..."
+		))
+		-- 4. 等待客户端恢复镜头（1秒观看新房屋 + 自动恢复）
+		-- 客户端会自动处理恢复，这里不需要额外等待
+	else
+		warn("[HouseUpgradeSystem] 房屋替换失败")
+	end
+
+	return success
+end
+
+--[[
+章节通关时触发的升级检查（V3.9修改：使用镜头表现）
+@param player Player - 玩家对象
+@param chapterId number - 通关的章节ID
+@param useCinematic boolean - 是否使用镜头表现（默认true）
+]]
+function HouseUpgradeSystem.OnChapterCompleted(player, chapterId, useCinematic)
+	EnsureInitialized()
+
+	if useCinematic == nil then
+		useCinematic = true  -- 默认使用镜头表现
+	end
+
+	print(string.format(
+		"[HouseUpgradeSystem] 玩家 %s 通关章节 %d，检查房屋升级... (镜头表现=%s)",
+		player.Name,
+		chapterId,
+		tostring(useCinematic)
 	))
 
 	-- 延迟一帧执行，确保数据已更新
 	task.defer(function()
-		local upgraded = HouseUpgradeSystem.CheckAndUpgradeHouse(player)
+		-- 获取玩家当前通关章节数
+		local completedChapters = DataManager.GetCompletedChapters(player)
 
-		if upgraded then
-			-- 可以在这里触发客户端特效或通知
+		-- 获取玩家当前房屋模型
+		local currentHouseModel = DataManager.GetCurrentHouseModel(player)
+
+		-- 判断是否需要升级
+		local shouldUpgrade, newModelName = HouseConfig.ShouldUpgradeHouse(currentHouseModel, completedChapters)
+
+		if shouldUpgrade then
 			print(string.format(
-				"[HouseUpgradeSystem] 玩家 %s 房屋升级成功！",
-				player.Name
+				"[HouseUpgradeSystem] 玩家 %s 满足升级条件: 当前房屋 %s -> 新房屋 %s (通关章节: %d)",
+				player.Name,
+				currentHouseModel,
+				newModelName,
+				completedChapters
 			))
+
+			local upgraded = false
+			if useCinematic then
+				-- V3.9新增：使用镜头表现的升级
+				upgraded = HouseUpgradeSystem.ReplaceHouseModelWithCinematic(player, newModelName)
+			else
+				-- 直接升级（无镜头表现）
+				upgraded = HouseUpgradeSystem.ReplaceHouseModel(player, newModelName)
+			end
+
+			if upgraded then
+				print(string.format(
+					"[HouseUpgradeSystem] 玩家 %s 房屋升级成功！",
+					player.Name
+				))
+			end
 		end
 	end)
 end
