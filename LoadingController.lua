@@ -415,6 +415,44 @@ local function PerformClientPreload()
 		end
 	end
 
+	-- 预加载Victory UI相关资源
+	local victoryGui = PlayerGui:FindFirstChild("Victory")
+	if victoryGui then
+		local informationFrame = victoryGui:FindFirstChild("Information")
+		if informationFrame then
+			-- 预加载棒球棍图片
+			for _, child in ipairs(informationFrame:GetChildren()) do
+				if child:IsA("ImageLabel") and child.Image and child.Image ~= "" then
+					table.insert(assetsToPreload, child.Image)
+					totalAssets = totalAssets + 1
+					DebugLog("收集Victory UI图片:", child.Name, child.Image)
+				end
+			end
+
+			-- 预加载Confirm按钮图片（如果有）
+			local confirmButton = informationFrame:FindFirstChild("Confirm")
+			if confirmButton and confirmButton:IsA("ImageButton") and confirmButton.Image and confirmButton.Image ~= "" then
+				table.insert(assetsToPreload, confirmButton.Image)
+				totalAssets = totalAssets + 1
+				DebugLog("收集Confirm按钮图片:", confirmButton.Image)
+			end
+		end
+
+		-- 预加载Effect Frame的资源（如果有）
+		local effectFrame = victoryGui:FindFirstChild("Effect")
+		if effectFrame then
+			for _, child in ipairs(effectFrame:GetDescendants()) do
+				if child:IsA("ImageLabel") and child.Image and child.Image ~= "" then
+					table.insert(assetsToPreload, child.Image)
+					totalAssets = totalAssets + 1
+				elseif child:IsA("ImageButton") and child.Image and child.Image ~= "" then
+					table.insert(assetsToPreload, child.Image)
+					totalAssets = totalAssets + 1
+				end
+			end
+		end
+	end
+
 	DebugLog("收集到", totalAssets, "个资源需要预加载")
 
 	if totalAssets == 0 then

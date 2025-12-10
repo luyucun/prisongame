@@ -141,86 +141,161 @@ local function InitializeUI()
 end
 
 --[[
-播放UI显示动画
+显示UI框架（无动画）
 @param frame Frame - 要显示的UI框架
-@param duration number - 动画时长（可选，默认0.3秒）
 ]]
-local function ShowFrameWithAnimation(frame, duration)
+local function ShowFrame(frame)
+    if frame then
+        frame.Visible = true
+    end
+end
+
+--[[
+隐藏UI框架（无动画）
+@param frame Frame - 要隐藏的UI框架
+]]
+local function HideFrame(frame)
+    if frame then
+        frame.Visible = false
+    end
+end
+
+--[[
+播放棒球棍敲击动画
+@param imageLabel ImageLabel - 棒球棍图片
+@param fromLeft boolean - 是否从左边飞入
+@param duration number - 动画时长
+]]
+local function PlayBatAnimation(imageLabel, fromLeft, duration)
+    if not imageLabel then return end
+
+    duration = duration or 0.4
+
+    -- 保存原始位置和旋转
+    local originalPosition = imageLabel.Position
+    local originalRotation = imageLabel.Rotation
+    local originalSize = imageLabel.Size
+
+    -- 设置初始状态：从屏幕外飞入
+    if fromLeft then
+        -- 左边棒球棍：从左上方飞入，顺时针旋转
+        imageLabel.Position = UDim2.new(-0.3, 0, -0.3, 0)
+        imageLabel.Rotation = -45
+    else
+        -- 右边棒球棍：从右上方飞入，逆时针旋转
+        imageLabel.Position = UDim2.new(1.3, 0, -0.3, 0)
+        imageLabel.Rotation = 45
+    end
+
+    imageLabel.Size = UDim2.new(originalSize.X.Scale * 0.8, 0, originalSize.Y.Scale * 0.8, 0)
+    imageLabel.Visible = true
+
+    -- 创建飞入动画（快速）
+    local flyIn = TweenService:Create(
+        imageLabel,
+        TweenInfo.new(duration * 0.6, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+        {
+            Position = originalPosition,
+            Rotation = originalRotation,
+            Size = originalSize
+        }
+    )
+
+    -- 创建轻微回弹效果
+    local bounce = TweenService:Create(
+        imageLabel,
+        TweenInfo.new(duration * 0.2, Enum.EasingStyle.Elastic, Enum.EasingDirection.Out),
+        {
+            Rotation = originalRotation
+        }
+    )
+
+    flyIn:Play()
+
+    -- 飞入完成后播放回弹
+    flyIn.Completed:Connect(function()
+        bounce:Play()
+    end)
+
+    return flyIn
+end
+
+--[[
+播放文本弹出动画
+@param textLabel TextLabel - 文本标签
+@param duration number - 动画时长
+]]
+local function PlayTextPopAnimation(textLabel, duration)
+    if not textLabel then return end
+
+    duration = duration or 0.5
+
+    -- 保存原始状态
+    local originalSize = textLabel.Size
+    local originalPosition = textLabel.Position
+
+    -- 设置初始状态：缩小且透明
+    textLabel.Size = UDim2.new(0, 0, 0, 0)
+    textLabel.Position = UDim2.new(0.5, 0, 0.5, 0) -- 从中心开始
+    textLabel.TextTransparency = 1
+    textLabel.TextStrokeTransparency = 1
+    textLabel.Visible = true
+
+    -- 创建弹出动画
+    local popOut = TweenService:Create(
+        textLabel,
+        TweenInfo.new(duration, Enum.EasingStyle.Elastic, Enum.EasingDirection.Out),
+        {
+            Size = originalSize,
+            Position = originalPosition,
+            TextTransparency = 0,
+            TextStrokeTransparency = 0
+        }
+    )
+
+    popOut:Play()
+    return popOut
+end
+
+--[[
+播放按钮淡入动画
+@param button GuiButton - 按钮对象
+@param duration number - 动画时长
+]]
+local function PlayButtonFadeIn(button, duration)
+    if not button then return end
+
     duration = duration or 0.3
 
-    -- 初始状态：透明且缩小
-    frame.BackgroundTransparency = 1
-    frame.Size = UDim2.new(0.8, 0, 0.8, 0) -- 稍小一些
-    frame.Position = UDim2.new(0.1, 0, 0.1, 0) -- 居中
-    frame.Visible = true
-
-    -- 创建淡入和放大动画
-    local fadeIn = TweenService:Create(
-        frame,
-        TweenInfo.new(duration, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
-        {
-            BackgroundTransparency = 0,
-            Size = UDim2.new(1, 0, 1, 0),
-            Position = UDim2.new(0, 0, 0, 0)
-        }
-    )
-
-    fadeIn:Play()
-    return fadeIn
-end
-
---[[
-播放UI隐藏动画
-@param frame Frame - 要隐藏的UI框架
-@param duration number - 动画时长（可选，默认0.2秒）
-]]
-local function HideFrameWithAnimation(frame, duration)
-    duration = duration or 0.2
-
-    local fadeOut = TweenService:Create(
-        frame,
-        TweenInfo.new(duration, Enum.EasingStyle.Quart, Enum.EasingDirection.In),
-        {
-            BackgroundTransparency = 1,
-            Size = UDim2.new(0.8, 0, 0.8, 0),
-            Position = UDim2.new(0.1, 0, 0.1, 0)
-        }
-    )
-
-    fadeOut:Play()
-
-    fadeOut.Completed:Connect(function()
-        frame.Visible = false
-    end)
-
-    return fadeOut
-end
-
---[[
-播放按钮点击效果
-@param button GuiButton - 按钮对象
-]]
-local function PlayButtonClickEffect(button)
+    -- 保存原始状态
     local originalSize = button.Size
 
-    -- 缩小效果
-    local shrink = TweenService:Create(
-        button,
-        TweenInfo.new(0.1, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
-        {Size = UDim2.new(originalSize.X.Scale * 0.95, 0, originalSize.Y.Scale * 0.95, 0)}
-    )
+    -- 设置初始状态
+    button.Size = UDim2.new(originalSize.X.Scale * 0.8, 0, originalSize.Y.Scale * 0.8, 0)
+    button.BackgroundTransparency = 1
 
-    -- 恢复效果
-    local expand = TweenService:Create(
-        button,
-        TweenInfo.new(0.1, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
-        {Size = originalSize}
-    )
+    -- 如果按钮有文本
+    if button:IsA("TextButton") then
+        button.TextTransparency = 1
+    end
 
-    shrink:Play()
-    shrink.Completed:Connect(function()
-        expand:Play()
-    end)
+    button.Visible = true
+
+    -- 创建淡入和放大动画
+    local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+    local goals = {
+        Size = originalSize,
+        BackgroundTransparency = 0
+    }
+
+    if button:IsA("TextButton") then
+        goals.TextTransparency = 0
+    end
+
+    local fadeIn = TweenService:Create(button, tweenInfo, goals)
+    fadeIn:Play()
+
+    return fadeIn
 end
 
 --[[
@@ -280,13 +355,58 @@ local function ShowVictoryUI(battleId, result, stageNum, extraRewards)
         end
     end)
 
-    -- 按顺序显示UI元素，创建层次感（移除Back Frame）
-    ShowFrameWithAnimation(effectFrame, 0.3)
+    -- 显示Information Frame（作为容器）
+    informationFrame.Visible = true
 
-    task.wait(0.2)
-    ShowFrameWithAnimation(informationFrame, 0.4)
+    -- 获取UI元素
+    local leftBat = informationFrame:FindFirstChild("ImageLabel") -- 左边棒球棍
+    local rightBat = nil
+    local victoryText = informationFrame:FindFirstChild("TextLabel")
 
-    DebugLog("胜利界面显示完成")
+    -- 查找右边的ImageLabel（第二个ImageLabel）
+    for _, child in ipairs(informationFrame:GetChildren()) do
+        if child:IsA("ImageLabel") and child ~= leftBat then
+            rightBat = child
+            break
+        end
+    end
+
+    -- 确保所有元素初始状态为隐藏
+    if leftBat then leftBat.Visible = false end
+    if rightBat then rightBat.Visible = false end
+    if victoryText then victoryText.Visible = false end
+    if confirmButton then confirmButton.Visible = false end
+
+    -- 播放动画序列
+    task.spawn(function()
+        -- 1. 左边棒球棍飞入（0.4秒）
+        if leftBat then
+            PlayBatAnimation(leftBat, true, 0.4)
+        end
+
+        task.wait(0.15) -- 短暂延迟
+
+        -- 2. 右边棒球棍飞入（0.4秒）
+        if rightBat then
+            PlayBatAnimation(rightBat, false, 0.4)
+        end
+
+        task.wait(0.3) -- 等待棒球棍动画接近完成
+
+        -- 3. VICTORY文本弹出（0.5秒）
+        if victoryText then
+            PlayTextPopAnimation(victoryText, 0.5)
+        end
+
+        task.wait(0.9) -- 等待文本动画完成后再延迟0.5秒
+
+        -- 4. Confirm按钮淡入（0.3秒）
+        if confirmButton then
+            PlayButtonFadeIn(confirmButton, 0.3)
+        end
+    end)
+
+    DebugLog("胜利界面动画开始播放")
 end
 
 --[[
@@ -299,11 +419,21 @@ local function HideVictoryUI()
 
     DebugLog("开始隐藏胜利界面")
 
-    -- 按相反顺序隐藏UI元素（移除Back Frame）
-    HideFrameWithAnimation(informationFrame, 0.2)
+    -- 隐藏所有子元素
+    if informationFrame then
+        -- 隐藏所有子元素
+        for _, child in ipairs(informationFrame:GetChildren()) do
+            if child:IsA("GuiObject") then
+                child.Visible = false
+            end
+        end
+        -- 隐藏容器
+        informationFrame.Visible = false
+    end
 
-    task.wait(0.1)
-    HideFrameWithAnimation(effectFrame, 0.2)
+    if effectFrame then
+        effectFrame.Visible = false
+    end
 
     isVictoryShowing = false
     currentBattleId = nil
@@ -325,9 +455,6 @@ local function OnConfirmButtonClick()
 
     DebugLog(string.format("玩家点击确认按钮，BattleId: %d (isCampaign: %s)", currentBattleId, tostring(isCampaign)))
 
-    -- 播放按钮点击效果
-    PlayButtonClickEffect(confirmButton)
-
     -- 发送确认事件到服务器
     local success, err = pcall(function()
         victoryConfirmEvent:FireServer(currentBattleId)
@@ -340,10 +467,8 @@ local function OnConfirmButtonClick()
             _G.BattleCameraController.Stop()
         end
 
-        -- 短暂延迟后隐藏UI
-        task.delay(0.3, function()
-            HideVictoryUI()
-        end)
+        -- 立即隐藏UI（无延迟）
+        HideVictoryUI()
     else
         DebugLog("发送VictoryConfirm事件失败:", err)
     end
@@ -362,7 +487,7 @@ local function Initialize()
     else
         uiInitialized = true
 
-        -- 初始状态：隐藏所有UI（移除Back Frame）
+        -- 初始状态：隐藏所有UI
         if effectFrame then effectFrame.Visible = false end
         if informationFrame then informationFrame.Visible = false end
 
