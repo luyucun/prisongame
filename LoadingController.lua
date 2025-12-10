@@ -318,9 +318,17 @@ local function HideLoadingScreen()
 		if child:IsA("ImageLabel") or child:IsA("ImageButton") then
 			TweenService:Create(child, TweenInfo.new(0.4), {ImageTransparency = 1}):Play()
 		elseif child:IsA("TextLabel") or child:IsA("TextButton") then
+			-- 文本主体淡出0.4秒
 			TweenService:Create(child, TweenInfo.new(0.4), {TextTransparency = 1}):Play()
+			-- 描边快速淡出0.2秒（更快）
+			TweenService:Create(child, TweenInfo.new(0.2), {TextStrokeTransparency = 1}):Play()
 		elseif child:IsA("Frame") then
+			-- 背景淡出0.4秒
 			TweenService:Create(child, TweenInfo.new(0.4), {BackgroundTransparency = 1}):Play()
+			-- 边框快速淡出0.2秒（如果有）
+			if child.BorderSizePixel > 0 then
+				TweenService:Create(child, TweenInfo.new(0.2), {BorderTransparency = 1}):Play()
+			end
 		end
 	end
 
@@ -337,8 +345,12 @@ local function HideLoadingScreen()
 			child.ImageTransparency = 0
 		elseif child:IsA("TextLabel") or child:IsA("TextButton") then
 			child.TextTransparency = 0
+			child.TextStrokeTransparency = 0
 		elseif child:IsA("Frame") then
 			child.BackgroundTransparency = 0
+			if child.BorderSizePixel > 0 then
+				child.BorderTransparency = 0
+			end
 		end
 	end
 
