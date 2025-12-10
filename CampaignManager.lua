@@ -1802,8 +1802,7 @@ function CampaignManager.OnVictory(campaignData)
 		end
 	end
 
-	-- 延迟后进入结束流程
-	task.wait(3)
+	-- 立即进入结束流程（不延迟，让玩家立即看到胜利界面）
 	CampaignManager.OnCampaignEnd(campaignData, true)
 end
 
@@ -1828,12 +1827,8 @@ function CampaignManager.OnDefeat(campaignData, options)
 		end
 	end
 
-	-- 延迟后进入结束流程
-	local delaySeconds = options.skipDelay and 0 or 3
-	DebugLog(string.format("  OnDefeat将在%.1f秒后调用OnCampaignEnd", delaySeconds))
-	if delaySeconds > 0 then
-		task.wait(delaySeconds)
-	end
+	-- 立即进入结束流程（不延迟，让玩家立即看到结算界面）
+	-- 如果是Restart/Retreat触发的，options.skipDelay会为true，保持立即执行
 	DebugLog("✅ OnDefeat调用OnCampaignEnd(false)")
 	CampaignManager.OnCampaignEnd(campaignData, false)
 end
@@ -1976,17 +1971,17 @@ function CampaignManager.CompleteCampaignEnd(campaignData)
 		DebugLog(string.format("✅ 战役结束，已移除 %d 个单位的血条", #campaignUnits))
 	end
 
+	-- 关闭家园战斗特效（在单位重生之前关闭，避免玩家看到特效残留）
+	SetHomeFightingEffect(campaignData.HomeId, false)
+
+	-- 清理关卡场景
+	StageService.CleanupStages(campaignData.PlayerId)
+
 	-- 执行单位重生（现在是安全的，因为AI和移动都已停止）
 	DebugLog("✅ CompleteCampaignEnd调用RespawnUnits")
 	CampaignManager.RespawnUnits(campaignData)
 
 	-- V2.8.2: CampaignKeepInstance标记已在RespawnUnits中清除,这里不再重复处理
-
-	-- 清理关卡场景
-	StageService.CleanupStages(campaignData.PlayerId)
-
-	-- 关闭家园战斗特效
-	SetHomeFightingEffect(campaignData.HomeId, false)
 
 	-- 解锁家园操作
 	LockHomeOperations(campaignData.Player, false)
