@@ -86,6 +86,14 @@ ReplicatedStorage
         ├──StopBGM（RemoteEvent） - 服务器→客户端：停止BGM
         ├──PlaySFX（RemoteEvent） - 服务器→客户端：播放一次性音效(sfxKey)
         └──StopSFX（RemoteEvent） - 服务器→客户端：停止一次性音效(sfxKey)
+    └──ClientAIEvents（Folder）/  【V4.0新增 - 客户端AI迁移】
+        ├──InitializeBattle（RemoteEvent） - 服务器→客户端：初始化战斗(battleId, attackUnits, defenseUnits, battleField)
+        ├──SyncUnitPosition（RemoteEvent） - 服务器→客户端：同步单位位置(battleId, unitModel, position)
+        ├──TerminateBattle（RemoteEvent） - 服务器→客户端：终止战斗(battleId, result)
+        ├──ServerUnitDeath（RemoteEvent） - 服务器→客户端：单位死亡通知(battleId, unitModel, killerModel)
+        ├──RequestAttack（RemoteEvent） - 客户端→服务器：请求攻击(battleId, attackerModel, targetModel, attackType)
+        ├──ReportUnitPosition（RemoteEvent） - 客户端→服务器：上报位置(battleId, unitModel, position, state)
+        └──ClientBattleReady（RemoteEvent） - 客户端→服务器：客户端准备完成(battleId)
 
 
 如果需要补充新的RemoteEvent或者Remotefunction，请在这里列出来，我会自己去创建
@@ -755,3 +763,117 @@ CampaignStateUpdate事件变更（V3.6）：
    - SoundController.StopSFX(sfxKey) - 手动停止SFX
    - SoundController.IsInitialized() - 检查是否已初始化
    - SoundController.GetCurrentBGMKey() - 获取当前BGM键名
+
+
+【V4.0客户端AI迁移系统RemoteEvent创建说明】
+位置：ReplicatedStorage/Events/ClientAIEvents/ （新建文件夹）
+🆕 InitializeBattle (RemoteEvent) - 需在Studio中手动创建
+🆕 SyncUnitPosition (RemoteEvent) - 需在Studio中手动创建
+🆕 TerminateBattle (RemoteEvent) - 需在Studio中手动创建
+🆕 ServerUnitDeath (RemoteEvent) - 需在Studio中手动创建
+🆕 RequestAttack (RemoteEvent) - 需在Studio中手动创建
+🆕 ReportUnitPosition (RemoteEvent) - 需在Studio中手动创建
+🆕 ClientBattleReady (RemoteEvent) - 需在Studio中手动创建
+
+创建步骤：
+1. 打开Roblox Studio
+2. 导航到 ReplicatedStorage > Events
+3. 右键点击 Events 文件夹
+4. 选择 "Insert Object" > "Folder"
+5. 将新建的 Folder 重命名为 "ClientAIEvents"
+6. 右键点击 ClientAIEvents 文件夹
+7. 选择 "Insert Object" > "RemoteEvent"
+8. 将新建的 RemoteEvent 重命名为 "InitializeBattle"
+9. 重复步骤7-8，创建 "SyncUnitPosition"
+10. 重复步骤7-8，创建 "TerminateBattle"
+11. 重复步骤7-8，创建 "ServerUnitDeath"
+12. 重复步骤7-8，创建 "RequestAttack"
+13. 重复步骤7-8，创建 "ReportUnitPosition"
+14. 重复步骤7-8，创建 "ClientBattleReady"
+15. 保存游戏
+
+功能说明：
+- InitializeBattle：服务器→客户端：初始化战斗
+  参数：(battleId: number, attackUnits: table, defenseUnits: table, battleField: Folder)
+  说明：战斗开始时服务端通知客户端，下发所有单位信息和战场引用
+
+- SyncUnitPosition：服务器→客户端：同步单位位置
+  参数：(battleId: number, unitModel: Model, position: Vector3)
+  说明：服务端定期向客户端同步位置，客户端进行矫正（防作弊）
+
+- TerminateBattle：服务器→客户端：终止战斗
+  参数：(battleId: number, result: string)
+  说明：战斗结束时服务端通知客户端，清理所有AI
+
+- ServerUnitDeath：服务器→客户端：单位死亡通知
+  参数：(battleId: number, unitModel: Model, killerModel: Model|nil)
+  说明：服务端确认单位死亡后通知客户端，客户端播放死亡动画并清理AI
+
+- RequestAttack：客户端→服务器：请求攻击
+  参数：(battleId: number, attackerModel: Model, targetModel: Model, attackType: string)
+  说明：客户端AI判定发起攻击时请求服务端校验并执行伤害计算
+  attackType: "Melee" 或 "Ranged"
+
+- ReportUnitPosition：客户端→服务器：上报位置
+  参数：(battleId: number, unitModel: Model, position: Vector3, state: string)
+  说明：客户端定期向服务端报告单位位置和状态（每0.5秒），用于防作弊校验
+  state: "Idle"/"Seeking"/"Moving"/"Attacking"/"Dead"
+
+- ClientBattleReady：客户端→服务器：客户端准备完成
+  参数：(battleId: number)
+  说明：客户端AI系统初始化完成后通知服务端，可以开始战斗
+
+注意：服务端BattleManager.lua和CombatSystem.lua会在初始化时自动创建这些事件（如果不存在），
+但建议手动创建以确保事件在系统初始化前就存在。
+
+
+【V4.0客户端AI迁移系统其他资源创建说明】
+
+1. 客户端AI模块位置：StarterPlayer/StarterPlayerScripts/ClientAI/
+   需要创建以下文件：
+   - ClientUnitManager.lua (ModuleScript) - 客户端单位管理器
+   - ClientPathService.lua (ModuleScript) - 客户端寻路服务
+   - ClientUnitAI.lua (ModuleScript) - 客户端AI核心逻辑
+   - ClientAIBootstrap.lua (LocalScript) - 客户端AI启动脚本
+
+2. 服务端系统修改：
+   - ServerScriptService/Systems/CombatSystem.lua - 新增客户端攻击请求处理
+   - ServerScriptService/Systems/BattleManager.lua - 新增客户端AI初始化/停止
+   - ServerScriptService/Systems/CampaignManager.lua - 传递BattleField引用
+   - ServerScriptService/Systems/UnitAI.lua - 添加客户端AI检查
+
+3. 配置文件修改：ReplicatedStorage/Config/BattleConfig.lua
+   需要新增以下配置：
+   ```lua
+   -- ==================== V4.0 客户端AI配置 ====================
+   -- 是否启用客户端AI（渐进式迁移开关）
+   BattleConfig.ENABLE_CLIENT_AI = true
+
+   -- 客户端上报位置间隔（秒）
+   BattleConfig.CLIENT_POSITION_REPORT_INTERVAL = 0.5
+
+   -- 服务端位置同步间隔（秒）
+   BattleConfig.SERVER_POSITION_SYNC_INTERVAL = 1.0
+
+   -- 位置校验容差（studs）- 超过此值服务端强制同步
+   BattleConfig.POSITION_VALIDATION_TOLERANCE = 10
+
+   -- 攻击请求超时时间（秒）
+   BattleConfig.ATTACK_REQUEST_TIMEOUT = 0.2
+   ```
+
+4. 性能优化效果（理论值）：
+   - 服务端AI计算：200次/帧 → 0次/帧（100%降低）
+   - 服务端寻路请求：~50次/秒 → 0次/秒（100%降低）
+   - 客户端帧率(100v100)：~20 FPS → ~45 FPS（125%提升）
+   - 网络流量：位置同步为主 → 攻击请求为主（减少）
+
+5. 防作弊机制：
+   - 服务端权威伤害计算（客户端只能请求攻击）
+   - 攻击距离校验（1.5倍容差）
+   - 攻击阶段验证（必须Idle才能攻击）
+   - 队伍验证（不能攻击友军）
+   - 位置偏差检测（10 studs容差）
+
+6. 回滚方案：
+   如果客户端AI出现问题，可以通过设置 BattleConfig.ENABLE_CLIENT_AI = false 快速回退到服务端AI模式
