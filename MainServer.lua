@@ -64,6 +64,8 @@ local TaskSystem = require(ServerScriptService.Systems.TaskSystem)
 local GuideSystem = require(ServerScriptService.Systems.GuideSystem)
 -- V3.8新增 - 音效系统
 local SoundSystem = require(ServerScriptService.Systems.SoundSystem)
+-- Robux购买处理器
+local MarketplaceHandler = require(ServerScriptService.Systems.MarketplaceHandler)
 
 -- ==================== 系统初始化顺序 ====================
 
@@ -364,6 +366,16 @@ local function InitializeServer()
         warn(GameConfig.LOG_PREFIX, "音效系统初始化失败(异常):", result)
     elseif result == false then
         warn(GameConfig.LOG_PREFIX, "音效系统初始化失败(返回false)")
+    end
+
+    -- 15. 初始化Robux购买处理器 (MarketplaceHandler)
+    success, result = pcall(function()
+        return MarketplaceHandler.Initialize()
+    end)
+    if not success then
+        warn(GameConfig.LOG_PREFIX, "Robux购买处理器初始化失败(异常):", result)
+    elseif result == false then
+        warn(GameConfig.LOG_PREFIX, "Robux购买处理器初始化失败(返回false),Robux购买功能将不可用")
     end
 
     -- 检查是否有关键系统初始化失败

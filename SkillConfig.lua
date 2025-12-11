@@ -85,16 +85,16 @@ SkillConfig.Skills = {
 	-- ==================== 技能1：喷水枪 ====================
 	[1001] = {
 		SkillId = 1001,
-		Name = "喷水枪",
+		Name = "WaterGun",
 		ResourceName = "WaterGun",
 		Icon = "rbxassetid://120383806488759",
 		SkillType = SkillConfig.SkillType.DAMAGE,
 		EffectType = SkillConfig.EffectType.INSTANT,
 		TargetType = SkillConfig.TargetType.ENEMY,
 		Range = 20,                    -- 直径100studs的圆形范围
-		Damage = 100,                   -- 造成100点真实伤害
+		Damage = 200,                   -- 造成100点真实伤害
 		EffectDuration = 3,             -- 特效显示3秒
-		DevProductId = 0,               -- V3.1: 开发者商品ID（0表示未配置）
+		DevProductId = 3476850130,               -- V3.1: 开发者商品ID（0表示未配置）
 		Extra = {
 			Description = "对范围内所有敌人造成100点真实伤害",
 		},
@@ -103,16 +103,16 @@ SkillConfig.Skills = {
 	-- ==================== 技能2：毒气炸弹 ====================
 	[1002] = {
 		SkillId = 1002,
-		Name = "毒气炸弹",
+		Name = "PoisonGas",
 		ResourceName = "PoisonGas",
 		Icon = "rbxassetid://108132069408183",
 		SkillType = SkillConfig.SkillType.DAMAGE,
 		EffectType = SkillConfig.EffectType.INSTANT,
 		TargetType = SkillConfig.TargetType.ENEMY,
 		Range = 20,                    -- 直径100studs的圆形范围
-		Damage = 100,                   -- 造成100点真实伤害
+		Damage = 300,                   -- 造成100点真实伤害
 		EffectDuration = 3,             -- 特效显示3秒
-		DevProductId = 0,               -- V3.1: 开发者商品ID（0表示未配置）
+		DevProductId = 3476850326,               -- V3.1: 开发者商品ID（0表示未配置）
 		Extra = {
 			Description = "对范围内所有敌人造成100点真实伤害",
 		},
@@ -121,18 +121,18 @@ SkillConfig.Skills = {
 	-- ==================== 技能3：大火 ====================
 	[1003] = {
 		SkillId = 1003,
-		Name = "大火",
+		Name = "Molotov",
 		ResourceName = "Molotov",
 		Icon = "rbxassetid://119660478028982",
 		SkillType = SkillConfig.SkillType.DAMAGE,
 		EffectType = SkillConfig.EffectType.DOT,
 		TargetType = SkillConfig.TargetType.ENEMY,
-		Range = 20,                    -- 直径100studs的圆形范围
-		TickDamage = 20,                -- 每tick造成20点伤害
-		TickInterval = 0.5,             -- 每0.5秒触发一次
+		Range = 30,                    -- 直径100studs的圆形范围
+		TickDamage = 30,                -- 每tick造成20点伤害
+		TickInterval = 0.3,             -- 每0.5秒触发一次
 		Duration = 4,                   -- 持续4秒
 		EffectDuration = 4,             -- 特效显示4秒(与持续时间一致)
-		DevProductId = 0,               -- V3.1: 开发者商品ID（0表示未配置）
+		DevProductId = 3476850400,               -- V3.1: 开发者商品ID（0表示未配置）
 		Extra = {
 			Description = "对范围内所有敌人造成持续伤害，每0.5秒造成20点伤害，持续4秒",
 		},

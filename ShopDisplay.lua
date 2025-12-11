@@ -62,6 +62,7 @@ local CoinAnimationHelper = nil
 local RequestShopList = nil
 local ShopListEvent = nil
 local PurchaseUnit = nil
+local PurchaseUnitRobux = nil    -- Robux购买事件
 local PurchaseResult = nil
 local StockUpdate = nil          -- 库存更新事件 (V2.1库存功能)
 local RefreshTimeUpdate = nil    -- 刷新倒计时事件 (V2.1库存功能)
@@ -175,6 +176,7 @@ local function InitializeEvents()
     RequestShopList = shopEvents:FindFirstChild("RequestShopList")
     ShopListEvent = shopEvents:FindFirstChild("ShopList")
     PurchaseUnit = shopEvents:FindFirstChild("PurchaseUnit")
+    PurchaseUnitRobux = shopEvents:FindFirstChild("PurchaseUnitRobux")  -- Robux购买事件
     PurchaseResult = shopEvents:FindFirstChild("PurchaseResult")
     StockUpdate = shopEvents:FindFirstChild("StockUpdate")              -- V2.1库存功能
     RefreshTimeUpdate = shopEvents:FindFirstChild("RefreshTimeUpdate")  -- V2.1库存功能
@@ -543,11 +545,43 @@ local function InitializeGlobalBuyButtons()
 
     if robuxBuy then
         local robuxConnection = robuxBuy.MouseButton1Click:Connect(function()
-            -- TODO: 实现Robux购买逻辑
+            -- Robux购买逻辑
             if currentSelectedItem then
-                warn(LOG_PREFIX, "Robux购买功能尚未实现:", currentSelectedItem.UnitId)
+                if not PurchaseUnitRobux then
+                    warn(LOG_PREFIX, "PurchaseUnitRobux事件未找到，无法进行Robux购买")
+                    return
+                end
+
+                -- 检查是否有Robux价格
+                if not currentSelectedItem.RobuxPrice or currentSelectedItem.RobuxPrice <= 0 then
+                    warn(LOG_PREFIX, "该商品不支持Robux购买:", currentSelectedItem.UnitId)
+                    return
+                end
+
+                -- 防重复购买检查
+                if isPurchasing then
+                    if DEBUG_MODE then
+                        print(LOG_PREFIX, "Robux购买处理中，请稍候")
+                    end
+                    return
+                end
+
+                if DEBUG_MODE then
+                    print(LOG_PREFIX, "尝试Robux购买:", currentSelectedItem.UnitId, "价格: R$", currentSelectedItem.RobuxPrice)
+                end
+
+                -- 设置购买状态
+                isPurchasing = true
+
+                -- 发送Robux购买请求到服务端
+                PurchaseUnitRobux:FireServer(currentSelectedItem.UnitId)
+
+                -- 0.5秒后重置购买状态
+                task.delay(0.5, function()
+                    isPurchasing = false
+                end)
             else
-                warn(LOG_PREFIX, "Robux购买功能尚未实现")
+                warn(LOG_PREFIX, "没有选中的商品，无法进行Robux购买")
             end
         end)
         table.insert(globalBuyConnections, robuxConnection)

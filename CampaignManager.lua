@@ -1229,7 +1229,11 @@ function CampaignManager.MarchToStage(campaignData, stageNum)
 		end,
 
 		onUnitArrived = function(unitInstance, status)
-			-- 单位到达时的回调(当前为空实现)
+			-- 单位到达时的回调：停止移动动画，播放idle动画
+			if unitInstance and unitInstance.Parent then
+				UnitAI.StopMoveAnimation(unitInstance)
+				DebugLog(string.format("  %s 到达目的地(%s)，已切换到idle动画", unitInstance.Name, status))
+			end
 		end,
 
 		onAllSettled = function(arrivedList, timedOutList, failedList)

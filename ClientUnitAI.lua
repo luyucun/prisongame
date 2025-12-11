@@ -80,8 +80,8 @@ local CONFIG = {
 	-- 近战停靠距离容差（studs）
 	MELEE_CONTACT_BUFFER = 0.5,
 
-	-- 远程单位停靠距离系数
-	RANGED_DOCKING_RATIO = 0.65,
+	-- 远程单位停靠距离系数（1.0 = 在满射程处停下）
+	RANGED_DOCKING_RATIO = 1.0,
 
 	-- 调试日志
 	DEBUG_LOGS = false,
@@ -481,6 +481,8 @@ local function UpdateSeekingState(aiData, deltaTime)
 	if not aiData.CurrentTarget or not aiData.CurrentTarget.Parent then
 		aiData.State = AIState.IDLE
 		aiData.CurrentTarget = nil
+		-- 立即播放idle动画
+		PlayAnimation(aiData, AnimationState.IDLE)
 		return
 	end
 
@@ -490,6 +492,8 @@ local function UpdateSeekingState(aiData, deltaTime)
 	if not targetHumanoid or targetHumanoid.Health <= 0 or targetIsDead then
 		aiData.State = AIState.IDLE
 		aiData.CurrentTarget = nil
+		-- 立即播放idle动画
+		PlayAnimation(aiData, AnimationState.IDLE)
 		return
 	end
 
@@ -523,6 +527,8 @@ local function UpdateMovingState(aiData, deltaTime)
 		aiData.State = AIState.IDLE
 		aiData.CurrentTarget = nil
 		ClientPathService.StopMovement(aiData.UnitModel)
+		-- 立即播放idle动画
+		PlayAnimation(aiData, AnimationState.IDLE)
 		return
 	end
 
@@ -533,6 +539,8 @@ local function UpdateMovingState(aiData, deltaTime)
 		aiData.State = AIState.IDLE
 		aiData.CurrentTarget = nil
 		ClientPathService.StopMovement(aiData.UnitModel)
+		-- 立即播放idle动画
+		PlayAnimation(aiData, AnimationState.IDLE)
 		return
 	end
 
@@ -566,10 +574,21 @@ local function UpdateMovingState(aiData, deltaTime)
 		end
 
 		if not moveTarget then
-			-- 远程兵或围攻计算失败，使用传统方式
+			-- 远程兵或围攻计算失败，使用传统方式（保持停靠距离）
+			local myRoot = aiData.UnitModel:FindFirstChild("HumanoidRootPart")
 			local targetRoot = aiData.CurrentTarget:FindFirstChild("HumanoidRootPart")
-			if targetRoot then
-				moveTarget = targetRoot.Position
+			if myRoot and targetRoot then
+				local myPos = myRoot.Position
+				local targetPos = targetRoot.Position
+				local direction = (targetPos - myPos)
+				if direction.Magnitude > 0.1 then
+					direction = direction.Unit
+				else
+					direction = Vector3.new(1, 0, 0)
+				end
+				-- 远程兵需要保持停靠距离，不能直接冲到目标位置
+				local dockingDist = GetDockingDistance(aiData)
+				moveTarget = targetPos - direction * dockingDist
 			end
 		end
 
@@ -589,6 +608,8 @@ local function UpdateAttackingState(aiData, deltaTime)
 		aiData.State = AIState.IDLE
 		aiData.CurrentTarget = nil
 		aiData.IsAttacking = false
+		-- 立即播放idle动画（不等下一帧）
+		PlayAnimation(aiData, AnimationState.IDLE)
 		return
 	end
 
@@ -599,6 +620,8 @@ local function UpdateAttackingState(aiData, deltaTime)
 		aiData.State = AIState.IDLE
 		aiData.CurrentTarget = nil
 		aiData.IsAttacking = false
+		-- 立即播放idle动画（不等下一帧）
+		PlayAnimation(aiData, AnimationState.IDLE)
 		return
 	end
 
@@ -775,8 +798,11 @@ function ClientUnitAI.StartAI(battleId, unitModel, unitId, level, team)
 
 	local animator = humanoid:FindFirstChild("Animator")
 	if not animator then
-		WarnLog("启动AI失败：找不到Animator", unitModel.Name)
-		return false
+		-- V4.7修复：如果没有Animator，自动创建一个
+		-- 这对于从ReplicatedStorage克隆的敌方单位很重要
+		animator = Instance.new("Animator")
+		animator.Parent = humanoid
+		DebugLog(string.format("%s 自动创建Animator", unitModel.Name))
 	end
 
 	-- V4.0修复：禁用模型自带的Animate脚本，防止与客户端AI动画冲突

@@ -234,6 +234,13 @@ local function OnServerUnitDeath(battleId, unitModel, killerModel)
 	local rootPart = unitModel:FindFirstChild("HumanoidRootPart")
 	local animator = humanoid and humanoid:FindFirstChild("Animator")
 
+	-- V4.7修复：如果没有Animator，自动创建一个（敌方单位可能没有预创建）
+	if humanoid and not animator then
+		animator = Instance.new("Animator")
+		animator.Parent = humanoid
+		DebugLog(string.format("%s 死亡时自动创建Animator", unitModel.Name))
+	end
+
 	-- V4.2修复：再次确保物理状态被冻结（双重保险）
 	if humanoid then
 		pcall(function()
@@ -263,10 +270,25 @@ local function OnServerUnitDeath(battleId, unitModel, killerModel)
 
 	-- 播放死亡动画（如果有）
 	if animator then
+		-- V4.7修复：优先从ClientUnitManager获取，如果失败则从模型属性获取UnitId
 		local unitInfo = ClientUnitManager.GetUnitBattleInfo(unitModel)
+		local unitId = nil
+
 		if unitInfo then
+			unitId = unitInfo.UnitId
+		else
+			-- 备用方案：从模型属性获取UnitId
+			unitId = unitModel:GetAttribute("UnitId")
+			if not unitId then
+				-- 尝试从模型名解析 (格式如 "10001_Lv1_1")
+				unitId = unitModel.Name:match("^(%d+)_")
+			end
+			DebugLog(string.format("从属性获取UnitId: %s -> %s", unitModel.Name, tostring(unitId)))
+		end
+
+		if unitId then
 			local UnitConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("UnitConfig"))
-			local deathAnimId = UnitConfig.GetDeathAnimationId(unitInfo.UnitId)
+			local deathAnimId = UnitConfig.GetDeathAnimationId(unitId)
 			if deathAnimId and deathAnimId ~= "" then
 				local anim = Instance.new("Animation")
 				anim.AnimationId = "rbxassetid://" .. deathAnimId
@@ -278,10 +300,16 @@ local function OnServerUnitDeath(battleId, unitModel, killerModel)
 					animTrack.Priority = Enum.AnimationPriority.Action4
 					animTrack.Looped = false
 					animTrack:Play(0)  -- 立即播放，无淡入
-					DebugLog(string.format("播放死亡动画: %s", unitModel.Name))
+					DebugLog(string.format("播放死亡动画: %s (UnitId=%s)", unitModel.Name, unitId))
+				else
+					WarnLog(string.format("加载死亡动画失败: %s", unitModel.Name))
 				end
 				anim:Destroy()
+			else
+				WarnLog(string.format("没有死亡动画配置: %s (UnitId=%s)", unitModel.Name, tostring(unitId)))
 			end
+		else
+			WarnLog(string.format("无法获取UnitId，跳过死亡动画: %s", unitModel.Name))
 		end
 	end
 

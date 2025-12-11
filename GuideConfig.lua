@@ -5,8 +5,9 @@
 ]]
 
 --[[
-新手引导配置模块 V3.5
+新手引导配置模块 V3.9.1
 职责: 存储所有新手引导的配置信息
+V3.9.1新增: IDLE_FLOOR/UI_FOCUS引导类型，引导1003/1004/1005
 ]]
 
 local GuideConfig = {}
@@ -15,6 +16,8 @@ local GuideConfig = {}
 GuideConfig.GuideType = {
 	SHOP = "SHOP",           -- 引导前往兵种商店
 	MAIL = "MAIL",           -- 引导前往挂机金币邮箱
+	IDLE_FLOOR = "IDLE_FLOOR", -- 引导前往IdleFloor中心
+	UI_FOCUS = "UI_FOCUS",   -- UI聚焦引导（半透明Frame包围）
 }
 
 -- ==================== 引导配置 ====================
@@ -45,6 +48,44 @@ GuideConfig.Guides = {
 		Sort = 2,                             -- 排序
 		Enabled = true,                       -- 是否启用
 	},
+
+	-- 引导3：前往IdleFloor中心（获得第一个兵种后）
+	[1003] = {
+		GuideId = 1003,
+		GuideType = GuideConfig.GuideType.IDLE_FLOOR,
+		Name = "IdleFloorGuide",
+		Description = "引导前往IdleFloor中心",
+		TargetName = "IdleFloor",             -- 目标对象名称
+		TriggerCondition = "HAS_FIRST_UNIT",  -- 触发条件：获得第一个兵种
+		ArrivalDistance = 15,                 -- 到达判定距离(studs)
+		Sort = 3,                             -- 排序
+		Enabled = true,                       -- 是否启用
+	},
+
+	-- 引导4：点击背包中的兵种（到达IdleFloor后）
+	[1004] = {
+		GuideId = 1004,
+		GuideType = GuideConfig.GuideType.UI_FOCUS,
+		Name = "BackpackClickGuide",
+		Description = "引导点击背包中的兵种",
+		TargetUIPath = "BackpackGui/BackpackFrame/ItemListFrame", -- UI路径
+		TriggerCondition = "ARRIVED_IDLE_FLOOR", -- 触发条件：到达IdleFloor
+		Sort = 4,                             -- 排序
+		Enabled = true,                       -- 是否启用
+		SkipIfNoUnits = true,                 -- 如果背包没有兵种则跳过
+	},
+
+	-- 引导5：点击Attack按钮（首次摆放兵种后）
+	[1005] = {
+		GuideId = 1005,
+		GuideType = GuideConfig.GuideType.UI_FOCUS,
+		Name = "AttackButtonGuide",
+		Description = "引导点击Attack按钮",
+		TargetUIPath = "MainGui/BattleControl/Play", -- UI路径
+		TriggerCondition = "FIRST_UNIT_PLACED", -- 触发条件：首次摆放兵种
+		Sort = 5,                             -- 排序
+		Enabled = true,                       -- 是否启用
+	},
 }
 
 -- ==================== 引导表现配置 ====================
@@ -62,6 +103,14 @@ GuideConfig.Display = {
 	-- 玩家绑定位置（绑定到躯干）
 	AttachmentPartName = "Torso",             -- 绑定到玩家的哪个Part
 	AttachmentOffset = Vector3.new(0, 1, 0),  -- 绑定偏移量
+
+	-- UI聚焦引导配置
+	UIFocus = {
+		FrameColor = Color3.fromRGB(0, 0, 0),      -- 半透明Frame颜色（黑色）
+		FrameTransparency = 0.5,                   -- 半透明Frame透明度
+		AnimationDuration = 0.5,                   -- 滑入动画时长（秒）
+		ZIndex = 1000,                             -- Frame的ZIndex（确保在最上层）
+	},
 }
 
 -- ==================== 公共接口 ====================

@@ -53,6 +53,7 @@ local SkillShopEvents = nil
 local RequestSkillShopList = nil
 local SkillShopListEvent = nil
 local PurchaseSkill = nil
+local PurchaseSkillRobux = nil        -- Robux购买事件
 local SkillPurchaseResult = nil
 local SkillStockUpdate = nil
 local SkillRefreshTimeUpdate = nil
@@ -118,7 +119,8 @@ local function InitializeEvents()
 	local eventNames = {
 		"RequestSkillShopList",   -- 客户端→服务器：请求技能商店列表
 		"SkillShopList",          -- 服务器→客户端：返回技能商店列表
-		"PurchaseSkill",          -- 客户端→服务器：购买技能
+		"PurchaseSkill",          -- 客户端→服务器：购买技能（金币）
+		"PurchaseSkillRobux",     -- 客户端→服务器：购买技能（Robux）
 		"SkillPurchaseResult",    -- 服务器→客户端：购买结果
 		"SkillStockUpdate",       -- 服务器→客户端：库存更新
 		"SkillRefreshTimeUpdate", -- 服务器→客户端：刷新倒计时
@@ -136,6 +138,7 @@ local function InitializeEvents()
 	RequestSkillShopList = SkillShopEvents:FindFirstChild("RequestSkillShopList")
 	SkillShopListEvent = SkillShopEvents:FindFirstChild("SkillShopList")
 	PurchaseSkill = SkillShopEvents:FindFirstChild("PurchaseSkill")
+	PurchaseSkillRobux = SkillShopEvents:FindFirstChild("PurchaseSkillRobux")
 	SkillPurchaseResult = SkillShopEvents:FindFirstChild("SkillPurchaseResult")
 	SkillStockUpdate = SkillShopEvents:FindFirstChild("SkillStockUpdate")
 	SkillRefreshTimeUpdate = SkillShopEvents:FindFirstChild("SkillRefreshTimeUpdate")
@@ -787,6 +790,113 @@ local function OnPurchaseSkill(player, skillId)
 end
 
 --[[
+处理客户端Robux购买请求
+@param player Player - 玩家实例
+@param skillId number - 技能ID
+]]
+local function OnPurchaseSkillRobux(player, skillId)
+	local success, result = pcall(function()
+		-- 1. 购买锁检查
+		if PurchaseLocks[player] then
+			SendFailure(player, "请稍等，正在处理上一个购买请求")
+			return
+		end
+		PurchaseLocks[player] = true
+
+		-- 2. 购买冷却检查
+		local now = tick()
+		if LastPurchaseTime[player] then
+			local timeSinceLastPurchase = now - LastPurchaseTime[player]
+			if timeSinceLastPurchase < PURCHASE_COOLDOWN then
+				PurchaseLocks[player] = false
+				SendFailure(player, "购买冷却中，请稍候")
+				return
+			end
+		end
+
+		-- 3. 验证技能ID
+		if not SkillConfig.IsValidSkill(skillId) then
+			PurchaseLocks[player] = false
+			SendFailure(player, "无效的技能")
+			return
+		end
+
+		-- 4. 获取商店ID和DevProductId（从SkillShopConfig获取）
+		local shopId = GetPlayerNearbySkillShopId(player) or "SkillShop"
+		local devProductId = SkillShopConfig.GetDevProductId(shopId, skillId)
+		if not devProductId or devProductId == "" or devProductId == "0" then
+			PurchaseLocks[player] = false
+			SendFailure(player, "该技能不支持Robux购买")
+			return
+		end
+
+		-- 5. 距离检查（可选）
+		if GameConfig.Shop.EnableDistanceCheck then
+			local nearbyShopId = GetPlayerNearbySkillShopId(player)
+			if not nearbyShopId then
+				PurchaseLocks[player] = false
+				SendFailure(player, "距离商人太远，无法购买")
+				return
+			end
+		end
+
+		-- 6. 查找MarketplaceHandler模块
+		local marketplaceModule = ServerScriptService.Systems:FindFirstChild("MarketplaceHandler")
+		if not marketplaceModule then
+			PurchaseLocks[player] = false
+			SendFailure(player, "无法打开购买界面")
+			warn("[SkillShopSystem] 未找到 MarketplaceHandler 模块")
+			return
+		end
+
+		if not marketplaceModule:IsA("ModuleScript") then
+			PurchaseLocks[player] = false
+			SendFailure(player, "无法打开购买界面")
+			warn("[SkillShopSystem] MarketplaceHandler 不是ModuleScript")
+			return
+		end
+
+		-- 7. 加载MarketplaceHandler并提示购买
+		local loadSuccess, loadResult = pcall(require, marketplaceModule)
+		if not loadSuccess then
+			PurchaseLocks[player] = false
+			SendFailure(player, "无法打开购买界面")
+			warn("[SkillShopSystem] MarketplaceHandler 加载失败: " .. tostring(loadResult))
+			return
+		end
+
+		local marketplaceHandler = loadResult :: any
+		local shopId = GetPlayerNearbySkillShopId(player) or "SkillShop"
+		local promptSuccess = marketplaceHandler.PromptSkillPurchase(player, skillId, shopId)
+
+		if not promptSuccess then
+			PurchaseLocks[player] = false
+			SendFailure(player, "无法打开购买界面")
+			return
+		end
+
+		-- 8. 重置购买状态
+		LastPurchaseTime[player] = now
+		PurchaseLocks[player] = false
+
+		if DEBUG_MODE then
+			print(string.format(
+				"%s [SkillShopSystem] 提示Robux购买技能 - 玩家:%s SkillId:%d",
+				GameConfig.LOG_PREFIX,
+				player.Name,
+				skillId
+			))
+		end
+	end)
+
+	if not success then
+		PurchaseLocks[player] = false
+		warn("[SkillShopSystem] OnPurchaseSkillRobux 错误: " .. tostring(result))
+		SendFailure(player, "系统错误，请重试")
+	end
+end
+
+--[[
 玩家离开游戏时清理数据
 @param player Player - 离开的玩家
 ]]
@@ -828,6 +938,9 @@ function SkillShopSystem.Initialize()
 	local bindSuccess, bindError = pcall(function()
 		RequestSkillShopList.OnServerEvent:Connect(OnRequestSkillShopList)
 		PurchaseSkill.OnServerEvent:Connect(OnPurchaseSkill)
+		if PurchaseSkillRobux then
+			PurchaseSkillRobux.OnServerEvent:Connect(OnPurchaseSkillRobux)
+		end
 	end)
 
 	if not bindSuccess then

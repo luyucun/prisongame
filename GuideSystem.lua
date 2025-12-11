@@ -5,12 +5,13 @@
 ]]
 
 --[[
-新手引导系统模块 V3.5
+新手引导系统模块 V3.9.1
 职责:
 1. 管理玩家的新手引导数据
 2. 处理引导触发条件判断
 3. 与客户端同步引导状态
 4. 提供GM命令接口
+V3.9.1新增: HAS_FIRST_UNIT/ARRIVED_IDLE_FLOOR/FIRST_UNIT_PLACED触发条件，UI聚焦引导支持
 ]]
 
 local GuideSystem = {}
@@ -94,6 +95,8 @@ local function EnsureEventsExist()
 		"GuideArrived",      -- 客户端→服务器：玩家到达目标
 		"SyncGuideData",     -- 服务器→客户端：同步引导数据
 		"RequestGuideSync",  -- 客户端→服务器：请求同步引导数据
+		"StartUIFocusGuide", -- 服务器→客户端：开始UI聚焦引导
+		"UIFocusCompleted",  -- 客户端→服务器：UI聚焦引导完成
 	}
 
 	guideEvents = {}
@@ -206,6 +209,68 @@ local function CheckTriggerCondition(player, guideConfig)
 			end
 		end
 		return false
+
+	elseif condition == "HAS_FIRST_UNIT" then
+		-- 获得第一个兵种
+		if IsGuideCompleted(player, guideConfig.GuideId) then
+			return false
+		end
+
+		-- 必须先完成引导1001（前往商店）才能触发此引导
+		if not IsGuideCompleted(player, 1001) then
+			return false
+		end
+
+		-- 检查背包是否有兵种
+		local dm = GetDataManager()
+		if dm then
+			local playerData = dm.GetPlayerData(player)
+			if playerData and playerData.Inventory then
+				-- 检查背包中是否有任何兵种
+				for unitId, count in pairs(playerData.Inventory) do
+					if count and count > 0 then
+						return true
+					end
+				end
+			end
+		end
+		return false
+
+	elseif condition == "ARRIVED_IDLE_FLOOR" then
+		-- 到达IdleFloor（由引导1003完成后触发）
+		if IsGuideCompleted(player, guideConfig.GuideId) then
+			return false
+		end
+
+		-- 检查引导1003是否已完成
+		return IsGuideCompleted(player, 1003)
+
+	elseif condition == "FIRST_UNIT_PLACED" then
+		-- 首次摆放兵种
+		if IsGuideCompleted(player, guideConfig.GuideId) then
+			return false
+		end
+
+		-- 必须先完成引导1003（前往IdleFloor）或引导1004（点击背包）才能触发此引导
+		-- 注意：引导1004可能被跳过，所以检查1003即可
+		if not IsGuideCompleted(player, 1003) then
+			return false
+		end
+
+		-- 检查是否有兵种被摆放在IdleFloor上
+		local dm = GetDataManager()
+		if dm then
+			local playerData = dm.GetPlayerData(player)
+			if playerData and playerData.PlacedUnits then
+				-- 检查是否有任何兵种被摆放
+				for _, unitData in pairs(playerData.PlacedUnits) do
+					if unitData then
+						return true
+					end
+				end
+			end
+		end
+		return false
 	end
 
 	return false
@@ -247,12 +312,26 @@ end
 发送引导开始事件到客户端
 @param player Player - 玩家对象
 @param guideId number - 引导ID
-@param targetPosition Vector3 - 目标位置
+@param targetPosition Vector3|nil - 目标位置（nil表示UI聚焦类型）
 ]]
 local function SendStartGuide(player, guideId, targetPosition)
 	local events = EnsureEventsExist()
-	if events.StartGuide then
-		events.StartGuide:FireClient(player, guideId, targetPosition)
+	local guideConfig = GuideConfig.GetGuideById(guideId)
+
+	if not guideConfig then
+		return
+	end
+
+	-- 如果是UI聚焦类型
+	if guideConfig.GuideType == GuideConfig.GuideType.UI_FOCUS then
+		if events.StartUIFocusGuide then
+			events.StartUIFocusGuide:FireClient(player, guideId, guideConfig.TargetUIPath)
+		end
+	else
+		-- 普通Beam引导
+		if events.StartGuide then
+			events.StartGuide:FireClient(player, guideId, targetPosition)
+		end
 	end
 end
 
@@ -301,6 +380,12 @@ function GuideSystem.Initialize()
 	if guideEvents.RequestGuideSync then
 		guideEvents.RequestGuideSync.OnServerEvent:Connect(function(player)
 			SyncGuideDataToClient(player)
+		end)
+	end
+
+	if guideEvents.UIFocusCompleted then
+		guideEvents.UIFocusCompleted.OnServerEvent:Connect(function(player, guideId)
+			GuideSystem.OnGuideArrived(player, guideId)
 		end)
 	end
 
@@ -363,6 +448,53 @@ function GuideSystem.TriggerGuide(player, guideId)
 		return false
 	end
 
+	-- 如果是UI聚焦类型的引导
+	if guideConfig.GuideType == GuideConfig.GuideType.UI_FOCUS then
+		-- 特殊处理：检查是否需要跳过
+		if guideConfig.SkipIfNoUnits then
+			-- 检查背包是否有兵种
+			local dm = GetDataManager()
+			if dm then
+				local playerData = dm.GetPlayerData(player)
+				if playerData and playerData.Inventory then
+					local hasUnits = false
+					for unitId, count in pairs(playerData.Inventory) do
+						if count and count > 0 then
+							hasUnits = true
+							break
+						end
+					end
+					if not hasUnits then
+						-- 没有兵种，跳过并标记为完成
+						print(string.format("[GuideSystem] 引导 %d 跳过（背包无兵种）", guideId))
+						MarkGuideCompleted(player, guideId)
+						-- 检查下一个引导
+						task.delay(0.5, function()
+							if player and player.Parent then
+								GuideSystem.CheckAndTriggerGuides(player)
+							end
+						end)
+						return false
+					end
+				end
+			end
+		end
+
+		-- 记录当前激活的引导（UI聚焦类型）
+		playerGuideStates[player.UserId] = {
+			activeGuideId = guideId,
+			guideType = guideConfig.GuideType,
+			targetUIPath = guideConfig.TargetUIPath,
+		}
+
+		-- 发送开始引导事件到客户端（UI聚焦类型）
+		SendStartGuide(player, guideId, nil)  -- targetPosition为nil表示UI聚焦类型
+
+		print(string.format("[GuideSystem] 玩家 %s 触发UI聚焦引导 %d (%s)", player.Name, guideId, guideConfig.Name))
+		return true
+	end
+
+	-- 普通引导（Beam类型）
 	-- 获取目标对象
 	local target = GetTargetInPlayerHome(player, guideConfig.TargetName)
 	if not target then

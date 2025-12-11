@@ -75,7 +75,7 @@ local CONFIG = {
 	STUCK_COUNT_THRESHOLD = 3,
 	MIN_DISTANCE_FOR_CHECK = 5,
 
-	DEBUG_LOGS = false,  -- 关闭调试日志
+	DEBUG_LOGS = true,  -- 打开调试日志（调试远程兵问题）
 
 	-- ==================== V5.7 围攻系统配置 ====================
 	SURROUND = {
@@ -135,6 +135,10 @@ local surroundTargetData = {}  -- [targetModel] = { units = {model=true}, lastUp
 
 -- 全局递增计数器,用于分配唯一SlotId (替代GetDebugId)
 local nextSlotIdCounter = 1
+
+-- 行军动画Track存储（用于没有aiData的行军模式）
+local MarchAnimTracks = {}
+local MarchIdleTracks = {}
 
 -------------------------------------------------------
 -- Logging
@@ -580,7 +584,10 @@ function AnimationController.SwitchToAttack(model, aiData, target)
 			local markerConnection
 			markerConnection = track:GetMarkerReachedSignal("Damage"):Connect(function()
 				-- 检查是否是远程单位
-				local isRanged = UnitConfig.IsRangedUnit and UnitConfig.IsRangedUnit(aiData.UnitId)
+				local isRanged = UnitConfig.IsRangedUnit(aiData.UnitId)
+				DebugLog(string.format("[AnimEvent] %s Damage事件触发, UnitId=%s, IsRanged=%s",
+					model.Name, tostring(aiData.UnitId), tostring(isRanged)))
+
 				if isRanged then
 					CombatSystem.OnRangedDamageEvent(model, target)
 				else
@@ -601,7 +608,10 @@ function AnimationController.SwitchToAttack(model, aiData, target)
 			-- 如果没有攻击动画，直接触发伤害
 			task.delay(0.3, function()
 				if CombatSystem.GetAttackPhase(model) == BattleConfig.AttackPhase.ATTACKING then
-					local isRanged = UnitConfig.IsRangedUnit and UnitConfig.IsRangedUnit(aiData.UnitId)
+					local isRanged = UnitConfig.IsRangedUnit(aiData.UnitId)
+					DebugLog(string.format("[NoAnim] %s 无动画触发伤害, UnitId=%s, IsRanged=%s",
+						model.Name, tostring(aiData.UnitId), tostring(isRanged)))
+
 					if isRanged then
 						CombatSystem.OnRangedDamageEvent(model, target)
 					else
@@ -686,15 +696,19 @@ local function ShouldHoldAttackPosition(distance, dockingDistance, aiData)
 	-- 退出攻击（需要追上去）的阈值（更大）
 	local EXIT_RANGE = dockingDistance + 3.0
 
-	-- 若当前尚未进入攻击区，则当距离 <= ENTER_RANGE 切换为“保持不动”
+	-- 若当前尚未进入攻击区，则当距离 <= ENTER_RANGE 切换为"保持不动"
 	if not aiData._InAttackHold then
 		if distance <= ENTER_RANGE then
 			aiData._InAttackHold = true
+			DebugLog(string.format("[HoldPos] %s 进入攻击区: dist=%.1f, enterRange=%.1f, docking=%.1f",
+				aiData.UnitId or "?", distance, ENTER_RANGE, dockingDistance))
 		end
 	else
 		-- 已经处于保持区，若距离超过一个更大的阈值，才退出保持区
 		if distance >= EXIT_RANGE then
 			aiData._InAttackHold = false
+			DebugLog(string.format("[HoldPos] %s 退出攻击区: dist=%.1f, exitRange=%.1f",
+				aiData.UnitId or "?", distance, EXIT_RANGE))
 		end
 	end
 
@@ -742,8 +756,14 @@ local function HandleCombatMovement(model, aiData, deltaTime)
 	local isPlayerUnit = unitInfo and unitInfo.Team == "Attack"
 
 	-- 判断是否是近战单位(只有近战兵使用围攻系统，远程兵不需要找位置散开)
-	local isRangedUnit = UnitConfig.IsRangedUnit and UnitConfig.IsRangedUnit(aiData.UnitId)
+	local isRangedUnit = UnitConfig.IsRangedUnit(aiData.UnitId)
 	local useSurroundSystem = isPlayerUnit and not isRangedUnit
+
+	-- 调试：远程兵距离信息
+	if isRangedUnit then
+		DebugLog(string.format("[Ranged] %s dist=%.1f, atkRange=%.1f, inHold=%s",
+			model.Name, distance, dockingDistance, tostring(aiData._InAttackHold or false)))
+	end
 
 	---------------------------------------------------
 	-- ① 使用"迟滞区"决定是否保持当前攻击位置
@@ -1083,6 +1103,22 @@ function UnitAI.PlayMoveAnimation(model)
 		if aiData then
 			aiData.Tracks = aiData.Tracks or {}
 			aiData.Tracks.Move = track
+		else
+			-- 如果没有aiData（行军模式），使用模型属性存储track引用
+			-- 通过ObjectValue存储AnimationTrack引用
+			local existingTrackHolder = model:FindFirstChild("_MarchMoveTrack")
+			if existingTrackHolder then
+				existingTrackHolder:Destroy()
+			end
+			local trackHolder = Instance.new("ObjectValue")
+			trackHolder.Name = "_MarchMoveTrack"
+			trackHolder.Value = nil  -- ObjectValue不能存AnimationTrack，改用其他方式
+			trackHolder.Parent = model
+			-- 将track存到模块级别的表中
+			if not MarchAnimTracks then
+				MarchAnimTracks = {}
+			end
+			MarchAnimTracks[model] = track
 		end
 	end
 
@@ -1093,10 +1129,102 @@ function UnitAI.StopMoveAnimation(model)
 	if not model then return end
 
 	local aiData = activeAIs[model]
-	if aiData and aiData.Tracks and aiData.Tracks.Move then
-		SafeStopAnimation(aiData.Tracks.Move)
-		aiData.Tracks.Move = nil
+	if aiData and aiData.Tracks then
+		-- 停止移动动画
+		if aiData.Tracks.Move then
+			SafeStopAnimation(aiData.Tracks.Move)
+		end
+		-- 播放idle动画（避免单位站着不动却没有任何动画）
+		AnimationController.PlayIdleAnimation(model, aiData)
+	else
+		-- 没有aiData的情况（行军模式），从MarchAnimTracks获取track
+		if MarchAnimTracks and MarchAnimTracks[model] then
+			SafeStopAnimation(MarchAnimTracks[model])
+			MarchAnimTracks[model] = nil
+		end
+
+		-- 清理标记
+		local trackHolder = model:FindFirstChild("_MarchMoveTrack")
+		if trackHolder then
+			trackHolder:Destroy()
+		end
+
+		-- 播放idle动画（使用直接方式，因为没有aiData）
+		UnitAI.PlayIdleAnimation(model)
 	end
+end
+
+--[[
+播放Idle动画（供外部调用，不依赖aiData）
+@param model Model - 单位模型
+]]
+function UnitAI.PlayIdleAnimation(model)
+	if not model or not model.Parent then return end
+
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	local animator = humanoid and humanoid:FindFirstChildOfClass("Animator")
+	if not animator then return end
+
+	-- 获取UnitId
+	local unitId = model:GetAttribute("UnitId")
+	if not unitId then
+		unitId = model.Name:match("^(%d+)_") or model.Name
+	end
+
+	-- 查找UnitConfig
+	local unitData = UnitConfig.Units[unitId]
+	if not unitData then
+		for id, data in pairs(UnitConfig.Units) do
+			if data.Name == unitId or data.Name == model.Name then
+				unitData = data
+				break
+			end
+		end
+	end
+
+	if not unitData then return end
+
+	local idleAnimId = unitData.IdleAnimationId
+	if not idleAnimId or idleAnimId == "" then return end
+
+	-- 确保动画ID格式正确
+	local animationId = tostring(idleAnimId)
+	if not string.match(animationId, "^rbxassetid://") then
+		animationId = "rbxassetid://" .. animationId
+	end
+
+	-- 停止当前所有动画（除了idle）
+	for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+		local animation = track.Animation
+		if animation then
+			local animId = animation.AnimationId or ""
+			if not string.find(animId, tostring(idleAnimId), 1, true) then
+				pcall(function() track:Stop(0.2) end)
+			end
+		end
+	end
+
+	-- 创建并播放idle动画
+	local anim = Instance.new("Animation")
+	anim.AnimationId = animationId
+
+	local success, track = pcall(function()
+		return animator:LoadAnimation(anim)
+	end)
+
+	if success and track then
+		track.Priority = Enum.AnimationPriority.Idle
+		track.Looped = true
+		track:Play(0.2)
+
+		-- 存储到MarchAnimTracks以便后续管理
+		if not MarchIdleTracks then
+			MarchIdleTracks = {}
+		end
+		MarchIdleTracks[model] = track
+	end
+
+	anim:Destroy()
 end
 
 -------------------------------------------------------

@@ -1540,6 +1540,17 @@ local function OnConfirmPlacement(player, instanceId, position)
 			TaskSystem = require(taskModule)
 			TaskSystem.OnPlaceUnit(player, instanceId)
 		end
+
+		-- V3.9.1引导系统：首次摆放兵种后触发引导检查
+		task.delay(0.5, function()
+			if player and player.Parent then
+				local guideModule = ServerScriptService.Systems:FindFirstChild("GuideSystem")
+				if guideModule and guideModule:IsA("ModuleScript") then
+					local GuideSystem = require(guideModule :: ModuleScript)
+					GuideSystem.CheckAndTriggerGuides(player)
+				end
+			end
+		end)
 	end
 
 	-- 通知客户端结果

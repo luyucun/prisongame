@@ -75,12 +75,14 @@ ReplicatedStorage
         ├──TaskComplete（RemoteEvent） - 服务器→客户端：任务完成通知(taskInfo)
         ├──ClaimTaskReward（RemoteEvent） - 客户端→服务器：领取任务奖励
         └──ClaimRewardResult（RemoteEvent） - 服务器→客户端：领取结果(success, message, rewardCoins)
-    └──GuideEvents（Folder）/  【V3.5新增】
+    └──GuideEvents（Folder）/  【V3.5新增 / V3.9.1增强】
         ├──StartGuide（RemoteEvent） - 服务器→客户端：开始引导(guideId, targetPosition)
         ├──CompleteGuide（RemoteEvent） - 服务器→客户端：完成引导(guideId)
         ├──GuideArrived（RemoteEvent） - 客户端→服务器：到达目标(guideId)
         ├──SyncGuideData（RemoteEvent） - 服务器→客户端：同步引导数据(guideData)
-        └──RequestGuideSync（RemoteEvent） - 客户端→服务器：请求同步引导数据
+        ├──RequestGuideSync（RemoteEvent） - 客户端→服务器：请求同步引导数据
+        ├──StartUIFocusGuide（RemoteEvent） - 服务器→客户端：开始UI聚焦引导(guideId, uiPath) 【V3.9.1新增】
+        └──UIFocusCompleted（RemoteEvent） - 客户端→服务器：UI聚焦引导完成(guideId) 【V3.9.1新增】
     └──SoundEvents（Folder）/  【V3.8新增】
         ├──PlayBGM（RemoteEvent） - 服务器→客户端：播放BGM(bgmKey)
         ├──StopBGM（RemoteEvent） - 服务器→客户端：停止BGM

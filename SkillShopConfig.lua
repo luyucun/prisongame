@@ -44,18 +44,18 @@ SkillShopConfig.Shops = {
 	-- ==================== 技能商店 ====================
 	["SkillShop"] = {
 		NPCName = "KeepShoper02",        -- 关联NPC（技能商人）
-		DisplayName = "技能商店",
+		DisplayName = "Skill Shop",
 		RefreshInterval = 300,           -- 库存刷新间隔(秒) 5分钟（与兵种商店共享）
 		Items = {
 			-- 1001: 喷水枪
 			{
 				ItemType = "Skill",
 				SkillId = 1001,
-				Price = 500,             -- 金币价格
+				Price = 200,             -- 金币价格
 				RobuxPrice = 10,         -- 罗布币价格
-				DevProductId = "",       -- 开发者商品ID（需在Roblox开发者门户配置）
-				RefreshProbability = 1, -- 80%概率刷新
-				StockMin = 5,
+				DevProductId = "3476850130",       -- 开发者商品ID（需在Roblox开发者门户配置）
+				RefreshProbability = 0.8, -- 100%概率刷新
+				StockMin = 3,
 				StockMax = 5,
 				Sort = 10,
 				Enabled = true,
@@ -64,11 +64,11 @@ SkillShopConfig.Shops = {
 			{
 				ItemType = "Skill",
 				SkillId = 1002,
-				Price = 500,
+				Price = 300,
 				RobuxPrice = 10,
-				DevProductId = "",
-				RefreshProbability = 1,
-				StockMin = 5,
+				DevProductId = "3476850326",
+				RefreshProbability = 0.5, -- 100%概率刷新
+				StockMin = 3,
 				StockMax = 5,
 				Sort = 20,
 				Enabled = true,
@@ -77,12 +77,12 @@ SkillShopConfig.Shops = {
 			{
 				ItemType = "Skill",
 				SkillId = 1003,
-				Price = 800,
+				Price = 600,
 				RobuxPrice = 15,
-				DevProductId = "",
-				RefreshProbability = 1,
-				StockMin = 5,
-				StockMax = 5,
+				DevProductId = "3476850400",
+				RefreshProbability = 0.4, -- 100%概率刷新
+				StockMin = 1,
+				StockMax = 2,
 				Sort = 30,
 				Enabled = true,
 			},
@@ -252,6 +252,45 @@ function SkillShopConfig.GetRobuxPrice(shopId, skillId)
 	end
 
 	return nil
+end
+
+--[[
+获取商品开发者商品ID
+@param shopId string - 商店ID
+@param skillId number - 技能ID
+@return string|nil - DevProductId，未找到返回nil
+]]
+function SkillShopConfig.GetDevProductId(shopId, skillId)
+	local shopData = SkillShopConfig.Shops[shopId]
+	if not shopData then
+		return nil
+	end
+
+	for _, itemConfig in ipairs(shopData.Items) do
+		if itemConfig.ItemType == "Skill" and itemConfig.SkillId == skillId then
+			return itemConfig.DevProductId
+		end
+	end
+
+	return nil
+end
+
+--[[
+根据DevProductId查找对应的技能ID和商店ID
+@param devProductId string - 开发者商品ID
+@return number|nil - 技能ID，未找到返回nil
+@return string|nil - 商店ID
+]]
+function SkillShopConfig.FindSkillByDevProductId(devProductId)
+	local devProductIdStr = tostring(devProductId)
+	for shopId, shopData in pairs(SkillShopConfig.Shops) do
+		for _, itemConfig in ipairs(shopData.Items) do
+			if itemConfig.ItemType == "Skill" and tostring(itemConfig.DevProductId) == devProductIdStr then
+				return itemConfig.SkillId, shopId
+			end
+		end
+	end
+	return nil, nil
 end
 
 --[[

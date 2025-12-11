@@ -58,6 +58,7 @@ local CoinAnimationHelper = nil
 local RequestSkillShopList = nil
 local SkillShopListEvent = nil
 local PurchaseSkill = nil
+local PurchaseSkillRobux = nil       -- Robux购买事件
 local SkillPurchaseResult = nil
 local SkillStockUpdate = nil
 local SkillRefreshTimeUpdate = nil
@@ -164,6 +165,7 @@ local function InitializeEvents()
 	RequestSkillShopList = skillShopEvents:FindFirstChild("RequestSkillShopList")
 	SkillShopListEvent = skillShopEvents:FindFirstChild("SkillShopList")
 	PurchaseSkill = skillShopEvents:FindFirstChild("PurchaseSkill")
+	PurchaseSkillRobux = skillShopEvents:FindFirstChild("PurchaseSkillRobux")  -- Robux购买事件
 	SkillPurchaseResult = skillShopEvents:FindFirstChild("SkillPurchaseResult")
 	SkillStockUpdate = skillShopEvents:FindFirstChild("SkillStockUpdate")
 	SkillRefreshTimeUpdate = skillShopEvents:FindFirstChild("SkillRefreshTimeUpdate")
@@ -458,8 +460,43 @@ local function InitializeGlobalBuyButtons()
 
 	if robuxBuy then
 		local robuxConnection = robuxBuy.MouseButton1Click:Connect(function()
+			-- Robux购买逻辑
 			if currentSelectedItem then
-				warn(LOG_PREFIX, "Robux购买功能尚未实现:", currentSelectedItem.SkillId)
+				if not PurchaseSkillRobux then
+					warn(LOG_PREFIX, "PurchaseSkillRobux事件未找到，无法进行Robux购买")
+					return
+				end
+
+				-- 检查是否有Robux价格
+				if not currentSelectedItem.RobuxPrice or currentSelectedItem.RobuxPrice <= 0 then
+					warn(LOG_PREFIX, "该技能不支持Robux购买:", currentSelectedItem.SkillId)
+					return
+				end
+
+				-- 防重复购买检查
+				if isPurchasing then
+					if DEBUG_MODE then
+						print(LOG_PREFIX, "Robux购买处理中，请稍候")
+					end
+					return
+				end
+
+				if DEBUG_MODE then
+					print(LOG_PREFIX, "尝试Robux购买技能:", currentSelectedItem.SkillId, "价格: R$", currentSelectedItem.RobuxPrice)
+				end
+
+				-- 设置购买状态
+				isPurchasing = true
+
+				-- 发送Robux购买请求到服务端
+				PurchaseSkillRobux:FireServer(currentSelectedItem.SkillId)
+
+				-- 0.5秒后重置购买状态
+				task.delay(0.5, function()
+					isPurchasing = false
+				end)
+			else
+				warn(LOG_PREFIX, "没有选中的技能，无法进行Robux购买")
 			end
 		end)
 		table.insert(globalBuyConnections, robuxConnection)

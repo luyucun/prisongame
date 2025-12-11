@@ -5,12 +5,13 @@
 ]]
 
 --[[
-新手引导控制器 V3.5
+新手引导控制器 V3.9.1
 职责:
 1. 接收服务端引导事件
 2. 显示引导箭头（Guide01 + Guide02 + Beam）
 3. 检测玩家是否到达目标位置
 4. 通知服务端引导完成
+5. V3.9.1新增: UI聚焦引导（半透明Frame包围目标UI，带滑入动画）
 ]]
 
 local GuideController = {}
@@ -46,12 +47,19 @@ local guideStartPart = nil   -- 绑定到玩家的Guide01副本
 local guideEndPart = nil     -- 放在目标位置的Guide02副本
 local updateConnection = nil -- RenderStepped连接
 
+-- UI聚焦引导状态
+local uiFocusFrames = {}     -- 存储ScreenGui和4个半透明Frame
+local uiFocusConnections = {} -- 存储所有UI点击监听连接
+local currentUIPath = nil    -- 当前聚焦的UI路径
+
 -- ==================== 私有函数（前向声明） ====================
 
 -- 前向声明，解决函数互相调用的问题
 local CheckArrival
 local OnArriveAtTarget
 local ClearGuideDisplay
+local ClearUIFocusGuide
+local CreateUIFocusGuide
 
 --[[
 获取事件引用
@@ -77,6 +85,8 @@ local function GetGuideEvents()
 		GuideArrived = guideEventsFolder:WaitForChild("GuideArrived", 5),
 		SyncGuideData = guideEventsFolder:WaitForChild("SyncGuideData", 5),
 		RequestGuideSync = guideEventsFolder:WaitForChild("RequestGuideSync", 5),
+		StartUIFocusGuide = guideEventsFolder:WaitForChild("StartUIFocusGuide", 5),
+		UIFocusCompleted = guideEventsFolder:WaitForChild("UIFocusCompleted", 5),
 	}
 
 	return guideEvents
@@ -297,6 +307,7 @@ end
 local function OnCompleteGuide(guideId)
 	if guideId == 0 or guideId == currentGuideId then
 		ClearGuideDisplay()
+		ClearUIFocusGuide()
 	end
 end
 
@@ -306,6 +317,211 @@ end
 ]]
 local function OnSyncGuideData(guideData)
 	-- 可以在这里处理引导数据的客户端缓存
+end
+
+--[[
+清除UI聚焦引导
+]]
+ClearUIFocusGuide = function()
+	-- 断开所有监听连接
+	for _, connection in pairs(uiFocusConnections) do
+		if connection then
+			pcall(function()
+				connection:Disconnect()
+			end)
+		end
+	end
+	uiFocusConnections = {}
+
+	-- 移除所有半透明Frame（包括ScreenGui）
+	for _, frame in pairs(uiFocusFrames) do
+		if frame and frame.Parent then
+			pcall(function()
+				frame:Destroy()
+			end)
+		end
+	end
+	uiFocusFrames = {}
+	currentUIPath = nil
+end
+
+--[[
+获取UI对象
+@param uiPath string - UI路径（例如："BackpackGui/BackpackFrame/ItemListFrame"）
+@return GuiObject|nil - UI对象
+]]
+local function GetUIObject(uiPath)
+	local playerGui = player:WaitForChild("PlayerGui", 5)
+	if not playerGui then
+		return nil
+	end
+
+	local parts = string.split(uiPath, "/")
+	local current = playerGui
+
+	for _, partName in ipairs(parts) do
+		current = current:FindFirstChild(partName)
+		if not current then
+			return nil
+		end
+	end
+
+	return current
+end
+
+--[[
+创建UI聚焦引导
+@param guideId number - 引导ID
+@param uiPath string - UI路径
+]]
+CreateUIFocusGuide = function(guideId, uiPath)
+	-- 清除旧的引导
+	ClearUIFocusGuide()
+
+	-- 获取目标UI
+	local targetUI = GetUIObject(uiPath)
+	if not targetUI then
+		warn("[GuideController] 找不到目标UI:", uiPath)
+		return false
+	end
+
+	-- 获取PlayerGui
+	local playerGui = player:WaitForChild("PlayerGui")
+	if not playerGui then
+		return false
+	end
+
+	-- 获取配置
+	local focusConfig = GuideConfig.Display.UIFocus
+
+	-- 获取目标UI的绝对位置和大小
+	local targetAbsPos = targetUI.AbsolutePosition
+	local targetAbsSize = targetUI.AbsoluteSize
+
+	-- 获取屏幕大小
+	local viewportSize = workspace.CurrentCamera.ViewportSize
+
+	-- 创建一个ScreenGui来容纳聚焦Frame
+	local focusScreenGui = Instance.new("ScreenGui")
+	focusScreenGui.Name = "GuideFocusGui"
+	focusScreenGui.DisplayOrder = focusConfig.ZIndex
+	focusScreenGui.IgnoreGuiInset = true
+	focusScreenGui.ResetOnSpawn = false
+	focusScreenGui.Parent = playerGui
+
+	-- 创建4个半透明Frame（上、下、左、右）
+	local frames = {focusScreenGui}  -- 把ScreenGui也加入，方便清理
+
+	-- 上方Frame
+	local topFrame = Instance.new("Frame")
+	topFrame.Name = "GuideFocusTop"
+	topFrame.BackgroundColor3 = focusConfig.FrameColor
+	topFrame.BackgroundTransparency = focusConfig.FrameTransparency
+	topFrame.BorderSizePixel = 0
+	topFrame.Size = UDim2.new(1, 0, 0, targetAbsPos.Y)
+	topFrame.Position = UDim2.new(0, 0, 0, 0)
+	topFrame.Parent = focusScreenGui
+	table.insert(frames, topFrame)
+
+	-- 下方Frame
+	local bottomFrame = Instance.new("Frame")
+	bottomFrame.Name = "GuideFocusBottom"
+	bottomFrame.BackgroundColor3 = focusConfig.FrameColor
+	bottomFrame.BackgroundTransparency = focusConfig.FrameTransparency
+	bottomFrame.BorderSizePixel = 0
+	local bottomY = targetAbsPos.Y + targetAbsSize.Y
+	bottomFrame.Size = UDim2.new(1, 0, 0, viewportSize.Y - bottomY)
+	bottomFrame.Position = UDim2.new(0, 0, 0, bottomY)
+	bottomFrame.Parent = focusScreenGui
+	table.insert(frames, bottomFrame)
+
+	-- 左侧Frame
+	local leftFrame = Instance.new("Frame")
+	leftFrame.Name = "GuideFocusLeft"
+	leftFrame.BackgroundColor3 = focusConfig.FrameColor
+	leftFrame.BackgroundTransparency = focusConfig.FrameTransparency
+	leftFrame.BorderSizePixel = 0
+	leftFrame.Size = UDim2.new(0, targetAbsPos.X, 0, targetAbsSize.Y)
+	leftFrame.Position = UDim2.new(0, 0, 0, targetAbsPos.Y)
+	leftFrame.Parent = focusScreenGui
+	table.insert(frames, leftFrame)
+
+	-- 右侧Frame
+	local rightFrame = Instance.new("Frame")
+	rightFrame.Name = "GuideFocusRight"
+	rightFrame.BackgroundColor3 = focusConfig.FrameColor
+	rightFrame.BackgroundTransparency = focusConfig.FrameTransparency
+	rightFrame.BorderSizePixel = 0
+	local rightX = targetAbsPos.X + targetAbsSize.X
+	rightFrame.Size = UDim2.new(0, viewportSize.X - rightX, 0, targetAbsSize.Y)
+	rightFrame.Position = UDim2.new(0, rightX, 0, targetAbsPos.Y)
+	rightFrame.Parent = focusScreenGui
+	table.insert(frames, rightFrame)
+
+	-- 保存Frame引用
+	uiFocusFrames = frames
+	currentUIPath = uiPath
+	currentGuideId = guideId
+
+	-- 添加滑入动画
+	local TweenService = game:GetService("TweenService")
+	local tweenInfo = TweenInfo.new(focusConfig.AnimationDuration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+
+	-- 上方Frame从上往下滑入
+	topFrame.Position = UDim2.new(0, 0, 0, -targetAbsPos.Y)
+	local topTween = TweenService:Create(topFrame, tweenInfo, {Position = UDim2.new(0, 0, 0, 0)})
+	topTween:Play()
+
+	-- 下方Frame从下往上滑入
+	bottomFrame.Position = UDim2.new(0, 0, 1, 0)
+	local bottomTween = TweenService:Create(bottomFrame, tweenInfo, {Position = UDim2.new(0, 0, 0, bottomY)})
+	bottomTween:Play()
+
+	-- 左侧Frame从左往右滑入
+	leftFrame.Position = UDim2.new(0, -targetAbsPos.X, 0, targetAbsPos.Y)
+	local leftTween = TweenService:Create(leftFrame, tweenInfo, {Position = UDim2.new(0, 0, 0, targetAbsPos.Y)})
+	leftTween:Play()
+
+	-- 右侧Frame从右往左滑入
+	rightFrame.Position = UDim2.new(1, 0, 0, targetAbsPos.Y)
+	local rightTween = TweenService:Create(rightFrame, tweenInfo, {Position = UDim2.new(0, rightX, 0, targetAbsPos.Y)})
+	rightTween:Play()
+
+	-- 监听目标UI的点击事件
+	local function CheckUIClick(descendant)
+		if descendant:IsA("GuiButton") or descendant:IsA("TextButton") or descendant:IsA("ImageButton") then
+			local connection
+			connection = descendant.MouseButton1Click:Connect(function()
+				-- 通知服务端引导完成
+				local events = GetGuideEvents()
+				if events and events.UIFocusCompleted then
+					events.UIFocusCompleted:FireServer(guideId)
+				end
+
+				-- 清除引导
+				ClearUIFocusGuide()
+			end)
+			-- 保存连接以便清理时断开
+			table.insert(uiFocusConnections, connection)
+		end
+	end
+
+	-- 检查目标UI及其所有子对象
+	CheckUIClick(targetUI)
+	for _, descendant in ipairs(targetUI:GetDescendants()) do
+		CheckUIClick(descendant)
+	end
+
+	return true
+end
+
+--[[
+处理开始UI聚焦引导事件
+@param guideId number - 引导ID
+@param uiPath string - UI路径
+]]
+local function OnStartUIFocusGuide(guideId, uiPath)
+	CreateUIFocusGuide(guideId, uiPath)
 end
 
 -- ==================== 公共接口 ====================
@@ -332,6 +548,10 @@ function GuideController.Initialize()
 
 	if events.SyncGuideData then
 		events.SyncGuideData.OnClientEvent:Connect(OnSyncGuideData)
+	end
+
+	if events.StartUIFocusGuide then
+		events.StartUIFocusGuide.OnClientEvent:Connect(OnStartUIFocusGuide)
 	end
 
 	-- 监听角色重生
@@ -373,6 +593,7 @@ end
 ]]
 function GuideController.ClearGuide()
 	ClearGuideDisplay()
+	ClearUIFocusGuide()
 end
 
 -- 初始化
