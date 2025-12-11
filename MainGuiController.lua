@@ -43,8 +43,11 @@ local isInitialized = false
 
 -- ==================== 日志函数 ====================
 
+local DEBUG_MODE = false
 local function DebugLog(...)
-	print("[MainGuiController]", ...)
+	if DEBUG_MODE then
+		print("[MainGuiController]", ...)
+	end
 end
 
 -- ==================== UI初始化 ====================
@@ -296,5 +299,3 @@ task.spawn(function()
 		warn("[MainGuiController] 初始化出错:", err)
 	end
 end)
-
-DebugLog("MainGuiController脚本加载完成")

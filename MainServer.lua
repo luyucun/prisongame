@@ -487,54 +487,25 @@ Players.PlayerAdded:Connect(function(player)
 		-- V2.1修复：初始化玩家商店库存系统
 		pcall(function()
 			ShopSystem.InitializePlayerShopTimer(player, "UnitShop")
-			print(string.format(
-				"%s [MainServer] 玩家 %s 商店库存系统已初始化",
-				GameConfig.LOG_PREFIX,
-				player.Name
-			))
 		end)
 		LoadingSystem.NotifySceneSetup(player, 0.25)
 
 		-- V3.1新增：初始化玩家技能商店库存系统
 		pcall(function()
 			SkillShopSystem.InitializePlayerSkillShopTimer(player, "SkillShop")
-			print(string.format(
-				"%s [MainServer] 玩家 %s 技能商店库存系统已初始化",
-				GameConfig.LOG_PREFIX,
-				player.Name
-			))
 		end)
 		LoadingSystem.NotifySceneSetup(player, 0.5)
 
 		-- V2.6新增：初始化挂机金币系统（HomeSlot已确认存在）
 		pcall(function()
 			IdleCoinSystem.OnPlayerJoin(player)
-			print(string.format(
-				"%s [MainServer] 玩家 %s 挂机金币系统已初始化",
-				GameConfig.LOG_PREFIX,
-				player.Name
-			))
 		end)
 		LoadingSystem.NotifySceneSetup(player, 0.65)
 
 		-- 🔥V2.6.1新增：在Loading流程中创建Mail的ProximityPrompt
 		-- 确保在玩家看到游戏界面前，ProximityPrompt已准备好
 		pcall(function()
-			local success, message = IdleCoinSystem.SetupPlayerMailPrompt(player)
-			if success then
-				print(string.format(
-					"%s [MainServer] ✅ 玩家 %s 的Mail交互已准备",
-					GameConfig.LOG_PREFIX,
-					player.Name
-				))
-			else
-				warn(string.format(
-					"%s [MainServer] ❌ 玩家 %s 的Mail交互创建失败: %s",
-					GameConfig.LOG_PREFIX,
-					player.Name,
-					message
-				))
-			end
+			IdleCoinSystem.SetupPlayerMailPrompt(player)
 		end)
 		LoadingSystem.NotifySceneSetup(player, 0.75)
 
@@ -547,43 +518,23 @@ Players.PlayerAdded:Connect(function(player)
 		-- V3.0新增：同步技能背包数据到客户端
 		pcall(function()
 			SkillSystem.SyncSkillInventory(player)
-			print(string.format(
-				"%s [MainServer] 玩家 %s 技能背包已同步",
-				GameConfig.LOG_PREFIX,
-				player.Name
-			))
 		end)
 		LoadingSystem.NotifyDataSync(player, 0.5)
 
 		-- V3.3新增：初始化玩家任务数据并同步到客户端
 		pcall(function()
 			TaskSystem.InitializePlayerTask(player)
-			print(string.format(
-				"%s [MainServer] 玩家 %s 任务系统已初始化",
-				GameConfig.LOG_PREFIX,
-				player.Name
-			))
 		end)
 		LoadingSystem.NotifyDataSync(player, 0.75)
 
 		-- V3.5新增：初始化玩家新手引导
 		pcall(function()
 			GuideSystem.InitializePlayerGuide(player)
-			print(string.format(
-				"%s [MainServer] 玩家 %s 新手引导系统已初始化",
-				GameConfig.LOG_PREFIX,
-				player.Name
-			))
 		end)
 
 		-- V3.8新增：玩家加入时播放通用BGM
 		pcall(function()
 			SoundSystem.OnPlayerJoin(player)
-			print(string.format(
-				"%s [MainServer] 玩家 %s 音效系统已初始化",
-				GameConfig.LOG_PREFIX,
-				player.Name
-			))
 		end)
 
 		-- V3.2: 通知数据同步完成（这会尝试完成加载流程）

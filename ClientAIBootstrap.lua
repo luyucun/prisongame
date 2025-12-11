@@ -81,19 +81,6 @@ local function OnInitializeBattle(battleId, attackUnits, defenseUnits, battleFie
 	DebugLog(string.format("收到战斗初始化: BattleId=%d, Attack=%d, Defense=%d",
 		battleId, #attackUnits, #defenseUnits))
 
-	-- V4.0调试：输出收到的单位列表
-	print(string.format("[V4.0客户端调试] 收到战斗初始化: BattleId=%d", battleId))
-	print(string.format("[V4.0客户端调试] 攻击方单位数量: %d", #attackUnits))
-	for i, unitData in ipairs(attackUnits) do
-		print(string.format("[V4.0客户端调试] 攻击方[%d]: Name=%s, UnitId=%s",
-			i, unitData.UnitModel and unitData.UnitModel.Name or "nil", tostring(unitData.UnitId)))
-	end
-	print(string.format("[V4.0客户端调试] 防守方单位数量: %d", #defenseUnits))
-	for i, unitData in ipairs(defenseUnits) do
-		print(string.format("[V4.0客户端调试] 防守方[%d]: Name=%s, UnitId=%s",
-			i, unitData.UnitModel and unitData.UnitModel.Name or "nil", tostring(unitData.UnitId)))
-	end
-
 	-- 检查BattleConfig是否启用客户端AI
 	if not BattleConfig.ENABLE_CLIENT_AI then
 		WarnLog("客户端AI未启用，跳过初始化")

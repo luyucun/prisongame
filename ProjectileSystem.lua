@@ -229,6 +229,12 @@ local function UpdateProjectiles(dt)
     for i = #activeProjectiles, 1, -1 do
         local projectile = activeProjectiles[i]
 
+        -- 检查弹道数据是否有效
+        if not projectile or not projectile.StartTime then
+            table.remove(activeProjectiles, i)
+            continue
+        end
+
         -- 检查弹道是否超时
         if currentTime - projectile.StartTime > BattleConfig.PROJECTILE_LIFETIME then
             ProjectileSystem.DestroyProjectile(projectile)

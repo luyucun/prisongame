@@ -2,7 +2,7 @@
 脚本名称: HouseUpgradeSystem
 脚本类型: ModuleScript (服务端系统)
 脚本位置: ServerScriptService/Systems/HouseUpgradeSystem
-版本: V3.9
+版本: V3.9.1
 ]]
 
 --[[
@@ -26,8 +26,14 @@ V3.9房屋升级表现流程：
 4. 客户端镜头拉高看向房屋（1秒）
 5. 等待1秒
 6. 服务端替换房屋（旧房屋消失，新房屋出现）
-7. 等待1秒
-8. 客户端恢复镜头控制
+7. 播放HouseChange特效（1秒后移除）
+8. 等待1秒
+9. 客户端恢复镜头控制
+
+V3.9.1新增：
+- 房屋替换时播放HouseChange特效
+- 特效从ReplicatedStorage/Effect/HouseChange复制
+- 特效放置在新房屋位置，1秒后自动移除
 ]]
 
 local HouseUpgradeSystem = {}
@@ -92,6 +98,78 @@ local function InitializeEvents()
 
 	HouseUpgradeEvents = houseUpgradeFolder
 	return true
+end
+
+-- 调试日志开关
+local DEBUG_LOGS = false
+
+-- 特效配置
+local HOUSE_CHANGE_EFFECT_DURATION = 1.5  -- 房屋替换特效持续时间（秒）
+
+--[[
+输出调试日志
+@param ... - 日志内容
+]]
+local function DebugLog(...)
+	if DEBUG_LOGS then
+		print("[HouseUpgradeSystem]", ...)
+	end
+end
+
+--[[
+播放房屋替换特效（V3.9.1新增）
+@param position Vector3 - 特效播放位置
+]]
+local function PlayHouseChangeEffect(position)
+	-- 获取特效模板
+	local effectFolder = ReplicatedStorage:FindFirstChild("Effect")
+	if not effectFolder then
+		warn("[HouseUpgradeSystem] ReplicatedStorage/Effect文件夹不存在")
+		return
+	end
+
+	local effectTemplate = effectFolder:FindFirstChild("HouseChange")
+	if not effectTemplate then
+		warn("[HouseUpgradeSystem] HouseChange特效模板不存在")
+		return
+	end
+
+	-- 1. 克隆特效（子节点通过Weld自动跟随）
+	local effect = effectTemplate:Clone()
+
+	-- 2. 先挂载到Workspace
+	effect.Parent = Workspace
+
+	-- 3. 立即锚定，防止物理引擎干扰（子节点保持不锚定，通过Weld跟随）
+	if effect:IsA("Model") then
+		if effect.PrimaryPart then
+			effect.PrimaryPart.Anchored = true
+		end
+	elseif effect:IsA("BasePart") then
+		effect.Anchored = true
+	end
+
+	-- 4. 移动到目标位置
+	if effect:IsA("Model") then
+		effect:PivotTo(CFrame.new(position))
+	elseif effect:IsA("BasePart") then
+		effect.CFrame = CFrame.new(position)
+	end
+
+	DebugLog(string.format(
+		"播放房屋替换特效，位置=(%.2f, %.2f, %.2f)",
+		position.X,
+		position.Y,
+		position.Z
+	))
+
+	-- 1.5秒后移除特效
+	task.delay(HOUSE_CHANGE_EFFECT_DURATION, function()
+		if effect and effect.Parent then
+			effect:Destroy()
+			DebugLog("房屋替换特效已移除")
+		end
+	end)
 end
 
 --[[
@@ -210,8 +288,8 @@ function HouseUpgradeSystem.ReplaceHouseModel(player, newModelName)
 	local currentPivot = currentHouseModel:GetPivot()
 	local _, currentYRotation, _ = currentPivot:ToEulerAnglesYXZ()
 
-	print(string.format(
-		"[HouseUpgradeSystem] 当前房屋 %s: 底部Y=%.2f, 中心=(%.2f, %.2f), Y旋转=%.2f度",
+	DebugLog(string.format(
+		"当前房屋 %s: 底部Y=%.2f, 中心=(%.2f, %.2f), Y旋转=%.2f度",
 		currentHouseModel.Name,
 		currentBottomY,
 		currentCenterX,
@@ -236,8 +314,8 @@ function HouseUpgradeSystem.ReplaceHouseModel(player, newModelName)
 	local pivotToCenterX = newPivot.Position.X - newBBoxCF.Position.X
 	local pivotToCenterZ = newPivot.Position.Z - newBBoxCF.Position.Z
 
-	print(string.format(
-		"[HouseUpgradeSystem] 新房屋 %s 模板: 轴点到底部距离=%.2f, 轴点到中心偏移=(%.2f, %.2f)",
+	DebugLog(string.format(
+		"新房屋 %s 模板: 轴点到底部距离=%.2f, 轴点到中心偏移=(%.2f, %.2f)",
 		newModelName,
 		pivotToBottomY,
 		pivotToCenterX,
@@ -262,8 +340,8 @@ function HouseUpgradeSystem.ReplaceHouseModel(player, newModelName)
 	local verifyBBoxCF, verifyBBoxSize = newHouseModel:GetBoundingBox()
 	local verifyBottomY = verifyBBoxCF.Position.Y - verifyBBoxSize.Y / 2
 
-	print(string.format(
-		"[HouseUpgradeSystem] 新房屋 %s 已放置: 轴点=(%.2f, %.2f, %.2f), 实际底部Y=%.2f, Y旋转=%.2f度",
+	DebugLog(string.format(
+		"新房屋 %s 已放置: 轴点=(%.2f, %.2f, %.2f), 实际底部Y=%.2f, Y旋转=%.2f度",
 		newModelName,
 		targetPivotX,
 		targetPivotY,
@@ -278,11 +356,16 @@ function HouseUpgradeSystem.ReplaceHouseModel(player, newModelName)
 	-- 再销毁旧房屋模型
 	currentHouseModel:Destroy()
 
+	-- V3.9.1新增：播放房屋替换特效
+	-- 特效位置使用新房屋的轴点位置（与房屋轴点对齐）
+	local effectPosition = targetCFrame.Position
+	PlayHouseChangeEffect(effectPosition)
+
 	-- 更新DataManager中的房屋模型名称
 	DataManager.SetCurrentHouseModel(player, newModelName)
 
-	print(string.format(
-		"[HouseUpgradeSystem] 玩家 %s 的房屋已升级: %s -> %s",
+	DebugLog(string.format(
+		"玩家 %s 的房屋已升级: %s -> %s",
 		player.Name,
 		currentHouseModel.Name,
 		newModelName
@@ -313,8 +396,8 @@ function HouseUpgradeSystem.CheckAndUpgradeHouse(player)
 	local shouldUpgrade, newModelName = HouseConfig.ShouldUpgradeHouse(currentHouseModel, completedChapters)
 
 	if shouldUpgrade then
-		print(string.format(
-			"[HouseUpgradeSystem] 玩家 %s 满足升级条件: 当前房屋 %s -> 新房屋 %s (通关章节: %d)",
+		DebugLog(string.format(
+			"玩家 %s 满足升级条件: 当前房屋 %s -> 新房屋 %s (通关章节: %d)",
 			player.Name,
 			currentHouseModel,
 			newModelName,
@@ -351,8 +434,8 @@ function HouseUpgradeSystem.ReplaceHouseModelWithCinematic(player, newModelName)
 	-- 类型断言：此时homeSlot一定不为nil且不为0
 	local validHomeSlot = homeSlot :: number
 
-	print(string.format(
-		"[HouseUpgradeSystem] 开始房屋升级镜头表现，玩家=%s, HomeSlot=%d, 新房屋=%s",
+	DebugLog(string.format(
+		"开始房屋升级镜头表现，玩家=%s, HomeSlot=%d, 新房屋=%s",
 		player.Name,
 		validHomeSlot,
 		newModelName
@@ -363,7 +446,6 @@ function HouseUpgradeSystem.ReplaceHouseModelWithCinematic(player, newModelName)
 		local startEvent = HouseUpgradeEvents:FindFirstChild("StartUpgradeSequence")
 		if startEvent then
 			startEvent:FireClient(player, validHomeSlot)
-			print("[HouseUpgradeSystem] 已通知客户端开始镜头表现")
 		end
 	end
 
@@ -371,16 +453,9 @@ function HouseUpgradeSystem.ReplaceHouseModelWithCinematic(player, newModelName)
 	task.wait(2.0)
 
 	-- 3. 执行房屋替换
-	print("[HouseUpgradeSystem] 开始替换房屋模型...")
 	local success = HouseUpgradeSystem.ReplaceHouseModel(player, newModelName)
 
-	if success then
-		print(string.format(
-			"[HouseUpgradeSystem] 房屋替换成功，等待镜头恢复..."
-		))
-		-- 4. 等待客户端恢复镜头（1秒观看新房屋 + 自动恢复）
-		-- 客户端会自动处理恢复，这里不需要额外等待
-	else
+	if not success then
 		warn("[HouseUpgradeSystem] 房屋替换失败")
 	end
 
@@ -400,8 +475,8 @@ function HouseUpgradeSystem.OnChapterCompleted(player, chapterId, useCinematic)
 		useCinematic = true  -- 默认使用镜头表现
 	end
 
-	print(string.format(
-		"[HouseUpgradeSystem] 玩家 %s 通关章节 %d，检查房屋升级... (镜头表现=%s)",
+	DebugLog(string.format(
+		"玩家 %s 通关章节 %d，检查房屋升级... (镜头表现=%s)",
 		player.Name,
 		chapterId,
 		tostring(useCinematic)
@@ -419,28 +494,20 @@ function HouseUpgradeSystem.OnChapterCompleted(player, chapterId, useCinematic)
 		local shouldUpgrade, newModelName = HouseConfig.ShouldUpgradeHouse(currentHouseModel, completedChapters)
 
 		if shouldUpgrade then
-			print(string.format(
-				"[HouseUpgradeSystem] 玩家 %s 满足升级条件: 当前房屋 %s -> 新房屋 %s (通关章节: %d)",
+			DebugLog(string.format(
+				"玩家 %s 满足升级条件: 当前房屋 %s -> 新房屋 %s (通关章节: %d)",
 				player.Name,
 				currentHouseModel,
 				newModelName,
 				completedChapters
 			))
 
-			local upgraded = false
 			if useCinematic then
 				-- V3.9新增：使用镜头表现的升级
-				upgraded = HouseUpgradeSystem.ReplaceHouseModelWithCinematic(player, newModelName)
+				HouseUpgradeSystem.ReplaceHouseModelWithCinematic(player, newModelName)
 			else
 				-- 直接升级（无镜头表现）
-				upgraded = HouseUpgradeSystem.ReplaceHouseModel(player, newModelName)
-			end
-
-			if upgraded then
-				print(string.format(
-					"[HouseUpgradeSystem] 玩家 %s 房屋升级成功！",
-					player.Name
-				))
+				HouseUpgradeSystem.ReplaceHouseModel(player, newModelName)
 			end
 		end
 	end)
@@ -471,8 +538,8 @@ function HouseUpgradeSystem.InitializePlayerHouse(player, homeSlot)
 	local currentHouseModel = houseFolder and GetCurrentHouseModelInFolder(houseFolder)
 	local actualModelName = currentHouseModel and currentHouseModel.Name or "PrisonLv1"
 
-	print(string.format(
-		"[HouseUpgradeSystem] 玩家 %s 登录，通关章节: %d, 目标房屋: %s, 存档房屋: %s, 场景中房屋: %s",
+	DebugLog(string.format(
+		"玩家 %s 登录，通关章节: %d, 目标房屋: %s, 存档房屋: %s, 场景中房屋: %s",
 		player.Name,
 		completedChapters,
 		targetModelName,
@@ -482,8 +549,8 @@ function HouseUpgradeSystem.InitializePlayerHouse(player, homeSlot)
 
 	-- V2.8.2修改：如果场景中的房屋模型与目标不一致，立即替换（无延迟）
 	if actualModelName ~= targetModelName then
-		print(string.format(
-			"[HouseUpgradeSystem] 玩家 %s 需要替换房屋: %s -> %s",
+		DebugLog(string.format(
+			"玩家 %s 需要替换房屋: %s -> %s",
 			player.Name,
 			actualModelName,
 			targetModelName
@@ -498,8 +565,8 @@ function HouseUpgradeSystem.InitializePlayerHouse(player, homeSlot)
 	-- 如果存档的模型名称与目标不一致，更新存档
 	if savedModelName ~= targetModelName then
 		DataManager.SetCurrentHouseModel(player, targetModelName)
-		print(string.format(
-			"[HouseUpgradeSystem] 玩家 %s 存档房屋模型已更新: %s -> %s",
+		DebugLog(string.format(
+			"玩家 %s 存档房屋模型已更新: %s -> %s",
 			player.Name,
 			savedModelName,
 			targetModelName

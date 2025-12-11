@@ -160,8 +160,6 @@ end
 初始化伤害冒字系统
 ]]
 local function Initialize()
-	print("[DamageNumberSystem] 正在初始化伤害冒字系统...")
-
 	-- 等待Events文件夹加载
 	local eventsFolder = ReplicatedStorage:WaitForChild("Events")
 	local battleEventsFolder = eventsFolder:WaitForChild("BattleEvents")
@@ -172,8 +170,6 @@ local function Initialize()
 	showDamageNumberEvent.OnClientEvent:Connect(function(unitModel, damage, attackerTeam, targetTeam)
 		ShowDamageNumber(unitModel, damage, attackerTeam, targetTeam)
 	end)
-
-	print("[DamageNumberSystem] 伤害冒字系统初始化完成")
 end
 
 -- 启动系统

@@ -9,7 +9,7 @@
 local ShopSystem = {}
 
 -- 调试配置
-local DEBUG_MODE = true  -- V2.1调试：临时启用详细日志，排查价格问题
+local DEBUG_MODE = false
 
 -- 引用服务
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -549,13 +549,15 @@ local function StartRefreshTimer(player, shopId)
 		end)
 	end
 
-	print(string.format(
-		"%s [ShopSystem] 启动刷新定时器 - 玩家:%s 商店:%s 间隔:%ds",
-		GameConfig.LOG_PREFIX,
-		player.Name,
-		shopId,
-		refreshInterval
-	))
+	if DEBUG_MODE then
+		print(string.format(
+			"%s [ShopSystem] 启动刷新定时器 - 玩家:%s 商店:%s 间隔:%ds",
+			GameConfig.LOG_PREFIX,
+			player.Name,
+			shopId,
+			refreshInterval
+		))
+	end
 end
 
 --[[
@@ -592,12 +594,14 @@ local function SendFailure(player, message)
 		end)
 	end
 
-	print(string.format(
-		"%s [ShopSystem] 购买失败 - 玩家:%s 原因:%s",
-		GameConfig.LOG_PREFIX,
-		player.Name,
-		message
-	))
+	if DEBUG_MODE then
+		print(string.format(
+			"%s [ShopSystem] 购买失败 - 玩家:%s 原因:%s",
+			GameConfig.LOG_PREFIX,
+			player.Name,
+			message
+		))
+	end
 end
 
 --[[
@@ -615,14 +619,16 @@ local function SendSuccess(player, message, unitId, newCoins, instanceId)
 		end)
 	end
 
-	print(string.format(
-		"%s [ShopSystem] 购买成功 - 玩家:%s 兵种:%s 实例:%s 剩余金币:%d",
-		GameConfig.LOG_PREFIX,
-		player.Name,
-		unitId,
-		instanceId or "N/A",
-		newCoins
-	))
+	if DEBUG_MODE then
+		print(string.format(
+			"%s [ShopSystem] 购买成功 - 玩家:%s 兵种:%s 实例:%s 剩余金币:%d",
+			GameConfig.LOG_PREFIX,
+			player.Name,
+			unitId,
+			instanceId or "N/A",
+			newCoins
+		))
+	end
 end
 
 --[[
@@ -756,14 +762,16 @@ local function OnRequestShopList(player)
 			end
 		end
 
-		print(string.format(
-			"%s [ShopSystem] 玩家 %s 请求商店[%s]，返回 %d 个商品%s",
-			GameConfig.LOG_PREFIX,
-			player.Name,
-			shopId,
-			#shopItems,
-			useFallback and " (回退模式)" or ""
-		))
+		if DEBUG_MODE then
+			print(string.format(
+				"%s [ShopSystem] 玩家 %s 请求商店[%s]，返回 %d 个商品%s",
+				GameConfig.LOG_PREFIX,
+				player.Name,
+				shopId,
+				#shopItems,
+				useFallback and " (回退模式)" or ""
+			))
+		end
 	end)
 
 	if not success then
@@ -1004,16 +1012,18 @@ function ShopSystem.Initialize()
 	-- 5. 绑定玩家离开事件
 	Players.PlayerRemoving:Connect(OnPlayerRemoving)
 
-	-- 6. 输出初始化结果
-	print(string.format(
-		"%s [ShopSystem] ✅ 商店系统已就绪（数据驱动模式）",
-		GameConfig.LOG_PREFIX
-	))
-	print(string.format(
-		"%s [ShopSystem] 配置状态: %s",
-		GameConfig.LOG_PREFIX,
-		configSuccess and "✅ 配置正常" or "⚠️ 配置异常，将回退到UnitConfig"
-	))
+	-- 6. 输出初始化结果（仅在调试模式下）
+	if DEBUG_MODE then
+		print(string.format(
+			"%s [ShopSystem] 商店系统已就绪（数据驱动模式）",
+			GameConfig.LOG_PREFIX
+		))
+		print(string.format(
+			"%s [ShopSystem] 配置状态: %s",
+			GameConfig.LOG_PREFIX,
+			configSuccess and "配置正常" or "配置异常，将回退到UnitConfig"
+		))
+	end
 
 	return true
 end
@@ -1052,11 +1062,13 @@ end
 function ShopSystem.ClearPlayerLock(player)
 	PurchaseLocks[player] = nil
 	LastPurchaseTime[player] = nil
-	print(string.format(
-		"%s [ShopSystem] 管理员清理玩家锁: %s",
-		GameConfig.LOG_PREFIX,
-		player.Name
-	))
+	if DEBUG_MODE then
+		print(string.format(
+			"%s [ShopSystem] 管理员清理玩家锁: %s",
+			GameConfig.LOG_PREFIX,
+			player.Name
+		))
+	end
 end
 
 --[[
@@ -1077,13 +1089,6 @@ function ShopSystem.InitializePlayerShopTimer(player, shopId)
 	-- 启动刷新定时器
 	StartRefreshTimer(player, shopId)
 
-	print(string.format(
-		"%s [ShopSystem] 玩家进入游戏，启动商店定时器 - 玩家:%s 商店:%s",
-		GameConfig.LOG_PREFIX,
-		player.Name,
-		shopId
-	))
-
 	-- V3.1新增：同时初始化技能商店定时器（共享刷新周期）
 	local SkillShopSystem = nil
 	local skillSystemModule = ServerScriptService.Systems:FindFirstChild("SkillShopSystem")
@@ -1094,11 +1099,6 @@ function ShopSystem.InitializePlayerShopTimer(player, shopId)
 		if success then
 			SkillShopSystem = result
 			SkillShopSystem.InitializePlayerSkillShopTimer(player, "SkillShop")
-			print(string.format(
-				"%s [ShopSystem] V3.1 同时初始化技能商店定时器 - 玩家:%s",
-				GameConfig.LOG_PREFIX,
-				player.Name
-			))
 		end
 	end
 end

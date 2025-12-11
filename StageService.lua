@@ -29,9 +29,12 @@ local LevelDisplayHelper = require(ReplicatedStorage:WaitForChild("Modules"):Wai
 
 local StageService = {}
 
--- V2.3.2新增：简单调试日志函数
+-- V2.3.2新增：简单调试日志函数（默认关闭）
+local DEBUG_MODE = false
 local function DebugLog(msg)
-	print("[StageService] " .. tostring(msg))
+	if DEBUG_MODE then
+		print("[StageService] " .. tostring(msg))
+	end
 end
 
 -- 缓存: [playerId] = {[stageNum] = stageFolderRef}
@@ -52,9 +55,6 @@ V3.7新增：设置玩家当前章节
 ]]
 function StageService.SetPlayerChapter(playerId, chapterId)
 	StageService.PlayerChapterCache[playerId] = chapterId
-	-- V3.7调试：强制打印设置章节缓存
-	print(string.format("[StageService V3.7] SetPlayerChapter: playerId=%s, chapterId=%s",
-		tostring(playerId), tostring(chapterId)))
 end
 
 --[[
@@ -79,16 +79,9 @@ local function GetTemplateStyle(playerId)
 	if playerId and StageService.PlayerChapterCache[playerId] then
 		local chapterId = StageService.PlayerChapterCache[playerId]
 		local chapterStyle = StageConfig.GetChapterStyle(chapterId)
-		-- V3.7调试：强制打印章节模板信息
-		print(string.format("[StageService V3.7] GetTemplateStyle: playerId=%s, chapterId=%s, chapterStyle=%s",
-			tostring(playerId), tostring(chapterId), tostring(chapterStyle)))
 		if chapterStyle then
 			return chapterStyle
 		end
-	else
-		-- V3.7调试：打印缓存缺失信息
-		print(string.format("[StageService V3.7] GetTemplateStyle: 缓存缺失! playerId=%s, cache=%s",
-			tostring(playerId), tostring(StageService.PlayerChapterCache[playerId])))
 	end
 
 	-- 回退到GameConfig默认值
@@ -330,15 +323,11 @@ function StageService.GenerateStage001(homeId, playerId)
         -- 优先从Style专属配置中读取
         if GameConfig.Campaign.Stage001PositionsByStyle and GameConfig.Campaign.Stage001PositionsByStyle[templateStyle] then
             targetPosition = GameConfig.Campaign.Stage001PositionsByStyle[templateStyle][homeId]
-            print(string.format("[StageService V3.7] 使用Style专属坐标: style=%s, homeId=%d, position=%s",
-                templateStyle, homeId, tostring(targetPosition)))
         end
 
         -- 如果Style专属配置不存在，回退到默认配置
         if not targetPosition then
             targetPosition = GameConfig.Campaign.Stage001Positions[homeId]
-            print(string.format("[StageService V3.7] 使用默认坐标: homeId=%d, position=%s",
-                homeId, tostring(targetPosition)))
         end
 
         if not targetPosition then

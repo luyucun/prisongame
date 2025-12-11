@@ -215,7 +215,7 @@ local function PlayBGM(bgmKey)
 	currentBGM = newSound
 	currentBGMKey = bgmKey
 
-	print(LOG_PREFIX, "BGM切换:", bgmKey)
+	DebugLog("BGM切换:", bgmKey)
 end
 
 --[[
@@ -365,8 +365,6 @@ end
 -- ==================== 初始化 ====================
 
 local function Initialize()
-	print(LOG_PREFIX, "初始化音效控制器...")
-
 	-- 预加载音效
 	PreloadSounds()
 
@@ -380,7 +378,6 @@ local function Initialize()
 	end
 
 	isInitialized = true
-	print(LOG_PREFIX, "音效控制器初始化完成")
 end
 
 -- ==================== 公共接口（供其他客户端脚本调用） ====================

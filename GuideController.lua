@@ -15,6 +15,14 @@
 
 local GuideController = {}
 
+-- 调试配置
+local DEBUG_MODE = false
+local function DebugLog(...)
+	if DEBUG_MODE then
+		print("[GuideController]", ...)
+	end
+end
+
 -- 引用服务
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -145,8 +153,6 @@ OnArriveAtTarget = function()
 
 	local guideId = currentGuideId
 
-	print(string.format("[GuideController] 玩家到达引导目标: %d", guideId))
-
 	-- 通知服务端
 	local events = GetGuideEvents()
 	if events and events.GuideArrived then
@@ -272,7 +278,6 @@ local function CreateGuideDisplay(guideId, targetPosition)
 		UpdateGuideDisplay()
 	end)
 
-	print(string.format("[GuideController] 创建引导显示: %d, 目标位置: %s", guideId, tostring(targetPosition)))
 	return true
 end
 
@@ -282,7 +287,6 @@ end
 @param targetPosition Vector3 - 目标位置
 ]]
 local function OnStartGuide(guideId, targetPosition)
-	print(string.format("[GuideController] 收到开始引导事件: %d", guideId))
 	CreateGuideDisplay(guideId, targetPosition)
 end
 
@@ -291,8 +295,6 @@ end
 @param guideId number - 引导ID (0表示清除所有)
 ]]
 local function OnCompleteGuide(guideId)
-	print(string.format("[GuideController] 收到完成引导事件: %d", guideId))
-
 	if guideId == 0 or guideId == currentGuideId then
 		ClearGuideDisplay()
 	end
@@ -303,7 +305,6 @@ end
 @param guideData table - 引导数据
 ]]
 local function OnSyncGuideData(guideData)
-	print("[GuideController] 收到引导数据同步")
 	-- 可以在这里处理引导数据的客户端缓存
 end
 
@@ -313,8 +314,6 @@ end
 初始化引导控制器
 ]]
 function GuideController.Initialize()
-	print("[GuideController] 初始化新手引导控制器...")
-
 	-- 等待事件就绪
 	local events = GetGuideEvents()
 	if not events then
@@ -351,8 +350,6 @@ function GuideController.Initialize()
 			events.RequestGuideSync:FireServer()
 		end
 	end)
-
-	print("[GuideController] 新手引导控制器初始化完成")
 end
 
 --[[

@@ -94,7 +94,6 @@ local function GetPlayerHomeId(waitForAttribute)
 			homeSlot = player:GetAttribute("HomeSlot")
 			if homeSlot and type(homeSlot) == "number" and homeSlot > 0 then
 				cachedHomeId = homeSlot
-				print("[IdleCoinController] HomeSlot已获取: " .. homeSlot)
 				return homeSlot
 			end
 			task.wait(0.2)
@@ -156,7 +155,6 @@ local function GetMailPrimaryPart(mailModel)
 	local namedPart = mailModel:FindFirstChild("PrimaryPart")
 	if namedPart and namedPart:IsA("BasePart") then
 		mailModel.PrimaryPart = namedPart
-		print("[IdleCoinController] 已通过名称'PrimaryPart'找到并设置PrimaryPart")
 		return namedPart
 	end
 
@@ -173,7 +171,6 @@ local function GetMailPrimaryPart(mailModel)
 	local deepPart = FindPartRecursive(mailModel, "PrimaryPart")
 	if deepPart then
 		mailModel.PrimaryPart = deepPart
-		print("[IdleCoinController] 已在子层级找到并设置PrimaryPart: " .. deepPart:GetFullName())
 		return deepPart
 	end
 
@@ -181,7 +178,6 @@ local function GetMailPrimaryPart(mailModel)
 	for _, child in ipairs(mailModel:GetChildren()) do
 		if child:IsA("BasePart") then
 			mailModel.PrimaryPart = child
-			print("[IdleCoinController] 使用备用Part作为PrimaryPart: " .. child.Name)
 			return child
 		end
 	end
@@ -224,7 +220,6 @@ local function OnCollectCoins()
 	local collectEvent = IdleCoinEvents:FindFirstChild("CollectIdleCoins")
 	if collectEvent then
 		collectEvent:FireServer()
-		print("[IdleCoinController] 发送领取挂机金币请求")
 	end
 end
 
@@ -237,7 +232,6 @@ local function UpdateCoinDisplay(coins)
 	-- 实际的Mail上TextLabel显示由服务端的UpdateMailDisplay负责更新
 	-- 服务端修改Workspace中的对象会自动同步到所有客户端
 	pendingIdleCoins = coins
-	print("[IdleCoinController] 收到挂机金币同步: " .. coins)
 end
 
 --[[
@@ -257,10 +251,6 @@ local function SetupMailPromptConnection(waitForHomeId)
 	local primaryPart = GetMailPrimaryPart(mailModel)
 	if not primaryPart then
 		warn("[IdleCoinController] Mail模型未设置PrimaryPart，且未找到名为'PrimaryPart'的子Part")
-		-- 列出Mail子节点便于排查
-		for _, child in ipairs(mailModel:GetChildren()) do
-			print("[IdleCoinController] Mail子节点: " .. child.Name .. " (" .. child.ClassName .. ")")
-		end
 		return
 	end
 
@@ -279,14 +269,11 @@ local function SetupMailPromptConnection(waitForHomeId)
 			OnCollectCoins()
 		end
 	end)
-
-	print("[IdleCoinController] 已连接Mail ProximityPrompt事件，PrimaryPart: " .. primaryPart.Name)
 end
 
 -- ==================== 初始化 ====================
 
 local function Initialize()
-	print("[IdleCoinController] 开始初始化...")
 
 	-- 初始化事件
 	if not InitializeEvents() then
@@ -322,8 +309,6 @@ local function Initialize()
 		task.wait(1)
 		SetupMailPromptConnection(false)
 	end)
-
-	print("[IdleCoinController] 初始化完成")
 end
 
 -- 启动初始化

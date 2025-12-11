@@ -19,7 +19,7 @@
 local SkillShopSystem = {}
 
 -- 调试配置
-local DEBUG_MODE = true
+local DEBUG_MODE = false
 
 -- 引用服务
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -466,13 +466,15 @@ local function StartSkillRefreshTimer(player, shopId)
 		end)
 	end
 
-	print(string.format(
-		"%s [SkillShopSystem] 启动技能刷新定时器 - 玩家:%s 商店:%s 间隔:%ds",
-		GameConfig.LOG_PREFIX,
-		player.Name,
-		shopId,
-		refreshInterval
-	))
+	if DEBUG_MODE then
+		print(string.format(
+			"%s [SkillShopSystem] 启动技能刷新定时器 - 玩家:%s 商店:%s 间隔:%ds",
+			GameConfig.LOG_PREFIX,
+			player.Name,
+			shopId,
+			refreshInterval
+		))
+	end
 end
 
 --[[
@@ -507,12 +509,14 @@ local function SendFailure(player, message)
 		end)
 	end
 
-	print(string.format(
-		"%s [SkillShopSystem] 购买失败 - 玩家:%s 原因:%s",
-		GameConfig.LOG_PREFIX,
-		player.Name,
-		message
-	))
+	if DEBUG_MODE then
+		print(string.format(
+			"%s [SkillShopSystem] 购买失败 - 玩家:%s 原因:%s",
+			GameConfig.LOG_PREFIX,
+			player.Name,
+			message
+		))
+	end
 end
 
 --[[
@@ -529,13 +533,15 @@ local function SendSuccess(player, message, skillId, newCoins)
 		end)
 	end
 
-	print(string.format(
-		"%s [SkillShopSystem] 购买成功 - 玩家:%s 技能:%d 剩余金币:%d",
-		GameConfig.LOG_PREFIX,
-		player.Name,
-		skillId,
-		newCoins
-	))
+	if DEBUG_MODE then
+		print(string.format(
+			"%s [SkillShopSystem] 购买成功 - 玩家:%s 技能:%d 剩余金币:%d",
+			GameConfig.LOG_PREFIX,
+			player.Name,
+			skillId,
+			newCoins
+		))
+	end
 end
 
 -- ==================== 事件处理函数 ====================
@@ -832,16 +838,18 @@ function SkillShopSystem.Initialize()
 	-- 5. 绑定玩家离开事件
 	Players.PlayerRemoving:Connect(OnPlayerRemoving)
 
-	-- 6. 输出初始化结果
-	print(string.format(
-		"%s [SkillShopSystem] 技能商店系统已就绪",
-		GameConfig.LOG_PREFIX
-	))
-	print(string.format(
-		"%s [SkillShopSystem] 配置状态: %s",
-		GameConfig.LOG_PREFIX,
-		configSuccess and "配置正常" or "配置异常"
-	))
+	-- 6. 输出初始化结果（仅在调试模式下）
+	if DEBUG_MODE then
+		print(string.format(
+			"%s [SkillShopSystem] 技能商店系统已就绪",
+			GameConfig.LOG_PREFIX
+		))
+		print(string.format(
+			"%s [SkillShopSystem] 配置状态: %s",
+			GameConfig.LOG_PREFIX,
+			configSuccess and "配置正常" or "配置异常"
+		))
+	end
 
 	return true
 end
@@ -859,13 +867,6 @@ function SkillShopSystem.InitializePlayerSkillShopTimer(player, shopId)
 
 	-- 启动刷新定时器
 	StartSkillRefreshTimer(player, shopId)
-
-	print(string.format(
-		"%s [SkillShopSystem] 玩家进入游戏，启动技能商店定时器 - 玩家:%s 商店:%s",
-		GameConfig.LOG_PREFIX,
-		player.Name,
-		shopId
-	))
 end
 
 --[[
@@ -901,11 +902,13 @@ end
 function SkillShopSystem.ClearPlayerLock(player)
 	PurchaseLocks[player] = nil
 	LastPurchaseTime[player] = nil
-	print(string.format(
-		"%s [SkillShopSystem] 管理员清理玩家锁: %s",
-		GameConfig.LOG_PREFIX,
-		player.Name
-	))
+	if DEBUG_MODE then
+		print(string.format(
+			"%s [SkillShopSystem] 管理员清理玩家锁: %s",
+			GameConfig.LOG_PREFIX,
+			player.Name
+		))
+	end
 end
 
 return SkillShopSystem

@@ -2,7 +2,7 @@
 脚本名称: HouseUpgradeCameraController
 脚本类型: LocalScript
 脚本位置: StarterPlayer/StarterPlayerScripts/Controllers/HouseUpgradeCameraController
-版本: V3.9
+版本: V3.9.1
 ]]
 
 --[[
@@ -48,7 +48,7 @@ local CAMERA_DISTANCE = 40  -- 镜头距离房屋的距离
 local CAMERA_ANGLE = math.rad(30)  -- 镜头俯视角度（30度）
 local TWEEN_DURATION = 1.0  -- 镜头移动时长
 local WAIT_BEFORE_REPLACE = 1.0  -- 房屋替换前等待时间
-local WAIT_AFTER_REPLACE = 1.0  -- 房屋替换后等待时间
+local WAIT_AFTER_REPLACE = 3.0  -- 房屋替换后等待时间（V3.9.1修改：1秒→3秒）
 
 -- RemoteEvent引用
 local HouseUpgradeEvents = nil
@@ -199,7 +199,6 @@ function HouseUpgradeCameraController.StartUpgradeSequence(homeSlot)
 	end
 
 	isUpgrading = true
-	print(string.format("[HouseUpgradeCameraController] 开始房屋升级镜头表现，HomeSlot=%d", homeSlot))
 
 	-- 保存当前镜头状态
 	SaveCameraState()
@@ -240,7 +239,6 @@ function HouseUpgradeCameraController.StartUpgradeSequence(homeSlot)
 
 			-- 立即设置镜头位置（不使用Tween）
 			camera.CFrame = targetCFrame
-			print("[HouseUpgradeCameraController] 镜头已立即切换到房屋上方")
 		end)
 
 		if not success then
@@ -250,8 +248,6 @@ function HouseUpgradeCameraController.StartUpgradeSequence(homeSlot)
 			return
 		end
 
-		print("[HouseUpgradeCameraController] 镜头已到位，等待房屋替换...")
-
 		-- 2. 等待1秒（让玩家看清楚房屋）
 		task.wait(WAIT_BEFORE_REPLACE)
 
@@ -260,7 +256,6 @@ function HouseUpgradeCameraController.StartUpgradeSequence(homeSlot)
 			local readyEvent = HouseUpgradeEvents:FindFirstChild("ClientCameraReady")
 			if readyEvent then
 				readyEvent:FireServer()
-				print("[HouseUpgradeCameraController] 已通知服务端镜头就位")
 			end
 		end
 
@@ -268,15 +263,12 @@ function HouseUpgradeCameraController.StartUpgradeSequence(homeSlot)
 		-- 这里我们等待一个信号或者固定时间
 		task.wait(WAIT_AFTER_REPLACE + 0.5)  -- 等待房屋替换 + 额外0.5秒
 
-		print("[HouseUpgradeCameraController] 房屋替换完成，等待后恢复镜头...")
-
 		-- 5. 再等待1秒（让玩家看清楚新房屋）
 		task.wait(WAIT_AFTER_REPLACE)
 
 		-- 6. 恢复镜头控制
 		RestoreCameraState()
 		isUpgrading = false
-		print("[HouseUpgradeCameraController] 房屋升级镜头表现完成")
 	end)
 end
 
@@ -284,7 +276,6 @@ end
 初始化控制器
 ]]
 function HouseUpgradeCameraController.Initialize()
-	print("[HouseUpgradeCameraController] 初始化中...")
 
 	-- 等待RemoteEvent
 	if not InitializeEvents() then
@@ -296,15 +287,11 @@ function HouseUpgradeCameraController.Initialize()
 	local startUpgradeEvent = HouseUpgradeEvents:FindFirstChild("StartUpgradeSequence")
 	if startUpgradeEvent then
 		startUpgradeEvent.OnClientEvent:Connect(function(homeSlot)
-			print(string.format("[HouseUpgradeCameraController] 收到房屋升级通知，HomeSlot=%d", homeSlot))
 			HouseUpgradeCameraController.StartUpgradeSequence(homeSlot)
 		end)
-		print("[HouseUpgradeCameraController] 已监听StartUpgradeSequence事件")
 	else
 		warn("[HouseUpgradeCameraController] 找不到StartUpgradeSequence事件")
 	end
-
-	print("[HouseUpgradeCameraController] 初始化完成")
 end
 
 -- 简单的Promise实现（如果游戏中没有Promise库）

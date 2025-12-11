@@ -951,3 +951,37 @@ CampaignStateUpdate事件变更（V3.6）：
    - 镜头表现期间玩家无法控制镜头
    - 房屋替换保持底部中心位置对齐
    - 支持关闭镜头表现（useCinematic=false）用于调试
+
+
+【V3.9.1房屋升级特效说明】
+
+功能描述：
+- 房屋替换时播放HouseChange特效
+- 特效在新房屋出现的瞬间播放
+- 特效持续1秒后自动移除
+
+特效资源位置：
+- ReplicatedStorage/Effect/HouseChange (Part)
+- 该Part下绑定着特效内容（粒子/光效等）
+
+特效播放逻辑：
+1. 房屋替换时，从ReplicatedStorage/Effect复制HouseChange
+2. 将特效的轴点与新房屋的轴点位置对齐
+3. 特效出现1.5秒后自动移除
+
+创建步骤：
+1. 打开Roblox Studio
+2. 导航到 ReplicatedStorage > Effect
+3. 如果Effect文件夹不存在，先创建Effect文件夹
+4. 在Effect文件夹下创建一个Part，命名为"HouseChange"
+5. 在HouseChange Part下添加所需的特效（ParticleEmitter/PointLight/Beam等）
+6. 将HouseChange Part的Anchored属性设为true
+7. 将HouseChange Part的CanCollide属性设为false
+8. 将HouseChange Part的Transparency属性设为1（透明，只显示特效）
+9. 保存游戏
+
+配置参数：
+- HouseUpgradeSystem.lua:
+  - HOUSE_CHANGE_EFFECT_DURATION = 1.5秒（特效持续时间）
+- HouseUpgradeCameraController.lua:
+  - WAIT_AFTER_REPLACE = 3.0秒（房屋替换后等待时间，即镜头解锁前的等待）

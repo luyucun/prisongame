@@ -9,7 +9,7 @@
 local TaskSystem = {}
 
 -- 调试配置
-local DEBUG_MODE = true
+local DEBUG_MODE = false
 
 -- 引用服务
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -92,7 +92,6 @@ local function InitializeEvents()
         TaskEvents = Instance.new("Folder")
         TaskEvents.Name = "TaskEvents"
         TaskEvents.Parent = eventsFolder
-        print(string.format("%s [TaskSystem] 自动创建TaskEvents文件夹", GameConfig.LOG_PREFIX))
     end
 
     -- 创建或获取各个事件
@@ -102,7 +101,6 @@ local function InitializeEvents()
             event = Instance.new("RemoteEvent")
             event.Name = name
             event.Parent = TaskEvents
-            print(string.format("%s [TaskSystem] 自动创建事件: %s", GameConfig.LOG_PREFIX, name))
         end
         return event
     end
@@ -451,7 +449,6 @@ end
 @return boolean - 是否成功
 ]]
 function TaskSystem.Initialize()
-    print(string.format("%s [TaskSystem] 开始初始化任务系统...", GameConfig.LOG_PREFIX))
 
     -- 1. 初始化依赖模块
     if not InitializeDependencies() then
@@ -475,7 +472,6 @@ function TaskSystem.Initialize()
         return false
     end
 
-    print(string.format("%s [TaskSystem] ✅ 任务系统初始化完成", GameConfig.LOG_PREFIX))
     return true
 end
 
