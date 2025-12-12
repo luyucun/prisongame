@@ -1469,7 +1469,9 @@ function CampaignManager.BeginBattlePrep(campaignData, stageNum, arrivedList, ti
 
 	-- 如果敌军数量为0,尝试重新加载敌人数据
 	if #preparedEnemies == 0 then
-		StageService.LoadEnemyData(stageFolder, stageNum)
+		-- V3.10: 传递章节ID
+		local chapterId = campaignData.CurrentChapter
+		StageService.LoadEnemyData(stageFolder, stageNum, chapterId)
 		task.wait(0.2)
 
 		-- 重新查找并激活敌军

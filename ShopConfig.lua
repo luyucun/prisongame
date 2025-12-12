@@ -22,6 +22,7 @@ local ShopConfig = {}
       - Icon: 图标（同步监狱数据表Icon）
       - Sort: 排序权重（数字越小越靠前）
       - Enabled: 是否上架（true/false）
+      - Show: 是否在商店中显示（true/false，仅对UnitShop生效）
       - RobuxPrice: 罗布币价格
       - DevProductId: 开发者商品ID（同步监狱数据表）
       - LimitPerDay: 每日限购次数（0=不限购）
@@ -48,9 +49,10 @@ ShopConfig.Shops = {
 				Icon = "rbxassetid://98616255072587", -- 同步监狱数据表Icon
 				Sort = 10,
 				Enabled = true,
-				RefreshProbability = 0.6,
-				StockMin = 3,
-				StockMax = 6,
+				Show = true,              -- 是否在商店中显示
+				RefreshProbability = 0.7,
+				StockMin = 4,
+				StockMax = 5,
 				LimitPerDay = 0,
 				LimitTotal = 0,
 				UnlockStage = 0,
@@ -59,15 +61,16 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10002",
-				Price = 120,              -- 同步监狱数据表价格
+				Price = 150,              -- 同步监狱数据表价格
 				RobuxPrice = 10,
 				DevProductId = "3472102380", -- 同步监狱数据表开发者商品ID
 				Icon = "rbxassetid://133527593486392", -- 同步监狱数据表Icon
 				Sort = 20,
 				Enabled = true,
-				RefreshProbability = 0.6,
-				StockMin = 3,
-				StockMax = 6,
+				Show = true,              -- 是否在商店中显示
+				RefreshProbability = 0.7,
+				StockMin = 4,
+				StockMax = 5,
 				LimitPerDay = 0,
 				LimitTotal = 0,
 				UnlockStage = 0,
@@ -82,8 +85,9 @@ ShopConfig.Shops = {
 				Icon = "rbxassetid://114892183819195", -- 同步监狱数据表Icon
 				Sort = 30,
 				Enabled = true,
-				RefreshProbability = 0.5,
-				StockMin = 2,
+				Show = true,              -- 是否在商店中显示
+				RefreshProbability = 0.7,
+				StockMin = 4,
 				StockMax = 5,
 				LimitPerDay = 0,
 				LimitTotal = 0,
@@ -93,14 +97,15 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10004",
-				Price = 150,              -- 同步监狱数据表价格
+				Price = 250,              -- 同步监狱数据表价格
 				RobuxPrice = 10,
 				DevProductId = "3472102983", -- 同步监狱数据表开发者商品ID
 				Icon = "rbxassetid://80744151898936", -- 同步监狱数据表Icon
 				Sort = 40,
 				Enabled = true,
-				RefreshProbability = 0.5,
-				StockMin = 2,
+				Show = true,              -- 是否在商店中显示
+				RefreshProbability = 0.7,
+				StockMin = 4,
 				StockMax = 5,
 				LimitPerDay = 0,
 				LimitTotal = 0,
@@ -110,15 +115,16 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10005",
-				Price = 280,              -- 同步监狱数据表价格
+				Price = 500,              -- 同步监狱数据表价格
 				RobuxPrice = 15,
 				DevProductId = "3472103245", -- 同步监狱数据表开发者商品ID
 				Icon = "rbxassetid://80710637196540", -- 同步监狱数据表Icon
 				Sort = 50,
 				Enabled = true,
+				Show = true,              -- 是否在商店中显示
 				RefreshProbability = 0.5,
-				StockMin = 2,
-				StockMax = 5,
+				StockMin = 3,
+				StockMax = 4,
 				LimitPerDay = 0,
 				LimitTotal = 0,
 				UnlockStage = 0,
@@ -127,15 +133,16 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10006",
-				Price = 300,              -- 同步监狱数据表价格
+				Price = 750,              -- 同步监狱数据表价格
 				RobuxPrice = 15,
 				DevProductId = "3472104357", -- 同步监狱数据表开发者商品ID
 				Icon = "rbxassetid://123524507681699", -- 同步监狱数据表Icon
 				Sort = 60,
 				Enabled = true,
+				Show = true,              -- 是否在商店中显示
 				RefreshProbability = 0.5,
-				StockMin = 2,
-				StockMax = 5,
+				StockMin = 3,
+				StockMax = 4,
 				LimitPerDay = 0,
 				LimitTotal = 0,
 				UnlockStage = 0,
@@ -144,14 +151,15 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10007",
-				Price = 320,              -- 同步监狱数据表价格
+				Price = 750,              -- 同步监狱数据表价格
 				RobuxPrice = 15,
 				DevProductId = "3472103372", -- 同步监狱数据表开发者商品ID
 				Icon = "rbxassetid://96910755166910", -- 同步监狱数据表Icon
 				Sort = 70,
 				Enabled = true,
-				RefreshProbability = 0.4,
-				StockMin = 2,
+				Show = true,              -- 是否在商店中显示
+				RefreshProbability = 0.5,
+				StockMin = 3,
 				StockMax = 4,
 				LimitPerDay = 0,
 				LimitTotal = 0,
@@ -161,14 +169,15 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10008",
-				Price = 400,              -- 同步监狱数据表价格
+				Price = 1000,              -- 同步监狱数据表价格
 				RobuxPrice = 15,
 				DevProductId = "3472105731", -- 同步监狱数据表开发者商品ID
 				Icon = "rbxassetid://87038735300763", -- 同步监狱数据表Icon
 				Sort = 80,
 				Enabled = true,
-				RefreshProbability = 0.4,
-				StockMin = 2,
+				Show = true,              -- 是否在商店中显示
+				RefreshProbability = 0.5,
+				StockMin = 3,
 				StockMax = 4,
 				LimitPerDay = 0,
 				LimitTotal = 0,
@@ -178,14 +187,15 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10009",
-				Price = 350,              -- 同步监狱数据表价格
+				Price = 1000,              -- 同步监狱数据表价格
 				RobuxPrice = 20,
 				DevProductId = "3472103709", -- 同步监狱数据表开发者商品ID
 				Icon = "rbxassetid://123162348831885", -- 同步监狱数据表Icon
 				Sort = 90,
 				Enabled = true,
-				RefreshProbability = 0.4,
-				StockMin = 2,
+				Show = true,              -- 是否在商店中显示
+				RefreshProbability = 0.5,
+				StockMin = 3,
 				StockMax = 4,
 				LimitPerDay = 0,
 				LimitTotal = 0,
@@ -195,15 +205,16 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10010",
-				Price = 500,              -- 同步监狱数据表价格
+				Price = 2000,              -- 同步监狱数据表价格
 				RobuxPrice = 20,
 				DevProductId = "3472105294", -- 同步监狱数据表开发者商品ID
 				Icon = "rbxassetid://74819350235405", -- 同步监狱数据表Icon
 				Sort = 100,
 				Enabled = true,
-				RefreshProbability = 0.4,
+				Show = true,              -- 是否在商店中显示
+				RefreshProbability = 0.3,
 				StockMin = 2,
-				StockMax = 4,
+				StockMax = 3,
 				LimitPerDay = 0,
 				LimitTotal = 0,
 				UnlockStage = 0,
@@ -212,14 +223,15 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10011",
-				Price = 600,              -- 同步监狱数据表价格
+				Price = 2500,              -- 同步监狱数据表价格
 				RobuxPrice = 20,
 				DevProductId = "3472105457", -- 同步监狱数据表开发者商品ID
 				Icon = "rbxassetid://75652304417710", -- 同步监狱数据表Icon
 				Sort = 110,
 				Enabled = true,
+				Show = true,              -- 是否在商店中显示
 				RefreshProbability = 0.3,
-				StockMin = 1,
+				StockMin = 2,
 				StockMax = 3,
 				LimitPerDay = 0,
 				LimitTotal = 0,
@@ -229,14 +241,15 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10012",
-				Price = 550,              -- 同步监狱数据表价格
+				Price = 3500,              -- 同步监狱数据表价格
 				RobuxPrice = 20,
 				DevProductId = "3472105191", -- 同步监狱数据表开发者商品ID
 				Icon = "rbxassetid://130658905780133", -- 同步监狱数据表Icon
 				Sort = 120,
 				Enabled = true,
+				Show = true,              -- 是否在商店中显示
 				RefreshProbability = 0.3,
-				StockMin = 1,
+				StockMin = 2,
 				StockMax = 3,
 				LimitPerDay = 0,
 				LimitTotal = 0,
@@ -246,14 +259,15 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10013",
-				Price = 550,              -- 同步监狱数据表价格
+				Price = 4000,              -- 同步监狱数据表价格
 				RobuxPrice = 25,
 				DevProductId = "3472103485", -- 同步监狱数据表开发者商品ID
 				Icon = "rbxassetid://140057693756084", -- 同步监狱数据表Icon
 				Sort = 130,
 				Enabled = true,
+				Show = true,              -- 是否在商店中显示
 				RefreshProbability = 0.3,
-				StockMin = 1,
+				StockMin = 2,
 				StockMax = 3,
 				LimitPerDay = 0,
 				LimitTotal = 0,
@@ -263,14 +277,15 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10014",
-				Price = 600,              -- 同步监狱数据表价格
+				Price = 4500,              -- 同步监狱数据表价格
 				RobuxPrice = 25,
 				DevProductId = "3472103600", -- 同步监狱数据表开发者商品ID
 				Icon = "rbxassetid://109694053639716", -- 同步监狱数据表Icon
 				Sort = 140,
 				Enabled = true,
+				Show = true,              -- 是否在商店中显示
 				RefreshProbability = 0.3,
-				StockMin = 1,
+				StockMin = 2,
 				StockMax = 3,
 				LimitPerDay = 0,
 				LimitTotal = 0,
@@ -280,15 +295,16 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10015",
-				Price = 900,              -- 同步监狱数据表价格
+				Price = 6000,              -- 同步监狱数据表价格
 				RobuxPrice = 25,
 				DevProductId = "3472103096", -- 同步监狱数据表开发者商品ID
 				Icon = "rbxassetid://129425310745524", -- 同步监狱数据表Icon
 				Sort = 150,
 				Enabled = true,
+				Show = true,              -- 是否在商店中显示
 				RefreshProbability = 0.3,
 				StockMin = 1,
-				StockMax = 3,
+				StockMax = 2,
 				LimitPerDay = 0,
 				LimitTotal = 0,
 				UnlockStage = 0,
@@ -297,15 +313,16 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10016",
-				Price = 1200,             -- 同步监狱数据表价格
+				Price = 6000,             -- 同步监狱数据表价格
 				RobuxPrice = 25,
 				DevProductId = "3472105796", -- 同步监狱数据表开发者商品ID
 				Icon = "rbxassetid://88477019377142", -- 同步监狱数据表Icon
 				Sort = 160,
 				Enabled = true,
+				Show = true,              -- 是否在商店中显示
 				RefreshProbability = 0.3,
 				StockMin = 1,
-				StockMax = 3,
+				StockMax = 2,
 				LimitPerDay = 0,
 				LimitTotal = 0,
 				UnlockStage = 0,
@@ -314,13 +331,14 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10017",
-				Price = 1000,             -- 同步监狱数据表价格
+				Price = 8000,             -- 同步监狱数据表价格
 				RobuxPrice = 30,
 				DevProductId = "3472104653", -- 同步监狱数据表开发者商品ID
 				Icon = "rbxassetid://96684518109328", -- 同步监狱数据表Icon
 				Sort = 170,
 				Enabled = true,
-				RefreshProbability = 0.2,
+				Show = true,              -- 是否在商店中显示
+				RefreshProbability = 0.3,
 				StockMin = 1,
 				StockMax = 2,
 				LimitPerDay = 0,
@@ -331,12 +349,13 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10018",
-				Price = 2200,             -- 同步监狱数据表价格
+				Price = 10000,             -- 同步监狱数据表价格
 				RobuxPrice = 30,
 				DevProductId = "3472105522", -- 同步监狱数据表开发者商品ID
 				Icon = "rbxassetid://107612488818992", -- 同步监狱数据表Icon
 				Sort = 180,
 				Enabled = true,
+				Show = true,              -- 是否在商店中显示
 				RefreshProbability = 0.2,
 				StockMin = 1,
 				StockMax = 2,
@@ -348,12 +367,13 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10019",
-				Price = 2000,             -- 同步监狱数据表价格
+				Price = 12000,             -- 同步监狱数据表价格
 				RobuxPrice = 30,
 				DevProductId = "3472104884", -- 同步监狱数据表开发者商品ID
 				Icon = "rbxassetid://127241024884061", -- 同步监狱数据表Icon
 				Sort = 190,
 				Enabled = true,
+				Show = true,              -- 是否在商店中显示
 				RefreshProbability = 0.2,
 				StockMin = 1,
 				StockMax = 2,
@@ -365,12 +385,13 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10020",
-				Price = 2500,             -- 同步监狱数据表价格
+				Price = 15000,             -- 同步监狱数据表价格
 				RobuxPrice = 30,
 				DevProductId = "3472104457", -- 同步监狱数据表开发者商品ID
 				Icon = "rbxassetid://78069816818003", -- 同步监狱数据表Icon
 				Sort = 200,
 				Enabled = true,
+				Show = true,              -- 是否在商店中显示
 				RefreshProbability = 0.2,
 				StockMin = 1,
 				StockMax = 2,
@@ -382,13 +403,14 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10021",
-				Price = 4000,             -- 同步监狱数据表价格
+				Price = 30000,             -- 同步监狱数据表价格
 				RobuxPrice = 30,
 				DevProductId = "3472104793", -- 同步监狱数据表开发者商品ID
 				Icon = "rbxassetid://102001177844916", -- 同步监狱数据表Icon
 				Sort = 210,
 				Enabled = true,
-				RefreshProbability = 0.2,
+				Show = true,              -- 是否在商店中显示
+				RefreshProbability = 0.1,
 				StockMin = 1,
 				StockMax = 2,
 				LimitPerDay = 0,
@@ -399,12 +421,13 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10022",
-				Price = 4500,             -- 同步监狱数据表价格
+				Price = 40000,             -- 同步监狱数据表价格
 				RobuxPrice = 40,
 				DevProductId = "3472105103", -- 同步监狱数据表开发者商品ID
 				Icon = "rbxassetid://86449419798698", -- 同步监狱数据表Icon
 				Sort = 220,
-				Enabled = true,
+				Enabled = false,
+				Show = false,              -- 是否在商店中显示
 				RefreshProbability = 0.15,
 				StockMin = 1,
 				StockMax = 2,
@@ -416,12 +439,13 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10023",
-				Price = 4800,             -- 同步监狱数据表价格
+				Price = 50000,             -- 同步监狱数据表价格
 				RobuxPrice = 40,
 				DevProductId = "3472104998", -- 同步监狱数据表开发者商品ID
 				Icon = "rbxassetid://96284212262078", -- 同步监狱数据表Icon
 				Sort = 230,
-				Enabled = true,
+				Enabled = false,
+				Show = false,              -- 是否在商店中显示
 				RefreshProbability = 0.15,
 				StockMin = 1,
 				StockMax = 2,
@@ -433,12 +457,13 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10024",
-				Price = 8000,             -- 同步监狱数据表价格
+				Price = 100000,             -- 同步监狱数据表价格
 				RobuxPrice = 40,
 				DevProductId = "3472105858", -- 同步监狱数据表开发者商品ID
 				Icon = "rbxassetid://102620601082371", -- 同步监狱数据表Icon
 				Sort = 240,
-				Enabled = true,
+				Enabled = false,
+				Show = false,              -- 是否在商店中显示
 				RefreshProbability = 0.15,
 				StockMin = 1,
 				StockMax = 2,
@@ -450,12 +475,13 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10025",
-				Price = 8800,             -- 同步监狱数据表价格
+				Price = 100000,             -- 同步监狱数据表价格
 				RobuxPrice = 40,
 				DevProductId = "3472105595", -- 同步监狱数据表开发者商品ID
 				Icon = "rbxassetid://105156254180465", -- 同步监狱数据表Icon
 				Sort = 250,
-				Enabled = true,
+				Enabled = false,
+				Show = false,              -- 是否在商店中显示
 				RefreshProbability = 0.15,
 				StockMin = 1,
 				StockMax = 2,
@@ -497,6 +523,12 @@ function ShopConfig.GetShopItems(shopId, player)
 	end
 	local items = {}
 	for _, itemConfig in ipairs(shopData.Items) do
+		-- V3.9.2新增：对UnitShop检查Show字段
+		if shopId == "UnitShop" and itemConfig.Show == false then
+			-- 跳过不显示的商品
+			continue
+		end
+
 		if itemConfig.Enabled then
 			if itemConfig.ItemType == "Unit" then
 				local unitId = itemConfig.UnitId
@@ -550,6 +582,10 @@ function ShopConfig.IsUnitOnSale(shopId, unitId, player)
 		if itemConfig.ItemType == "Unit" and itemConfig.UnitId == unitId then
 			if not itemConfig.Enabled then
 				return false, "商品未上架"
+			end
+			-- V3.9.2新增：对UnitShop检查Show字段
+			if shopId == "UnitShop" and itemConfig.Show == false then
+				return false, "商品不在售"
 			end
 			return true, "在售"
 		end

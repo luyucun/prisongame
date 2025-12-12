@@ -22,7 +22,7 @@ GameConfig.USE_STUDIO_DATASTORE_SUFFIX = true
 GameConfig.MAX_PLAYERS = 6
 
 -- 玩家初始货币配置
-GameConfig.INITIAL_COINS = 100
+GameConfig.INITIAL_COINS = 200
 
 -- ==================== 基地相关配置 ====================
 -- 基地数量(对应玩家数量)
@@ -44,7 +44,7 @@ GameConfig.SPAWN_LOCATION_NAME = "SpawnLocation"
 -- ==================== 货币相关配置 ====================
 -- 货币类型
 GameConfig.CurrencyType = {
-    COINS = "Coins"  -- 金币
+	COINS = "Coins"  -- 金币
 }
 
 -- 货币显示格式
@@ -67,7 +67,7 @@ GameConfig.PUT_CONFIRM_GUI_NAME = "PutConfirm"
 -- ==================== 战役系统配置 (V2.0) ====================
 -- 战役关卡配置
 GameConfig.Campaign = {
-	MaxStages = 3,                       -- 最大关卡数
+	MaxStages = 8,                       -- 最大关卡数
 	StageGenerateOffset = 170,           -- 关卡Z轴间距(studs)
 	MoveTimeout = 30,                    -- 移动超时(秒)
 	ArrivalThreshold = 8,                -- 到达阈值(studs) - V2.0修复：放宽到8，避免因敌人存在导致无法到达
@@ -157,9 +157,9 @@ GameConfig.UI.ButtonScaleDuration = 0.1  -- 按钮缩放动画时长(秒)
 
 -- ==================== 挂机金币配置 (V2.6) ====================
 GameConfig.IdleCoin = {
-	CoinsPerMinute = 10,                 -- 每分钟产出金币数
-	MaxOfflineHours = 6,                 -- 最大离线产出小时数
-	MaxOfflineMinutes = 6 * 60,          -- 最大离线产出分钟数(6小时=360分钟)
+	CoinsPerMinute = 20,                 -- 每分钟产出金币数
+	MaxOfflineHours = 18,                 -- 最大离线产出小时数
+	MaxOfflineMinutes = 18 * 60,          -- 最大离线产出分钟数(6小时=360分钟)
 	ProximityTriggerDistance = 8,        -- 触发交互的距离(studs)
 	ProximityHoldDuration = 0.6,           -- 长按确认时长(秒)
 	ParticleEffectDuration = 1,          -- 粒子特效持续时长(秒)
@@ -168,8 +168,8 @@ GameConfig.IdleCoin = {
 -- ==================== 战斗金币配置 (V3.4) ====================
 GameConfig.BattleCoin = {
 	-- 前进金币配置
-	AdvanceDistance = 30,                -- 战场中心每前进多少studs获得一次金币
-	AdvanceReward = 5,                   -- 每次前进获得的金币数
+	AdvanceDistance = 10,                -- 战场中心每前进多少studs获得一次金币
+	AdvanceReward = 3,                   -- 每次前进获得的金币数
 
 	-- 击杀金币说明(实际在UnitConfig中配置每个兵种的KillReward)
 	-- 1级兵就是配置的基础值

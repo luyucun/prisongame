@@ -2,7 +2,7 @@
 脚本名称: StageConfig
 脚本类型: ModuleScript (配置模块)
 脚本位置: ReplicatedStorage/Config/StageConfig
-版本: V3.7
+版本: V3.10
 ]]
 
 --[[
@@ -10,15 +10,19 @@
 职责: 存储关卡相关的配置参数
 V2.8新增: 章节概念，每个章节包含多个小关
 V3.7新增: 章节关卡地图替换功能，每个章节可配置不同的StageTemplateStyle
+V3.10重构: 引用EnemyConfig的章节配置，实现配置统一管理
 ]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local EnemyConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("EnemyConfig"))
 
 local StageConfig = {}
 
--- ==================== 章节配置 (V2.8新增, V3.7增强) ====================
+-- ==================== 章节配置 (V2.8新增, V3.7增强, V3.10重构) ====================
 -- 章节列表配置
 -- ChapterId: 章节ID (从1开始)
--- StagesPerChapter: 该章节的关卡数量
--- Style: 该章节使用的模板风格 (V3.7: 改名为StageTemplateStyle)
+-- EnemyChapterRef: 引用EnemyConfig中的章节ID (V3.10新增)
+-- StagesPerChapter: 该章节的关卡数量 (V3.10: 自动从EnemyConfig读取)
 -- StageTemplateStyle: 该章节使用的关卡模板风格 (如 "Style01", "Style02" 等)
 -- Rewards: 该章节每关的奖励
 
@@ -27,7 +31,7 @@ StageConfig.Chapters = {
 	[1] = {
 		ChapterId = 1,
 		ChapterName = "Chapter 1",
-		StagesPerChapter = 3,  -- 3个小关
+		EnemyChapterRef = 1,  -- V3.10: 引用EnemyConfig.Chapters[1]
 		StageTemplateStyle = "Style01",  -- V3.7: 使用Style01风格的关卡模板
 		Rewards = {
 			[1] = {Coins = 100},
@@ -39,7 +43,7 @@ StageConfig.Chapters = {
 	[2] = {
 		ChapterId = 2,
 		ChapterName = "Chapter 2",
-		StagesPerChapter = 3,  -- 3个小关
+		EnemyChapterRef = 2,  -- V3.10: 引用EnemyConfig.Chapters[2]
 		StageTemplateStyle = "Style02",  -- V3.7: 使用Style02风格
 		Rewards = {
 			[1] = {Coins = 250},
@@ -83,14 +87,25 @@ function StageConfig.GetChapterConfig(chapterId)
 end
 
 --[[
-获取章节的关卡数量
+获取章节的关卡数量 (V3.10增强: 从EnemyConfig读取)
 @param chapterId number - 章节ID
 @return number - 关卡数量
 ]]
 function StageConfig.GetStagesPerChapter(chapterId)
 	local chapter = StageConfig.Chapters[chapterId]
 	if chapter then
-		return chapter.StagesPerChapter
+		-- V3.10: 优先从配置的StagesPerChapter读取
+		if chapter.StagesPerChapter then
+			return chapter.StagesPerChapter
+		end
+
+		-- V3.10: 如果没有配置，从EnemyConfig自动读取
+		if chapter.EnemyChapterRef then
+			local enemyStageCount = EnemyConfig.GetStageCount(chapter.EnemyChapterRef)
+			if enemyStageCount > 0 then
+				return enemyStageCount
+			end
+		end
 	end
 	return 3  -- 默认3关
 end

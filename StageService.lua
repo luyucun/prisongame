@@ -67,6 +67,15 @@ function StageService.ClearPlayerChapter(playerId)
 end
 
 --[[
+V3.10新增：获取玩家当前章节ID
+@param playerId number - 玩家ID
+@return number|nil - 章节ID
+]]
+function StageService.GetPlayerChapter(playerId)
+	return StageService.PlayerChapterCache[playerId]
+end
+
+--[[
 获取模板风格（V3.7增强：支持根据玩家章节获取）
 @param playerId number|nil - 玩家ID（可选）
 @return string - 模板风格名称
@@ -195,7 +204,9 @@ function StageService.GetOrCreateStage(playerId, stageNum, resetAirWall)
                             end
                             if not hasEnemies then
                                 DebugLog("Stage" .. stageNum .. " 敌人已被销毁，重新加载敌人数据")
-                                StageService.LoadEnemyData(cached, stageNum)
+                                -- V3.10: 传递章节ID
+                                local chapterId = StageService.GetPlayerChapter(playerId)
+                                StageService.LoadEnemyData(cached, stageNum, chapterId)
                             end
                         end
 
@@ -219,7 +230,9 @@ function StageService.GetOrCreateStage(playerId, stageNum, resetAirWall)
                     end
                     if not hasEnemies then
                         DebugLog("Stage" .. stageNum .. " 敌人已被销毁，重新加载敌人数据")
-                        StageService.LoadEnemyData(cached, stageNum)
+                        -- V3.10: 传递章节ID
+                        local chapterId = StageService.GetPlayerChapter(playerId)
+                        StageService.LoadEnemyData(cached, stageNum, chapterId)
                     end
                 end
 
@@ -381,8 +394,9 @@ function StageService.GenerateStage001(homeId, playerId)
 
         newStage.Parent = stageContainer
 
-        -- 9. 加载敌人数据
-        StageService.LoadEnemyData(newStage, 1)
+        -- 9. 加载敌人数据 (V3.10: 传递章节ID)
+        local chapterId = StageService.GetPlayerChapter(playerId)
+        StageService.LoadEnemyData(newStage, 1, chapterId)
 
         -- V2.0.3：生成后默认锁定空气墙
         StageService.SetAirWallState(newStage, false)
@@ -497,8 +511,9 @@ function StageService.GenerateStage(playerId, stageNum)
 
         newStage.Parent = stageContainer
 
-        -- 加载敌人数据
-        StageService.LoadEnemyData(newStage, stageNum)
+        -- 加载敌人数据 (V3.10: 传递章节ID)
+        local chapterId = StageService.GetPlayerChapter(playerId)
+        StageService.LoadEnemyData(newStage, stageNum, chapterId)
 
         -- V2.0.3：生成后默认锁定空气墙
         StageService.SetAirWallState(newStage, false)
@@ -517,22 +532,42 @@ end
 --[[
 	加载关卡敌人数据（从EnemyConfig配置表）
 	@param stageFolder Folder - 关卡文件夹
-	@param stageNum number - 关卡编号
+	@param stageNum number - 章节内关卡编号
+	@param chapterId number|nil - 章节ID（V3.10新增，可选）
 	@return table - 敌人实例列表
 ]]
-function StageService.LoadEnemyData(stageFolder, stageNum)
-	local stageName = string.format("Stage%03d", stageNum)
-	local config = EnemyConfig[stageName]
+function StageService.LoadEnemyData(stageFolder, stageNum, chapterId)
+	local config = nil
+	local stageName = string.format("Stage%03d", stageNum)  -- 提前定义，避免作用域问题
+
+	-- V3.10: 优先使用章节化配置
+	if chapterId then
+		local stageConfig = StageConfig.GetChapterConfig(chapterId)
+		if stageConfig and stageConfig.EnemyChapterRef then
+			config = EnemyConfig.GetStageConfig(stageConfig.EnemyChapterRef, stageNum)
+			if DEBUG_MODE and config then
+				DebugLog(string.format("✅ 使用章节化配置: Chapter%d Stage%d", chapterId, stageNum))
+			end
+		end
+	end
+
+	-- V3.10: 如果章节化配置不存在，回退到旧的全局编号方式（向后兼容）
+	if not config then
+		config = EnemyConfig[stageName]
+		if DEBUG_MODE and config then
+			DebugLog(string.format("⚠️ 使用旧配置方式: %s", stageName))
+		end
+	end
 
 	if not config then
-		warn("[StageService] 关卡敌人配置未找到:", stageName)
+		warn(string.format("[StageService] 关卡敌人配置未找到: Chapter%s Stage%d", tostring(chapterId or "?"), stageNum))
 		return {}
 	end
 
 	-- V2.0修复：使用递归搜索，支持IdleFloorEnemy在子文件夹中（如Stage001/StageNodes/IdleFloorEnemy）
 	local idleFloorEnemy = stageFolder:FindFirstChild("IdleFloorEnemy", true)
 	if not idleFloorEnemy then
-		warn("[StageService] IdleFloorEnemy未找到（已递归搜索）:", stageName, "关卡路径:", stageFolder:GetFullName())
+		warn(string.format("[StageService] IdleFloorEnemy未找到（已递归搜索）: %s 关卡路径: %s", stageName, stageFolder:GetFullName()))
 		return {}
 	end
 
