@@ -1794,12 +1794,24 @@ function CampaignManager.OnVictory(campaignData)
 			-- 保存数据
 			DataManager.SavePlayerDataThrottled(player, true)  -- 强制保存
 
-			-- V3.9修改: 将房屋升级标记保存到campaignData，在CompleteCampaignEnd中执行
-			-- 这样可以在玩家点击确认按钮后、重生在基地时触发镜头表现
-			campaignData.PendingHouseUpgrade = {
-				chapterId = currentChapter,
-				shouldUpgrade = true
-			}
+			-- V3.9修改+修复: 判断是否真正需要房屋升级并且不是最后一章
+			-- 只有真的要换房子且不是最后一章才设置pending标记，避免触发镜头效果
+			local HouseConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("HouseConfig"))
+			local currentHouseModel = DataManager.GetCurrentHouseModel(player)
+			local shouldUpgrade, newModelName = HouseConfig.ShouldUpgradeHouse(currentHouseModel, newCompletedChapters)
+			local isLastChapter = StageConfig.IsLastChapter(currentChapter)
+
+			if shouldUpgrade and not isLastChapter then
+				DebugLog(string.format("[OnVictory] 检测到需要房屋升级: %s -> %s", currentHouseModel, newModelName))
+				campaignData.PendingHouseUpgrade = {
+					chapterId = currentChapter,
+					shouldUpgrade = true,
+					targetModel = newModelName
+				}
+			else
+				DebugLog(string.format("[OnVictory] 不需要房屋升级 (shouldUpgrade=%s, isLastChapter=%s)",
+					tostring(shouldUpgrade), tostring(isLastChapter)))
+			end
 		end
 	end
 
@@ -1938,9 +1950,32 @@ function CampaignManager.CompleteCampaignEnd(campaignData)
 
 	-- =================================================================
 
-	-- V3.9修改: 如果需要房屋升级，先启动镜头表现，再传送玩家
+	-- V3.9修改+修复: 如果需要房屋升级，先启动镜头表现，再传送玩家
+	-- 加入二次校验：确保真的需要升级且不是最后一章
 	local player = campaignData.Player
-	local shouldUpgradeHouse = campaignData.PendingHouseUpgrade and campaignData.PendingHouseUpgrade.shouldUpgrade
+	local pendingUpgrade = campaignData.PendingHouseUpgrade
+	local shouldUpgradeHouse = false
+
+	if pendingUpgrade and pendingUpgrade.shouldUpgrade then
+		-- 二次校验：用最新数据判断是否真的需要升级
+		local HouseConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("HouseConfig"))
+		local completedChapters = DataManager.GetCompletedChapters(player)
+		local currentHouseModel = DataManager.GetCurrentHouseModel(player)
+		local shouldUpgrade, newModelName = HouseConfig.ShouldUpgradeHouse(currentHouseModel, completedChapters)
+		local isLastChapter = StageConfig.IsLastChapter(pendingUpgrade.chapterId)
+
+		if shouldUpgrade and not isLastChapter then
+			shouldUpgradeHouse = true
+			-- 更新目标模型（以二次校验的结果为准）
+			pendingUpgrade.targetModel = newModelName
+			DebugLog(string.format("✅ 二次校验通过，确认需要房屋升级: %s -> %s", currentHouseModel, newModelName))
+		else
+			DebugLog(string.format("⚠️ 二次校验未通过，取消房屋升级 (shouldUpgrade=%s, isLastChapter=%s)",
+				tostring(shouldUpgrade), tostring(isLastChapter)))
+			-- 清除标记，不触发镜头
+			campaignData.PendingHouseUpgrade = nil
+		end
+	end
 
 	if shouldUpgradeHouse then
 		DebugLog(string.format("✅ 检测到待处理的房屋升级，立即启动镜头表现..."))

@@ -18,11 +18,21 @@ local DataManager = {}
 local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local DataStoreService = game:GetService("DataStoreService")  -- V2.1：添加DataStore服务
+local RunService = game:GetService("RunService")  -- Studio检测服务
+local HttpService = game:GetService("HttpService")  -- V3.9：用于生成InstanceId
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
 local StageConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("StageConfig"))  -- V3.7.1：章节配置
 
 -- DataStore实例（V2.1库存系统：添加真正的持久化）
-local PlayerDataStore = DataStoreService:GetDataStore("PlayerData_V2.1")
+-- Studio与线上数据隔离：根据环境和配置决定DataStore名称
+local isStudio = RunService:IsStudio()
+local suffix = (isStudio and GameConfig.USE_STUDIO_DATASTORE_SUFFIX) and "_Studio" or ""
+local DATASTORE_NAME = "PlayerData_V2.1" .. suffix
+local PlayerDataStore = DataStoreService:GetDataStore(DATASTORE_NAME)
+
+-- 打印当前使用的DataStore名称（便于确认环境）
+print(string.format("[DataManager] 🗄️ 使用DataStore: %s (isStudio=%s, suffix=%s)",
+	DATASTORE_NAME, tostring(isStudio), suffix))
 
 -- 存储所有玩家的数据 [UserId] = PlayerData
 -- 注意: Roblox脚本是单线程执行,因此不存在真正的race condition问题
@@ -172,6 +182,16 @@ local function LoadFromDataStore(player)
 		return PlayerDataStore:GetAsync("Player_" .. player.UserId)
 	end)
 
+	-- Studio环境下如果DataStore访问失败，可能是未开启API Access
+	if not success and isStudio then
+		warn(string.format(
+			"[DataManager] ⚠️ Studio DataStore访问失败（可能未开启API Access），使用空数据 - 玩家:%s 错误:%s",
+			player.Name,
+			tostring(data)
+		))
+		return nil
+	end
+
 	if success and data then
 		-- 还原Vector3等类型（如果需要）
 		if data.Units then
@@ -253,12 +273,21 @@ local function SaveToDataStore(player, playerData, userId)
 	if success then
 		return true
 	else
-		warn(string.format(
-			"%s [DataManager] DataStore保存失败 - 玩家:%s 错误:%s",
-			GameConfig.LOG_PREFIX,
-			playerName,
-			tostring(errorMsg)
-		))
+		-- Studio环境下给出更友好的提示
+		if isStudio then
+			warn(string.format(
+				"[DataManager] ⚠️ Studio DataStore保存失败（可能未开启API Access）- 玩家:%s 错误:%s",
+				playerName,
+				tostring(errorMsg)
+			))
+		else
+			warn(string.format(
+				"%s [DataManager] DataStore保存失败 - 玩家:%s 错误:%s",
+				GameConfig.LOG_PREFIX,
+				playerName,
+				tostring(errorMsg)
+			))
+		end
 		return false
 	end
 end
@@ -388,6 +417,49 @@ function DataManager.InitializePlayerData(player)
             playerData.GuideData = {
                 CompletedGuides = {},
             }
+        end
+
+        -- 🔥V3.9数据迁移：Inventory→Units（向后兼容）
+        -- 如果Units为空但Inventory有数据，则迁移到Units数组
+        if (not playerData.Units or #playerData.Units == 0) and playerData.Inventory then
+            local hasInventoryData = false
+            for unitId, count in pairs(playerData.Inventory) do
+                if count and count > 0 then
+                    hasInventoryData = true
+                    break
+                end
+            end
+
+            if hasInventoryData then
+                print(string.format("[DataManager] 检测到旧存档，开始迁移 Inventory→Units (玩家: %s)", player.Name))
+                playerData.Units = playerData.Units or {}
+
+                -- 将Inventory中的每个兵种转换为Units数组元素
+                for unitId, count in pairs(playerData.Inventory) do
+                    if count and count > 0 then
+                        for i = 1, count do
+                            table.insert(playerData.Units, {
+                                UnitId = tostring(unitId),  -- 🔥修复：保持字符串类型，与UnitConfig一致
+                                InstanceId = HttpService:GenerateGUID(false),
+                                Level = 1,  -- 默认等级1
+                            })
+                        end
+                    end
+                end
+
+                print(string.format("[DataManager] 迁移完成：%d 个兵种已转换为 Units 数组", #playerData.Units))
+
+                -- 清空旧的Inventory（避免重复迁移）
+                playerData.Inventory = {}
+
+                -- 立即保存迁移后的数据
+                DataManager.SavePlayerDataThrottled(player)  -- 🔥修复：添加DataManager前缀
+            end
+        end
+
+        -- 确保Units字段存在（向后兼容）
+        if not playerData.Units then
+            playerData.Units = {}
         end
 
     else

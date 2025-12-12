@@ -11,6 +11,12 @@
 
 local GameConfig = {}
 
+-- ==================== 数据存储配置 ====================
+-- Studio与线上数据隔离开关
+-- 当为true时，Studio环境会使用独立的DataStore（名称追加_Studio后缀）
+-- 发布到线上前可以设置为false来使用相同的DataStore（不推荐）
+GameConfig.USE_STUDIO_DATASTORE_SUFFIX = true
+
 -- ==================== 玩家相关配置 ====================
 -- 服务器最大玩家数量
 GameConfig.MAX_PLAYERS = 6

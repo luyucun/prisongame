@@ -225,11 +225,18 @@ local function CheckTriggerCondition(player, guideConfig)
 		local dm = GetDataManager()
 		if dm then
 			local playerData = dm.GetPlayerData(player)
-			if playerData and playerData.Inventory then
-				-- 检查背包中是否有任何兵种
-				for unitId, count in pairs(playerData.Inventory) do
-					if count and count > 0 then
-						return true
+			if playerData then
+				-- 🔥修复：优先检查新的 Units 数组
+				if playerData.Units and #playerData.Units > 0 then
+					return true
+				end
+
+				-- 兼容旧的 Inventory map
+				if playerData.Inventory then
+					for unitId, count in pairs(playerData.Inventory) do
+						if count and count > 0 then
+							return true
+						end
 					end
 				end
 			end
@@ -456,14 +463,24 @@ function GuideSystem.TriggerGuide(player, guideId)
 			local dm = GetDataManager()
 			if dm then
 				local playerData = dm.GetPlayerData(player)
-				if playerData and playerData.Inventory then
+				if playerData then
 					local hasUnits = false
-					for unitId, count in pairs(playerData.Inventory) do
-						if count and count > 0 then
-							hasUnits = true
-							break
+
+					-- 🔥修复：优先检查新的 Units 数组
+					if playerData.Units and #playerData.Units > 0 then
+						hasUnits = true
+					end
+
+					-- 兼容旧的 Inventory map
+					if not hasUnits and playerData.Inventory then
+						for unitId, count in pairs(playerData.Inventory) do
+							if count and count > 0 then
+								hasUnits = true
+								break
+							end
 						end
 					end
+
 					if not hasUnits then
 						-- 没有兵种，跳过并标记为完成
 						print(string.format("[GuideSystem] 引导 %d 跳过（背包无兵种）", guideId))
