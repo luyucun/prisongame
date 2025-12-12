@@ -68,7 +68,7 @@ GuideConfig.Guides = {
 		GuideType = GuideConfig.GuideType.UI_FOCUS,
 		Name = "BackpackClickGuide",
 		Description = "引导点击背包中的兵种",
-		TargetUIPath = "BackpackGui/BackpackFrame/ItemListFrame", -- UI路径
+		TargetUIPath = "BackpackGui/BackpackFrame", -- UI路径
 		TriggerCondition = "ARRIVED_IDLE_FLOOR", -- 触发条件：到达IdleFloor
 		Sort = 4,                             -- 排序
 		Enabled = true,                       -- 是否启用
@@ -107,7 +107,7 @@ GuideConfig.Display = {
 	-- UI聚焦引导配置
 	UIFocus = {
 		FrameColor = Color3.fromRGB(0, 0, 0),      -- 半透明Frame颜色（黑色）
-		FrameTransparency = 0.5,                   -- 半透明Frame透明度
+		FrameTransparency = 0.3,                   -- 半透明Frame透明度
 		AnimationDuration = 0.5,                   -- 滑入动画时长（秒）
 		ZIndex = 1000,                             -- Frame的ZIndex（确保在最上层）
 	},

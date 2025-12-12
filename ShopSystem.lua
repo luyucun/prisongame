@@ -220,7 +220,7 @@ local function InitializePlayerStock(player, shopId)
 end
 
 --[[ 刷新商店库存 ]]
-local function RefreshShopStock(player, shopId)
+local function RefreshShopStock(player, shopId, isFirstRefresh)
 	if not GameConfig.Shop.EnableStockSystem then
 		return {} -- 库存系统未启用
 	end
@@ -235,12 +235,26 @@ local function RefreshShopStock(player, shopId)
 		return {}
 	end
 
+	-- 如果没有传入isFirstRefresh参数，则根据当前状态判断
+	if isFirstRefresh == nil then
+		local lastRefreshTime = stockData.LastRefreshTime or 0
+		local hasAnyStock = false
+		for unitId, stock in pairs(stockData) do
+			if unitId ~= "LastRefreshTime" and type(stock) == "number" then
+				hasAnyStock = true
+				break
+			end
+		end
+		isFirstRefresh = (lastRefreshTime == 0 and not hasAnyStock)
+	end
+
 	if DEBUG_MODE then
 		print(string.format(
-			"%s [ShopSystem] 开始刷新库存 - 玩家:%s 商店:%s",
+			"%s [ShopSystem] 开始刷新库存 - 玩家:%s 商店:%s 首次刷新:%s",
 			GameConfig.LOG_PREFIX,
 			player.Name,
-			shopId
+			shopId,
+			tostring(isFirstRefresh)
 		))
 	end
 
@@ -252,7 +266,20 @@ local function RefreshShopStock(player, shopId)
 
 			if stockConfig then
 				local probability = stockConfig.RefreshProbability
-				local hasStock = math.random() <= probability
+				local hasStock = false
+
+				-- 新玩家首次刷新时，10001必定有库存
+				if isFirstRefresh and shopId == "UnitShop" and unitId == "10001" then
+					hasStock = true
+					if DEBUG_MODE then
+						print(string.format(
+							"  [%s] 新玩家首次刷新，强制上架",
+							unitId
+						))
+					end
+				else
+					hasStock = math.random() <= probability
+				end
 
 				if hasStock then
 					local stock = math.random(stockConfig.StockMin, stockConfig.StockMax)
@@ -436,7 +463,8 @@ local function StartRefreshTimer(player, shopId)
 
 	local nextRefreshTime
 	if lastRefreshTime == 0 and not hasRestoredStock then
-		RefreshShopStock(player, shopId)
+		-- 首次进入，传递isFirstRefresh=true
+		RefreshShopStock(player, shopId, true)
 		nextRefreshTime = tick() + refreshInterval
 	elseif lastRefreshTime == 0 and hasRestoredStock then
 		stockData.LastRefreshTime = tick()

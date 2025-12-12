@@ -29,6 +29,7 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
+local UserInputService = game:GetService("UserInputService")
 
 -- 本地玩家
 local player = Players.LocalPlayer
@@ -394,9 +395,33 @@ CreateUIFocusGuide = function(guideId, uiPath)
 	-- 获取配置
 	local focusConfig = GuideConfig.Display.UIFocus
 
+	-- 本次UI聚焦是否已完成（防止多次触发）
+	local hasCompleted = false
+	local function CompleteUIFocus()
+		if hasCompleted then
+			return
+		end
+		hasCompleted = true
+
+		local events = GetGuideEvents()
+		if events and events.UIFocusCompleted then
+			events.UIFocusCompleted:FireServer(guideId)
+		end
+
+		ClearUIFocusGuide()
+	end
+
 	-- 获取目标UI的绝对位置和大小
 	local targetAbsPos = targetUI.AbsolutePosition
 	local targetAbsSize = targetUI.AbsoluteSize
+
+	-- 获取GuiInset偏移量（顶部状态栏高度，通常36像素）
+	local GuiService = game:GetService("GuiService")
+	local guiInset = GuiService:GetGuiInset()
+
+	-- AbsolutePosition是相对于GuiInset之后的坐标，需要补偿
+	local adjustedPosX = targetAbsPos.X
+	local adjustedPosY = targetAbsPos.Y + guiInset.Y
 
 	-- 获取屏幕大小
 	local viewportSize = workspace.CurrentCamera.ViewportSize
@@ -405,6 +430,7 @@ CreateUIFocusGuide = function(guideId, uiPath)
 	local focusScreenGui = Instance.new("ScreenGui")
 	focusScreenGui.Name = "GuideFocusGui"
 	focusScreenGui.DisplayOrder = focusConfig.ZIndex
+	-- 使用IgnoreGuiInset=true覆盖整个屏幕，但需要补偿AbsolutePosition的偏移
 	focusScreenGui.IgnoreGuiInset = true
 	focusScreenGui.ResetOnSpawn = false
 	focusScreenGui.Parent = playerGui
@@ -418,7 +444,7 @@ CreateUIFocusGuide = function(guideId, uiPath)
 	topFrame.BackgroundColor3 = focusConfig.FrameColor
 	topFrame.BackgroundTransparency = focusConfig.FrameTransparency
 	topFrame.BorderSizePixel = 0
-	topFrame.Size = UDim2.new(1, 0, 0, targetAbsPos.Y)
+	topFrame.Size = UDim2.new(1, 0, 0, adjustedPosY)
 	topFrame.Position = UDim2.new(0, 0, 0, 0)
 	topFrame.Parent = focusScreenGui
 	table.insert(frames, topFrame)
@@ -429,7 +455,7 @@ CreateUIFocusGuide = function(guideId, uiPath)
 	bottomFrame.BackgroundColor3 = focusConfig.FrameColor
 	bottomFrame.BackgroundTransparency = focusConfig.FrameTransparency
 	bottomFrame.BorderSizePixel = 0
-	local bottomY = targetAbsPos.Y + targetAbsSize.Y
+	local bottomY = adjustedPosY + targetAbsSize.Y
 	bottomFrame.Size = UDim2.new(1, 0, 0, viewportSize.Y - bottomY)
 	bottomFrame.Position = UDim2.new(0, 0, 0, bottomY)
 	bottomFrame.Parent = focusScreenGui
@@ -441,8 +467,8 @@ CreateUIFocusGuide = function(guideId, uiPath)
 	leftFrame.BackgroundColor3 = focusConfig.FrameColor
 	leftFrame.BackgroundTransparency = focusConfig.FrameTransparency
 	leftFrame.BorderSizePixel = 0
-	leftFrame.Size = UDim2.new(0, targetAbsPos.X, 0, targetAbsSize.Y)
-	leftFrame.Position = UDim2.new(0, 0, 0, targetAbsPos.Y)
+	leftFrame.Size = UDim2.new(0, adjustedPosX, 0, targetAbsSize.Y)
+	leftFrame.Position = UDim2.new(0, 0, 0, adjustedPosY)
 	leftFrame.Parent = focusScreenGui
 	table.insert(frames, leftFrame)
 
@@ -452,9 +478,9 @@ CreateUIFocusGuide = function(guideId, uiPath)
 	rightFrame.BackgroundColor3 = focusConfig.FrameColor
 	rightFrame.BackgroundTransparency = focusConfig.FrameTransparency
 	rightFrame.BorderSizePixel = 0
-	local rightX = targetAbsPos.X + targetAbsSize.X
+	local rightX = adjustedPosX + targetAbsSize.X
 	rightFrame.Size = UDim2.new(0, viewportSize.X - rightX, 0, targetAbsSize.Y)
-	rightFrame.Position = UDim2.new(0, rightX, 0, targetAbsPos.Y)
+	rightFrame.Position = UDim2.new(0, rightX, 0, adjustedPosY)
 	rightFrame.Parent = focusScreenGui
 	table.insert(frames, rightFrame)
 
@@ -468,7 +494,7 @@ CreateUIFocusGuide = function(guideId, uiPath)
 	local tweenInfo = TweenInfo.new(focusConfig.AnimationDuration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 
 	-- 上方Frame从上往下滑入
-	topFrame.Position = UDim2.new(0, 0, 0, -targetAbsPos.Y)
+	topFrame.Position = UDim2.new(0, 0, 0, -adjustedPosY)
 	local topTween = TweenService:Create(topFrame, tweenInfo, {Position = UDim2.new(0, 0, 0, 0)})
 	topTween:Play()
 
@@ -478,13 +504,13 @@ CreateUIFocusGuide = function(guideId, uiPath)
 	bottomTween:Play()
 
 	-- 左侧Frame从左往右滑入
-	leftFrame.Position = UDim2.new(0, -targetAbsPos.X, 0, targetAbsPos.Y)
-	local leftTween = TweenService:Create(leftFrame, tweenInfo, {Position = UDim2.new(0, 0, 0, targetAbsPos.Y)})
+	leftFrame.Position = UDim2.new(0, -adjustedPosX, 0, adjustedPosY)
+	local leftTween = TweenService:Create(leftFrame, tweenInfo, {Position = UDim2.new(0, 0, 0, adjustedPosY)})
 	leftTween:Play()
 
 	-- 右侧Frame从右往左滑入
-	rightFrame.Position = UDim2.new(1, 0, 0, targetAbsPos.Y)
-	local rightTween = TweenService:Create(rightFrame, tweenInfo, {Position = UDim2.new(0, rightX, 0, targetAbsPos.Y)})
+	rightFrame.Position = UDim2.new(1, 0, 0, adjustedPosY)
+	local rightTween = TweenService:Create(rightFrame, tweenInfo, {Position = UDim2.new(0, rightX, 0, adjustedPosY)})
 	rightTween:Play()
 
 	-- 监听目标UI的点击事件
@@ -492,19 +518,22 @@ CreateUIFocusGuide = function(guideId, uiPath)
 		if descendant:IsA("GuiButton") or descendant:IsA("TextButton") or descendant:IsA("ImageButton") then
 			local connection
 			connection = descendant.MouseButton1Click:Connect(function()
-				-- 通知服务端引导完成
-				local events = GetGuideEvents()
-				if events and events.UIFocusCompleted then
-					events.UIFocusCompleted:FireServer(guideId)
-				end
-
-				-- 清除引导
-				ClearUIFocusGuide()
+				CompleteUIFocus()
 			end)
 			-- 保存连接以便清理时断开
 			table.insert(uiFocusConnections, connection)
 		end
 	end
+
+	-- 任意点击/触摸屏幕任意区域都视为完成（不必点目标UI）
+	local anyClickConn
+	anyClickConn = UserInputService.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+			CompleteUIFocus()
+		end
+	end)
+	table.insert(uiFocusConnections, anyClickConn)
 
 	-- 检查目标UI及其所有子对象
 	CheckUIClick(targetUI)
