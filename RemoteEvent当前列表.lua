@@ -99,6 +99,9 @@ ReplicatedStorage
         ├──RequestAttack（RemoteEvent） - 客户端→服务器：请求攻击(battleId, attackerModel, targetModel, attackType)
         ├──ReportUnitPosition（RemoteEvent） - 客户端→服务器：上报位置(battleId, unitModel, position, state)
         └──ClientBattleReady（RemoteEvent） - 客户端→服务器：客户端准备完成(battleId)
+    └──PowerEvents（Folder）/  【V3.9.2新增 - 战斗力系统】
+        ├──PowerUpdate（RemoteEvent） - 服务器→客户端：同步战斗力数值(totalPower)
+        └──RequestPower（RemoteEvent） - 客户端→服务器：请求当前战斗力
 
 
 如果需要补充新的RemoteEvent或者Remotefunction，请在这里列出来，我会自己去创建
@@ -987,3 +990,70 @@ CampaignStateUpdate事件变更（V3.6）：
   - HOUSE_CHANGE_EFFECT_DURATION = 1.5秒（特效持续时间）
 - HouseUpgradeCameraController.lua:
   - WAIT_AFTER_REPLACE = 3.0秒（房屋替换后等待时间，即镜头解锁前的等待）
+
+
+【V3.9.2战斗力系统RemoteEvent创建说明】
+位置：ReplicatedStorage/Events/PowerEvents/ （新建文件夹）
+✅ PowerUpdate (RemoteEvent) - 服务端自动创建
+
+注意：PowerSystem.lua会在初始化时自动创建这些事件（如果不存在），
+**无需手动创建**，系统会自动处理。
+
+创建步骤（可选，如果系统未自动创建）：
+1. 打开Roblox Studio
+2. 导航到 ReplicatedStorage > Events
+3. 右键点击 Events 文件夹
+4. 选择 "Insert Object" > "Folder"
+5. 将新建的 Folder 重命名为 "PowerEvents"
+6. 右键点击 PowerEvents 文件夹
+7. 选择 "Insert Object" > "RemoteEvent"
+8. 将新建的 RemoteEvent 重命名为 "PowerUpdate"
+9. 保存游戏
+
+功能说明：
+- PowerUpdate：服务器→客户端：同步战斗力数值
+  参数：(totalPower: number) 玩家总战斗力
+  触发时机：
+    - 玩家加入游戏时（初始化）
+    - 添加兵种时
+    - 删除兵种时
+    - 兵种合成升级时
+    - 兵种放置/回收时（通过重算触发）
+
+
+【V3.9.2战斗力系统其他资源创建说明】
+
+1. 战斗力配置模块位置：ReplicatedStorage/Config/PowerConfig
+   需要创建PowerConfig.lua配置文件，定义战斗力计算规则
+
+2. 服务端系统位置：ServerScriptService/Systems/PowerSystem
+   已存在，自动初始化
+
+3. 客户端控制器位置：StarterPlayer/StarterPlayerScripts/Controllers/PowerController（需要创建）
+   负责接收战斗力更新并显示UI
+
+4. 战斗力UI结构（需要在Studio中创建）：
+   StarterGui/MainGui/PowerPanel/ （建议添加到MainGui中）
+   └── PowerPanel (Frame) - 战斗力显示面板
+       ├── PowerIcon (ImageLabel) - 战斗力图标
+       ├── PowerValue (TextLabel) - 战斗力数值显示
+       └── PowerLabel (TextLabel) - "战斗力"文字标签（可选）
+
+5. 战斗力计算触发点：
+   - InventorySystem.AddUnit() → PowerSystem.OnAddUnit()
+   - InventorySystem.RemoveUnit() → PowerSystem.OnRemoveUnit()
+   - MergeSystem.MergeUnits() → PowerSystem.OnMergeUnit()（需集成）
+   - PlacementSystem放置/回收 → 通过Units数组变化自动重算
+
+6. 数据持久化：
+   - 战斗力实时计算，不直接存储
+   - 基于玩家Units数组（包含背包和已放置兵种）
+   - 兼容旧存档（Inventory + PlacedUnits）
+
+7. 性能优化：
+   - 使用playerPowerCache缓存计算结果
+   - 避免频繁重复计算
+   - 操作触发时直接重算确保准确性
+
+8. 调试模式：
+   在PowerSystem.lua中设置 DEBUG = true 可以查看详细日志

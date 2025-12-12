@@ -33,6 +33,7 @@ local PlacementSystem = require(ServerScriptService.Systems.PlacementSystem)
 -- 延迟加载系统模块（避免循环依赖）
 local TaskSystem = nil
 local SoundSystem = nil  -- V3.8新增
+local PowerSystem = nil  -- V3.9.2新增
 
 -- 远程事件(延迟获取)
 local MergeEvents = nil
@@ -313,6 +314,19 @@ function MergeSystem.MergeUnits(player, instanceIdA, instanceIdB)
             SoundSystem.OnMerge(player)
         end)
     end
+
+	-- V3.9.2新增：通知PowerSystem更新战斗力（合成后全量重算）
+	if not PowerSystem then
+		local powerModule = ServerScriptService.Systems:FindFirstChild("PowerSystem")
+		if powerModule then
+			PowerSystem = require(powerModule)
+		end
+	end
+	if PowerSystem then
+		pcall(function()
+			PowerSystem.OnMergeUnit(player, newInstance.UnitId, unitA.Level, newLevel)
+		end)
+	end
 
     return true, "合成成功", {
         InstanceId = newInstance.InstanceId,

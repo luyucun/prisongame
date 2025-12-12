@@ -2,6 +2,7 @@
 脚本名称: InventorySystem
 脚本类型: ModuleScript (服务端系统)
 脚本位置: ServerScriptService/Systems/InventorySystem
+版本: V3.9.1 - 添加placedUnits参数到InventoryRefresh事件
 ]]
 
 --[[
@@ -23,9 +24,34 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
 local UnitConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("UnitConfig"))
 local DataManager = require(ServerScriptService.Core.DataManager)
+-- 延迟加载避免循环依赖 (V3.9.2)
+local PowerSystem
 
 -- 远程事件(延迟获取)
 local InventoryEvents = nil
+
+-- ==================== 延迟加载辅助函数 ====================
+
+--[[
+延迟加载PowerSystem模块（避免循环依赖）
+@return boolean - 是否成功加载
+]]
+local function LoadPowerSystem()
+	if PowerSystem then
+		return true
+	end
+
+	local powerModule = ServerScriptService.Systems:FindFirstChild("PowerSystem")
+	if powerModule then
+		local success, result = pcall(require, powerModule)
+		if success and result then
+			PowerSystem = result
+			return true
+		end
+	end
+
+	return false
+end
 
 -- ==================== 兵种实例数据结构 ====================
 --[[
@@ -207,10 +233,13 @@ local function NotifyClientInventoryRefresh(player)
         })
     end
 
+    -- V3.9.1: 获取已放置的兵种数据
+    local placedUnits = DataManager.GetPlacedUnits(player)
+
     local inventoryRefreshEvent = InventoryEvents:FindFirstChild("InventoryRefresh")
     if inventoryRefreshEvent then
         pcall(function()
-            inventoryRefreshEvent:FireClient(player, inventoryData)
+            inventoryRefreshEvent:FireClient(player, inventoryData, placedUnits)
         end)
     end
 end
@@ -263,6 +292,13 @@ function InventorySystem.AddUnit(player, unitId)
         instance.InstanceId
     ))
 
+    -- V3.9.2: 通知PowerSystem更新战斗力
+    if LoadPowerSystem() then
+        pcall(function()
+            PowerSystem.OnAddUnit(player, unitId, instance.Level or 1)
+        end)
+    end
+
     return true, instance
 end
 
@@ -302,6 +338,13 @@ function InventorySystem.RemoveUnit(player, instanceId)
                 unitId,
                 instanceId
             ))
+
+            -- V3.9.2: 通知PowerSystem更新战斗力
+            if LoadPowerSystem() then
+                pcall(function()
+                    PowerSystem.OnRemoveUnit(player, unitId, instance.Level or 1, 1)
+                end)
+            end
 
             return true, "删除成功"
         end

@@ -90,6 +90,9 @@ local originalJumpPower = 50
 -- V3.2.4新增：CharacterAdded连接，用于在Loading结束时断开
 local characterAddedConnection = nil
 
+-- V3.9.2新增：预加载的Information模型引用（供PowerDisplayController使用）
+local preloadedInformationModel = nil
+
 -- ==================== 私有函数 ====================
 
 local function DebugLog(...)
@@ -515,6 +518,61 @@ local function PerformClientPreload()
 end
 
 --[[
+V3.9.2新增：预加载玩家家园的Information模型
+等待HomeSlot分配后，提前找到并缓存Information模型
+]]
+local function PreloadPlayerInformation()
+	local Workspace = game:GetService("Workspace")
+
+	-- 等待HomeSlot属性被设置（最多等待15秒）
+	local maxWaitTime = 15
+	local startTime = tick()
+	local homeSlot = nil
+
+	while tick() - startTime < maxWaitTime do
+		homeSlot = LocalPlayer:GetAttribute("HomeSlot")
+		if homeSlot and type(homeSlot) == "number" and homeSlot > 0 then
+			break
+		end
+		task.wait(0.2)
+	end
+
+	if not homeSlot then
+		-- 备用方案：从IntValue获取
+		local homeIdValue = LocalPlayer:FindFirstChild("HomeId")
+		if homeIdValue and homeIdValue:IsA("IntValue") and homeIdValue.Value > 0 then
+			homeSlot = homeIdValue.Value
+		end
+	end
+
+	if not homeSlot then
+		return nil
+	end
+
+	-- 等待Home文件夹加载
+	local homeFolder = Workspace:WaitForChild("Home", 10)
+	if not homeFolder then
+		return nil
+	end
+
+	-- 等待玩家家园加载
+	local playerHome = homeFolder:WaitForChild("PlayerHome" .. homeSlot, 10)
+	if not playerHome then
+		return nil
+	end
+
+	-- 等待Information模型加载
+	local information = playerHome:WaitForChild("Information", 10)
+	if not information then
+		return nil
+	end
+
+	-- 缓存引用
+	preloadedInformationModel = information
+	return information
+end
+
+--[[
 通知服务端客户端预加载完成
 ]]
 local function NotifyServerPreloadComplete()
@@ -648,6 +706,9 @@ local function Initialize()
 		-- 然后预加载其他资源
 		PerformClientPreload()
 
+		-- V3.9.2新增：预加载玩家家园的Information模型
+		PreloadPlayerInformation()
+
 		-- 通知服务端
 		NotifyServerPreloadComplete()
 	end)
@@ -670,6 +731,15 @@ end
 function LoadingController.ForceHide()
 	isLoadingComplete = true
 	HideLoadingScreen()
+end
+
+--[[
+V3.9.2新增：获取预加载的Information模型
+供PowerDisplayController等其他控制器使用
+@return Model|nil - Information模型引用
+]]
+function LoadingController.GetPreloadedInformation()
+	return preloadedInformationModel
 end
 
 _G.LoadingController = LoadingController

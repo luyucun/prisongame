@@ -29,6 +29,7 @@ local HomeSystem = require(ServerScriptService.Systems.HomeSystem)
 local InventorySystem = require(ServerScriptService.Systems.InventorySystem)
 local PlacementSystem = require(ServerScriptService.Systems.PlacementSystem)
 local MergeSystem = require(ServerScriptService.Systems.MergeSystem)  -- V1.4新增
+local PowerSystem = require(ServerScriptService.Systems.PowerSystem) -- V3.9.2新增 战斗力系统
 local PhysicsManager = require(ServerScriptService.Systems.PhysicsManager)
 local GMCommandSystem = require(ServerScriptService.Systems.GMCommandSystem)
 -- V1.5新增 - 战斗系统
@@ -173,6 +174,16 @@ local function InitializeServer()
         -- 合成系统不是关键系统,失败不影响游戏运行
     elseif result == false then
         warn(GameConfig.LOG_PREFIX, "合成系统初始化失败(返回false),合成功能将不可用")
+    end
+
+    -- 5.55 初始化战斗力系统 (V3.9.2新增)
+    success, result = pcall(function()
+        return PowerSystem.Initialize()
+    end)
+    if not success then
+        warn(GameConfig.LOG_PREFIX, "战斗力系统初始化失败(异常):", result)
+    elseif result == false then
+        warn(GameConfig.LOG_PREFIX, "战斗力系统初始化失败(返回false),战斗力显示将不可用")
     end
 
     -- 5.6. 初始化商店系统(V2.1新增 - 数据驱动版)
@@ -726,4 +737,3 @@ game:BindToClose(function()
 
 	print(GameConfig.LOG_PREFIX .. " [MainServer] 🔥服务器关闭流程完成")
 end)
-
