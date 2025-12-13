@@ -265,6 +265,19 @@ function CombatSystem.InitializeUnit(unitModel, unitId, level, team, battleId)
 	-- 存储状态
 	unitStates[unitModel] = combatState
 
+	-- ✅ 关键修复：清除死亡标记！
+	-- 当单位被重新初始化时，必须确保IsDead属性被清除
+	-- 否则客户端AI会认为该单位已死亡，不会攻击
+	unitModel:SetAttribute("IsDead", false)
+
+	-- ✅ 关键修复：同步Humanoid.Health到CombatSystem状态
+	-- 确保Humanoid.Health和CombatSystem.CurrentHealth一致
+	local humanoid = unitModel:FindFirstChild("Humanoid")
+	if humanoid then
+		humanoid.Health = maxHealth
+		humanoid.MaxHealth = maxHealth
+	end
+
 	DebugLog(string.format("初始化兵种战斗状态: %s Lv.%d [%s] HP:%d ATK:%d",
 		unitId, level, team, maxHealth, attack))
 

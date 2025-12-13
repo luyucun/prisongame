@@ -239,7 +239,41 @@ end
 @return Model|nil - 兵种模型模板
 ]]
 local function FindUnitModel(unitId)
-	-- 从ReplicatedStorage/Role递归查找
+	-- V3.10修复：使用UnitConfig的ModelPath查找模型
+	local success, unitConfig = pcall(function()
+		return require(ReplicatedStorage:FindFirstChild("Config"):FindFirstChild("UnitConfig"))
+	end)
+
+	if success and unitConfig and unitConfig.Units and unitConfig.Units[unitId] then
+		local unitInfo = unitConfig.Units[unitId]
+		local modelPath = unitInfo.ModelPath
+
+		if modelPath and modelPath ~= "" then
+			-- 解析路径（例如 "Role/Basic/Noob"）
+			local pathParts = string.split(modelPath, "/")
+			local currentFolder = ReplicatedStorage
+
+			-- 遍历路径
+			for i = 1, #pathParts do
+				local nextPart = currentFolder:FindFirstChild(pathParts[i])
+				if not nextPart then
+					warn(string.format("[StageEditor] 路径不存在: %s (在 %s)", pathParts[i], currentFolder:GetFullName()))
+					return nil
+				end
+				currentFolder = nextPart
+			end
+
+			-- 最后一个应该是模型
+			if currentFolder:IsA("Model") then
+				return currentFolder
+			else
+				warn(string.format("[StageEditor] %s 不是Model类型", modelPath))
+				return nil
+			end
+		end
+	end
+
+	-- 回退：从ReplicatedStorage/Role递归查找（向后兼容）
 	local function SearchRecursive(folder, targetName)
 		local found = folder:FindFirstChild(targetName)
 		if found and found:IsA("Model") then
@@ -264,6 +298,7 @@ local function FindUnitModel(unitId)
 		return nil
 	end
 
+	warn(string.format("[StageEditor] ⚠️ 使用旧查找方式: %s", unitId))
 	return SearchRecursive(roleFolder, unitId)
 end
 
@@ -606,6 +641,26 @@ local function ExportToLua(stageName)
 		setclipboard(code)
 	end)
 
+	-- V3.10新增：保存到本地文件
+	local success, err = pcall(function()
+		-- 使用 writefile 保存到 Studio 的工作目录
+		-- 文件会保存到：%localappdata%\Roblox\logs\StageExports\
+		local fileName = stageName .. "_export.lua"
+
+		-- 尝试使用 writefile（如果插件环境支持）
+		if writefile then
+			writefile(fileName, code)
+			print(string.format("[StageEditor] ✅ 已保存到文件: %s", fileName))
+		else
+			-- 如果不支持 writefile，尝试使用 plugin:SaveSelectedToRoblox()
+			warn("[StageEditor] ⚠️ 当前环境不支持 writefile，仅复制到剪贴板")
+		end
+	end)
+
+	if not success and err then
+		warn("[StageEditor] 保存文件失败:", err)
+	end
+
 	print("=== 导出的Lua代码 ===")
 	print(code)
 	print("=== 已复制到剪贴板 ===")
@@ -820,6 +875,9 @@ local function CreateTextBox(parent, labelText, defaultValue, yPos)
 end
 
 -- ========== 关卡管理区 ==========
+-- 前向声明（函数定义在后面）
+local RefreshStageList
+
 CreateTitle(mainFrame, "📁 关卡管理", yOffset)
 yOffset = yOffset + 30
 
@@ -868,41 +926,9 @@ yOffset = yOffset + 30
 local availableUnits = GetAllUnitIds()
 local currentUnitIndex = 1
 
--- 兵种选择（下拉按钮）
-local unitLabel = Instance.new("TextLabel")
-unitLabel.Size = UDim2.new(1, -20, 0, 20)
-unitLabel.Position = UDim2.new(0, 10, 0, yOffset)
-unitLabel.BackgroundTransparency = 1
-unitLabel.Text = "兵种ID (点击切换):"
-unitLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-unitLabel.Font = Enum.Font.SourceSans
-unitLabel.TextSize = 13
-unitLabel.TextXAlignment = Enum.TextXAlignment.Left
-unitLabel.Parent = mainFrame
-yOffset = yOffset + 22
-
-local unitButton = Instance.new("TextButton")
-unitButton.Size = UDim2.new(1, -20, 0, 35)
-unitButton.Position = UDim2.new(0, 10, 0, yOffset)
-unitButton.BackgroundColor3 = Color3.fromRGB(80, 120, 200)
-unitButton.Text = availableUnits[currentUnitIndex] or "Noob"
-unitButton.TextColor3 = Color3.new(1, 1, 1)
-unitButton.Font = Enum.Font.SourceSansBold
-unitButton.TextSize = 16
-unitButton.BorderSizePixel = 0
-unitButton.Parent = mainFrame
-
--- 点击切换兵种
-unitButton.MouseButton1Click:Connect(function()
-	currentUnitIndex = currentUnitIndex + 1
-	if currentUnitIndex > #availableUnits then
-		currentUnitIndex = 1
-	end
-	unitButton.Text = availableUnits[currentUnitIndex]
-	selectedUnitId = availableUnits[currentUnitIndex]
-	print("[StageEditor] 切换到兵种:", selectedUnitId)
-end)
-yOffset = yOffset + 40
+-- 兵种ID输入框（V3.10改为手动输入）
+local unitIdInput, newOffset = CreateTextBox(mainFrame, "兵种ID (如10001):", availableUnits[1] or "10001", yOffset)
+yOffset = newOffset
 
 -- 等级选择
 local levelInput, newOffset = CreateTextBox(mainFrame, "等级 (1-3):", "1", yOffset)
@@ -918,14 +944,14 @@ yOffset = newOffset
 
 -- 生成按钮
 CreateButton(mainFrame, "✨ 生成兵种", yOffset, function()
-	local unitId = unitButton.Text  -- 从按钮获取
+	local unitId = unitIdInput.Text  -- V3.10: 从输入框获取
 	local level = tonumber(levelInput.Text) or 1
 	local gridX = tonumber(gridXInput.Text) or 7
 	local gridY = tonumber(gridYInput.Text) or 7
 
 	-- 验证输入
 	if unitId == "" then
-		warn("[StageEditor] 请选择兵种")
+		warn("[StageEditor] 请输入兵种ID")
 		return
 	end
 
@@ -962,8 +988,8 @@ stageListFrame.ScrollBarThickness = 6
 stageListFrame.Parent = mainFrame
 yOffset = yOffset + 155
 
--- 刷新关卡列表
-local function RefreshStageList()
+-- 刷新关卡列表（函数实现）
+RefreshStageList = function()
 	-- 清空现有内容
 	for _, child in ipairs(stageListFrame:GetChildren()) do
 		if child:IsA("TextButton") then

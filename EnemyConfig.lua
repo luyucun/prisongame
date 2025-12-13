@@ -15,7 +15,7 @@ local EnemyConfig = {}
 -- ==================== 章节化敌人配置 (V3.10重构) ====================
 -- 按章节组织关卡配置，每个章节包含多个关卡
 
-EnemyConfig.Chapters = {}
+EnemyConfig.Chapters = {} :: { [number]: any }
 
 -- ==================== 第1章 ====================
 EnemyConfig.Chapters[1] = {
@@ -25,27 +25,99 @@ EnemyConfig.Chapters[1] = {
 		-- 第1关: 简单测试
 		[1] = {
 			{UnitId = "10001", Level = 1, GridPos = {X = 7, Y = 7}},
-			{UnitId = "10001", Level = 1, GridPos = {X = 7, Y = 8}},
-			{UnitId = "10001", Level = 1, GridPos = {X = 8, Y = 7}},
 		},
 
 		-- 第2关: 增加难度
 		[2] = {
-			{UnitId = "10005", Level = 1, GridPos = {X = 6, Y = 7}},
-			{UnitId = "10005", Level = 1, GridPos = {X = 7, Y = 6}},
-			{UnitId = "10001", Level = 2, GridPos = {X = 7, Y = 7}},
-			{UnitId = "10005", Level = 1, GridPos = {X = 7, Y = 8}},
-			{UnitId = "10005", Level = 1, GridPos = {X = 8, Y = 7}},
+			{UnitId = "10001", Level = 1, GridPos = {X = 7, Y = 7}},
+			{UnitId = "10001", Level = 1, GridPos = {X = 8, Y = 7}},
 		},
 
 		-- 第3关: 更强的敌人
 		[3] = {
-			{UnitId = "10005", Level = 2, GridPos = {X = 5, Y = 7}},
-			{UnitId = "10005", Level = 2, GridPos = {X = 7, Y = 5}},
-			{UnitId = "10005", Level = 2, GridPos = {X = 7, Y = 7}},
-			{UnitId = "10005", Level = 2, GridPos = {X = 7, Y = 9}},
-			{UnitId = "10005", Level = 2, GridPos = {X = 9, Y = 7}},
-			{UnitId = "10001", Level = 3, GridPos = {X = 7, Y = 8}},
+			{UnitId = "10001", Level = 1, GridPos = {X = 7, Y = 7}},
+			{UnitId = "10001", Level = 1, GridPos = {X = 8, Y = 7}},
+			{UnitId = "10001", Level = 1, GridPos = {X = 6, Y = 7}},
+		},
+		
+		-- 第3关: 更强的敌人
+		[4] = {
+			{UnitId = "10002", Level = 1, GridPos = {X = 7, Y = 7}},
+			{UnitId = "10001", Level = 1, GridPos = {X = 5, Y = 7}},
+			{UnitId = "10001", Level = 1, GridPos = {X = 9, Y = 7}},
+		},
+		
+		-- 第3关: 更强的敌人
+		[5] = {
+			{UnitId = "10003", Level = 1, GridPos = {X = 9, Y = 7}},
+			{UnitId = "10003", Level = 1, GridPos = {X = 5, Y = 7}},
+			{UnitId = "10004", Level = 1, GridPos = {X = 7, Y = 10}},
+			{UnitId = "10001", Level = 1, GridPos = {X = 7, Y = 3}},
+		},
+		
+		-- 第3关: 更强的敌人
+		[6] = {
+			{UnitId = "10001", Level = 1, GridPos = {X = 5, Y = 3}},
+			{UnitId = "10001", Level = 1, GridPos = {X = 9, Y = 3}},
+			{UnitId = "10001", Level = 1, GridPos = {X = 7, Y = 5}},
+			{UnitId = "10005", Level = 1, GridPos = {X = 9, Y = 7}},
+			{UnitId = "10005", Level = 1, GridPos = {X = 7, Y = 7}},
+			{UnitId = "10005", Level = 1, GridPos = {X = 5, Y = 7}},
+		},
+		
+		-- 第3关: 更强的敌人
+		[7] = {
+			{UnitId = "10001", Level = 1, GridPos = {X = 5, Y = 3}},
+			{UnitId = "10001", Level = 1, GridPos = {X = 9, Y = 3}},
+			{UnitId = "10001", Level = 1, GridPos = {X = 7, Y = 5}},
+			{UnitId = "10005", Level = 1, GridPos = {X = 9, Y = 7}},
+			{UnitId = "10005", Level = 1, GridPos = {X = 7, Y = 7}},
+			{UnitId = "10005", Level = 1, GridPos = {X = 5, Y = 7}},
+			{UnitId = "10008", Level = 1, GridPos = {X = 5, Y = 1}},
+			{UnitId = "10008", Level = 1, GridPos = {X = 9, Y = 1}},
+		},
+		
+		-- 第3关: 更强的敌人
+		[8] = {
+			{UnitId = "10001", Level = 1, GridPos = {X = 5, Y = 3}},
+			{UnitId = "10001", Level = 1, GridPos = {X = 9, Y = 3}},
+			{UnitId = "10005", Level = 1, GridPos = {X = 9, Y = 7}},
+			{UnitId = "10005", Level = 1, GridPos = {X = 7, Y = 7}},
+			{UnitId = "10005", Level = 1, GridPos = {X = 5, Y = 7}},
+			{UnitId = "10008", Level = 1, GridPos = {X = 5, Y = 1}},
+			{UnitId = "10008", Level = 1, GridPos = {X = 9, Y = 1}},
+			{UnitId = "10009", Level = 1, GridPos = {X = 7, Y = 5}},
+		},
+		
+		-- 第3关: 更强的敌人
+		[9] = {
+			{UnitId = "10001", Level = 1, GridPos = {X = 5, Y = 3}},
+			{UnitId = "10001", Level = 1, GridPos = {X = 9, Y = 3}},
+			{UnitId = "10005", Level = 1, GridPos = {X = 9, Y = 7}},
+			{UnitId = "10005", Level = 1, GridPos = {X = 7, Y = 7}},
+			{UnitId = "10005", Level = 1, GridPos = {X = 5, Y = 7}},
+			{UnitId = "10008", Level = 1, GridPos = {X = 5, Y = 1}},
+			{UnitId = "10008", Level = 1, GridPos = {X = 9, Y = 1}},
+			{UnitId = "10009", Level = 1, GridPos = {X = 7, Y = 5}},
+			{UnitId = "10010", Level = 1, GridPos = {X = 7, Y = 2}},
+			{UnitId = "10010", Level = 1, GridPos = {X = 10, Y = 5}},
+			{UnitId = "10010", Level = 1, GridPos = {X = 4, Y = 5}},
+		},
+		
+		-- 第3关: 更强的敌人
+		[10] = {
+			{UnitId = "10010", Level = 1, GridPos = {X = 5, Y = 2}},
+			{UnitId = "10010", Level = 1, GridPos = {X = 10, Y = 2}},
+			{UnitId = "10008", Level = 1, GridPos = {X = 7, Y = 3}},
+			{UnitId = "10008", Level = 1, GridPos = {X = 8, Y = 3}},
+			{UnitId = "10004", Level = 1, GridPos = {X = 5, Y = 5}},
+			{UnitId = "10004", Level = 1, GridPos = {X = 7, Y = 5}},
+			{UnitId = "10004", Level = 1, GridPos = {X = 9, Y = 5}},
+			{UnitId = "10004", Level = 1, GridPos = {X = 11, Y = 5}},
+			{UnitId = "10001", Level = 1, GridPos = {X = 5, Y = 1}},
+			{UnitId = "10001", Level = 1, GridPos = {X = 6, Y = 1}},
+			{UnitId = "10001", Level = 1, GridPos = {X = 8, Y = 1}},
+			{UnitId = "10001", Level = 1, GridPos = {X = 9, Y = 1}},
 		},
 	}
 }

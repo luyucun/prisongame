@@ -399,10 +399,8 @@ task.spawn(function()
 							chapterToUse = currentChapterAttr
 						end
 
-						local chapterConfig = StageConfig.GetChapterConfig(chapterToUse)
-						if chapterConfig then
-							stagesToUse = chapterConfig.StagesPerChapter or 3
-						end
+						-- 使用StageConfig.GetStagesPerChapter()函数获取关卡数
+						stagesToUse = StageConfig.GetStagesPerChapter(chapterToUse)
 					end
 				end
 

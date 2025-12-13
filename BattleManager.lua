@@ -51,6 +51,15 @@ local battleStateUpdateEvent = nil
 -- 是否已初始化
 local isInitialized = false
 
+-- 战斗超时自动清理时间(秒) - 防止战斗实例永久驻留
+local BATTLE_TIMEOUT = 600  -- 10分钟
+
+-- 上次清理检查时间
+local lastCleanupCheck = 0
+
+-- 清理检查间隔(秒)
+local CLEANUP_CHECK_INTERVAL = 30  -- 每30秒检查一次
+
 -- ==================== 数据结构 ====================
 
 --[[
@@ -74,9 +83,9 @@ BattleInstance = {
 @param ... - 日志内容
 ]]
 local function DebugLog(...)
-    if BattleConfig.DEBUG_COMBAT_LOGS then
-        print(GameConfig.LOG_PREFIX, "[BattleManager]", ...)
-    end
+	if BattleConfig.DEBUG_COMBAT_LOGS then
+		print(GameConfig.LOG_PREFIX, "[BattleManager]", ...)
+	end
 end
 
 --[[
@@ -84,7 +93,56 @@ end
 @param ... - 日志内容
 ]]
 local function WarnLog(...)
-    warn(GameConfig.LOG_PREFIX, "[BattleManager]", ...)
+	warn(GameConfig.LOG_PREFIX, "[BattleManager]", ...)
+end
+
+--[[
+清理超时的战斗实例
+自动清理超过BATTLE_TIMEOUT时间且状态为FINISHED的战斗
+]]
+local function CleanupTimeoutBattles()
+	local currentTime = tick()
+	local cleanedCount = 0
+
+	for battleId, battle in pairs(battles) do
+		-- 计算战斗存在时间
+		local battleAge = currentTime - (battle.StartTime or currentTime)
+
+		-- 清理条件：
+		-- 1. 战斗状态为FINISHED且超过CLEANUP_DELAY
+		-- 2. 战斗状态为FIGHTING但超过BATTLE_TIMEOUT（卡住的战斗）
+		local shouldClean = false
+
+		if battle.State == BattleConfig.BattleState.FINISHED then
+			-- 已结束的战斗，超过清理延迟就清理
+			if battleAge > BattleConfig.CLEANUP_DELAY then
+				shouldClean = true
+				DebugLog(string.format("清理已结束战斗: BattleId=%d (存在时间%.1f秒)", battleId, battleAge))
+			end
+		elseif battle.State == BattleConfig.BattleState.FIGHTING then
+			-- 战斗中但超时，可能是卡住了
+			if battleAge > BATTLE_TIMEOUT then
+				shouldClean = true
+				WarnLog(string.format("强制清理超时战斗: BattleId=%d (存在时间%.1f秒 > %d秒)",
+					battleId, battleAge, BATTLE_TIMEOUT))
+			end
+		elseif battle.State == BattleConfig.BattleState.PREPARING then
+			-- 准备中但超时（可能创建后没有StartBattle）
+			if battleAge > 60 then  -- 准备超过1分钟
+				shouldClean = true
+				WarnLog(string.format("强制清理准备超时战斗: BattleId=%d (准备时间%.1f秒)", battleId, battleAge))
+			end
+		end
+
+		if shouldClean then
+			BattleManager.CleanupBattle(battleId)
+			cleanedCount = cleanedCount + 1
+		end
+	end
+
+	if cleanedCount > 0 then
+		DebugLog(string.format("✅ 自动清理完成，清理了 %d 个战斗实例", cleanedCount))
+	end
 end
 
 --[[
@@ -93,38 +151,38 @@ end
 @return boolean, string - 是否结束, 胜利方
 ]]
 local function CheckBattleEnd(battleId)
-    local battle = battles[battleId]
+	local battle = battles[battleId]
 
-    if not battle then
-        return false, nil
-    end
+	if not battle then
+		return false, nil
+	end
 
-    -- 统计存活单位
-    local attackAliveCount = 0
-    local defenseAliveCount = 0
+	-- 统计存活单位
+	local attackAliveCount = 0
+	local defenseAliveCount = 0
 
-    for _, unit in ipairs(battle.AttackUnits) do
-        if CombatSystem.IsUnitAlive(unit) then
-            attackAliveCount = attackAliveCount + 1
-        end
-    end
+	for _, unit in ipairs(battle.AttackUnits) do
+		if CombatSystem.IsUnitAlive(unit) then
+			attackAliveCount = attackAliveCount + 1
+		end
+	end
 
-    for _, unit in ipairs(battle.DefenseUnits) do
-        if CombatSystem.IsUnitAlive(unit) then
-            defenseAliveCount = defenseAliveCount + 1
-        end
-    end
+	for _, unit in ipairs(battle.DefenseUnits) do
+		if CombatSystem.IsUnitAlive(unit) then
+			defenseAliveCount = defenseAliveCount + 1
+		end
+	end
 
-    -- 判断胜负
-    if attackAliveCount == 0 and defenseAliveCount > 0 then
-        return true, BattleConfig.Team.DEFENSE
-    elseif defenseAliveCount == 0 and attackAliveCount > 0 then
-        return true, BattleConfig.Team.ATTACK
-    elseif attackAliveCount == 0 and defenseAliveCount == 0 then
-        return true, nil  -- 平局(双方同归于尽)
-    end
+	-- 判断胜负
+	if attackAliveCount == 0 and defenseAliveCount > 0 then
+		return true, BattleConfig.Team.DEFENSE
+	elseif defenseAliveCount == 0 and attackAliveCount > 0 then
+		return true, BattleConfig.Team.ATTACK
+	elseif attackAliveCount == 0 and defenseAliveCount == 0 then
+		return true, nil  -- 平局(双方同归于尽)
+	end
 
-    return false, nil
+	return false, nil
 end
 
 -- ==================== 公共接口 ====================
@@ -134,140 +192,149 @@ end
 @return boolean - 是否初始化成功
 ]]
 function BattleManager.Initialize()
-    if isInitialized then
-        WarnLog("战斗管理器已经初始化过了")
-        return true
-    end
+	if isInitialized then
+		WarnLog("战斗管理器已经初始化过了")
+		return true
+	end
 
-    DebugLog("正在初始化战斗管理器...")
+	DebugLog("正在初始化战斗管理器...")
 
-    -- 获取战斗状态更新事件
-    local eventsFolder = ReplicatedStorage:WaitForChild("Events")
-    local battleEventsFolder = eventsFolder:FindFirstChild("BattleEvents")
+	-- 获取战斗状态更新事件
+	local eventsFolder = ReplicatedStorage:WaitForChild("Events")
+	local battleEventsFolder = eventsFolder:FindFirstChild("BattleEvents")
 
-    if battleEventsFolder then
-        battleStateUpdateEvent = battleEventsFolder:FindFirstChild("BattleStateUpdate")
+	if battleEventsFolder then
+		battleStateUpdateEvent = battleEventsFolder:FindFirstChild("BattleStateUpdate")
 
-        if not battleStateUpdateEvent then
-            WarnLog("未找到BattleStateUpdate事件,客户端将无法收到战斗状态更新通知")
-        end
+		if not battleStateUpdateEvent then
+			WarnLog("未找到BattleStateUpdate事件,客户端将无法收到战斗状态更新通知")
+		end
 
-        -- 连接死亡事件,用于检查战斗结束
-        local unitDeathEvent = battleEventsFolder:FindFirstChild("UnitDeath")
+		-- 连接死亡事件,用于检查战斗结束
+		local unitDeathEvent = battleEventsFolder:FindFirstChild("UnitDeath")
 
-        if unitDeathEvent then
-            deathEventConnection = unitDeathEvent.Event:Connect(function(deadUnit, killer, battleId)
-                -- 检查战斗是否结束
-                local isEnd, winner = CheckBattleEnd(battleId)
+		if unitDeathEvent then
+			deathEventConnection = unitDeathEvent.Event:Connect(function(deadUnit, killer, battleId)
+				-- 检查战斗是否结束
+				local isEnd, winner = CheckBattleEnd(battleId)
 
-                if isEnd then
-                    BattleManager.EndBattle(battleId, winner)
-                end
-            end)
-        end
+				if isEnd then
+					BattleManager.EndBattle(battleId, winner)
+				end
+			end)
+		end
 
-        -- V2.4新增：连接胜利确认事件
-        -- V2.5扩展：支持战役结算确认（battleId=0表示战役结算）
-        local victoryConfirmEvent = battleEventsFolder:FindFirstChild("VictoryConfirm")
-        if victoryConfirmEvent then
-            victoryConfirmEvent.OnServerEvent:Connect(function(player, battleId)
-                local success, err = pcall(function()
-                    -- 验证玩家合法性
-                    if not player then
-                        return
-                    end
+		-- V2.4新增：连接胜利确认事件
+		-- V2.5扩展：支持战役结算确认（battleId=0表示战役结算）
+		local victoryConfirmEvent = battleEventsFolder:FindFirstChild("VictoryConfirm")
+		if victoryConfirmEvent then
+			victoryConfirmEvent.OnServerEvent:Connect(function(player, battleId)
+				local success, err = pcall(function()
+					-- 验证玩家合法性
+					if not player then
+						return
+					end
 
-                    -- V2.5新增：处理战役结算确认（battleId=0）
-                    if battleId == 0 then
-                        -- 战役结算确认
-                        local CampaignManager = require(ServerScriptService:WaitForChild("Systems"):WaitForChild("CampaignManager") :: ModuleScript)
-                        local campaignData = CampaignManager.ActiveCampaigns[player.UserId]
+					-- V2.5新增：处理战役结算确认（battleId=0）
+					if battleId == 0 then
+						-- 战役结算确认
+						local CampaignManager = require(ServerScriptService:WaitForChild("Systems"):WaitForChild("CampaignManager") :: ModuleScript)
+						local campaignData = CampaignManager.ActiveCampaigns[player.UserId]
 
-                        if not campaignData then
-                            DebugLog(string.format("忽略VictoryConfirm: 玩家 %s 无活跃战役(battleId=0)", player.Name))
-                            return
-                        end
+						if not campaignData then
+							DebugLog(string.format("忽略VictoryConfirm: 玩家 %s 无活跃战役(battleId=0)", player.Name))
+							return
+						end
 
-                        if not campaignData.IsWaitingForConfirm then
-                            DebugLog(string.format("忽略VictoryConfirm: 玩家 %s 的战役未在等待确认状态", player.Name))
-                            return
-                        end
+						if not campaignData.IsWaitingForConfirm then
+							DebugLog(string.format("忽略VictoryConfirm: 玩家 %s 的战役未在等待确认状态", player.Name))
+							return
+						end
 
-                        DebugLog(string.format("收到玩家 %s 的战役结算确认", player.Name))
+						DebugLog(string.format("收到玩家 %s 的战役结算确认", player.Name))
 
-                        -- 完成战役结算
-                        CampaignManager.CompleteCampaignEnd(campaignData)
-                        return
-                    end
+						-- 完成战役结算
+						CampaignManager.CompleteCampaignEnd(campaignData)
+						return
+					end
 
-                    -- 战役结算(battleId==0) 已在CampaignManager处理，普通战斗需>0
-                    if not battleId or battleId == 0 then
-                        DebugLog(string.format("忽略VictoryConfirm: battleId无效(%s)", tostring(battleId)))
-                        return
-                    end
+					-- 战役结算(battleId==0) 已在CampaignManager处理，普通战斗需>0
+					if not battleId or battleId == 0 then
+						DebugLog(string.format("忽略VictoryConfirm: battleId无效(%s)", tostring(battleId)))
+						return
+					end
 
-                    -- 确保battleId是数字类型
-                    local battleIdNum = tonumber(battleId)
-                    if not battleIdNum then
-                        WarnLog("VictoryConfirm失败: battleId类型无效")
-                        return
-                    end
+					-- 确保battleId是数字类型
+					local battleIdNum = tonumber(battleId)
+					if not battleIdNum then
+						WarnLog("VictoryConfirm失败: battleId类型无效")
+						return
+					end
 
-                    local battle = battles[battleIdNum]
-                    if not battle then
-                        DebugLog(string.format("忽略VictoryConfirm: 战斗 %d 不存在或已结算", battleIdNum))
-                        return
-                    end
+					local battle = battles[battleIdNum]
+					if not battle then
+						DebugLog(string.format("忽略VictoryConfirm: 战斗 %d 不存在或已结算", battleIdNum))
+						return
+					end
 
-                    if battle.PlayerId ~= player.UserId then
-                        DebugLog(string.format("忽略VictoryConfirm: 玩家 %s 不是战斗 %d 的发起者", player.Name, battleIdNum))
-                        return
-                    end
+					if battle.PlayerId ~= player.UserId then
+						DebugLog(string.format("忽略VictoryConfirm: 玩家 %s 不是战斗 %d 的发起者", player.Name, battleIdNum))
+						return
+					end
 
-                    if not battle.IsSettling then
-                        DebugLog(string.format("忽略VictoryConfirm: 战斗 %d 未在结算中", battleIdNum))
-                        return
-                    end
+					if not battle.IsSettling then
+						DebugLog(string.format("忽略VictoryConfirm: 战斗 %d 未在结算中", battleIdNum))
+						return
+					end
 
-                    DebugLog(string.format("收到玩家 %s 的胜利确认: BattleId=%d", player.Name, battleIdNum))
+					DebugLog(string.format("收到玩家 %s 的胜利确认: BattleId=%d", player.Name, battleIdNum))
 
-                    -- 完成战斗结算
-                    BattleManager.CompleteBattle(battleIdNum, battle.Winner)
-                end)
+					-- 完成战斗结算
+					BattleManager.CompleteBattle(battleIdNum, battle.Winner)
+				end)
 
-                if not success then
-                    WarnLog("VictoryConfirm处理失败:", err)
-                end
-            end)
-        else
-            WarnLog("未找到VictoryConfirm事件，结算界面功能将不可用")
-        end
-    end
+				if not success then
+					WarnLog("VictoryConfirm处理失败:", err)
+				end
+			end)
+		else
+			WarnLog("未找到VictoryConfirm事件，结算界面功能将不可用")
+		end
+	end
 
-    isInitialized = true
+	isInitialized = true
 
-    DebugLog("战斗管理器初始化完成")
-    return true
+	-- 启动定期清理任务
+	RunService.Heartbeat:Connect(function()
+		local currentTime = tick()
+		if currentTime - lastCleanupCheck > CLEANUP_CHECK_INTERVAL then
+			CleanupTimeoutBattles()
+			lastCleanupCheck = currentTime
+		end
+	end)
+
+	DebugLog("战斗管理器初始化完成")
+	return true
 end
 
 --[[
 关闭战斗管理器
 ]]
 function BattleManager.Shutdown()
-    if deathEventConnection then
-        deathEventConnection:Disconnect()
-        deathEventConnection = nil
-    end
+	if deathEventConnection then
+		deathEventConnection:Disconnect()
+		deathEventConnection = nil
+	end
 
-    -- 清理所有战斗
-    for battleId, _ in pairs(battles) do
-        BattleManager.CleanupBattle(battleId)
-    end
+	-- 清理所有战斗
+	for battleId, _ in pairs(battles) do
+		BattleManager.CleanupBattle(battleId)
+	end
 
-    battles = {}
-    isInitialized = false
+	battles = {}
+	isInitialized = false
 
-    DebugLog("战斗管理器已关闭")
+	DebugLog("战斗管理器已关闭")
 end
 
 --[[
@@ -287,6 +354,13 @@ function BattleManager.CreateBattle(playerId, attackUnits, defenseUnits)
 		defenseUnits = config.DefenseTeam or config.DefenseUnits or {}
 	end
 
+	-- 每次创建战斗前，先执行一次清理检查
+	local currentTime = tick()
+	if currentTime - lastCleanupCheck > CLEANUP_CHECK_INTERVAL then
+		CleanupTimeoutBattles()
+		lastCleanupCheck = currentTime
+	end
+
 	-- 检查是否超过最大战斗数(遍历计数,因为battles是字典)
 	local battleCount = 0
 	for _ in pairs(battles) do
@@ -294,8 +368,32 @@ function BattleManager.CreateBattle(playerId, attackUnits, defenseUnits)
 	end
 
 	if battleCount >= BattleConfig.MAX_CONCURRENT_BATTLES then
-		WarnLog("达到最大并发战斗数限制")
-		return nil
+		WarnLog(string.format("达到最大并发战斗数限制 (当前:%d, 上限:%d)", battleCount, BattleConfig.MAX_CONCURRENT_BATTLES))
+
+		-- 输出当前战斗列表信息以便调试
+		DebugLog("当前战斗实例列表:")
+		for bid, battle in pairs(battles) do
+			local ageSeconds = currentTime - (battle.StartTime or currentTime)
+			DebugLog(string.format("  - BattleId=%d, State=%s, Type=%s, Age=%.1fs",
+				bid, battle.State, battle.BattleType or "Unknown", ageSeconds))
+		end
+
+		-- 强制执行一次清理，尝试清理已完成的战斗
+		CleanupTimeoutBattles()
+
+		-- 重新计数
+		battleCount = 0
+		for _ in pairs(battles) do
+			battleCount = battleCount + 1
+		end
+
+		-- 如果清理后还是超限，返回nil
+		if battleCount >= BattleConfig.MAX_CONCURRENT_BATTLES then
+			WarnLog(string.format("清理后仍达到最大并发战斗数限制 (当前:%d)", battleCount))
+			return nil
+		else
+			DebugLog(string.format("✅ 清理后战斗数量: %d，可以继续创建", battleCount))
+		end
 	end
 
 	-- 分配战斗ID
@@ -309,7 +407,7 @@ function BattleManager.CreateBattle(playerId, attackUnits, defenseUnits)
 		AttackUnits = attackUnits or {},
 		DefenseUnits = defenseUnits or {},
 		State = BattleConfig.BattleState.PREPARING,
-		StartTime = 0,
+		StartTime = currentTime,  -- 使用当前时间作为创建时间
 		Winner = nil,
 		-- V2.0新增字段
 		BattleType = config and config.BattleType or "Test",  -- "Test"或"Campaign"
@@ -335,240 +433,240 @@ end
 @return boolean - 是否成功
 ]]
 function BattleManager.StartBattle(battleId)
-    local battle = battles[battleId]
+	local battle = battles[battleId]
 
-    if not battle then
-        WarnLog("StartBattle失败: 战斗不存在")
-        return false
-    end
+	if not battle then
+		WarnLog("StartBattle失败: 战斗不存在")
+		return false
+	end
 
-    if battle.State ~= BattleConfig.BattleState.PREPARING then
-        WarnLog("StartBattle失败: 战斗状态不正确")
-        return false
-    end
+	if battle.State ~= BattleConfig.BattleState.PREPARING then
+		WarnLog("StartBattle失败: 战斗状态不正确")
+		return false
+	end
 
-    -- 更新战斗状态
-    battle.State = BattleConfig.BattleState.FIGHTING
-    battle.StartTime = tick()
+	-- 更新战斗状态
+	battle.State = BattleConfig.BattleState.FIGHTING
+	battle.StartTime = tick()  -- 更新为真正的战斗开始时间
 
-    -- V2.0新增：二次校验，移除无效单位
-    local validAttackUnits = {}
-    local validDefenseUnits = {}
+	-- V2.0新增：二次校验，移除无效单位
+	local validAttackUnits = {}
+	local validDefenseUnits = {}
 
-    for _, unit in ipairs(battle.AttackUnits) do
-        if unit and unit.Parent then
-            local humanoid = unit:FindFirstChild("Humanoid")
-            local rootPart = unit:FindFirstChild("HumanoidRootPart")
-            if humanoid and rootPart then
-                -- 检查是否锚定（战斗中不应该锚定）
-                if rootPart.Anchored then
-                    WarnLog(string.format("警告：攻击单位 %s 仍处于锚定状态，尝试解锚", unit.Name))
-                    rootPart.Anchored = false
-                end
-                table.insert(validAttackUnits, unit)
-            else
-                WarnLog(string.format("移除无效攻击单位：%s（缺少Humanoid或RootPart）", unit.Name))
-            end
-        else
-            WarnLog("移除无效攻击单位：实例无效或已销毁")
-        end
-    end
+	for _, unit in ipairs(battle.AttackUnits) do
+		if unit and unit.Parent then
+			local humanoid = unit:FindFirstChild("Humanoid")
+			local rootPart = unit:FindFirstChild("HumanoidRootPart")
+			if humanoid and rootPart then
+				-- 检查是否锚定（战斗中不应该锚定）
+				if rootPart.Anchored then
+					WarnLog(string.format("警告：攻击单位 %s 仍处于锚定状态，尝试解锚", unit.Name))
+					rootPart.Anchored = false
+				end
+				table.insert(validAttackUnits, unit)
+			else
+				WarnLog(string.format("移除无效攻击单位：%s（缺少Humanoid或RootPart）", unit.Name))
+			end
+		else
+			WarnLog("移除无效攻击单位：实例无效或已销毁")
+		end
+	end
 
-    for _, unit in ipairs(battle.DefenseUnits) do
-        if unit and unit.Parent then
-            local humanoid = unit:FindFirstChild("Humanoid")
-            local rootPart = unit:FindFirstChild("HumanoidRootPart")
-            if humanoid and rootPart then
-                -- 检查是否锚定
-                if rootPart.Anchored then
-                    WarnLog(string.format("警告：防守单位 %s 仍处于锚定状态，尝试解锚", unit.Name))
-                    rootPart.Anchored = false
-                end
-                table.insert(validDefenseUnits, unit)
-            else
-                WarnLog(string.format("移除无效防守单位：%s（缺少Humanoid或RootPart）", unit.Name))
-            end
-        else
-            WarnLog("移除无效防守单位：实例无效或已销毁")
-        end
-    end
+	for _, unit in ipairs(battle.DefenseUnits) do
+		if unit and unit.Parent then
+			local humanoid = unit:FindFirstChild("Humanoid")
+			local rootPart = unit:FindFirstChild("HumanoidRootPart")
+			if humanoid and rootPart then
+				-- 检查是否锚定
+				if rootPart.Anchored then
+					WarnLog(string.format("警告：防守单位 %s 仍处于锚定状态，尝试解锚", unit.Name))
+					rootPart.Anchored = false
+				end
+				table.insert(validDefenseUnits, unit)
+			else
+				WarnLog(string.format("移除无效防守单位：%s（缺少Humanoid或RootPart）", unit.Name))
+			end
+		else
+			WarnLog("移除无效防守单位：实例无效或已销毁")
+		end
+	end
 
-    -- 检查是否还有有效单位
-    if #validAttackUnits == 0 or #validDefenseUnits == 0 then
-        WarnLog(string.format("StartBattle失败：有效单位不足（攻击%d，防守%d）",
-            #validAttackUnits, #validDefenseUnits))
-        battle.State = BattleConfig.BattleState.FINISHED
-        return false
-    end
+	-- 检查是否还有有效单位
+	if #validAttackUnits == 0 or #validDefenseUnits == 0 then
+		WarnLog(string.format("StartBattle失败：有效单位不足（攻击%d，防守%d）",
+			#validAttackUnits, #validDefenseUnits))
+		battle.State = BattleConfig.BattleState.FINISHED
+		return false
+	end
 
-    -- 更新单位列表
-    battle.AttackUnits = validAttackUnits
-    battle.DefenseUnits = validDefenseUnits
+	-- 更新单位列表
+	battle.AttackUnits = validAttackUnits
+	battle.DefenseUnits = validDefenseUnits
 
-    -- V2.0新增：初始化CombatSystem状态并启动AI
-    -- V3.0修复：先完成所有单位的注册，再统一启动AI，避免时序问题
-    local finalAttackUnits = {}
-    local finalDefenseUnits = {}
+	-- V2.0新增：初始化CombatSystem状态并启动AI
+	-- V3.0修复：先完成所有单位的注册，再统一启动AI，避免时序问题
+	local finalAttackUnits = {}
+	local finalDefenseUnits = {}
 
-    -- ==================== 第一阶段：注册所有单位（不启动AI）====================
-    -- V4.0调试：输出攻击方单位列表
-    print(string.format("[V4.0调试] 开始初始化攻击方单位，总数: %d", #battle.AttackUnits))
-    for i, unit in ipairs(battle.AttackUnits) do
-        print(string.format("[V4.0调试] 攻击方单位[%d]: %s", i, unit.Name))
-    end
+	-- ==================== 第一阶段：注册所有单位（不启动AI）====================
+	-- V4.0调试：输出攻击方单位列表
+	print(string.format("[V4.0调试] 开始初始化攻击方单位，总数: %d", #battle.AttackUnits))
+	for i, unit in ipairs(battle.AttackUnits) do
+		print(string.format("[V4.0调试] 攻击方单位[%d]: %s", i, unit.Name))
+	end
 
-    -- 处理攻击方
-    for i, unit in ipairs(battle.AttackUnits) do
-        -- V2.5新增：标记阵营
-        unit:SetAttribute("Team", BattleConfig.Team.ATTACK)
+	-- 处理攻击方
+	for i, unit in ipairs(battle.AttackUnits) do
+		-- V2.5新增：标记阵营
+		unit:SetAttribute("Team", BattleConfig.Team.ATTACK)
 
-        UnitManager.RegisterUnit(battleId, BattleConfig.Team.ATTACK, unit)
+		UnitManager.RegisterUnit(battleId, BattleConfig.Team.ATTACK, unit)
 
-        -- 2. 初始化CombatSystem状态
-        local unitId = unit:GetAttribute("UnitId") or unit.Name
-        local level = unit:GetAttribute("Level") or 1
+		-- 2. 初始化CombatSystem状态
+		local unitId = unit:GetAttribute("UnitId") or unit.Name
+		local level = unit:GetAttribute("Level") or 1
 
-        -- V4.0调试：输出单位信息
-        DebugLog(string.format("[V4.0] 准备初始化攻击方单位: Name=%s, UnitId=%s, Level=%d, HasUnitIdAttr=%s",
-            unit.Name, tostring(unitId), level, tostring(unit:GetAttribute("UnitId") ~= nil)))
+		-- V4.0调试：输出单位信息
+		DebugLog(string.format("[V4.0] 准备初始化攻击方单位: Name=%s, UnitId=%s, Level=%d, HasUnitIdAttr=%s",
+			unit.Name, tostring(unitId), level, tostring(unit:GetAttribute("UnitId") ~= nil)))
 
-        local success = CombatSystem.InitializeUnit(unit, unitId, level, BattleConfig.Team.ATTACK, battleId)
+		local success = CombatSystem.InitializeUnit(unit, unitId, level, BattleConfig.Team.ATTACK, battleId)
 
-        if success then
-            PhysicsManager.ConfigureUnitPhysics(unit, "ally")
-            -- V3.0修复：暂时不启动AI，等所有单位注册完成后再统一启动
-            table.insert(finalAttackUnits, unit)
-            DebugLog(string.format("[V4.0] 攻击方单位初始化成功: %s (unitId=%s)", unit.Name, tostring(unitId)))
-        else
-            WarnLog(string.format("[V4.0] 攻击方单位初始化失败: %s (unitId=%s)", unit.Name, tostring(unitId)))
-        end
-    end
+		if success then
+			PhysicsManager.ConfigureUnitPhysics(unit, "ally")
+			-- V3.0修复：暂时不启动AI，等所有单位注册完成后再统一启动
+			table.insert(finalAttackUnits, unit)
+			DebugLog(string.format("[V4.0] 攻击方单位初始化成功: %s (unitId=%s)", unit.Name, tostring(unitId)))
+		else
+			WarnLog(string.format("[V4.0] 攻击方单位初始化失败: %s (unitId=%s)", unit.Name, tostring(unitId)))
+		end
+	end
 
-    -- 处理防守方
-    for i, unit in ipairs(battle.DefenseUnits) do
-        -- V2.5新增：标记阵营
-        unit:SetAttribute("Team", BattleConfig.Team.DEFENSE)
+	-- 处理防守方
+	for i, unit in ipairs(battle.DefenseUnits) do
+		-- V2.5新增：标记阵营
+		unit:SetAttribute("Team", BattleConfig.Team.DEFENSE)
 
-        -- V2.5新增：为敌方设置红色Highlight描边
-        -- 注意：只修改描边（OutlineColor/OutlineTransparency）和深度模式，不修改填充
-        local highlight = unit:FindFirstChild("Highlight")
-        if not highlight then
-            highlight = Instance.new("Highlight")
-            highlight.Name = "Highlight"
-            highlight.Parent = unit
-        end
-        -- 只设置描边属性和深度模式，保持填充属性不变
-        highlight.OutlineColor = Color3.fromRGB(255, 0, 0)
-        highlight.OutlineTransparency = 0
-        highlight.DepthMode = Enum.HighlightDepthMode.Occluded  -- 避免总在最上层
-        -- 不设置 FillTransparency / FillColor，保持默认
-        DebugLog(string.format("✅ 敌方高光设置完成: %s (Outline=红色, DepthMode=Occluded)", unit.Name))
+		-- V2.5新增：为敌方设置红色Highlight描边
+		-- 注意：只修改描边（OutlineColor/OutlineTransparency）和深度模式，不修改填充
+		local highlight = unit:FindFirstChild("Highlight")
+		if not highlight then
+			highlight = Instance.new("Highlight")
+			highlight.Name = "Highlight"
+			highlight.Parent = unit
+		end
+		-- 只设置描边属性和深度模式，保持填充属性不变
+		highlight.OutlineColor = Color3.fromRGB(255, 0, 0)
+		highlight.OutlineTransparency = 0
+		highlight.DepthMode = Enum.HighlightDepthMode.Occluded  -- 避免总在最上层
+		-- 不设置 FillTransparency / FillColor，保持默认
+		DebugLog(string.format("✅ 敌方高光设置完成: %s (Outline=红色, DepthMode=Occluded)", unit.Name))
 
-        UnitManager.RegisterUnit(battleId, BattleConfig.Team.DEFENSE, unit)
+		UnitManager.RegisterUnit(battleId, BattleConfig.Team.DEFENSE, unit)
 
-        -- 2. 初始化CombatSystem状态
-        local unitId = unit:GetAttribute("UnitId") or unit.Name
-        local level = unit:GetAttribute("Level") or 1
-        local success = CombatSystem.InitializeUnit(unit, unitId, level, BattleConfig.Team.DEFENSE, battleId)
+		-- 2. 初始化CombatSystem状态
+		local unitId = unit:GetAttribute("UnitId") or unit.Name
+		local level = unit:GetAttribute("Level") or 1
+		local success = CombatSystem.InitializeUnit(unit, unitId, level, BattleConfig.Team.DEFENSE, battleId)
 
-        if success then
-            PhysicsManager.ConfigureUnitPhysics(unit, "enemy")
-            -- V3.0修复：暂时不启动AI，等所有单位注册完成后再统一启动
-            table.insert(finalDefenseUnits, unit)
-            DebugLog(string.format("[V4.0] 防守方单位初始化成功: %s", unit.Name))
-        else
-            WarnLog(string.format("[V4.0] 防守方单位初始化失败: %s", unit.Name))
-        end
-    end
+		if success then
+			PhysicsManager.ConfigureUnitPhysics(unit, "enemy")
+			-- V3.0修复：暂时不启动AI，等所有单位注册完成后再统一启动
+			table.insert(finalDefenseUnits, unit)
+			DebugLog(string.format("[V4.0] 防守方单位初始化成功: %s", unit.Name))
+		else
+			WarnLog(string.format("[V4.0] 防守方单位初始化失败: %s", unit.Name))
+		end
+	end
 
-    -- ==================== 第二阶段：统一启动AI ====================
-    -- V3.0修复：确保所有单位都已注册到UnitManager后再启动AI
-    -- 这样FindNearestEnemy才能正确找到所有敌人
-    -- V4.0修改：根据配置选择启动服务端AI或客户端AI
-    DebugLog(string.format("所有单位注册完成，开始启动AI - 攻击方:%d, 防守方:%d", #finalAttackUnits, #finalDefenseUnits))
+	-- ==================== 第二阶段：统一启动AI ====================
+	-- V3.0修复：确保所有单位都已注册到UnitManager后再启动AI
+	-- 这样FindNearestEnemy才能正确找到所有敌人
+	-- V4.0修改：根据配置选择启动服务端AI或客户端AI
+	DebugLog(string.format("所有单位注册完成，开始启动AI - 攻击方:%d, 防守方:%d", #finalAttackUnits, #finalDefenseUnits))
 
-    if BattleConfig.ENABLE_CLIENT_AI then
-        -- V4.0修复：客户端AI模式下，攻守双方都由客户端AI控制
-        -- 服务端仅做伤害/死亡校验
-        DebugLog("[V4.0] 客户端AI模式已启用，攻守双方都交给客户端AI")
-        BattleManager.InitializeClientAI(battleId, finalAttackUnits, finalDefenseUnits, battle)
-        -- 不再为任何一方启动服务端AI
-    else
-        -- 传统服务端AI模式
-        for _, unit in ipairs(finalAttackUnits) do
-            UnitAI.StartAI(unit)
-        end
+	if BattleConfig.ENABLE_CLIENT_AI then
+		-- V4.0修复：客户端AI模式下，攻守双方都由客户端AI控制
+		-- 服务端仅做伤害/死亡校验
+		DebugLog("[V4.0] 客户端AI模式已启用，攻守双方都交给客户端AI")
+		BattleManager.InitializeClientAI(battleId, finalAttackUnits, finalDefenseUnits, battle)
+		-- 不再为任何一方启动服务端AI
+	else
+		-- 传统服务端AI模式
+		for _, unit in ipairs(finalAttackUnits) do
+			UnitAI.StartAI(unit)
+		end
 
-        for _, unit in ipairs(finalDefenseUnits) do
-            UnitAI.StartAI(unit)
-        end
-    end
+		for _, unit in ipairs(finalDefenseUnits) do
+			UnitAI.StartAI(unit)
+		end
+	end
 
-    -- 再次检查：如果有单位初始化失败，更新战斗列表
-    if #finalAttackUnits < #battle.AttackUnits or #finalDefenseUnits < #battle.DefenseUnits then
-        WarnLog(string.format("部分单位初始化失败 - 攻击方: %d/%d, 防守方: %d/%d",
-            #finalAttackUnits, #battle.AttackUnits,
-            #finalDefenseUnits, #battle.DefenseUnits))
+	-- 再次检查：如果有单位初始化失败，更新战斗列表
+	if #finalAttackUnits < #battle.AttackUnits or #finalDefenseUnits < #battle.DefenseUnits then
+		WarnLog(string.format("部分单位初始化失败 - 攻击方: %d/%d, 防守方: %d/%d",
+			#finalAttackUnits, #battle.AttackUnits,
+			#finalDefenseUnits, #battle.DefenseUnits))
 
-        battle.AttackUnits = finalAttackUnits
-        battle.DefenseUnits = finalDefenseUnits
+		battle.AttackUnits = finalAttackUnits
+		battle.DefenseUnits = finalDefenseUnits
 
-        -- 如果任一方单位为0，无法开战
-        if #finalAttackUnits == 0 or #finalDefenseUnits == 0 then
-            WarnLog("初始化后有效单位不足，无法开战")
-            battle.State = BattleConfig.BattleState.FINISHED
-            return false
-        end
-    end
+		-- 如果任一方单位为0，无法开战
+		if #finalAttackUnits == 0 or #finalDefenseUnits == 0 then
+			WarnLog("初始化后有效单位不足，无法开战")
+			battle.State = BattleConfig.BattleState.FINISHED
+			return false
+		end
+	end
 
-    -- 通知客户端战斗状态更新
-    if battleStateUpdateEvent then
-        local player = Players:GetPlayerByUserId(battle.PlayerId)
-        if player then
-            battleStateUpdateEvent:FireClient(player, battleId, BattleConfig.BattleState.FIGHTING, nil)
-        end
-    end
+	-- 通知客户端战斗状态更新
+	if battleStateUpdateEvent then
+		local player = Players:GetPlayerByUserId(battle.PlayerId)
+		if player then
+			battleStateUpdateEvent:FireClient(player, battleId, BattleConfig.BattleState.FIGHTING, nil)
+		end
+	end
 
-    -- V2.3新增: 通知客户端挂载血条
-    local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
-    if eventsFolder then
-        local battleEventsFolder = eventsFolder:FindFirstChild("BattleEvents")
-        if battleEventsFolder then
-            local attachHealthBarsEvent = battleEventsFolder:FindFirstChild("AttachHealthBars")
-            if attachHealthBarsEvent then
-                -- 收集所有战斗单位
-                local allBattleUnits = {}
-                for _, unit in ipairs(finalAttackUnits) do
-                    table.insert(allBattleUnits, unit)
-                end
-                for _, unit in ipairs(finalDefenseUnits) do
-                    table.insert(allBattleUnits, unit)
-                end
+	-- V2.3新增: 通知客户端挂载血条
+	local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
+	if eventsFolder then
+		local battleEventsFolder = eventsFolder:FindFirstChild("BattleEvents")
+		if battleEventsFolder then
+			local attachHealthBarsEvent = battleEventsFolder:FindFirstChild("AttachHealthBars")
+			if attachHealthBarsEvent then
+				-- 收集所有战斗单位
+				local allBattleUnits = {}
+				for _, unit in ipairs(finalAttackUnits) do
+					table.insert(allBattleUnits, unit)
+				end
+				for _, unit in ipairs(finalDefenseUnits) do
+					table.insert(allBattleUnits, unit)
+				end
 
-                -- 通知所有客户端挂载血条
-                attachHealthBarsEvent:FireAllClients(allBattleUnits)
-            end
+				-- 通知所有客户端挂载血条
+				attachHealthBarsEvent:FireAllClients(allBattleUnits)
+			end
 
-            -- V2.5新增修复：Team属性设置完成后，通知客户端重新着色血条
-            -- 这解决了"血条在Team属性设置前挂载"的时序问题
-            local reapplyTeamColorsEvent = battleEventsFolder:FindFirstChild("ReapplyTeamColors")
-            if reapplyTeamColorsEvent then
-                local allBattleUnits = {}
-                for _, unit in ipairs(finalAttackUnits) do
-                    table.insert(allBattleUnits, unit)
-                end
-                for _, unit in ipairs(finalDefenseUnits) do
-                    table.insert(allBattleUnits, unit)
-                end
-                reapplyTeamColorsEvent:FireAllClients(allBattleUnits)
-                DebugLog("✅ 通知客户端重新着色血条: " .. #allBattleUnits .. " 个单位")
-            else
-                DebugLog("⚠️ ReapplyTeamColors事件不存在，血条着色可能延迟")
-            end
-        end
-    end
+			-- V2.5新增修复：Team属性设置完成后，通知客户端重新着色血条
+			-- 这解决了"血条在Team属性设置前挂载"的时序问题
+			local reapplyTeamColorsEvent = battleEventsFolder:FindFirstChild("ReapplyTeamColors")
+			if reapplyTeamColorsEvent then
+				local allBattleUnits = {}
+				for _, unit in ipairs(finalAttackUnits) do
+					table.insert(allBattleUnits, unit)
+				end
+				for _, unit in ipairs(finalDefenseUnits) do
+					table.insert(allBattleUnits, unit)
+				end
+				reapplyTeamColorsEvent:FireAllClients(allBattleUnits)
+				DebugLog("✅ 通知客户端重新着色血条: " .. #allBattleUnits .. " 个单位")
+			else
+				DebugLog("⚠️ ReapplyTeamColors事件不存在，血条着色可能延迟")
+			end
+		end
+	end
 
-    return true
+	return true
 end
 
 --[[
@@ -842,7 +940,7 @@ end
 @return table|nil - 战斗实例
 ]]
 function BattleManager.GetBattle(battleId)
-    return battles[battleId]
+	return battles[battleId]
 end
 
 --[[
@@ -851,13 +949,13 @@ end
 @return table|nil - 战斗实例
 ]]
 function BattleManager.GetPlayerBattle(playerId)
-    for _, battle in pairs(battles) do
-        if battle.PlayerId == playerId and battle.State ~= BattleConfig.BattleState.FINISHED then
-            return battle
-        end
-    end
+	for _, battle in pairs(battles) do
+		if battle.PlayerId == playerId and battle.State ~= BattleConfig.BattleState.FINISHED then
+			return battle
+		end
+	end
 
-    return nil
+	return nil
 end
 
 --[[
@@ -867,15 +965,15 @@ end
 @return boolean - 是否成功
 ]]
 function BattleManager.AddAttackUnit(battleId, unitModel)
-    local battle = battles[battleId]
+	local battle = battles[battleId]
 
-    if not battle then
-        return false
-    end
+	if not battle then
+		return false
+	end
 
-    table.insert(battle.AttackUnits, unitModel)
+	table.insert(battle.AttackUnits, unitModel)
 
-    return true
+	return true
 end
 
 --[[
@@ -885,15 +983,15 @@ end
 @return boolean - 是否成功
 ]]
 function BattleManager.AddDefenseUnit(battleId, unitModel)
-    local battle = battles[battleId]
+	local battle = battles[battleId]
 
-    if not battle then
-        return false
-    end
+	if not battle then
+		return false
+	end
 
-    table.insert(battle.DefenseUnits, unitModel)
+	table.insert(battle.DefenseUnits, unitModel)
 
-    return true
+	return true
 end
 
 --[[
@@ -901,15 +999,15 @@ end
 @return number - 活跃战斗数量
 ]]
 function BattleManager.GetActiveBattleCount()
-    local count = 0
+	local count = 0
 
-    for _, battle in pairs(battles) do
-        if battle.State == BattleConfig.BattleState.FIGHTING then
-            count = count + 1
-        end
-    end
+	for _, battle in pairs(battles) do
+		if battle.State == BattleConfig.BattleState.FIGHTING then
+			count = count + 1
+		end
+	end
 
-    return count
+	return count
 end
 
 --[[
@@ -917,7 +1015,7 @@ end
 @return table - 所有战斗实例
 ]]
 function BattleManager.GetAllBattles()
-    return battles
+	return battles
 end
 
 -- ==================== V4.0 客户端AI支持 ====================
@@ -928,15 +1026,15 @@ end
 @param player Player - 目标玩家
 ]]
 local function SetNetworkOwnerToPlayer(model, player)
-    if not model or not player then return end
+	if not model or not player then return end
 
-    for _, part in ipairs(model:GetDescendants()) do
-        if part:IsA("BasePart") and part:CanSetNetworkOwnership() then
-            pcall(function()
-                part:SetNetworkOwner(player)
-            end)
-        end
-    end
+	for _, part in ipairs(model:GetDescendants()) do
+		if part:IsA("BasePart") and part:CanSetNetworkOwnership() then
+			pcall(function()
+				part:SetNetworkOwner(player)
+			end)
+		end
+	end
 end
 
 --[[
@@ -944,15 +1042,15 @@ end
 @param model Model - 单位模型
 ]]
 local function SetNetworkOwnerToServer(model)
-    if not model then return end
+	if not model then return end
 
-    for _, part in ipairs(model:GetDescendants()) do
-        if part:IsA("BasePart") and part:CanSetNetworkOwnership() then
-            pcall(function()
-                part:SetNetworkOwner(nil)  -- nil表示服务端
-            end)
-        end
-    end
+	for _, part in ipairs(model:GetDescendants()) do
+		if part:IsA("BasePart") and part:CanSetNetworkOwnership() then
+			pcall(function()
+				part:SetNetworkOwner(nil)  -- nil表示服务端
+			end)
+		end
+	end
 end
 
 --[[
@@ -964,97 +1062,97 @@ end
 @param battle table - 战斗实例
 ]]
 function BattleManager.InitializeClientAI(battleId, attackUnits, defenseUnits, battle)
-    local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
-    if not eventsFolder then
-        WarnLog("[V4.0] 未找到Events文件夹")
-        return
-    end
+	local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
+	if not eventsFolder then
+		WarnLog("[V4.0] 未找到Events文件夹")
+		return
+	end
 
-    local clientAIEvents = eventsFolder:FindFirstChild("ClientAIEvents")
-    if not clientAIEvents then
-        WarnLog("[V4.0] 未找到ClientAIEvents文件夹")
-        return
-    end
+	local clientAIEvents = eventsFolder:FindFirstChild("ClientAIEvents")
+	if not clientAIEvents then
+		WarnLog("[V4.0] 未找到ClientAIEvents文件夹")
+		return
+	end
 
-    local initializeBattleEvent = clientAIEvents:FindFirstChild("InitializeBattle")
-    if not initializeBattleEvent then
-        WarnLog("[V4.0] 未找到InitializeBattle事件")
-        return
-    end
+	local initializeBattleEvent = clientAIEvents:FindFirstChild("InitializeBattle")
+	if not initializeBattleEvent then
+		WarnLog("[V4.0] 未找到InitializeBattle事件")
+		return
+	end
 
-    -- 获取玩家实例
-    local player = Players:GetPlayerByUserId(battle.PlayerId)
-    if not player then
-        WarnLog("[V4.0] 找不到玩家，无法初始化客户端AI")
-        return
-    end
+	-- 获取玩家实例
+	local player = Players:GetPlayerByUserId(battle.PlayerId)
+	if not player then
+		WarnLog("[V4.0] 找不到玩家，无法初始化客户端AI")
+		return
+	end
 
-    -- V4.0修复：设置攻守双方单位的网络所有权为客户端
-    -- 这样客户端才能流畅地控制单位移动
-    for _, unit in ipairs(attackUnits) do
-        SetNetworkOwnerToPlayer(unit, player)
-        DebugLog(string.format("[V4.0] 设置攻击方 %s 的NetworkOwner为玩家 %s", unit.Name, player.Name))
-    end
-    for _, unit in ipairs(defenseUnits) do
-        SetNetworkOwnerToPlayer(unit, player)
-        DebugLog(string.format("[V4.0] 设置防守方 %s 的NetworkOwner为玩家 %s", unit.Name, player.Name))
-    end
+	-- V4.0修复：设置攻守双方单位的网络所有权为客户端
+	-- 这样客户端才能流畅地控制单位移动
+	for _, unit in ipairs(attackUnits) do
+		SetNetworkOwnerToPlayer(unit, player)
+		DebugLog(string.format("[V4.0] 设置攻击方 %s 的NetworkOwner为玩家 %s", unit.Name, player.Name))
+	end
+	for _, unit in ipairs(defenseUnits) do
+		SetNetworkOwnerToPlayer(unit, player)
+		DebugLog(string.format("[V4.0] 设置防守方 %s 的NetworkOwner为玩家 %s", unit.Name, player.Name))
+	end
 
-    -- 获取战场Folder（用于客户端获取IdleFloorDefense/Enemy）
-    local battleField = battle.BattleField  -- 假设battle实例中存储了BattleField引用
+	-- 获取战场Folder（用于客户端获取IdleFloorDefense/Enemy）
+	local battleField = battle.BattleField  -- 假设battle实例中存储了BattleField引用
 
-    -- 构建攻击方单位数据
-    local attackUnitsData = {}
-    for _, unit in ipairs(attackUnits) do
-        local unitId = unit:GetAttribute("UnitId") or unit.Name
-        local level = unit:GetAttribute("Level") or 1
-        table.insert(attackUnitsData, {
-            UnitModel = unit,
-            UnitId = unitId,
-            Level = level,
-            Team = BattleConfig.Team.ATTACK,
-        })
-    end
+	-- 构建攻击方单位数据
+	local attackUnitsData = {}
+	for _, unit in ipairs(attackUnits) do
+		local unitId = unit:GetAttribute("UnitId") or unit.Name
+		local level = unit:GetAttribute("Level") or 1
+		table.insert(attackUnitsData, {
+			UnitModel = unit,
+			UnitId = unitId,
+			Level = level,
+			Team = BattleConfig.Team.ATTACK,
+		})
+	end
 
-    -- 构建防守方单位数据
-    local defenseUnitsData = {}
-    for _, unit in ipairs(defenseUnits) do
-        local unitId = unit:GetAttribute("UnitId") or unit.Name
-        local level = unit:GetAttribute("Level") or 1
-        table.insert(defenseUnitsData, {
-            UnitModel = unit,
-            UnitId = unitId,
-            Level = level,
-            Team = BattleConfig.Team.DEFENSE,
-        })
-    end
+	-- 构建防守方单位数据
+	local defenseUnitsData = {}
+	for _, unit in ipairs(defenseUnits) do
+		local unitId = unit:GetAttribute("UnitId") or unit.Name
+		local level = unit:GetAttribute("Level") or 1
+		table.insert(defenseUnitsData, {
+			UnitModel = unit,
+			UnitId = unitId,
+			Level = level,
+			Team = BattleConfig.Team.DEFENSE,
+		})
+	end
 
-    -- 向玩家客户端发送初始化事件
-    local player = Players:GetPlayerByUserId(battle.PlayerId)
-    if player then
-        initializeBattleEvent:FireClient(player, battleId, attackUnitsData, defenseUnitsData, battleField)
-        DebugLog(string.format("[V4.0] 已向玩家 %s 发送战斗初始化事件 (BattleId=%d, Attack=%d, Defense=%d)",
-            player.Name, battleId, #attackUnitsData, #defenseUnitsData))
-    else
-        WarnLog("[V4.0] 找不到玩家，无法发送初始化事件")
-    end
+	-- 向玩家客户端发送初始化事件
+	local player = Players:GetPlayerByUserId(battle.PlayerId)
+	if player then
+		initializeBattleEvent:FireClient(player, battleId, attackUnitsData, defenseUnitsData, battleField)
+		DebugLog(string.format("[V4.0] 已向玩家 %s 发送战斗初始化事件 (BattleId=%d, Attack=%d, Defense=%d)",
+			player.Name, battleId, #attackUnitsData, #defenseUnitsData))
+	else
+		WarnLog("[V4.0] 找不到玩家，无法发送初始化事件")
+	end
 
-    -- 监听客户端准备就绪事件
-    local clientBattleReadyEvent = clientAIEvents:FindFirstChild("ClientBattleReady")
-    if clientBattleReadyEvent then
-        -- 注意：这里应该使用一次性连接，避免重复监听
-        -- 实际实现中可能需要更复杂的连接管理
-        local connection
-        connection = clientBattleReadyEvent.OnServerEvent:Connect(function(clientPlayer, clientBattleId)
-            if clientPlayer == player and clientBattleId == battleId then
-                DebugLog(string.format("[V4.0] 客户端准备就绪: 玩家 %s, BattleId=%d", clientPlayer.Name, clientBattleId))
-                -- 断开连接，避免重复触发
-                if connection then
-                    connection:Disconnect()
-                end
-            end
-        end)
-    end
+	-- 监听客户端准备就绪事件
+	local clientBattleReadyEvent = clientAIEvents:FindFirstChild("ClientBattleReady")
+	if clientBattleReadyEvent then
+		-- 注意：这里应该使用一次性连接，避免重复监听
+		-- 实际实现中可能需要更复杂的连接管理
+		local connection
+		connection = clientBattleReadyEvent.OnServerEvent:Connect(function(clientPlayer, clientBattleId)
+			if clientPlayer == player and clientBattleId == battleId then
+				DebugLog(string.format("[V4.0] 客户端准备就绪: 玩家 %s, BattleId=%d", clientPlayer.Name, clientBattleId))
+				-- 断开连接，避免重复触发
+				if connection then
+					connection:Disconnect()
+				end
+			end
+		end)
+	end
 end
 
 --[[
@@ -1064,55 +1162,55 @@ end
 @param result string - 战斗结果
 ]]
 function BattleManager.TerminateClientAI(battleId, result)
-    local battle = battles[battleId]
-    if not battle then
-        return
-    end
+	local battle = battles[battleId]
+	if not battle then
+		return
+	end
 
-    local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
-    if not eventsFolder then
-        return
-    end
+	local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
+	if not eventsFolder then
+		return
+	end
 
-    local clientAIEvents = eventsFolder:FindFirstChild("ClientAIEvents")
-    if not clientAIEvents then
-        return
-    end
+	local clientAIEvents = eventsFolder:FindFirstChild("ClientAIEvents")
+	if not clientAIEvents then
+		return
+	end
 
-    local terminateBattleEvent = clientAIEvents:FindFirstChild("TerminateBattle")
-    if not terminateBattleEvent then
-        WarnLog("[V4.0] 未找到TerminateBattle事件")
-        return
-    end
+	local terminateBattleEvent = clientAIEvents:FindFirstChild("TerminateBattle")
+	if not terminateBattleEvent then
+		WarnLog("[V4.0] 未找到TerminateBattle事件")
+		return
+	end
 
-    -- 向玩家客户端发送终止事件
-    local player = Players:GetPlayerByUserId(battle.PlayerId)
-    if player then
-        terminateBattleEvent:FireClient(player, battleId, result)
-        DebugLog(string.format("[V4.0] 已向玩家 %s 发送战斗终止事件 (BattleId=%d, Result=%s)",
-            player.Name, battleId, result))
-    end
+	-- 向玩家客户端发送终止事件
+	local player = Players:GetPlayerByUserId(battle.PlayerId)
+	if player then
+		terminateBattleEvent:FireClient(player, battleId, result)
+		DebugLog(string.format("[V4.0] 已向玩家 %s 发送战斗终止事件 (BattleId=%d, Result=%s)",
+			player.Name, battleId, result))
+	end
 
-    -- V4.0关键：恢复攻守双方单位的网络所有权为服务端
-    -- 战斗结束后，单位控制权回归服务端
-    if battle.AttackUnits then
-        for _, unit in ipairs(battle.AttackUnits) do
-            if unit and unit.Parent then
-                SetNetworkOwnerToServer(unit)
-                DebugLog(string.format("[V4.0] 恢复攻击方 %s 的NetworkOwner为服务端", unit.Name))
-            end
-        end
-    end
+	-- V4.0关键：恢复攻守双方单位的网络所有权为服务端
+	-- 战斗结束后，单位控制权回归服务端
+	if battle.AttackUnits then
+		for _, unit in ipairs(battle.AttackUnits) do
+			if unit and unit.Parent then
+				SetNetworkOwnerToServer(unit)
+				DebugLog(string.format("[V4.0] 恢复攻击方 %s 的NetworkOwner为服务端", unit.Name))
+			end
+		end
+	end
 
-    -- V4.0修复：防守方也需要还原NetworkOwner（如果实例未销毁/复用）
-    if battle.DefenseUnits then
-        for _, unit in ipairs(battle.DefenseUnits) do
-            if unit and unit.Parent then
-                SetNetworkOwnerToServer(unit)
-                DebugLog(string.format("[V4.0] 恢复防守方 %s 的NetworkOwner为服务端", unit.Name))
-            end
-        end
-    end
+	-- V4.0修复：防守方也需要还原NetworkOwner（如果实例未销毁/复用）
+	if battle.DefenseUnits then
+		for _, unit in ipairs(battle.DefenseUnits) do
+			if unit and unit.Parent then
+				SetNetworkOwnerToServer(unit)
+				DebugLog(string.format("[V4.0] 恢复防守方 %s 的NetworkOwner为服务端", unit.Name))
+			end
+		end
+	end
 end
 
 return BattleManager

@@ -958,10 +958,13 @@ function CampaignManager.StartCampaign(player)
 	LockPlayerMovement(campaignData)
 
 	-- 通知客户端战役状态更新（传送完成后再触发相机锁定）
+	-- V3.6: 传递章节和总关卡数参数给客户端，用于进度条显示
 	if InitializeEvents() then
 		local stateUpdate = CampaignEvents:FindFirstChild("CampaignStateUpdate")
 		if stateUpdate then
-			stateUpdate:FireClient(player, CampaignState.PREPARING, 1)
+			local currentChapter = campaignData.CurrentChapter or 1
+			local totalStagesInChapter = StageConfig.GetStagesPerChapter(currentChapter)
+			stateUpdate:FireClient(player, CampaignState.PREPARING, 1, currentChapter, totalStagesInChapter)
 		end
 	end
 
@@ -1890,8 +1893,9 @@ function CampaignManager.OnCampaignEnd(campaignData, isVictory)
 
 	-- 设置超时自动完成机制(15秒后自动清理)
 	task.delay(15, function()
-		if campaignData.IsWaitingForConfirm then
-			warn(GameConfig.LOG_PREFIX, string.format("[CampaignManager] 玩家超过 15秒未确认结算，PlayerId=%d", campaignData.PlayerId))
+		if campaignData and campaignData.IsWaitingForConfirm then
+			-- 超时属于正常兜底流程（例如玩家不点确认/客户端卡死），默认不当成报错刷warn
+			DebugLog(string.format("玩家超过15秒未确认结算，自动完成清理，PlayerId=%d", campaignData.PlayerId))
 			CampaignManager.CompleteCampaignEnd(campaignData)
 		end
 	end)
@@ -2543,7 +2547,25 @@ function CampaignManager.RespawnUnits(campaignData)
 		local humanoid = currentInstance:FindFirstChild("Humanoid")
 		if humanoid then
 			humanoid.Health = unitData.MaxHP or humanoid.MaxHealth
-			DebugLog(string.format("    %s 血量恢复到 %d", safeUnitId, humanoid.Health))
+
+			-- ✅ 关键修复：重置死亡时被修改的Humanoid属性
+			humanoid.WalkSpeed = unitData.MoveSpeed or 16  -- 恢复行走速度
+			humanoid.JumpPower = 50  -- 恢复跳跃力
+			humanoid.AutoRotate = true  -- 恢复自动旋转
+			humanoid.PlatformStand = false  -- 取消布娃娃状态
+
+			-- 恢复碰撞（死亡时部分部件的碰撞被禁用）
+			for _, part in ipairs(currentInstance:GetDescendants()) do
+				if part:IsA("BasePart") then
+					-- 根据部件类型恢复碰撞
+					if part.Name == "HumanoidRootPart" or part.Name == "Head" or part.Name == "Torso" or part.Name == "UpperTorso" then
+						part.CanCollide = false  -- 这些部件通常不需要碰撞
+					end
+				end
+			end
+
+			DebugLog(string.format("    %s 血量和物理状态已恢复 (HP=%d, WalkSpeed=%.1f)",
+				safeUnitId, humanoid.Health, humanoid.WalkSpeed))
 		end
 
 		-- 移除血条
@@ -2561,6 +2583,13 @@ function CampaignManager.RespawnUnits(campaignData)
 		-- 重置死亡标记
 		unitData.IsDead = false
 		unitData.CurrentHP = unitData.MaxHP
+
+		-- ✅ 关键修复：清除单位的IsDead属性！
+		-- 这个属性在CombatSystem死亡时设置，客户端AI会检查这个属性
+		pcall(function()
+			currentInstance:SetAttribute("IsDead", false)
+			DebugLog(string.format("    ✅ %s IsDead属性已清除", safeUnitId))
+		end)
 
 		-- V2.8.2: 清除CampaignKeepInstance标记(在这里清除确保使用正确的实例)
 		pcall(function()
@@ -2594,6 +2623,44 @@ function CampaignManager.RespawnUnits(campaignData)
 
 		-- 播放展示动画
 		PlayShowAnimation(currentInstance, safeUnitId)
+
+		-- ✅ 关键修复：重置CombatSystem状态！
+		-- 复生后必须清除旧的战斗状态，否则单位会保持死亡状态导致无敌/不攻击
+		local combatModule = SystemsFolder:FindFirstChild("CombatSystem")
+		if combatModule then
+			local CombatSystem = require(combatModule :: ModuleScript)
+			-- 获取旧状态
+			local oldState = CombatSystem.GetUnitState(currentInstance)
+			if oldState then
+				DebugLog(string.format("    清除 %s 的旧战斗状态 (IsAlive=%s, HP=%.1f/%.1f)",
+					safeUnitId,
+					tostring(oldState.IsAlive),
+					oldState.CurrentHealth,
+					oldState.MaxHealth))
+
+				-- 重新初始化战斗状态（这会覆盖旧状态）
+				-- 注意：这里battleId传0，因为单位暂时不在战斗中
+				CombatSystem.InitializeUnit(
+					currentInstance,
+					unitData.UnitId,
+					unitData.Level or 1,
+					"Attack",  -- 复生的单位都是玩家的攻击方
+					0  -- battleId=0 表示暂时不在战斗中
+				)
+
+				DebugLog(string.format("    ✅ %s 战斗状态已重置", safeUnitId))
+			else
+				-- 没有旧状态，创建新状态
+				CombatSystem.InitializeUnit(
+					currentInstance,
+					unitData.UnitId,
+					unitData.Level or 1,
+					"Attack",
+					0
+				)
+				DebugLog(string.format("    ✅ %s 战斗状态已初始化", safeUnitId))
+			end
+		end
 
 		-- V1.5.12修复：透明度已在循环开头通过CancelDeathFade重置
 		-- 这里保留兜底清理，处理任何遗漏情况

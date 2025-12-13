@@ -24,6 +24,7 @@ local EnemyConfig = require(ReplicatedStorage.Config.EnemyConfig)
 local UnitConfig = require(ReplicatedStorage.Config.UnitConfig)
 local StageConfig = require(ReplicatedStorage.Config.StageConfig)  -- V3.7新增
 local GridPositionSystem = require(ServerScriptService.Systems.GridPositionSystem)
+local CollisionSystem = require(ServerScriptService.Systems.CollisionSystem) -- V2.5: 碰撞/状态优化（用于敌人生成稳定化）
 -- V2.2新增：等级显示辅助工具
 local LevelDisplayHelper = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("LevelDisplayHelper"))
 
@@ -670,30 +671,96 @@ function StageService.LoadEnemyData(stageFolder, stageNum, chapterId)
 				warn("[StageService] 更新等级显示失败，unitId=" .. tostring(enemyData.UnitId) .. ", level=" .. tostring(level))
 			end
 
-			-- 添加到场景（先添加，让物理系统生效）
+			-- 添加到场景
 			unitModel.Parent = idleFloorEnemy
 
-			-- V2.0修复：提前生成敌人但关闭碰撞，避免阻挡我方行军
-			-- 初始状态：先不锚定，让角色自然掉落到地面
-			-- 修复：先让角色掉落到地面，然后再锚定
-			for _, descendant in ipairs(unitModel:GetDescendants()) do
-				if descendant:IsA("BasePart") then
-					descendant.Anchored = false  -- 先不锚定，让角色掉落
-					descendant.CanCollide = true  -- 临时开启碰撞，让角色能站在地面上
-				end
-			end
+			-- V3.10修复：敌人生成时不再让模型自由掉落（会触发Humanoid摔倒/起身）
+			-- 直接对齐IdleFloorEnemy顶面，并进入展示态（锚定根部件+关闭碰撞，避免阻挡我方行军）
+			do
+				local floorTopY = idleFloorEnemy.Position.Y + idleFloorEnemy.Size.Y / 2
+				local padding = 0.05
 
-			-- 等待0.5秒让角色掉落到地面并稳定
-			task.delay(0.5, function()
-				if unitModel and unitModel.Parent then
-					-- 掉落稳定后，锚定并关闭碰撞
-					for _, descendant in ipairs(unitModel:GetDescendants()) do
-						if descendant:IsA("BasePart") then
-							descendant.Anchored = true  -- 锚定，防止被推动
-							descendant.CanCollide = false  -- 关闭碰撞，不阻挡行军
+				-- 排除武器/饰品，避免包围盒被武器尖端拉低导致角色浮空
+				local bodyParts = {}
+				local excludeNames = {"Handle", "Sword", "Spear", "Weapon", "Gun", "Bow", "Staff", "Axe", "Knife", "Shield"}
+
+				for _, part in ipairs(unitModel:GetDescendants()) do
+					if part:IsA("BasePart") then
+						-- 排除工具和饰品
+						local parent = part.Parent
+						local isAccessoryOrTool = false
+
+						while parent and parent ~= unitModel do
+							if parent:IsA("Tool") or parent:IsA("Accoutrement") or parent:IsA("Accessory") then
+								isAccessoryOrTool = true
+								break
+							end
+							parent = parent.Parent
+						end
+
+						-- 排除武器相关名称的部件
+						local isWeaponPart = false
+						for _, excludeName in ipairs(excludeNames) do
+							if string.find(string.lower(part.Name), string.lower(excludeName)) then
+								isWeaponPart = true
+								break
+							end
+						end
+
+						if not isAccessoryOrTool and not isWeaponPart then
+							table.insert(bodyParts, part)
 						end
 					end
 				end
+
+				-- 计算身体部件的最低点（脚底），并对齐到地板顶面
+				local lowestY = math.huge
+				if #bodyParts > 0 then
+					for _, part in ipairs(bodyParts) do
+						local partBottomY = part.Position.Y - part.Size.Y / 2
+						if partBottomY < lowestY then
+							lowestY = partBottomY
+						end
+					end
+				else
+					-- 回退：无有效部件时使用整体包围盒
+					local bboxCf, bboxSize = unitModel:GetBoundingBox()
+					lowestY = bboxCf.Position.Y - bboxSize.Y / 2
+				end
+
+				local deltaY = (floorTopY + padding) - lowestY
+				unitModel:PivotTo(unitModel:GetPivot() * CFrame.new(0, deltaY, 0))
+			end
+
+			-- 展示态：只锚定根部件，其他部件不锚定但关闭碰撞（允许动画播放且不阻挡行军）
+			local rootPart = unitModel:FindFirstChild("HumanoidRootPart") or unitModel.PrimaryPart
+			if rootPart then
+				rootPart.Anchored = true
+				rootPart.CanCollide = false
+			end
+
+			for _, descendant in ipairs(unitModel:GetDescendants()) do
+				if descendant:IsA("BasePart") then
+					if descendant ~= rootPart then
+						descendant.Anchored = false
+						descendant.CanCollide = false
+					end
+				end
+			end
+
+			-- V2.5/V3.x：对敌人也应用Humanoid优化，避免开战瞬间“摔倒→起身”
+			local humanoid = unitModel:FindFirstChildOfClass("Humanoid")
+			if humanoid then
+				humanoid.PlatformStand = false
+				humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+				pcall(function()
+					CollisionSystem.OptimizeHumanoid(humanoid)
+				end)
+			end
+
+			-- 设置碰撞组/无质量（与放置单位一致）
+			pcall(function()
+				CollisionSystem.SetUnitCollision(unitModel)
 			end)
 
 			-- 标记为未激活状态（需要在战斗开始时激活）
