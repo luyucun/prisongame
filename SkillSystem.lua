@@ -422,7 +422,7 @@ function SkillSystem.Initialize()
 		ProcessDOTEffects()
 	end)
 
-	print(GetLogPrefix(), "[SkillSystem] 技能系统初始化完成")
+	-- print(GetLogPrefix(), "[SkillSystem] 技能系统初始化完成")
 	return true
 end
 

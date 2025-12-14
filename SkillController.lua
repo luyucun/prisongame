@@ -36,7 +36,18 @@ local playerGui = player:WaitForChild("PlayerGui")
 local mouse = player:GetMouse()
 
 -- 引用配置
+local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
 local SkillConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("SkillConfig"))
+
+-- 收敛调试print，避免刷屏（仅在DEBUG_MODE开启时输出）
+local DEBUG_MODE = GameConfig.DEBUG_MODE
+local _print = print
+local function DebugPrint(...)
+	if DEBUG_MODE then
+		_print(...)
+	end
+end
+local print = DebugPrint
 
 -- 远程事件
 local SkillEvents = nil

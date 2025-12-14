@@ -406,8 +406,6 @@ local function Initialize()
 		for _, err in ipairs(errors) do
 			warn("  - " .. err)
 		end
-	else
-		print("[SkillShopConfig] 配置验证通过，共" .. #SkillShopConfig.GetAllShopIds() .. "个商店")
 	end
 end
 

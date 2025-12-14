@@ -18,7 +18,6 @@ local function CreateBattleTestUI()
     local oldGui = StarterGui:FindFirstChild("BattleTestGui")
     if oldGui then
         oldGui:Destroy()
-        print("已删除旧的BattleTestGui")
     end
 
     -- 创建主ScreenGui
@@ -350,11 +349,6 @@ local function CreateBattleTestUI()
     hintLabel.BackgroundTransparency = 1
     hintLabel.TextXAlignment = Enum.TextXAlignment.Center
     hintLabel.Parent = quickSection
-
-    print("✅ 战斗测试UI创建成功! (使用Scale布局)")
-    print("📍 位置: StarterGui > BattleTestGui")
-    print("🎮 使用方法: 游戏中按 V 键打开/关闭")
-    print("📱 适配: 支持不同分辨率自动适配")
 
     return gui
 end

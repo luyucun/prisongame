@@ -510,9 +510,9 @@ function BattleManager.StartBattle(battleId)
 
 	-- ==================== 第一阶段：注册所有单位（不启动AI）====================
 	-- V4.0调试：输出攻击方单位列表
-	print(string.format("[V4.0调试] 开始初始化攻击方单位，总数: %d", #battle.AttackUnits))
+	DebugLog(string.format("[V4.0调试] 开始初始化攻击方单位，总数: %d", #battle.AttackUnits))
 	for i, unit in ipairs(battle.AttackUnits) do
-		print(string.format("[V4.0调试] 攻击方单位[%d]: %s", i, unit.Name))
+		DebugLog(string.format("[V4.0调试] 攻击方单位[%d]: %s", i, unit.Name))
 	end
 
 	-- 处理攻击方
@@ -1061,6 +1061,45 @@ end
 @param defenseUnits table - 防守方单位列表
 @param battle table - 战斗实例
 ]]
+--[[
+V5.8 修复：在 NetworkOwner 交接前清理残留 MoveTo
+现象：单位开战瞬间会“回头一下”再扭回来。
+原因：行军/旧路径回调残留的 WalkToPoint 可能在身后，而客户端战斗 AI 很快下发新的 MoveTo 覆盖，导致短暂反向转向/补位。
+]]
+local function StopUnitResidualMovement(model)
+	if not model or not model.Parent then
+		return
+	end
+
+	-- 额外保险：清掉行军身份，避免任何延迟回调继续生效
+	pcall(function()
+		model:SetAttribute("_ActiveMoveId", nil)
+	end)
+
+	local humanoid = model:FindFirstChildOfClass("Humanoid") or model:FindFirstChild("Humanoid")
+	local rootPart = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
+
+	if humanoid then
+		pcall(function()
+			humanoid:Move(Vector3.zero)
+		end)
+		-- 关键：用“走到当前位置”覆盖掉可能残留的 WalkToPoint
+		if rootPart then
+			pcall(function()
+				humanoid:MoveTo(rootPart.Position)
+			end)
+		end
+	end
+
+	-- 清掉残留速度，避免交接瞬间滑步/抖动
+	if rootPart then
+		pcall(function()
+			rootPart.AssemblyLinearVelocity = Vector3.zero
+			rootPart.AssemblyAngularVelocity = Vector3.zero
+		end)
+	end
+end
+
 function BattleManager.InitializeClientAI(battleId, attackUnits, defenseUnits, battle)
 	local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
 	if not eventsFolder then
@@ -1089,6 +1128,13 @@ function BattleManager.InitializeClientAI(battleId, attackUnits, defenseUnits, b
 
 	-- V4.0修复：设置攻守双方单位的网络所有权为客户端
 	-- 这样客户端才能流畅地控制单位移动
+	for _, unit in ipairs(attackUnits) do
+		StopUnitResidualMovement(unit)
+	end
+	for _, unit in ipairs(defenseUnits) do
+		StopUnitResidualMovement(unit)
+	end
+
 	for _, unit in ipairs(attackUnits) do
 		SetNetworkOwnerToPlayer(unit, player)
 		DebugLog(string.format("[V4.0] 设置攻击方 %s 的NetworkOwner为玩家 %s", unit.Name, player.Name))

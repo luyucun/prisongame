@@ -135,8 +135,6 @@ function ButtonEffectHelper.AddClickEffect(button, options)
 	if onClick then
 		button.MouseButton1Click:Connect(onClick)
 	end
-
-	print(string.format("[ButtonEffectHelper] 为按钮 %s 添加了点击特效", button.Name))
 end
 
 --[[
@@ -195,8 +193,6 @@ function ButtonEffectHelper.AddHoverEffect(button, options)
 		table.insert(activeTweens[button], restoreTween)
 		restoreTween:Play()
 	end)
-
-	print(string.format("[ButtonEffectHelper] 为按钮 %s 添加了悬停特效", button.Name))
 end
 
 --[[
@@ -229,7 +225,6 @@ end
 ]]
 function ButtonEffectHelper.RemoveEffects(button)
 	CleanupTweens(button)
-	print(string.format("[ButtonEffectHelper] 移除了按钮 %s 的特效", button.Name))
 end
 
 --[[
@@ -241,7 +236,6 @@ function ButtonEffectHelper.AddEffectsToButtons(buttons, options)
 	for i, button in ipairs(buttons) do
 		ButtonEffectHelper.AddFullEffect(button, options)
 	end
-	print(string.format("[ButtonEffectHelper] 为 %d 个按钮添加了特效", #buttons))
 end
 
 --[[

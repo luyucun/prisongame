@@ -105,6 +105,15 @@ function CampaignUnitHelper.PrepareForBattle(unitModel)
 			PathService.ClearPath(unitModel)
 		end)
 
+		-- 2.1 关键：清掉MoveTo残留的WalkToPoint，避免进入战斗时先“回头补位”再被战斗AI拉回
+		pcall(function()
+			humanoid:Move(Vector3.zero)
+			local rootPart = unitModel:FindFirstChild("HumanoidRootPart") or unitModel.PrimaryPart
+			if rootPart then
+				humanoid:MoveTo(rootPart.Position)
+			end
+		end)
+
 		-- 3. 确保物理状态正确
 		humanoid.PlatformStand = false
 		humanoid:ChangeState(Enum.HumanoidStateType.Running)

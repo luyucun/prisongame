@@ -33,7 +33,7 @@ local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
 -- 调试和日志
-local DEBUG_MODE = true
+local DEBUG_MODE = false
 local LOG_PREFIX = "[SkillShopDisplay]"
 
 -- 状态变量

@@ -58,7 +58,7 @@ StageConfig.TotalChapters = 2
 
 -- ==================== Style01关卡配置 (保留兼容) ====================
 StageConfig.Style01 = {
-	TotalStages = 10,  -- 总关卡数（兼容旧配置）
+	TotalStages = 20,  -- 总关卡数（兼容旧配置）
 
 	-- 关卡奖励（预留，后续完善）
 	Rewards = {

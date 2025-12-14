@@ -191,8 +191,6 @@ function GridPositionSystem.LoadUnitGridPosition(unitInstance, idleFloor)
             unitInstance:SetAttribute("GridPosX", gridPos.X)
             unitInstance:SetAttribute("GridPosY", gridPos.Y)
 
-            print("[GridPositionSystem] 历史数据已修复，GridPos:", gridPos.X, gridPos.Y)
-
             return gridPos
         end
     end

@@ -191,8 +191,6 @@ end
 初始化
 ]]
 local function Initialize()
-	print("[BackpackTrigger] 正在初始化...")
-
 	-- 等待角色完全加载
 	task.wait(1)
 
@@ -212,8 +210,6 @@ local function Initialize()
 		return
 	end
 
-	print("[BackpackTrigger] IdleFloor已找到，开始监听...")
-
 	-- 启动定时检测
 	RunService.Heartbeat:Connect(function()
 		local currentTime = tick()
@@ -222,8 +218,6 @@ local function Initialize()
 			UpdateBackpackVisibility()
 		end
 	end)
-
-	print("[BackpackTrigger] 初始化完成")
 end
 
 -- 监听角色重生
@@ -255,5 +249,3 @@ end
 
 -- 启动初始化
 task.spawn(Initialize)
-
-print("[BackpackTrigger] 模块已加载")

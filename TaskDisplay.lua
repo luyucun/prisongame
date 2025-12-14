@@ -12,6 +12,19 @@ local TaskDisplay = {}
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+-- 引用配置
+local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
+
+-- 收敛调试print，避免刷屏（仅在DEBUG_MODE开启时输出）
+local DEBUG_MODE = GameConfig.DEBUG_MODE
+local _print = print
+local function DebugPrint(...)
+    if DEBUG_MODE then
+        _print(...)
+    end
+end
+local print = DebugPrint
+
 -- 玩家引用
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")

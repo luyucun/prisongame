@@ -3,7 +3,7 @@
 脚本名称: CampaignManager
 脚本类型: ModuleScript (服务端核心)
 脚本位置: ServerScriptService/Systems/CampaignManager.lua
-版本: V2.8.7 (配合PathService V5.6彻底修复行军/战斗冲突)
+版本: V2.8.8 (配合UnitAI V5.8修复开战回头Bug)
 =====================================================
 
 功能描述:
@@ -16,6 +16,9 @@
 - V2.8.7新增:
   - MoveUnitsToPositions传入isStillMarching状态检查函数
   - OnDefeat/CompleteCampaignEnd调用CancelAllMoves兜底
+- V2.8.8新增:
+  - BeginBattlePrep中增加等待时间到0.1秒
+  - 确保行军MoveTo完全清理后再启动战斗AI
 
 状态机:
 IDLE → PREPARING → MARCHING → FIGHTING → STAGE_CLEAR/DEFEAT → CLEANUP → IDLE
@@ -921,6 +924,7 @@ function CampaignManager.StartCampaign(player)
 	end
 
 	-- 打开家园大门
+	local doorOpenStartTime = tick()
 	pcall(function()
 		DoorControlService.OpenDoor(homeId)
 	end)
@@ -974,7 +978,26 @@ function CampaignManager.StartCampaign(player)
 	end)
 
 	-- V2.8修复：立即启动行军流程，跟随延迟由客户端CameraController根据状态控制
+	-- V4.0补充：等待大门打开动画结束后再开始首段行军寻路
+	-- 否则PathfindingService可能在门仍处于关闭/半开状态时计算路径，导致部队开局绕路呈“V”字
 	task.spawn(function()
+		local doorDuration = 1.0
+		pcall(function()
+			doorDuration = (GameConfig.Door and GameConfig.Door.TweenDuration) or doorDuration
+		end)
+		local elapsed = tick() - (doorOpenStartTime or tick())
+		local remaining = math.max(0, doorDuration - elapsed)
+		task.wait(remaining + 0.2) -- 额外留0.2秒给NavMesh更新
+
+		-- 防止玩家在等待期间退出/撤退导致误触发
+		local currentCampaign = CampaignManager.ActiveCampaigns[playerId]
+		if currentCampaign ~= campaignData then
+			return
+		end
+		if campaignData.State ~= CampaignState.PREPARING then
+			return
+		end
+
 		CampaignManager.MarchToStage(campaignData, 1)
 	end)
 
@@ -1338,6 +1361,12 @@ function CampaignManager.BeginBattlePrep(campaignData, stageNum, arrivedList, ti
 			local humanoid = unitInstance:FindFirstChild("Humanoid")
 			if humanoid then
 				humanoid:Move(Vector3.zero)
+
+				-- 关键：清掉MoveTo残留的WalkToPoint，避免进入战斗时先“回头补位”再被战斗AI拉回
+				local rootPart = unitInstance:FindFirstChild("HumanoidRootPart") or unitInstance.PrimaryPart
+				if rootPart then
+					humanoid:MoveTo(rootPart.Position)
+				end
 			end
 
 			-- 双保险：显式清除_ActiveMoveId属性
@@ -1347,8 +1376,10 @@ function CampaignManager.BeginBattlePrep(campaignData, stageNum, arrivedList, ti
 		end
 	end
 
-	-- 等待一帧确保PathService的Heartbeat完全停止处理这些单位
-	task.wait()
+	-- ★ V2.8.8修复：增加等待时间到0.1秒，确保PathService的Heartbeat完全停止
+	-- 以及Humanoid的MoveTo/Move指令完全生效
+	-- 这可以防止残留的行军MoveTo与后续战斗AI冲突导致"回头"现象
+	task.wait(0.1)
 
 	-- 通知客户端状态更新
 	if InitializeEvents() then

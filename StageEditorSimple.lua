@@ -36,10 +36,6 @@ if not stage:IsA("Folder") or not string.match(stage.Name, "^Stage%d+") then
 	return
 end
 
-print("[StageEditor] ==============================================")
-print("[StageEditor] 正在分析Stage:", stage.Name)
-print("[StageEditor] ==============================================")
-
 -- 查找IdleFloorEnemy
 local idleFloorEnemy = stage:FindFirstChild("IdleFloorEnemy")
 if not idleFloorEnemy then
@@ -110,9 +106,6 @@ for _, child in ipairs(idleFloorEnemy:GetChildren()) do
 			GridPos = gridPos,
 			ModelName = child.Name
 		})
-
-		print(string.format("[StageEditor] 发现敌人: %s (Lv%d) at Grid(%d,%d)",
-			unitId, level, gridPos.X, gridPos.Y))
 	end
 end
 
@@ -122,24 +115,10 @@ if #enemies == 0 then
 end
 
 -- 生成Lua配置代码
-print("[StageEditor] ")
-print("[StageEditor] ==============================================")
-print("[StageEditor] 复制下面的代码到 EnemyConfig.lua")
-print("[StageEditor] ==============================================")
-print("")
-
 local stageName = stage.Name
 local output = string.format('-- %s配置\nEnemyConfig["%s"] = {', stageName, stageName)
-print(output)
 
 for i, enemy in ipairs(enemies) do
 	local line = string.format('\t{UnitId = "%s", Level = %d, GridPos = {X = %d, Y = %d}},',
 		enemy.UnitId, enemy.Level, enemy.GridPos.X, enemy.GridPos.Y)
-	print(line)
 end
-
-print("}")
-print("")
-print("[StageEditor] ==============================================")
-print("[StageEditor] 导出完成！共", #enemies, "个敌人")
-print("[StageEditor] ==============================================")

@@ -358,7 +358,6 @@ function SkillBackpackDisplay.Initialize()
 	-- 初始隐藏
 	HideBackpack()
 
-	print("[SkillBackpackDisplay] 技能背包显示初始化完成")
 	return true
 end
 

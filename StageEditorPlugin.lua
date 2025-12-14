@@ -93,7 +93,6 @@ local function GetAllUnitIds()
 	if success and #result > 0 then
 		-- 按字母排序
 		table.sort(result)
-		print(string.format("[StageEditor] ✅ 加载了%d个兵种ID", #result))
 		return result
 	else
 		-- 默认兵种列表
@@ -142,7 +141,6 @@ local function GetEditorFloor()
 
 	if success and result then
 		editorFloor = result
-		print("[StageEditor] ✅ 找到编辑地板:", EDITOR_FLOOR_PATH)
 		return editorFloor
 	else
 		warn("[StageEditor] ❌ 无法找到编辑地板:", result)
@@ -467,8 +465,6 @@ local function GenerateUnit(unitId, level, gridX, gridY)
 	-- 添加到场景
 	unit.Parent = floor
 
-	print(string.format("[StageEditor] ✅ 生成兵种: %s Lv%d at (%d,%d)", unitId, level, gridX, gridY))
-
 	return unit
 end
 
@@ -488,8 +484,6 @@ local function ClearAllUnits()
 			count = count + 1
 		end
 	end
-
-	print(string.format("[StageEditor] 已清空地板，移除%d个兵种", count))
 	ChangeHistoryService:SetWaypoint("Clear Stage")
 end
 
@@ -525,7 +519,6 @@ local function SaveStage(stageName)
 	end)
 
 	if success then
-		print(string.format("[StageEditor] ✅ 保存关卡成功: %s (共%d个兵种)", stageName, #enemies))
 		return true
 	else
 		warn("[StageEditor] ❌ 保存失败:", err)
@@ -563,7 +556,6 @@ local function LoadStage(stageName)
 		end
 	end
 
-	print(string.format("[StageEditor] ✅ 加载关卡: %s (成功生成%d/%d)", stageName, successCount, #config))
 	ChangeHistoryService:SetWaypoint("Load Stage: " .. stageName)
 
 	return true
@@ -588,7 +580,6 @@ local function DeleteStage(stageName)
 	end)
 
 	if success then
-		print("[StageEditor] ✅ 删除关卡:", stageName)
 		return true
 	else
 		warn("[StageEditor] ❌ 删除失败:", err)
@@ -650,7 +641,6 @@ local function ExportToLua(stageName)
 		-- 尝试使用 writefile（如果插件环境支持）
 		if writefile then
 			writefile(fileName, code)
-			print(string.format("[StageEditor] ✅ 已保存到文件: %s", fileName))
 		else
 			-- 如果不支持 writefile，尝试使用 plugin:SaveSelectedToRoblox()
 			warn("[StageEditor] ⚠️ 当前环境不支持 writefile，仅复制到剪贴板")
@@ -660,10 +650,6 @@ local function ExportToLua(stageName)
 	if not success and err then
 		warn("[StageEditor] 保存文件失败:", err)
 	end
-
-	print("=== 导出的Lua代码 ===")
-	print(code)
-	print("=== 已复制到剪贴板 ===")
 
 	return code
 end
@@ -680,8 +666,6 @@ local function DestroyGridVisualization()
 
 	gridParts = {}
 	gridVisualizationEnabled = false
-
-	print("[StageEditor] 网格可视化已关闭")
 end
 
 --[[
@@ -773,7 +757,6 @@ local function CreateGridVisualization()
 	table.insert(gridParts, gridFolder)
 
 	gridVisualizationEnabled = true
-	print(string.format("[StageEditor] ✅ 网格可视化已启用 (共%d条线)", #gridParts - 2))
 end
 
 --[[
@@ -893,7 +876,6 @@ CreateButton(mainFrame, "新建关卡", yOffset, function()
 	end
 
 	currentStageName = newName
-	print("[StageEditor] 切换到关卡:", newName)
 end)
 yOffset = yOffset + 40
 
@@ -1079,7 +1061,6 @@ mainButton.Click:Connect(function()
 		-- 检查编辑地板
 		local floor = GetEditorFloor()
 		if floor then
-			print("[StageEditor] ✅ 编辑器已打开")
 		else
 			warn("[StageEditor] ❌ 无法找到编辑地板，请检查路径")
 		end
@@ -1116,7 +1097,6 @@ UserInputService.InputBegan:Connect(function(input, processed)
 		for _, obj in ipairs(selected) do
 			-- 验证是否在编辑地板内
 			if obj.Parent == floor and obj:IsA("Model") then
-				print("[StageEditor] 删除兵种:", obj.Name)
 				obj:Destroy()
 				deletedCount = deletedCount + 1
 			end
@@ -1124,7 +1104,6 @@ UserInputService.InputBegan:Connect(function(input, processed)
 
 		if deletedCount > 0 then
 			ChangeHistoryService:SetWaypoint("Delete Units")
-			print(string.format("[StageEditor] ✅ 已删除%d个兵种", deletedCount))
 		end
 	end
 end)
@@ -1143,16 +1122,10 @@ local function LoadPersistedData()
 
 	if success and result then
 		stageData = result
-		print("[StageEditor] ✅ 加载了", #GetAllStages(), "个关卡配置")
 	else
-		print("[StageEditor] ⚠️ 没有历史数据，从空开始")
 		stageData = {}
 	end
 end
 
 -- 初始化
 LoadPersistedData()
-print("====================================")
-print("Stage Editor V2.1 已加载")
-print("点击工具栏的'Stage Editor'按钮打开编辑器")
-print("====================================")

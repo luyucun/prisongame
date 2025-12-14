@@ -89,13 +89,18 @@ local currentSelections = {
     Position = 1
 }
 
+-- 调试开关（默认关闭，避免刷屏）
+local DEBUG_MODE = false
+
 -- ==================== 私有函数 ====================
 
 --[[
 输出调试日志
 ]]
 local function DebugLog(...)
-    print("[BattleTestUI]", ...)
+    if DEBUG_MODE then
+        print("[BattleTestUI]", ...)
+    end
 end
 
 --[[

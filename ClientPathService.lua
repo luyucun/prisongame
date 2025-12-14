@@ -121,6 +121,35 @@ local function DeepCopyWaypoints(waypoints)
 	return copy
 end
 
+--[[
+V4.1修复：跳过“初始回头路点”
+PathfindingService在NavMesh刚更新/起点靠近不可走区域边缘时，首个路点可能会落在目标反方向，
+表现为单位先掉头走一段再折返。
+该逻辑只在路径起始阶段(索引<=3)尝试跳过，避免影响正常绕障路径。
+]]
+local function ShouldSkipInitialBacktrackWaypoint(startPos, waypointPos, targetPos)
+	-- 只做XZ平面判断，忽略高度差
+	local toTarget = Vector3.new(targetPos.X - startPos.X, 0, targetPos.Z - startPos.Z)
+	local toWaypoint = Vector3.new(waypointPos.X - startPos.X, 0, waypointPos.Z - startPos.Z)
+
+	if toTarget.Magnitude < 0.05 or toWaypoint.Magnitude < 0.05 then
+		return false
+	end
+
+	-- dot<0 表示路点在目标的反方向(>90°)
+	local dot = toTarget.Unit:Dot(toWaypoint.Unit)
+	if dot >= -0.2 then
+		return false
+	end
+
+	-- 路点比当前位置“更远离目标”且步长不大时，认为是NavMesh投影导致的回头路点
+	local startDist = GetHorizontalDistance(startPos, targetPos)
+	local waypointDist = GetHorizontalDistance(waypointPos, targetPos)
+	local stepDist = GetHorizontalDistance(startPos, waypointPos)
+
+	return stepDist <= 18 and (waypointDist - startDist) >= 2
+end
+
 -- ==================== 动态Agent尺寸计算 ====================
 
 --[[
@@ -326,6 +355,22 @@ function ClientPathService.BuildPath(unitModel, targetPos)
 			pathState.Waypoints = DeepCopyWaypoints(waypoints)
 			pathState.Index = 2  -- 跳过起点
 			pathState.Status = PathStatus.SUCCESS
+
+			-- V4.1修复：跳过初始“回头路点”（最多跳过2个，且只在起始阶段）
+			local skipped = 0
+			while pathState.Waypoints
+				and pathState.Index <= #pathState.Waypoints
+				and pathState.Index <= 3
+				and skipped < 2 do
+				local wp = pathState.Waypoints[pathState.Index]
+				if wp and ShouldSkipInitialBacktrackWaypoint(startPos, wp, targetPos) then
+					pathState.Index += 1
+					skipped += 1
+				else
+					break
+				end
+			end
+
 			DebugLog(string.format("%s 寻路成功: %d waypoints", unitModel.Name, #waypoints))
 			return true
 		end

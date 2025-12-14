@@ -39,14 +39,14 @@ EnemyConfig.Chapters[1] = {
 			{UnitId = "10001", Level = 1, GridPos = {X = 8, Y = 7}},
 			{UnitId = "10001", Level = 1, GridPos = {X = 6, Y = 7}},
 		},
-		
+
 		-- 第3关: 更强的敌人
 		[4] = {
 			{UnitId = "10002", Level = 1, GridPos = {X = 7, Y = 7}},
 			{UnitId = "10001", Level = 1, GridPos = {X = 5, Y = 7}},
 			{UnitId = "10001", Level = 1, GridPos = {X = 9, Y = 7}},
 		},
-		
+
 		-- 第3关: 更强的敌人
 		[5] = {
 			{UnitId = "10003", Level = 1, GridPos = {X = 9, Y = 7}},
@@ -54,7 +54,7 @@ EnemyConfig.Chapters[1] = {
 			{UnitId = "10004", Level = 1, GridPos = {X = 7, Y = 10}},
 			{UnitId = "10001", Level = 1, GridPos = {X = 7, Y = 3}},
 		},
-		
+
 		-- 第3关: 更强的敌人
 		[6] = {
 			{UnitId = "10001", Level = 1, GridPos = {X = 5, Y = 3}},
@@ -64,7 +64,7 @@ EnemyConfig.Chapters[1] = {
 			{UnitId = "10005", Level = 1, GridPos = {X = 7, Y = 7}},
 			{UnitId = "10005", Level = 1, GridPos = {X = 5, Y = 7}},
 		},
-		
+
 		-- 第3关: 更强的敌人
 		[7] = {
 			{UnitId = "10001", Level = 1, GridPos = {X = 5, Y = 3}},
@@ -76,7 +76,7 @@ EnemyConfig.Chapters[1] = {
 			{UnitId = "10008", Level = 1, GridPos = {X = 5, Y = 1}},
 			{UnitId = "10008", Level = 1, GridPos = {X = 9, Y = 1}},
 		},
-		
+
 		-- 第3关: 更强的敌人
 		[8] = {
 			{UnitId = "10001", Level = 1, GridPos = {X = 5, Y = 3}},
@@ -88,7 +88,7 @@ EnemyConfig.Chapters[1] = {
 			{UnitId = "10008", Level = 1, GridPos = {X = 9, Y = 1}},
 			{UnitId = "10009", Level = 1, GridPos = {X = 7, Y = 5}},
 		},
-		
+
 		-- 第3关: 更强的敌人
 		[9] = {
 			{UnitId = "10001", Level = 1, GridPos = {X = 5, Y = 3}},
@@ -103,7 +103,7 @@ EnemyConfig.Chapters[1] = {
 			{UnitId = "10010", Level = 1, GridPos = {X = 10, Y = 5}},
 			{UnitId = "10010", Level = 1, GridPos = {X = 4, Y = 5}},
 		},
-		
+
 		-- 第3关: 更强的敌人
 		[10] = {
 			{UnitId = "10010", Level = 1, GridPos = {X = 5, Y = 2}},
@@ -129,36 +129,268 @@ EnemyConfig.Chapters[2] = {
 	Stages = {
 		-- 第1关: 第2章开始
 		[1] = {
-			{UnitId = "10005", Level = 2, GridPos = {X = 6, Y = 6}},
-			{UnitId = "10005", Level = 2, GridPos = {X = 6, Y = 8}},
-			{UnitId = "10005", Level = 2, GridPos = {X = 8, Y = 6}},
-			{UnitId = "10005", Level = 2, GridPos = {X = 8, Y = 8}},
-			{UnitId = "10001", Level = 3, GridPos = {X = 7, Y = 7}},
+			{UnitId = "10001", Level = 1, GridPos = {X = 7, Y = 1}},
+			{UnitId = "10001", Level = 1, GridPos = {X = 5, Y = 1}},
+			{UnitId = "10001", Level = 1, GridPos = {X = 9, Y = 1}},
+			{UnitId = "10002", Level = 1, GridPos = {X = 9, Y = 3}},
+			{UnitId = "10002", Level = 1, GridPos = {X = 5, Y = 3}},
+			{UnitId = "10002", Level = 1, GridPos = {X = 7, Y = 3}},
+			{UnitId = "10002", Level = 1, GridPos = {X = 11, Y = 3}},
+			{UnitId = "10002", Level = 1, GridPos = {X = 3, Y = 3}},
+			{UnitId = "10003", Level = 1, GridPos = {X = 7, Y = 5}},
+			{UnitId = "10003", Level = 1, GridPos = {X = 9, Y = 5}},
 		},
 
 		-- 第2关: 更多敌人
 		[2] = {
-			{UnitId = "10005", Level = 3, GridPos = {X = 5, Y = 5}},
-			{UnitId = "10005", Level = 3, GridPos = {X = 5, Y = 9}},
-			{UnitId = "10005", Level = 3, GridPos = {X = 9, Y = 5}},
-			{UnitId = "10005", Level = 3, GridPos = {X = 9, Y = 9}},
-			{UnitId = "10005", Level = 3, GridPos = {X = 7, Y = 7}},
-			{UnitId = "10001", Level = 3, GridPos = {X = 6, Y = 7}},
-			{UnitId = "10001", Level = 3, GridPos = {X = 8, Y = 7}},
+			{UnitId = "10001", Level = 1, GridPos = {X = 7, Y = 1}},
+			{UnitId = "10001", Level = 1, GridPos = {X = 5, Y = 1}},
+			{UnitId = "10001", Level = 1, GridPos = {X = 9, Y = 1}},
+			{UnitId = "10002", Level = 1, GridPos = {X = 9, Y = 3}},
+			{UnitId = "10002", Level = 1, GridPos = {X = 5, Y = 3}},
+			{UnitId = "10002", Level = 1, GridPos = {X = 7, Y = 3}},
+			{UnitId = "10002", Level = 1, GridPos = {X = 11, Y = 3}},
+			{UnitId = "10002", Level = 1, GridPos = {X = 3, Y = 3}},
+			{UnitId = "10003", Level = 1, GridPos = {X = 7, Y = 5}},
+			{UnitId = "10003", Level = 1, GridPos = {X = 9, Y = 5}},
 		},
 
 		-- 第3关: 第2章最终关
 		[3] = {
-			{UnitId = "10005", Level = 3, GridPos = {X = 4, Y = 7}},
-			{UnitId = "10005", Level = 3, GridPos = {X = 5, Y = 6}},
-			{UnitId = "10005", Level = 3, GridPos = {X = 5, Y = 8}},
-			{UnitId = "10005", Level = 3, GridPos = {X = 7, Y = 5}},
-			{UnitId = "10005", Level = 3, GridPos = {X = 7, Y = 7}},
-			{UnitId = "10005", Level = 3, GridPos = {X = 7, Y = 9}},
-			{UnitId = "10005", Level = 3, GridPos = {X = 9, Y = 6}},
-			{UnitId = "10005", Level = 3, GridPos = {X = 9, Y = 8}},
-			{UnitId = "10005", Level = 3, GridPos = {X = 10, Y = 7}},
+			{UnitId = "10001", Level = 2, GridPos = {X = 7, Y = 3}},
+			{UnitId = "10001", Level = 2, GridPos = {X = 9, Y = 3}},
+			{UnitId = "10003", Level = 3, GridPos = {X = 8, Y = 1}},
+			{UnitId = "10004", Level = 2, GridPos = {X = 8, Y = 5}},
+			{UnitId = "10004", Level = 2, GridPos = {X = 7, Y = 5}},
+			{UnitId = "10004", Level = 2, GridPos = {X = 9, Y = 5}},
 		},
+		-- 第3关: 第2章最终关
+		[4] = {
+			{UnitId = "10001", Level = 2, GridPos = {X = 7, Y = 3}},
+			{UnitId = "10001", Level = 2, GridPos = {X = 9, Y = 3}},
+			{UnitId = "10003", Level = 3, GridPos = {X = 8, Y = 1}},
+			{UnitId = "10004", Level = 2, GridPos = {X = 8, Y = 5}},
+			{UnitId = "10004", Level = 2, GridPos = {X = 7, Y = 5}},
+			{UnitId = "10004", Level = 2, GridPos = {X = 9, Y = 5}},
+		},
+		
+		-- 第3关: 第2章最终关
+		[5] = {
+			{UnitId = "10003", Level = 2, GridPos = {X = 7, Y = 1}},
+			{UnitId = "10003", Level = 2, GridPos = {X = 9, Y = 1}},
+			{UnitId = "10003", Level = 2, GridPos = {X = 5, Y = 1}},
+			{UnitId = "10004", Level = 1, GridPos = {X = 5, Y = 7}},
+			{UnitId = "10004", Level = 1, GridPos = {X = 7, Y = 7}},
+			{UnitId = "10004", Level = 1, GridPos = {X = 9, Y = 7}},
+			{UnitId = "10006", Level = 1, GridPos = {X = 9, Y = 3}},
+			{UnitId = "10006", Level = 1, GridPos = {X = 8, Y = 3}},
+			{UnitId = "10006", Level = 1, GridPos = {X = 7, Y = 3}},
+			{UnitId = "10006", Level = 1, GridPos = {X = 6, Y = 3}},
+			{UnitId = "10006", Level = 1, GridPos = {X = 5, Y = 3}},
+			{UnitId = "10012", Level = 1, GridPos = {X = 7, Y = 4}},
+		},
+		
+		-- 第3关: 第2章最终关
+		[6] = {
+			{UnitId = "10003", Level = 2, GridPos = {X = 7, Y = 1}},
+			{UnitId = "10003", Level = 2, GridPos = {X = 9, Y = 1}},
+			{UnitId = "10003", Level = 2, GridPos = {X = 5, Y = 1}},
+			{UnitId = "10004", Level = 1, GridPos = {X = 5, Y = 7}},
+			{UnitId = "10004", Level = 1, GridPos = {X = 7, Y = 7}},
+			{UnitId = "10004", Level = 1, GridPos = {X = 9, Y = 7}},
+			{UnitId = "10006", Level = 1, GridPos = {X = 9, Y = 3}},
+			{UnitId = "10006", Level = 1, GridPos = {X = 8, Y = 3}},
+			{UnitId = "10006", Level = 1, GridPos = {X = 7, Y = 3}},
+			{UnitId = "10006", Level = 1, GridPos = {X = 6, Y = 3}},
+			{UnitId = "10006", Level = 1, GridPos = {X = 5, Y = 3}},
+			{UnitId = "10012", Level = 1, GridPos = {X = 7, Y = 4}},
+		},
+		
+		-- 第3关: 第2章最终关
+		[7] = {
+			{UnitId = "10008", Level = 2, GridPos = {X = 7, Y = 1}},
+			{UnitId = "10008", Level = 2, GridPos = {X = 5, Y = 1}},
+			{UnitId = "10008", Level = 2, GridPos = {X = 9, Y = 1}},
+			{UnitId = "10008", Level = 2, GridPos = {X = 11, Y = 1}},
+			{UnitId = "10008", Level = 2, GridPos = {X = 11, Y = 3}},
+			{UnitId = "10008", Level = 2, GridPos = {X = 9, Y = 3}},
+			{UnitId = "10008", Level = 2, GridPos = {X = 7, Y = 3}},
+			{UnitId = "10008", Level = 2, GridPos = {X = 5, Y = 3}},
+		},
+		
+		-- 第3关: 第2章最终关
+		[8] = {
+			{UnitId = "10008", Level = 2, GridPos = {X = 7, Y = 1}},
+			{UnitId = "10008", Level = 2, GridPos = {X = 5, Y = 1}},
+			{UnitId = "10008", Level = 2, GridPos = {X = 9, Y = 1}},
+			{UnitId = "10008", Level = 2, GridPos = {X = 11, Y = 1}},
+			{UnitId = "10008", Level = 2, GridPos = {X = 11, Y = 3}},
+			{UnitId = "10008", Level = 2, GridPos = {X = 5, Y = 3}},
+			{UnitId = "10009", Level = 2, GridPos = {X = 7, Y = 5}},
+			{UnitId = "10009", Level = 2, GridPos = {X = 9, Y = 5}},
+		},
+		
+		-- 第3关: 第2章最终关
+		[9] = {
+			{UnitId = "10005", Level = 2, GridPos = {X = 11, Y = 1}},
+			{UnitId = "10005", Level = 2, GridPos = {X = 9, Y = 1}},
+			{UnitId = "10005", Level = 2, GridPos = {X = 7, Y = 1}},
+			{UnitId = "10005", Level = 2, GridPos = {X = 5, Y = 1}},
+			{UnitId = "10008", Level = 2, GridPos = {X = 8, Y = 3}},
+			{UnitId = "10008", Level = 2, GridPos = {X = 6, Y = 3}},
+			{UnitId = "10008", Level = 2, GridPos = {X = 10, Y = 3}},
+			{UnitId = "10014", Level = 2, GridPos = {X = 7, Y = 5}},
+			{UnitId = "10014", Level = 2, GridPos = {X = 9, Y = 5}},
+		},
+		
+		-- 第3关: 第2章最终关
+		[10] = {
+			{UnitId = "10008", Level = 2, GridPos = {X = 5, Y = 1}},
+			{UnitId = "10008", Level = 2, GridPos = {X = 7, Y = 1}},
+			{UnitId = "10008", Level = 2, GridPos = {X = 9, Y = 1}},
+			{UnitId = "10008", Level = 2, GridPos = {X = 11, Y = 1}},
+			{UnitId = "10007", Level = 2, GridPos = {X = 11, Y = 3}},
+			{UnitId = "10007", Level = 2, GridPos = {X = 9, Y = 3}},
+			{UnitId = "10007", Level = 2, GridPos = {X = 7, Y = 3}},
+			{UnitId = "10007", Level = 2, GridPos = {X = 5, Y = 3}},
+			{UnitId = "10013", Level = 2, GridPos = {X = 5, Y = 5}},
+			{UnitId = "10013", Level = 2, GridPos = {X = 7, Y = 5}},
+			{UnitId = "10013", Level = 2, GridPos = {X = 9, Y = 5}},
+			{UnitId = "10013", Level = 2, GridPos = {X = 11, Y = 5}},
+		},
+		
+		-- 第1关: 第2章开始
+		[11] = {
+			{UnitId = "10001", Level = 2, GridPos = {X = 7, Y = 1}},
+			{UnitId = "10001", Level = 2, GridPos = {X = 5, Y = 1}},
+			{UnitId = "10001", Level = 2, GridPos = {X = 9, Y = 1}},
+			{UnitId = "10002", Level = 2, GridPos = {X = 9, Y = 3}},
+			{UnitId = "10002", Level = 2, GridPos = {X = 5, Y = 3}},
+			{UnitId = "10002", Level = 2, GridPos = {X = 7, Y = 3}},
+			{UnitId = "10002", Level = 2, GridPos = {X = 11, Y = 3}},
+			{UnitId = "10002", Level = 2, GridPos = {X = 3, Y = 3}},
+			{UnitId = "10003", Level = 2, GridPos = {X = 7, Y = 5}},
+			{UnitId = "10003", Level = 2, GridPos = {X = 9, Y = 5}},
+		},
+
+		-- 第2关: 更多敌人
+		[12] = {
+			{UnitId = "10001", Level = 2, GridPos = {X = 7, Y = 1}},
+			{UnitId = "10001", Level = 2, GridPos = {X = 5, Y = 1}},
+			{UnitId = "10001", Level = 2, GridPos = {X = 9, Y = 1}},
+			{UnitId = "10002", Level = 2, GridPos = {X = 9, Y = 3}},
+			{UnitId = "10002", Level = 2, GridPos = {X = 5, Y = 3}},
+			{UnitId = "10002", Level = 2, GridPos = {X = 7, Y = 3}},
+			{UnitId = "10002", Level = 2, GridPos = {X = 11, Y = 3}},
+			{UnitId = "10002", Level = 2, GridPos = {X = 3, Y = 3}},
+			{UnitId = "10003", Level = 2, GridPos = {X = 7, Y = 5}},
+			{UnitId = "10003", Level = 2, GridPos = {X = 9, Y = 5}},
+		},
+
+		-- 第3关: 第2章最终关
+		[13] = {
+			{UnitId = "10001", Level = 2, GridPos = {X = 7, Y = 3}},
+			{UnitId = "10001", Level = 2, GridPos = {X = 9, Y = 3}},
+			{UnitId = "10003", Level = 3, GridPos = {X = 8, Y = 1}},
+			{UnitId = "10004", Level = 2, GridPos = {X = 8, Y = 5}},
+			{UnitId = "10004", Level = 3, GridPos = {X = 7, Y = 5}},
+			{UnitId = "10004", Level = 3, GridPos = {X = 9, Y = 5}},
+		},
+		-- 第3关: 第2章最终关
+		[14] = {
+			{UnitId = "10012", Level = 2, GridPos = {X = 7, Y = 3}},
+			{UnitId = "10012", Level = 2, GridPos = {X = 9, Y = 3}},
+			{UnitId = "10003", Level = 3, GridPos = {X = 8, Y = 1}},
+			{UnitId = "10004", Level = 2, GridPos = {X = 8, Y = 5}},
+			{UnitId = "10004", Level = 2, GridPos = {X = 7, Y = 5}},
+			{UnitId = "10004", Level = 2, GridPos = {X = 9, Y = 5}},
+		},
+
+		-- 第3关: 第2章最终关
+		[15] = {
+			{UnitId = "10008", Level = 2, GridPos = {X = 7, Y = 1}},
+			{UnitId = "10008", Level = 2, GridPos = {X = 9, Y = 1}},
+			{UnitId = "10008", Level = 2, GridPos = {X = 5, Y = 1}},
+			{UnitId = "10004", Level = 2, GridPos = {X = 5, Y = 7}},
+			{UnitId = "10004", Level = 2, GridPos = {X = 7, Y = 7}},
+			{UnitId = "10004", Level = 2, GridPos = {X = 9, Y = 7}},
+			{UnitId = "10006", Level = 2, GridPos = {X = 9, Y = 3}},
+			{UnitId = "10006", Level = 2, GridPos = {X = 8, Y = 3}},
+			{UnitId = "10006", Level = 2, GridPos = {X = 7, Y = 3}},
+			{UnitId = "10006", Level = 2, GridPos = {X = 6, Y = 3}},
+			{UnitId = "10006", Level = 2, GridPos = {X = 5, Y = 3}},
+			{UnitId = "10012", Level = 2, GridPos = {X = 7, Y = 4}},
+		},
+
+		-- 第3关: 第2章最终关
+		[16] = {
+			{UnitId = "10003", Level = 2, GridPos = {X = 7, Y = 1}},
+			{UnitId = "10003", Level = 2, GridPos = {X = 9, Y = 1}},
+			{UnitId = "10003", Level = 2, GridPos = {X = 5, Y = 1}},
+			{UnitId = "10004", Level = 2, GridPos = {X = 5, Y = 7}},
+			{UnitId = "10004", Level = 2, GridPos = {X = 7, Y = 7}},
+			{UnitId = "10004", Level = 2, GridPos = {X = 9, Y = 7}},
+			{UnitId = "10006", Level = 2, GridPos = {X = 9, Y = 3}},
+			{UnitId = "10006", Level = 2, GridPos = {X = 8, Y = 3}},
+			{UnitId = "10006", Level = 2, GridPos = {X = 7, Y = 3}},
+			{UnitId = "10006", Level = 2, GridPos = {X = 6, Y = 3}},
+			{UnitId = "10006", Level = 2, GridPos = {X = 5, Y = 3}},
+			{UnitId = "10012", Level = 2, GridPos = {X = 7, Y = 4}},
+		},
+
+		-- 第3关: 第2章最终关
+		[17] = {
+			{UnitId = "10008", Level = 2, GridPos = {X = 7, Y = 1}},
+			{UnitId = "10008", Level = 2, GridPos = {X = 5, Y = 1}},
+			{UnitId = "10008", Level = 3, GridPos = {X = 9, Y = 1}},
+			{UnitId = "10008", Level = 2, GridPos = {X = 11, Y = 1}},
+			{UnitId = "10008", Level = 3, GridPos = {X = 11, Y = 3}},
+			{UnitId = "10008", Level = 2, GridPos = {X = 9, Y = 3}},
+			{UnitId = "10008", Level = 3, GridPos = {X = 7, Y = 3}},
+			{UnitId = "10008", Level = 2, GridPos = {X = 5, Y = 3}},
+		},
+
+		-- 第3关: 第2章最终关
+		[18] = {
+			{UnitId = "10008", Level = 3, GridPos = {X = 7, Y = 1}},
+			{UnitId = "10008", Level = 2, GridPos = {X = 5, Y = 1}},
+			{UnitId = "10008", Level = 3, GridPos = {X = 9, Y = 1}},
+			{UnitId = "10008", Level = 2, GridPos = {X = 11, Y = 1}},
+			{UnitId = "10008", Level = 3, GridPos = {X = 11, Y = 3}},
+			{UnitId = "10008", Level = 2, GridPos = {X = 5, Y = 3}},
+			{UnitId = "10009", Level = 3, GridPos = {X = 7, Y = 5}},
+			{UnitId = "10009", Level = 3, GridPos = {X = 9, Y = 5}},
+		},
+
+		-- 第3关: 第2章最终关
+		[19] = {
+			{UnitId = "10005", Level = 2, GridPos = {X = 11, Y = 1}},
+			{UnitId = "10005", Level = 2, GridPos = {X = 9, Y = 1}},
+			{UnitId = "10005", Level = 3, GridPos = {X = 7, Y = 1}},
+			{UnitId = "10005", Level = 2, GridPos = {X = 5, Y = 1}},
+			{UnitId = "10008", Level = 3, GridPos = {X = 8, Y = 3}},
+			{UnitId = "10008", Level = 2, GridPos = {X = 6, Y = 3}},
+			{UnitId = "10008", Level = 3, GridPos = {X = 10, Y = 3}},
+			{UnitId = "10014", Level = 2, GridPos = {X = 7, Y = 5}},
+			{UnitId = "10014", Level = 3, GridPos = {X = 9, Y = 5}},
+		},
+
+		-- 第3关: 第2章最终关
+		[20] = {
+			{UnitId = "10008", Level = 2, GridPos = {X = 5, Y = 1}},
+			{UnitId = "10008", Level = 2, GridPos = {X = 7, Y = 1}},
+			{UnitId = "10008", Level = 2, GridPos = {X = 9, Y = 1}},
+			{UnitId = "10008", Level = 2, GridPos = {X = 11, Y = 1}},
+			{UnitId = "10007", Level = 2, GridPos = {X = 11, Y = 3}},
+			{UnitId = "10007", Level = 2, GridPos = {X = 9, Y = 3}},
+			{UnitId = "10007", Level = 2, GridPos = {X = 7, Y = 3}},
+			{UnitId = "10007", Level = 2, GridPos = {X = 5, Y = 3}},
+			{UnitId = "10013", Level = 3, GridPos = {X = 5, Y = 5}},
+			{UnitId = "10013", Level = 3, GridPos = {X = 7, Y = 5}},
+			{UnitId = "10013", Level = 3, GridPos = {X = 9, Y = 5}},
+			{UnitId = "10013", Level = 3, GridPos = {X = 11, Y = 5}},
+		},
+		
 	}
 }
 

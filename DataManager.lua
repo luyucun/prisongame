@@ -31,8 +31,10 @@ local DATASTORE_NAME = "PlayerData_V2.1" .. suffix
 local PlayerDataStore = DataStoreService:GetDataStore(DATASTORE_NAME)
 
 -- 打印当前使用的DataStore名称（便于确认环境）
-print(string.format("[DataManager] 🗄️ 使用DataStore: %s (isStudio=%s, suffix=%s)",
-	DATASTORE_NAME, tostring(isStudio), suffix))
+if GameConfig.DEBUG_MODE then
+	print(string.format("[DataManager] 🗄️ 使用DataStore: %s (isStudio=%s, suffix=%s)",
+		DATASTORE_NAME, tostring(isStudio), suffix))
+end
 
 -- 存储所有玩家的数据 [UserId] = PlayerData
 -- 注意: Roblox脚本是单线程执行,因此不存在真正的race condition问题

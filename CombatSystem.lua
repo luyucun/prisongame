@@ -1543,6 +1543,101 @@ function CombatSystem.InitializeClientAIEvents()
 	end
 end
 
+-- ==================== V4.0 客户端AI校验辅助（服务端权威） ====================
+
+-- BattleManager懒加载缓存（避免循环依赖）
+local cachedBattleManager = nil
+
+local function GetBattleManager()
+	-- nil=未加载，false=加载失败，table=模块
+	if cachedBattleManager ~= nil then
+		return cachedBattleManager or nil
+	end
+
+	local bmModule = ServerScriptService:FindFirstChild("Systems") and ServerScriptService.Systems:FindFirstChild("BattleManager")
+	if not bmModule then
+		cachedBattleManager = false
+		return nil
+	end
+
+	local ok, mod = pcall(function()
+		return require(bmModule :: ModuleScript)
+	end)
+
+	if ok and mod then
+		cachedBattleManager = mod
+		return mod
+	end
+
+	cachedBattleManager = false
+	return nil
+end
+
+local function GetSyncUnitPositionEvent()
+	local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
+	if not eventsFolder then
+		return nil
+	end
+
+	local clientAIEvents = eventsFolder:FindFirstChild("ClientAIEvents")
+	if not clientAIEvents then
+		return nil
+	end
+
+	return clientAIEvents:FindFirstChild("SyncUnitPosition")
+end
+
+local function IsBattleOwnedByPlayer(player, battleId)
+	local BattleManager = GetBattleManager()
+	if not BattleManager or not BattleManager.GetBattle then
+		return false
+	end
+
+	local battle = BattleManager.GetBattle(battleId)
+	if not battle or not battle.PlayerId then
+		return false
+	end
+
+	return battle.PlayerId == player.UserId
+end
+
+local function ResolveUnitStateForBattle(battleId, unitModel)
+	-- 先尝试直接引用（正常情况下客户端传入的Instance与服务端一致）
+	local state = unitStates[unitModel]
+	if state and state.BattleId == battleId then
+		return state, unitModel
+	end
+
+	-- 备用：使用InstanceId匹配（更稳定，避免同名模型误匹配）
+	local instanceId = nil
+	pcall(function()
+		instanceId = unitModel:GetAttribute("InstanceId")
+	end)
+
+	if instanceId then
+		for model, s in pairs(unitStates) do
+			if s.BattleId == battleId then
+				local mid = nil
+				pcall(function()
+					mid = model:GetAttribute("InstanceId")
+				end)
+				if mid == instanceId then
+					return s, model
+				end
+			end
+		end
+	end
+
+	-- 最后兜底：按Name匹配（不推荐，仅兼容旧逻辑）
+	for model, s in pairs(unitStates) do
+		if s.BattleId == battleId and model.Name == unitModel.Name then
+			return s, model
+		end
+	end
+
+	return nil, nil
+end
+
 --[[
 处理客户端攻击请求（V4.0核心接口）
 @param player Player - 发起请求的玩家
@@ -1552,51 +1647,50 @@ end
 @param attackType string - 攻击类型（"Melee"或"Ranged"）
 ]]
 function CombatSystem.OnClientAttackRequest(player, battleId, attackerModel, targetModel, attackType)
-	-- 参数验证
-	if not player or not battleId or not attackerModel or not targetModel or not attackType then
+	-- 参数验证（类型+存在性）
+	if not player or typeof(battleId) ~= "number" then
 		WarnLog("[V4.0] 客户端攻击请求参数无效")
 		return
 	end
-
-	-- V4.0修复：客户端和服务端的模型引用不同，需要通过名字查找
-	-- 先尝试直接引用
-	local attackerState = unitStates[attackerModel]
-
-	-- 如果直接引用失败，通过名字和BattleId查找
-	if not attackerState then
-		for model, state in pairs(unitStates) do
-			if model.Name == attackerModel.Name and state.BattleId == battleId then
-				attackerState = state
-				attackerModel = model  -- 更新为服务端的引用
-				break
-			end
-		end
+	if typeof(attackerModel) ~= "Instance" or not attackerModel:IsA("Model") then
+		WarnLog("[V4.0] 客户端攻击请求攻击者模型无效")
+		return
+	end
+	if typeof(targetModel) ~= "Instance" or not targetModel:IsA("Model") then
+		WarnLog("[V4.0] 客户端攻击请求目标模型无效")
+		return
+	end
+	if typeof(attackType) ~= "string" then
+		WarnLog("[V4.0] 客户端攻击请求攻击类型无效")
+		return
 	end
 
+	-- 关键校验：只能由战斗拥有者驱动该战斗的AI（客户端驱动，服务端校验）
+	if not IsBattleOwnedByPlayer(player, battleId) then
+		WarnLog(string.format("[V4.0] 非法攻击请求：玩家%s无权控制BattleId=%s", player.Name, tostring(battleId)))
+		return
+	end
+
+	-- 解析并强制绑定到该battleId下的单位状态（禁止跨战斗控制）
+	local attackerState, attackerServerModel = ResolveUnitStateForBattle(battleId, attackerModel)
 	if not attackerState then
 		return
 	end
+	attackerModel = attackerServerModel
 
 	if not attackerState.IsAlive then
 		DebugLog("[V4.0] 攻击者已死亡，拒绝攻击请求")
 		return
 	end
 
-	-- V4.0修复：同样需要为目标模型查找服务端引用
-	local targetState = unitStates[targetModel]
+	local targetState, targetServerModel = ResolveUnitStateForBattle(battleId, targetModel)
 	if not targetState then
-		for model, state in pairs(unitStates) do
-			if model.Name == targetModel.Name and state.BattleId == battleId then
-				targetState = state
-				targetModel = model  -- 更新为服务端的引用
-				DebugLog(string.format("[V4.0] 通过名字找到目标: %s", targetModel.Name))
-				break
-			end
-		end
+		return
 	end
+	targetModel = targetServerModel
 
 	-- 验证目标状态
-	if not targetState or not targetState.IsAlive then
+	if not targetState.IsAlive then
 		return
 	end
 
@@ -1604,6 +1698,31 @@ function CombatSystem.OnClientAttackRequest(player, battleId, attackerModel, tar
 	if attackerState.AttackPhase ~= BattleConfig.AttackPhase.IDLE then
 		return
 	end
+
+	-- 验证队伍（不能攻击友军）
+	if targetState.Team == attackerState.Team then
+		WarnLog("[V4.0] 不能攻击友军")
+		return
+	end
+
+	-- 由服务端根据配置决定真实攻击类型（不信任客户端传入的attackType）
+	local expectedAttackType = nil
+	if UnitConfig.IsMeleeUnit(attackerState.UnitId) then
+		expectedAttackType = "Melee"
+	elseif UnitConfig.IsRangedUnit(attackerState.UnitId) then
+		expectedAttackType = "Ranged"
+	end
+
+	if not expectedAttackType then
+		WarnLog(string.format("[V4.0] 未知单位类型，拒绝攻击请求: %s (%s)", tostring(attackerState.UnitId), attackerModel.Name))
+		return
+	end
+
+	if attackType ~= expectedAttackType then
+		DebugLog(string.format("[V4.0] 客户端攻击类型与配置不一致，已按服务端配置覆盖: %s -> %s (%s)",
+			tostring(attackType), tostring(expectedAttackType), tostring(attackerState.UnitId)))
+	end
+	attackType = expectedAttackType
 
 	-- 验证距离（防作弊）
 	local attackerRoot = attackerModel:FindFirstChild("HumanoidRootPart")
@@ -1614,38 +1733,25 @@ function CombatSystem.OnClientAttackRequest(player, battleId, attackerModel, tar
 	end
 
 	local distance = (attackerRoot.Position - targetRoot.Position).Magnitude
-	local maxValidDistance = attackerState.AttackRange * 1.5  -- 允许1.5倍容差
-
+	local maxValidDistance = attackerState.AttackRange * 1.5 -- 允许1.5倍容差
 	if distance > maxValidDistance then
 		return
 	end
 
-	-- 验证队伍（不能攻击友军）
-	if targetState.Team == attackerState.Team then
-		WarnLog("[V4.0] 不能攻击友军")
-		return
-	end
-
 	-- 校验通过，执行攻击
-
-	-- 进入Attacking阶段
 	if not CombatSystem.BeginAttack(attackerModel, targetModel) then
 		WarnLog("[V4.0] BeginAttack失败")
 		return
 	end
 
-	-- 设置当前目标
+	-- 设置当前目标（服务端维护）
 	CombatSystem.SetTarget(attackerModel, targetModel)
 
-	-- 根据攻击类型执行伤害判定
+	-- 根据单位真实类型执行伤害判定
 	if attackType == "Melee" then
-		-- 近战攻击：立即执行伤害判定
 		CombatSystem.OnDamageEvent(attackerModel)
 	elseif attackType == "Ranged" then
-		-- 远程攻击：发射子弹
 		CombatSystem.OnRangedDamageEvent(attackerModel, targetModel)
-	else
-		WarnLog("[V4.0] 未知的攻击类型:", attackType)
 	end
 end
 
@@ -1658,36 +1764,114 @@ end
 @param state string - 客户端报告的AI状态
 ]]
 function CombatSystem.OnClientPositionReport(player, battleId, unitModel, position, state)
-	-- 简单的位置校验（可选）
-	-- 这里可以添加更复杂的防作弊逻辑
-	-- 例如：检查位置变化速度是否合理、是否穿墙等
+	-- 参数验证
+	if not player or typeof(battleId) ~= "number" then
+		return
+	end
+	if typeof(unitModel) ~= "Instance" or not unitModel:IsA("Model") then
+		return
+	end
+	if typeof(position) ~= "Vector3" then
+		return
+	end
 
-	-- 当前实现：仅记录日志，不做强制校验
-	-- 如果需要强制同步，可以在这里调用SyncUnitPosition事件
+	-- 关键校验：只能由战斗拥有者上报本战斗单位位置
+	if not IsBattleOwnedByPlayer(player, battleId) then
+		return
+	end
 
-	-- 示例：检查位置偏差
-	if unitModel and unitModel.Parent then
-		local rootPart = unitModel:FindFirstChild("HumanoidRootPart")
-		if rootPart then
-			local serverPos = rootPart.Position
-			local distance = (serverPos - position).Magnitude
+	-- 绑定到本战斗的单位状态（禁止跨战斗）
+	local unitState, unitServerModel = ResolveUnitStateForBattle(battleId, unitModel)
+	if not unitState then
+		return
+	end
+	unitModel = unitServerModel
 
-			-- 如果偏差过大，记录警告
-			if distance > (BattleConfig.POSITION_VALIDATION_TOLERANCE or 10) then
-				WarnLog(string.format("[V4.0] 位置偏差过大: %s (%.1f studs, 玩家:%s)",
-					unitModel.Name, distance, player.Name))
+	if not unitModel.Parent or not unitState.IsAlive then
+		return
+	end
 
-				-- 可选：强制同步位置到客户端
-				-- local clientAIEvents = ReplicatedStorage:FindFirstChild("Events"):FindFirstChild("ClientAIEvents")
-				-- if clientAIEvents then
-				-- 	local syncEvent = clientAIEvents:FindFirstChild("SyncUnitPosition")
-				-- 	if syncEvent then
-				-- 		syncEvent:FireClient(player, battleId, unitModel, serverPos)
-				-- 	end
-				-- end
+	local rootPart = unitModel:FindFirstChild("HumanoidRootPart")
+	if not rootPart then
+		return
+	end
+
+	-- 服务器观测到的当前位置（服务端权威参考）
+	local serverPos = rootPart.Position
+	local now = tick()
+
+	-- 首次上报：建立基准，不做判定（避免初始化/复制阶段误判）
+	if not unitState.LastServerPosTime then
+		unitState.LastServerPosTime = now
+		unitState.LastServerPos = serverPos
+		return
+	end
+
+	-- 速度/位移校验：限制异常瞬移（客户端驱动，服务端校验）
+	local dt = math.max(now - (unitState.LastServerPosTime or now), 0.01)
+	local lastPos = unitState.LastServerPos or serverPos
+	local moved = (serverPos - lastPos).Magnitude
+
+	-- 允许一定的容差，避免网络抖动误判
+	local moveSpeed = unitState.MoveSpeed or 16
+	local tolerance = BattleConfig.POSITION_VALIDATION_TOLERANCE or 10
+	local maxAllowed = (moveSpeed * dt * 3) + tolerance
+
+	if moved > maxAllowed then
+		unitState.PositionViolationCount = (unitState.PositionViolationCount or 0) + 1
+
+		WarnLog(string.format("[V4.0] 位置校验失败: %s 移动%.1f > 允许%.1f (dt=%.2f, speed=%.1f, 玩家:%s)",
+			unitModel.Name, moved, maxAllowed, dt, moveSpeed, player.Name))
+
+		-- 强制回滚到上一次合法位置，并同步给客户端
+		local rollbackPos = lastPos
+
+		pcall(function()
+			if rootPart:CanSetNetworkOwnership() then
+				rootPart:SetNetworkOwner(nil) -- 临时收回所有权，确保回滚生效
 			end
+		end)
+
+		rootPart.CFrame = CFrame.new(rollbackPos)
+		rootPart.AssemblyLinearVelocity = Vector3.zero
+		rootPart.AssemblyAngularVelocity = Vector3.zero
+
+		-- 通知客户端矫正
+		local syncEvent = GetSyncUnitPositionEvent()
+		if syncEvent then
+			syncEvent:FireClient(player, battleId, unitModel, rollbackPos)
+		end
+
+		-- 轻量恢复NetworkOwner（避免持续抢夺导致抖动）
+		task.delay(0.2, function()
+			if rootPart and rootPart.Parent then
+				pcall(function()
+					if rootPart:CanSetNetworkOwnership() then
+						rootPart:SetNetworkOwner(player)
+					end
+				end)
+			end
+		end)
+
+		-- 回滚后更新基准，避免下一次继续按异常位移计算
+		unitState.LastServerPosTime = now
+		unitState.LastServerPos = rollbackPos
+		return
+	end
+
+	-- 位置偏差（客户端上报 vs 服务端观测）过大时，通知客户端矫正到服务端观测值
+	-- 该逻辑用于修正网络抖动/丢包导致的可见不同步，不用于信任客户端位置
+	local reportDiff = (serverPos - position).Magnitude
+	if reportDiff > (BattleConfig.POSITION_VALIDATION_TOLERANCE or 10) then
+		local syncEvent = GetSyncUnitPositionEvent()
+		if syncEvent then
+			syncEvent:FireClient(player, battleId, unitModel, serverPos)
 		end
 	end
+
+	-- 更新基准
+	unitState.LastServerPosTime = now
+	unitState.LastServerPos = serverPos
 end
 
 return CombatSystem

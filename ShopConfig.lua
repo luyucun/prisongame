@@ -736,8 +736,6 @@ local function Initialize()
 		for _, error in ipairs(errors) do
 			warn("  - " .. error)
 		end
-	else
-		print("[ShopConfig] 配置验证通过，共" .. #ShopConfig.GetAllShopIds() .. "个商店")
 	end
 end
 

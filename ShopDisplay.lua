@@ -36,7 +36,7 @@ local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
 -- 调试和日志
-local DEBUG_MODE = true  -- V2.1修复：临时启用调试，排查价格显示问题
+local DEBUG_MODE = false  -- 默认关闭，需要排查时再手动开启
 local LOG_PREFIX = "[ShopDisplay]"
 
 -- 状态变量

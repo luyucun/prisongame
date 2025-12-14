@@ -354,12 +354,12 @@ function PlayerManager.OnPlayerAdded(player)
             if placementModule.RestorePlacedUnits then
                 local success, message = placementModule.RestorePlacedUnits(player)
                 if success then
-                    print(string.format(
-                        "%s [PlayerManager] 🔥 玩家 %s 放置单位恢复成功: %s",
-                        GameConfig.LOG_PREFIX,
-                        player.Name,
-                        message
-                    ))
+                    -- print(string.format(
+                    --     "%s [PlayerManager] 🔥 玩家 %s 放置单位恢复成功: %s",
+                    --     GameConfig.LOG_PREFIX,
+                    --     player.Name,
+                    --     message
+                    -- ))
                 else
                     warn(string.format(
                         "%s [PlayerManager] 🔥 玩家 %s 放置单位恢复失败: %s",

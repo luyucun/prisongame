@@ -86,7 +86,9 @@ local WarnOnceCache = {}
 
 -- ==================== 工具函数 ====================
 local function Log(message)
-	print("[DoorControlService]", message)
+	if GameConfig.DEBUG_MODE then
+		print("[DoorControlService]", message)
+	end
 end
 
 local function WarnLog(message)

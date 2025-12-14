@@ -26,6 +26,15 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
 local GuideConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GuideConfig"))
 
+-- 收敛调试print，避免刷屏（仅在DEBUG_MODE开启时输出）
+local _print = print
+local function DebugPrint(...)
+	if GameConfig.DEBUG_MODE then
+		_print(...)
+	end
+end
+local print = DebugPrint
+
 -- 延迟加载的模块（避免循环依赖）
 local DataManager = nil
 local IdleCoinSystem = nil

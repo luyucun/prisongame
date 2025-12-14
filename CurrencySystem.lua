@@ -365,12 +365,14 @@ local function OnClientRequestCurrency(player)
         if allCurrency then
             -- 发送金币信息给客户端
             NotifyClient(player, GameConfig.CurrencyType.COINS, allCurrency.Coins)
-            print(string.format(
-                "%s [CurrencySystem] ✅ 响应客户端请求：玩家 %s 金币 %d",
-                GameConfig.LOG_PREFIX,
-                player.Name,
-                allCurrency.Coins
-            ))
+            if GameConfig.DEBUG_MODE then
+                print(string.format(
+                    "%s [CurrencySystem] ✅ 响应客户端请求：玩家 %s 金币 %d",
+                    GameConfig.LOG_PREFIX,
+                    player.Name,
+                    allCurrency.Coins
+                ))
+            end
         else
             -- 🔥修复：如果数据仍未加载，使用默认值并记录
             warn(string.format(
@@ -437,12 +439,14 @@ function CurrencySystem.PushInitialCurrency(player)
         if allCurrency then
             -- 主动推送金币信息给客户端
             NotifyClient(player, GameConfig.CurrencyType.COINS, allCurrency.Coins)
-            print(string.format(
-                "%s [CurrencySystem] 📤 主动推送初始金币：玩家 %s 金币 %d",
-                GameConfig.LOG_PREFIX,
-                player.Name,
-                allCurrency.Coins
-            ))
+            if GameConfig.DEBUG_MODE then
+                print(string.format(
+                    "%s [CurrencySystem] 📤 主动推送初始金币：玩家 %s 金币 %d",
+                    GameConfig.LOG_PREFIX,
+                    player.Name,
+                    allCurrency.Coins
+                ))
+            end
         else
             -- 如果数据加载失败，推送默认值
             NotifyClient(player, GameConfig.CurrencyType.COINS, GameConfig.InitialCoins)
@@ -486,7 +490,9 @@ local function InitializeBattleCoinEffectEvent()
             CoinEarnedEffectEvent = Instance.new("RemoteEvent")
             CoinEarnedEffectEvent.Name = "CoinEarnedEffect"
             CoinEarnedEffectEvent.Parent = battleEventsFolder
-            print(GameConfig.LOG_PREFIX, "[CurrencySystem] ✅ 自动创建CoinEarnedEffect事件")
+            if GameConfig.DEBUG_MODE then
+                print(GameConfig.LOG_PREFIX, "[CurrencySystem] ✅ 自动创建CoinEarnedEffect事件")
+            end
         end
     end
 

@@ -114,7 +114,7 @@ function UnitManager.Initialize()
 	unitBattleInfo = {}
 
 	isInitialized = true
-	print(GameConfig.LOG_PREFIX, "[UnitManager] 初始化完成 (高效列表模式)")
+	DebugLog("初始化完成 (高效列表模式)")
 	return true
 end
 
@@ -248,7 +248,7 @@ end
 @return Model|nil - 最近的敌人
 @return number|nil - 距离
 ]]
-function UnitManager.GetClosestEnemy(unitModel, maxDistance)
+function UnitManager.GetClosestEnemy(unitModel, maxDistance, forceUpdatePositions)
 	-- 1. 获取自身信息
 	local info = unitBattleInfo[unitModel]
 	if not info then
@@ -262,8 +262,10 @@ function UnitManager.GetClosestEnemy(unitModel, maxDistance)
 		return nil, nil
 	end
 
+	local forceUpdate = forceUpdatePositions == true
+
 	-- 2. 获取自身位置
-	local myPos = GetUnitPosition(unitModel, false)
+	local myPos = GetUnitPosition(unitModel, forceUpdate)
 	if not myPos then
 		return nil, nil
 	end
@@ -280,12 +282,19 @@ function UnitManager.GetClosestEnemy(unitModel, maxDistance)
 	-- 4. 简单直接的循环遍历 (O(N))，这在N<200时极快
 	for _, enemy in ipairs(enemies) do
 		if enemy and enemy.Parent then -- 基础有效性检查
-			local enemyPos = GetUnitPosition(enemy, false)
-			if enemyPos then
-				local dist = (myPos - enemyPos).Magnitude
-				if dist < closestDist then
-					closestDist = dist
-					closestUnit = enemy
+			-- 仅在明确死亡时跳过（IsDead 或 Humanoid.Health<=0）
+			local isDead = enemy:GetAttribute("IsDead")
+			if not isDead then
+				local enemyHumanoid = enemy:FindFirstChildOfClass("Humanoid") or enemy:FindFirstChild("Humanoid")
+				if not enemyHumanoid or enemyHumanoid.Health > 0 then
+					local enemyPos = GetUnitPosition(enemy, forceUpdate)
+					if enemyPos then
+						local dist = (myPos - enemyPos).Magnitude
+						if dist < closestDist then
+							closestDist = dist
+							closestUnit = enemy
+						end
+					end
 				end
 			end
 		end

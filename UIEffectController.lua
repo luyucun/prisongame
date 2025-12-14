@@ -62,7 +62,7 @@ local DEFAULT_DURATION = 3.0
 local ENABLE_DEFAULT_MODE = false
 
 -- 调试模式开关
-local DEBUG_MODE = true
+local DEBUG_MODE = false
 
 -- ======================== 核心逻辑 ========================
 

@@ -1,8 +1,20 @@
 --=====================================================
 -- UnitAI.lua (Modified RTS/MOBA Smooth Combat Movement)
--- Version: V5.7 (Multi-Ring Swarm System / 多层围攻系统)
+-- Version: V5.8 (修复开战回头Bug / Combat Start Protection)
 --=====================================================
 --[[
+V5.8 开战回头修复:
+1. _InAttackHold 初始化为 true (而非 false)
+   - 战斗开始时先原地站稳，不会立即去"找围攻位置"
+   - 只有当目标真正跑远时才会切换到追击模式
+
+2. 战斗开始保护期 (Combat Start Protection)
+   - 战斗开始后 0.5 秒内，不会因为距离原因退出攻击保持区
+   - 这可以防止刚开战时因为位置计算抖动导致的"回头"现象
+
+3. _CombatStartTime 记录战斗开始时间
+   - 用于计算保护期是否结束
+
 V5.7 围攻系统更新:
 1. 自动多层围攻 (Adaptive Multi-Ring Swarm)
    - 第一批士兵进入内圈(6人)
@@ -75,7 +87,7 @@ local CONFIG = {
 	STUCK_COUNT_THRESHOLD = 3,
 	MIN_DISTANCE_FOR_CHECK = 5,
 
-	DEBUG_LOGS = true,  -- 打开调试日志（调试远程兵问题）
+	DEBUG_LOGS = false,  -- 打开调试日志（调试远程兵问题）
 
 	-- ==================== V5.7 围攻系统配置 ====================
 	SURROUND = {
@@ -667,7 +679,7 @@ local function FindAndSetTarget(model, aiData)
 	LoadSystems()
 
 	-- 获取最近的敌人
-	local closestEnemy, distance = UnitManager.GetClosestEnemy(model, 9999)
+	local closestEnemy, distance = UnitManager.GetClosestEnemy(model, 9999, true)
 
 	if closestEnemy then
 		-- 检查敌人是否存活
@@ -696,6 +708,12 @@ local function ShouldHoldAttackPosition(distance, dockingDistance, aiData)
 	-- 退出攻击（需要追上去）的阈值（更大）
 	local EXIT_RANGE = dockingDistance + 3.0
 
+	-- ★ V5.8修复：战斗开始后的保护期（0.5秒内不会因为距离原因退出保持区）
+	-- 这可以防止刚开战时因为位置计算抖动导致的"回头"现象
+	local COMBAT_START_PROTECTION = 0.5
+	local timeSinceCombatStart = tick() - (aiData._CombatStartTime or 0)
+	local inProtectionPeriod = timeSinceCombatStart < COMBAT_START_PROTECTION
+
 	-- 若当前尚未进入攻击区，则当距离 <= ENTER_RANGE 切换为"保持不动"
 	if not aiData._InAttackHold then
 		if distance <= ENTER_RANGE then
@@ -705,7 +723,8 @@ local function ShouldHoldAttackPosition(distance, dockingDistance, aiData)
 		end
 	else
 		-- 已经处于保持区，若距离超过一个更大的阈值，才退出保持区
-		if distance >= EXIT_RANGE then
+		-- ★ V5.8修复：保护期内不退出攻击区，防止刚开战就"回头找位置"
+		if distance >= EXIT_RANGE and not inProtectionPeriod then
 			aiData._InAttackHold = false
 			DebugLog(string.format("[HoldPos] %s 退出攻击区: dist=%.1f, exitRange=%.1f",
 				aiData.UnitId or "?", distance, EXIT_RANGE))
@@ -770,6 +789,11 @@ local function HandleCombatMovement(model, aiData, deltaTime)
 	---------------------------------------------------
 	local holdPosition = ShouldHoldAttackPosition(distance, dockingDistance, aiData)
 
+	-- ★ V5.8修复：计算是否在战斗开始保护期内
+	local COMBAT_START_PROTECTION = 0.5
+	local timeSinceCombatStart = tick() - (aiData._CombatStartTime or 0)
+	local inProtectionPeriod = timeSinceCombatStart < COMBAT_START_PROTECTION
+
 	---------------------------------------------------
 	-- ② 根据 holdPosition 选择移动策略
 	---------------------------------------------------
@@ -779,7 +803,10 @@ local function HandleCombatMovement(model, aiData, deltaTime)
 
 		if not attackStarted then
 			-- 攻击冷却中
-			if useSurroundSystem then
+			-- ★ V5.8修复：保护期内完全不移动，防止"回头找围攻位置"
+			if inProtectionPeriod then
+				humanoid:Move(Vector3.zero)
+			elseif useSurroundSystem then
 				-- V5.7: 玩家方近战兵使用围攻位置微调 (此时使用避让)
 				local surroundPos, usingSurround = SurroundSystem.ComputeSurroundPosition(model, aiData, target, false)
 				if surroundPos and usingSurround then
@@ -808,7 +835,13 @@ local function HandleCombatMovement(model, aiData, deltaTime)
 
 	---------------------------------------------------
 	-- ③ 若不在攻击区间 → 需要追击
+	-- ★ V5.8修复：保护期内不追击，原地等待
 	---------------------------------------------------
+	if inProtectionPeriod then
+		humanoid:Move(Vector3.zero)
+		return
+	end
+
 	AnimationController.SwitchToMove(model, aiData)
 
 	local desiredPos
@@ -954,7 +987,10 @@ function UnitAI.StartAI(model)
 		CurrentAnimState = AnimationState.IDLE,
 		Tracks = {},  -- 动画轨道存储
 
-		_InAttackHold = false, -- ★ 用于迟滞区
+		-- ★ V5.8修复：初始化时设为true，防止刚开战就"回头找位置"
+		-- 让单位先原地站稳，第一次攻击判定后再根据距离决定是否移动
+		_InAttackHold = true,
+		_CombatStartTime = tick(),  -- V5.8: 记录战斗开始时间
 		_stuckTimer = 0,
 		_stuckCount = 0,
 

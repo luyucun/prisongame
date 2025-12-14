@@ -35,7 +35,6 @@ local function UpdateBattleControlVisibility()
 
     if battleControl.Visible ~= shouldShow then
         battleControl.Visible = shouldShow
-        print(LOG_PREFIX, "战斗按钮显示状态更新:", shouldShow and "显示" or "隐藏", "| 兵种数量:", placedUnitCount)
     end
 end
 
@@ -78,8 +77,6 @@ end
     初始化：请求当前背包数据
 ]]
 local function Initialize()
-    print(LOG_PREFIX, "初始化战斗按钮显示控制")
-
     -- 初始状态隐藏战斗按钮
     battleControl.Visible = false
 
@@ -89,8 +86,6 @@ local function Initialize()
     -- 请求初始数据
     local requestInventory = inventoryEvents:WaitForChild("RequestInventory")
     requestInventory:FireServer()
-
-    print(LOG_PREFIX, "初始化完成，已请求背包数据")
 end
 
 -- 启动初始化

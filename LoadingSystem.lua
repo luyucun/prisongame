@@ -388,7 +388,7 @@ function LoadingSystem.TryCompleteLoading(player)
 		SendLoadingComplete(player)
 
 		local duration = tick() - state.StartTime
-		print(string.format("%s 玩家 %s 加载完成，耗时: %.2f秒", LOG_PREFIX, player.Name, duration))
+		-- print(string.format("%s 玩家 %s 加载完成，耗时: %.2f秒", LOG_PREFIX, player.Name, duration))
 	else
 		-- 打印等待条件
 		if DEBUG_MODE then

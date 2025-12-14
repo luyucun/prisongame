@@ -33,8 +33,6 @@ local PowerUpdateEvent
 -- ==================== 初始化 ====================
 
 function PowerSystem.Initialize()
-	print("[PowerSystem] 正在初始化战斗力系统...")
-
 	-- 延迟加载模块
 	DataManager = require(game:GetService("ServerScriptService").Core.DataManager)
 	InventorySystem = require(game:GetService("ServerScriptService").Systems.InventorySystem)
@@ -86,8 +84,6 @@ function PowerSystem.Initialize()
 			PowerSystem.OnPlayerJoin(player)
 		end)
 	end
-
-	print("[PowerSystem] ✅ 战斗力系统初始化完成")
 end
 
 -- ==================== 核心功能 ====================

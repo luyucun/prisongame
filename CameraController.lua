@@ -215,7 +215,6 @@ local function setCombatMode()
 	targetOffset = COMBAT_MODE_OFFSET
 	currentOffset = COMBAT_MODE_OFFSET  -- 硬切：立即应用
 	needHardCut = true  -- 标记需要硬切相机位置
-	print("[CameraController] 切换到战斗特写模式(硬切)")
 end
 
 --[[
@@ -232,7 +231,6 @@ local function setFollowMode()
 	targetOffset = FOLLOW_MODE_OFFSET
 	currentOffset = FOLLOW_MODE_OFFSET  -- 硬切：立即应用
 	needHardCut = true  -- 标记需要硬切相机位置
-	print("[CameraController] 切换到跟随模式(硬切)")
 end
 
 --[[
@@ -396,7 +394,6 @@ local function updateCharacterFollow(center, targetCFrame)
 		needNewPath = true
 	elseif isStuck then
 		-- V5.2修改：卡住时直接瞬移到目的地，而非重新规划路径
-		print("[CameraController] 🚀 检测到主角卡住，直接瞬移到目的地")
 		hrp.CFrame = CFrame.new(followTarget.X, hrp.Position.Y, followTarget.Z)
 		-- 清理寻路状态
 		currentPath = nil
@@ -512,7 +509,6 @@ local function updateCamera()
 	if needHardCut then
 		camera.CFrame = targetCFrame
 		needHardCut = false
-		print("[CameraController] 执行硬切")
 	else
 		camera.CFrame = camera.CFrame:Lerp(targetCFrame, SMOOTHNESS)
 	end
@@ -745,16 +741,12 @@ V2.11新增：解锁镜头跟随战场，恢复玩家视角
 ]]
 local function unlockCameraToPlayer()
 	if not isActive then
-		print("[CameraController] 解锁镜头失败：战斗镜头未激活")
 		return false
 	end
 
 	if isCameraUnlocked then
-		print("[CameraController] 镜头已经解锁，忽略重复请求")
 		return true
 	end
-
-	print("[CameraController] 🔓 解锁镜头，恢复玩家视角")
 
 	-- 标记镜头已解锁
 	isCameraUnlocked = true

@@ -30,6 +30,15 @@ local CurrencySystem = nil
 local PlayerManager = nil
 local SoundSystem = nil  -- V3.8新增
 
+-- 收敛调试print，避免刷屏（仅在DEBUG_MODE开启时输出）
+local _print = print
+local function DebugPrint(...)
+	if GameConfig.DEBUG_MODE then
+		_print(...)
+	end
+end
+local print = DebugPrint
+
 -- 远程事件
 local IdleCoinEvents = nil
 

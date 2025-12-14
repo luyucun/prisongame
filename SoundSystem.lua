@@ -25,6 +25,15 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
 local SoundConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("SoundConfig"))
 
+-- 收敛调试print，避免刷屏（仅在DEBUG_MODE开启时输出）
+local _print = print
+local function DebugPrint(...)
+	if GameConfig.DEBUG_MODE then
+		_print(...)
+	end
+end
+local print = DebugPrint
+
 -- 远程事件引用
 local SoundEvents = nil
 

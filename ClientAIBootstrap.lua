@@ -169,7 +169,7 @@ local function OnInitializeBattle(battleId, attackUnits, defenseUnits, battleFie
 	-- 向服务端报告客户端准备就绪
 	ClientBattleReady:FireServer(battleId)
 
-	print(GameConfig.LOG_PREFIX, string.format("[ClientAIBootstrap] 战斗 %d 初始化完成", battleId))
+	DebugLog(string.format("战斗 %d 初始化完成", battleId))
 end
 
 -- ==================== 战斗终止处理 ====================
@@ -206,7 +206,7 @@ local function OnTerminateBattle(battleId, result)
 	-- 移除战斗记录
 	activeBattles[battleId] = nil
 
-	print(GameConfig.LOG_PREFIX, string.format("[ClientAIBootstrap] 战斗 %d 已终止", battleId))
+	DebugLog(string.format("战斗 %d 已终止", battleId))
 end
 
 -- ==================== 单位死亡处理 ====================
@@ -357,7 +357,7 @@ end
 -- ==================== 初始化系统 ====================
 
 local function Initialize()
-	print(GameConfig.LOG_PREFIX, "[ClientAIBootstrap] 开始初始化客户端AI系统...")
+	DebugLog("开始初始化客户端AI系统...")
 
 	-- 初始化三大模块
 	ClientUnitManager.Initialize()
@@ -370,7 +370,7 @@ local function Initialize()
 	ServerUnitDeath.OnClientEvent:Connect(OnServerUnitDeath)
 	SyncUnitPosition.OnClientEvent:Connect(OnSyncUnitPosition)
 
-	print(GameConfig.LOG_PREFIX, "[ClientAIBootstrap] 客户端AI系统初始化完成！")
+	DebugLog("客户端AI系统初始化完成！")
 end
 
 -- ==================== 脚本入口 ====================

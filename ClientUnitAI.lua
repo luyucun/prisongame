@@ -86,6 +86,14 @@ local CONFIG = {
 	-- 调试日志
 	DEBUG_LOGS = false,
 
+	-- V4.1修复：目标重新评估（防止初始化/复制窗口导致锁定远处目标）
+	TARGETING = {
+		RECHECK_INTERVAL = 0.5,          -- 重新评估间隔（秒）
+		SWITCH_DISTANCE_MARGIN = 15,     -- 新目标需要比当前目标近多少才切换（studs）
+		MIN_DISTANCE_TO_RECHECK = 35,    -- 当前目标距离超过此值才触发重新评估（studs）
+		INITIAL_CORRECTION_WINDOW = 1.0, -- 仅允许在锁定目标后的前N秒内纠偏一次（避免中途反复回头换目标）
+	},
+
 	-- V4.1新增：简化围攻系统配置
 	SURROUND = {
 		BASE_UNITS_PER_RING = 6,       -- 第一圈基础单位数
@@ -101,6 +109,13 @@ local CONFIG = {
 		CHECK_INTERVAL = 0.2,          -- 检测间隔（秒）
 		MAX_HEIGHT_DIFF = 3,           -- 最大允许高度差（studs）
 		RAYCAST_DISTANCE = 50,         -- 射线检测距离（studs）
+	},
+
+	-- 寻路配置
+	PATHFINDING = {
+		ENABLED = true,                -- 是否启用寻路（禁用则直线移动）
+		REPATH_COOLDOWN = 0.5,         -- 重新寻路冷却时间（秒）
+		DIRECT_MOVE_THRESHOLD = 8,     -- 距离小于此值时直接移动（studs）
 	},
 }
 
@@ -151,6 +166,67 @@ local function GetDockingDistance(aiData)
 		-- 远程：攻击距离 * 停靠系数
 		return attackRange * CONFIG.RANGED_DOCKING_RATIO
 	end
+end
+
+--[[
+V4.1修复：在移动/追击过程中，定期重新评估最近敌人
+目的：避免单位在目标列表/部件复制未就绪的短窗口内锁到远处目标后一直不切换
+@param aiData table
+@return boolean - 是否发生了目标切换
+]]
+local function MaybeSwitchToCloserTarget(aiData)
+	if not aiData or not aiData.CurrentTarget or not aiData.CurrentTarget.Parent then
+		return false
+	end
+
+	local now = tick()
+	local cfg = CONFIG.TARGETING or {}
+	local correctionWindow = cfg.INITIAL_CORRECTION_WINDOW or 1.0
+
+	-- 只做“开战初期”的一次纠偏，避免单位在追击过程中频繁切换目标导致回头/扭动
+	if aiData.TargetAcquiredTime and (now - aiData.TargetAcquiredTime) > correctionWindow then
+		return false
+	end
+	if aiData._DidInitialTargetCorrection then
+		return false
+	end
+
+	local recheckInterval = cfg.RECHECK_INTERVAL or 0.5
+	if aiData.LastTargetCheckTime and (now - aiData.LastTargetCheckTime) < recheckInterval then
+		return false
+	end
+	aiData.LastTargetCheckTime = now
+
+	local currentDist = GetDistance(aiData.UnitModel, aiData.CurrentTarget)
+	local minDistToRecheck = cfg.MIN_DISTANCE_TO_RECHECK or 25
+	if currentDist < minDistToRecheck then
+		return false
+	end
+
+	-- 强制刷新位置，避免缓存/复制窗口导致的距离误差
+	local nearest, nearestDist = ClientUnitManager.GetClosestEnemy(
+		aiData.UnitModel,
+		BattleConfig.TARGET_SEARCH_RANGE,
+		true
+	)
+
+	if not nearest or nearest == aiData.CurrentTarget then
+		return false
+	end
+
+	local switchMargin = cfg.SWITCH_DISTANCE_MARGIN or 5
+	if nearestDist + switchMargin < currentDist then
+		aiData.CurrentTarget = nearest
+		aiData.State = AIState.SEEKING
+		ClientPathService.StopMovement(aiData.UnitModel)
+		aiData._DidInitialTargetCorrection = true
+		aiData.TargetAcquiredTime = now
+		DebugLog(aiData.UnitModel.Name, "切换更近目标:", nearest.Name,
+			string.format("(%.1f -> %.1f)", currentDist, nearestDist))
+		return true
+	end
+
+	return false
 end
 
 -- ==================== V4.1新增：简化围攻系统 ====================
@@ -461,14 +537,18 @@ local function UpdateIdleState(aiData, deltaTime)
 	-- 寻找最近的敌人
 	local enemyUnit, distance = ClientUnitManager.GetClosestEnemy(
 		aiData.UnitModel,
-		BattleConfig.TARGET_SEARCH_RANGE
+		BattleConfig.TARGET_SEARCH_RANGE,
+		true
 	)
 
 	if enemyUnit then
 		-- 发现敌人，切换到SEEKING状态
 		aiData.State = AIState.SEEKING
 		aiData.CurrentTarget = enemyUnit
-		aiData.LastTargetCheckTime = tick()
+		aiData.TargetAcquiredTime = tick()
+		aiData._DidInitialTargetCorrection = false
+		-- 允许在下一帧SEEKING里立刻做一次“初期纠偏”（避免先走错方向再回头）
+		aiData.LastTargetCheckTime = 0
 		DebugLog(aiData.UnitModel.Name, "发现敌人:", enemyUnit.Name)
 	end
 end
@@ -487,13 +567,19 @@ local function UpdateSeekingState(aiData, deltaTime)
 	end
 
 	-- 检查目标是否死亡（V4.1增强：同时检查IsDead属性作为兜底）
+	-- 注意：客户端偶发存在Humanoid未复制完成的短窗口，此时不应直接判定目标无效
 	local targetHumanoid = aiData.CurrentTarget:FindFirstChild("Humanoid")
 	local targetIsDead = aiData.CurrentTarget:GetAttribute("IsDead")
-	if not targetHumanoid or targetHumanoid.Health <= 0 or targetIsDead then
+	if targetIsDead or (targetHumanoid and targetHumanoid.Health <= 0) then
 		aiData.State = AIState.IDLE
 		aiData.CurrentTarget = nil
 		-- 立即播放idle动画
 		PlayAnimation(aiData, AnimationState.IDLE)
+		return
+	end
+
+	-- V4.1修复：目标仍存活但距离很远时，定期重新评估最近目标（避免偶发锁到远处目标）
+	if MaybeSwitchToCloserTarget(aiData) then
 		return
 	end
 
@@ -533,14 +619,20 @@ local function UpdateMovingState(aiData, deltaTime)
 	end
 
 	-- 检查目标是否死亡（V4.1增强：同时检查IsDead属性作为兜底）
+	-- 注意：客户端偶发存在Humanoid未复制完成的短窗口，此时不应直接判定目标无效
 	local targetHumanoid = aiData.CurrentTarget:FindFirstChild("Humanoid")
 	local targetIsDead = aiData.CurrentTarget:GetAttribute("IsDead")
-	if not targetHumanoid or targetHumanoid.Health <= 0 or targetIsDead then
+	if targetIsDead or (targetHumanoid and targetHumanoid.Health <= 0) then
 		aiData.State = AIState.IDLE
 		aiData.CurrentTarget = nil
 		ClientPathService.StopMovement(aiData.UnitModel)
 		-- 立即播放idle动画
 		PlayAnimation(aiData, AnimationState.IDLE)
+		return
+	end
+
+	-- V4.1修复：目标仍存活但距离很远时，定期重新评估最近目标（避免偶发锁到远处目标）
+	if MaybeSwitchToCloserTarget(aiData) then
 		return
 	end
 
@@ -593,7 +685,38 @@ local function UpdateMovingState(aiData, deltaTime)
 		end
 
 		if moveTarget then
-			humanoid:MoveTo(moveTarget)
+			-- ✅ 寻路修复：使用ClientPathService进行寻路，而不是直线移动
+			if CONFIG.PATHFINDING.ENABLED and distance > CONFIG.PATHFINDING.DIRECT_MOVE_THRESHOLD then
+				-- 距离较远时使用寻路
+				local pathStatus = ClientPathService.GetPathStatus(aiData.UnitModel)
+
+				-- 检查是否需要重新寻路
+				local needRepath = ClientPathService.NeedRepath(aiData.UnitModel)
+				local noPath = pathStatus == ClientPathService.PathStatus.IDLE or pathStatus == ClientPathService.PathStatus.FAILED
+
+				if needRepath or noPath then
+					-- 请求新路径
+					local success = ClientPathService.RequestPath(aiData.UnitModel, moveTarget)
+					if success then
+						-- 开始跟随路径
+						ClientPathService.FollowPath(aiData.UnitModel, nil, nil)
+						DebugLog(aiData.UnitModel.Name, "寻路成功，开始跟随路径")
+					else
+						-- 寻路失败，回退到直线移动
+						humanoid:MoveTo(moveTarget)
+						DebugLog(aiData.UnitModel.Name, "寻路失败，使用直线移动")
+					end
+				elseif pathStatus == ClientPathService.PathStatus.SUCCESS then
+					-- 已有有效路径，继续跟随
+					ClientPathService.FollowPath(aiData.UnitModel, nil, nil)
+				else
+					-- 路径正在计算中或其他状态，暂时直线移动
+					humanoid:MoveTo(moveTarget)
+				end
+			else
+				-- 距离较近时直接移动（不需要寻路）
+				humanoid:MoveTo(moveTarget)
+			end
 		end
 	end
 end
@@ -763,7 +886,7 @@ function ClientUnitAI.Initialize(unitManager, pathService)
 		updateConnection = RunService.Heartbeat:Connect(OnHeartbeat)
 	end
 
-	print(GameConfig.LOG_PREFIX, "[ClientUnitAI] 客户端AI系统初始化完成")
+	DebugLog("客户端AI系统初始化完成")
 	return true
 end
 
@@ -795,6 +918,22 @@ function ClientUnitAI.StartAI(battleId, unitModel, unitId, level, team)
 		WarnLog("启动AI失败：找不到Humanoid", unitModel.Name)
 		return false
 	end
+
+	-- V4.1修复：启动战斗AI前，强制停止任何残留的移动指令（行军/旧MoveTo/旧路径）
+	-- 否则会出现“进入战斗先回头走一下再扭回来”的现象（旧目标点先被执行一帧）
+	pcall(function()
+		if ClientPathService then
+			ClientPathService.StopMovement(unitModel)
+		end
+	end)
+	pcall(function()
+		humanoid:Move(Vector3.new(0, 0, 0))
+		local rootPart = unitModel:FindFirstChild("HumanoidRootPart") or unitModel.PrimaryPart
+		if rootPart then
+			-- 用“走到当前位置”覆盖掉可能残留的WalkToPoint
+			humanoid:MoveTo(rootPart.Position)
+		end
+	end)
 
 	local animator = humanoid:FindFirstChild("Animator")
 	if not animator then
@@ -862,6 +1001,8 @@ function ClientUnitAI.StartAI(battleId, unitModel, unitId, level, team)
 		State = AIState.IDLE,
 		CurrentTarget = nil,
 		LastTargetCheckTime = 0,
+		TargetAcquiredTime = 0,
+		_DidInitialTargetCorrection = false,
 
 		-- 攻击状态
 		AttackCooldown = 0,
@@ -1012,12 +1153,16 @@ end
 调试：打印所有AI状态
 ]]
 function ClientUnitAI.DebugPrintAllStates()
-	print("=== ClientUnitAI Debug ===")
+	if not CONFIG.DEBUG_LOGS then
+		return
+	end
+
+	DebugLog("=== ClientUnitAI Debug ===")
 	for unitModel, aiData in pairs(activeAIs) do
-		print(string.format("  %s: State=%s, Target=%s",
+		DebugLog(string.format("  %s: State=%s, Target=%s",
 			unitModel.Name, aiData.State, aiData.CurrentTarget and aiData.CurrentTarget.Name or "nil"))
 	end
-	print("==========================")
+	DebugLog("==========================")
 end
 
 return ClientUnitAI
