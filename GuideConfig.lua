@@ -63,6 +63,7 @@ GuideConfig.Guides = {
 	},
 
 	-- 引导4：点击背包中的兵种（到达IdleFloor后）
+	-- 🔥已禁用：移除了这一步引导
 	[1004] = {
 		GuideId = 1004,
 		GuideType = GuideConfig.GuideType.UI_FOCUS,
@@ -71,7 +72,7 @@ GuideConfig.Guides = {
 		TargetUIPath = "BackpackGui/BackpackFrame", -- UI路径
 		TriggerCondition = "ARRIVED_IDLE_FLOOR", -- 触发条件：到达IdleFloor
 		Sort = 4,                             -- 排序
-		Enabled = true,                       -- 是否启用
+		Enabled = false,                      -- 🔥已禁用
 		SkipIfNoUnits = true,                 -- 如果背包没有兵种则跳过
 	},
 
