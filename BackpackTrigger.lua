@@ -236,6 +236,8 @@ player.CharacterAdded:Connect(function(newCharacter)
 	end
 end)
 
+-- ==================== 全局接口注册（提前注册，确保其他模块能立即访问） ====================
+-- 修复：将接口注册移到初始化之前，避免RemovalController等模块找不到接口
 _G.BackpackTrigger = _G.BackpackTrigger or {}
 _G.BackpackTrigger.RefreshVisibility = UpdateBackpackVisibility
 _G.BackpackTrigger.IsOnIdleFloor = function()
@@ -247,5 +249,5 @@ _G.BackpackTrigger.SubscribeIdleFloorChanged = function(callback)
 	end
 end
 
--- 启动初始化
+-- 启动初始化（异步执行，但接口已经可用）
 task.spawn(Initialize)
