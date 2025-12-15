@@ -3,7 +3,7 @@
 脚本名称: StageService
 脚本类型: ModuleScript (服务端)
 脚本位置: ServerScriptService/Systems/StageService.lua
-版本: V3.7
+版本: V3.11
 =====================================================
 
 功能描述:
@@ -12,6 +12,7 @@
 - 关卡缓存管理
 - 关卡清理
 - V3.7新增: 支持根据章节ID获取不同的关卡模板风格
+- V3.11新增: 敌人生成后自动播放展示动画
 
 ]]
 
@@ -36,6 +37,97 @@ local function DebugLog(msg)
 	if DEBUG_MODE then
 		print("[StageService] " .. tostring(msg))
 	end
+end
+
+--[[
+V3.11新增：播放展示动画（敌人生成后自动播放）
+@param model Model - 兵种模型
+@param unitId string - 兵种ID
+说明: 参考PlacementSystem.PlayShowAnimation实现
+]]
+local function PlayShowAnimation(model, unitId)
+	if not model or not unitId then
+		return
+	end
+
+	-- 获取展示动画ID
+	local showAnimId = UnitConfig.GetShowAnimationId(unitId)
+
+	-- 如果没有配置展示动画，直接返回
+	if not showAnimId or showAnimId == "" or showAnimId == "0" then
+		return
+	end
+
+	-- 验证动画ID格式
+	if not tonumber(showAnimId) then
+		warn("[StageService] PlayShowAnimation: 动画ID格式无效:", unitId, "AnimID:", showAnimId)
+		return
+	end
+
+	-- 查找Humanoid
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if not humanoid then
+		return
+	end
+
+	-- 禁用默认Animate脚本，防止与展示动画冲突
+	for _, descendant in ipairs(model:GetDescendants()) do
+		if descendant:IsA("BaseScript") and descendant.Name == "Animate" then
+			descendant.Enabled = false
+		end
+	end
+
+	-- 查找或创建Animator
+	local animator = humanoid:FindFirstChild("Animator")
+	if not animator then
+		animator = humanoid:FindFirstChildOfClass("Animator")
+		if not animator then
+			animator = Instance.new("Animator")
+			animator.Parent = humanoid
+		end
+	end
+
+	-- 停止所有正在播放的动画
+	for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+		pcall(function()
+			track:Stop(0)
+		end)
+	end
+
+	-- 创建动画实例
+	local animation = Instance.new("Animation")
+	animation.AnimationId = "rbxassetid://" .. showAnimId
+
+	-- 加载动画
+	local loadSuccess, animTrack = pcall(function()
+		return animator:LoadAnimation(animation)
+	end)
+
+	if not loadSuccess or not animTrack then
+		animation:Destroy()
+		return
+	end
+
+	-- 设置循环播放和优先级
+	animTrack.Looped = true
+	animTrack.Priority = Enum.AnimationPriority.Idle
+
+	-- 播放动画
+	local playSuccess = pcall(function()
+		animTrack:Play()
+	end)
+
+	if not playSuccess then
+		animation:Destroy()
+		return
+	end
+
+	-- 动画停止时清理Animation对象，防止内存泄漏
+	animTrack.Stopped:Connect(function()
+		if animation and animation.Parent then
+			animation:Destroy()
+		end
+	end)
 end
 
 -- 缓存: [playerId] = {[stageNum] = stageFolderRef}
@@ -765,6 +857,9 @@ function StageService.LoadEnemyData(stageFolder, stageNum, chapterId)
 
 			-- 标记为未激活状态（需要在战斗开始时激活）
 			unitModel:SetAttribute("IsActivated", false)
+
+			-- V3.11新增：播放展示动画，让敌人生成后不再傻站着
+			PlayShowAnimation(unitModel, enemyData.UnitId)
 
 			return unitModel
 		end)
