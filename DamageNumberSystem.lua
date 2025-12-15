@@ -18,6 +18,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 
 -- 获取本地玩家
 local player = Players.LocalPlayer
@@ -38,10 +39,92 @@ local DamageNumberConfig = {
 	STROKE_THICKNESS = 2,
 	RANDOM_OFFSET_X = 1,
 	RANDOM_OFFSET_Z = 1,
+	-- 距离缩放：近大远小（相机越远，字体越小）
+	ENABLE_DISTANCE_SCALE = true,
+	SCALE_BASE_DISTANCE = 70, -- 距离<=该值时保持默认大小
+	SCALE_MIN = 0.3, -- 最小缩放倍率（越小越“远小”）
+	SCALE_UPDATE_INTERVAL = 0.05, -- 缩放刷新频率（秒）
+	BILLBOARD_WIDTH = 100,
+	BILLBOARD_HEIGHT = 50,
 	-- V2.5新增：阵营颜色
 	ATTACKER_COLOR = Color3.fromRGB(255, 255, 255),  -- 我方打敌方：白字
 	DEFENDER_COLOR = Color3.fromRGB(255, 0, 0),      -- 敌方打我方：红字
 }
+
+-- 统一刷新：避免每个伤害字都绑一个RenderStepped连接
+local activeDamageNumbers = {} -- [BillboardGui] = {adorneePart, textLabel, uiStroke}
+local distanceScaleAccum = 0
+
+local function CalculateScaleByDistance(distance)
+	if not DamageNumberConfig.ENABLE_DISTANCE_SCALE then
+		return 1
+	end
+
+	local baseDistance = DamageNumberConfig.SCALE_BASE_DISTANCE or 70
+	local minScale = DamageNumberConfig.SCALE_MIN or 0.3
+
+	if baseDistance <= 0 then
+		return 1
+	end
+
+	local scale = baseDistance / math.max(distance, 1)
+	return math.clamp(scale, minScale, 1)
+end
+
+local function UpdateDamageNumberScales()
+	if not DamageNumberConfig.ENABLE_DISTANCE_SCALE then
+		return
+	end
+
+	local camera = workspace.CurrentCamera
+	if not camera then
+		return
+	end
+
+	for billboard, info in pairs(activeDamageNumbers) do
+		if not billboard or not billboard.Parent then
+			activeDamageNumbers[billboard] = nil
+		else
+			local adorneePart = info.adorneePart
+			local textLabel = info.textLabel
+			local uiStroke = info.uiStroke
+
+			if not adorneePart or not adorneePart.Parent or not textLabel or not textLabel.Parent then
+				activeDamageNumbers[billboard] = nil
+			else
+				local distance = (camera.CFrame.Position - adorneePart.Position).Magnitude
+				local scale = CalculateScaleByDistance(distance)
+
+				billboard.Size = UDim2.new(
+					0,
+					math.floor((DamageNumberConfig.BILLBOARD_WIDTH or 100) * scale + 0.5),
+					0,
+					math.floor((DamageNumberConfig.BILLBOARD_HEIGHT or 50) * scale + 0.5)
+				)
+
+				local baseTextSize = DamageNumberConfig.TEXT_SIZE or 24
+				textLabel.TextSize = math.max(8, math.floor(baseTextSize * scale + 0.5))
+
+				if uiStroke and uiStroke.Parent then
+					local baseThickness = DamageNumberConfig.STROKE_THICKNESS or 2
+					uiStroke.Thickness = math.max(1, baseThickness * scale)
+				end
+			end
+		end
+	end
+end
+
+RunService.RenderStepped:Connect(function(dt)
+	if not DamageNumberConfig.ENABLE_DISTANCE_SCALE then
+		return
+	end
+
+	distanceScaleAccum += dt
+	if distanceScaleAccum >= (DamageNumberConfig.SCALE_UPDATE_INTERVAL or 0.05) then
+		distanceScaleAccum = 0
+		UpdateDamageNumberScales()
+	end
+end)
 
 --[[
 创建伤害数字显示
@@ -84,9 +167,10 @@ local function ShowDamageNumber(unitModel, damage, attackerTeam, targetTeam)
 	-- 创建BillboardGui
 	local billboard = Instance.new("BillboardGui")
 	billboard.Name = "DamageNumber"
-	billboard.Size = UDim2.new(0, 100, 0, 50)
+	billboard.Size = UDim2.new(0, DamageNumberConfig.BILLBOARD_WIDTH, 0, DamageNumberConfig.BILLBOARD_HEIGHT)
 	billboard.StudsOffset = Vector3.new(0, 3, 0)  -- 从头顶稍上方开始
-	billboard.AlwaysOnTop = true
+	-- 不要透视/盖在模型上：让它参与深度测试，被场景模型遮挡
+	billboard.AlwaysOnTop = false
 	billboard.Parent = rootPart
 
 	-- 添加随机水平偏移
@@ -113,6 +197,14 @@ local function ShowDamageNumber(unitModel, damage, attackerTeam, targetTeam)
 	uiStroke.Color = DamageNumberConfig.STROKE_COLOR
 	uiStroke.Thickness = DamageNumberConfig.STROKE_THICKNESS
 	uiStroke.Parent = textLabel
+
+	-- 近大远小：注册到统一刷新列表
+	activeDamageNumbers[billboard] = {
+		adorneePart = rootPart,
+		textLabel = textLabel,
+		uiStroke = uiStroke,
+	}
+	UpdateDamageNumberScales()
 
 	-- 创建动画：向上移动
 	local startOffset = billboard.StudsOffset
@@ -151,6 +243,7 @@ local function ShowDamageNumber(unitModel, damage, attackerTeam, targetTeam)
 	-- 动画结束后清理
 	task.delay(DamageNumberConfig.DURATION, function()
 		if billboard and billboard.Parent then
+			activeDamageNumbers[billboard] = nil
 			billboard:Destroy()
 		end
 	end)
