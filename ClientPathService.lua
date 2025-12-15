@@ -466,6 +466,25 @@ function ClientPathService.FollowPath(unitModel, onReached, onFailed)
 		-- 只有当连接匹配时才处理（防止异步冲突）
 		if not pathState.MoveConnection then return end
 
+		-- ==================== V4.3修复：MoveTo控制权竞态 ====================
+		-- 校验：当前位置是否真的接近目标路点
+		-- 如果不接近，说明这个MoveToFinished是被其他MoveTo触发的（比如ClientUnitAI的直线MoveTo）
+		-- 此时应该忽略这次回调，但必须重新发起MoveTo到当前路点，否则单位会卡住
+		local unitPos = GetModelPosition(unitModel)
+		if unitPos and currentWaypoint then
+			local distanceToWaypoint = GetDistance3D(unitPos, currentWaypoint)
+			-- 如果距离超过阈值的2倍，说明这不是到达当前路点的回调
+			if distanceToWaypoint > CONFIG.WAYPOINT_REACH_THRESHOLD * 2 then
+				DebugLog(string.format("%s MoveToFinished被误触发: 距离路点%.1f, 重新MoveTo",
+					unitModel.Name, distanceToWaypoint))
+				-- 关键修复：重新发起MoveTo到当前路点，否则单位会卡住
+				humanoid:MoveTo(currentWaypoint)
+				-- 保留连接，等待下次MoveToFinished
+				return
+			end
+		end
+		-- ==================== 修复结束 ====================
+
 		pathState.MoveConnection:Disconnect()
 		pathState.MoveConnection = nil
 		pathState.CurrentWaypointIndex = nil  -- 清除当前目标索引标记

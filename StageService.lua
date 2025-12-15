@@ -361,6 +361,23 @@ function StageService.GetOrCreateStage(playerId, stageNum, resetAirWall)
 
         local existing = stageFolder:FindFirstChild("Stage001")
         if existing then
+            -- V5.7修复：检查敌人是否存在，如果被销毁则重新加载（修复Restart后关卡瞬间消失的问题）
+            local idleFloorEnemy = existing:FindFirstChild("IdleFloorEnemy", true)
+            if idleFloorEnemy then
+                local hasEnemies = false
+                for _, child in ipairs(idleFloorEnemy:GetChildren()) do
+                    if child:IsA("Model") and child:FindFirstChild("Humanoid") then
+                        hasEnemies = true
+                        break
+                    end
+                end
+                if not hasEnemies then
+                    DebugLog("Stage001 敌人已被销毁，重新加载敌人数据")
+                    local chapterId = StageService.GetPlayerChapter(playerId)
+                    StageService.LoadEnemyData(existing, 1, chapterId)
+                end
+            end
+
             -- V2.0.4修复：只有显式要求时才重置空气墙状态
             if resetAirWall then
                 StageService.SetAirWallState(existing, false)

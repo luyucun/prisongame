@@ -685,7 +685,8 @@ local function UpdateMovingState(aiData, deltaTime)
 		end
 
 		if moveTarget then
-			-- ✅ 寻路修复：使用ClientPathService进行寻路，而不是直线移动
+			-- ==================== V4.3修复：MoveTo控制权竞态 ====================
+			-- 寻路修复：使用ClientPathService进行寻路，避免与FollowPath的MoveTo冲突
 			if CONFIG.PATHFINDING.ENABLED and distance > CONFIG.PATHFINDING.DIRECT_MOVE_THRESHOLD then
 				-- 距离较远时使用寻路
 				local pathStatus = ClientPathService.GetPathStatus(aiData.UnitModel)
@@ -703,20 +704,31 @@ local function UpdateMovingState(aiData, deltaTime)
 						DebugLog(aiData.UnitModel.Name, "寻路成功，开始跟随路径")
 					else
 						-- 寻路失败，回退到直线移动
+						-- V4.3关键：先清理路径状态，避免MoveToFinished冲突
+						ClientPathService.StopMovement(aiData.UnitModel)
 						humanoid:MoveTo(moveTarget)
 						DebugLog(aiData.UnitModel.Name, "寻路失败，使用直线移动")
 					end
 				elseif pathStatus == ClientPathService.PathStatus.SUCCESS then
-					-- 已有有效路径，继续跟随
+					-- ✅ 已有有效路径，继续跟随
+					-- V4.3修复：不额外调用MoveTo，避免与FollowPath内部的MoveTo冲突
+					-- FollowPath会在内部自动调用humanoid:MoveTo(waypoint)
+					-- 这里只调用FollowPath，确保路径继续推进
 					ClientPathService.FollowPath(aiData.UnitModel, nil, nil)
 				else
 					-- 路径正在计算中或其他状态，暂时直线移动
+					-- V4.3关键：先清理路径状态，避免MoveToFinished冲突
+					ClientPathService.StopMovement(aiData.UnitModel)
 					humanoid:MoveTo(moveTarget)
 				end
 			else
 				-- 距离较近时直接移动（不需要寻路）
+				-- V4.3关键修复：切换到直线移动前，必须先清理路径状态
+				-- 否则FollowPath的MoveToFinished回调还活着，会收到误触发
+				ClientPathService.StopMovement(aiData.UnitModel)
 				humanoid:MoveTo(moveTarget)
 			end
+			-- ==================== 修复结束 ====================
 		end
 	end
 end
