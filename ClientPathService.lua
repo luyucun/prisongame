@@ -206,6 +206,7 @@ local function InitPathState(unitModel)
 		Status = PathStatus.IDLE,
 		BlockedConnection = nil,
 		MoveConnection = nil,
+		CurrentWaypointIndex = nil, -- V4.2新增：记录当前正在前往的路点索引
 	}
 	pathStates[unitModel] = pathState
 	return pathState
@@ -252,6 +253,7 @@ function ClientPathService.ClearPath(unitModel)
 	pathState.Index = 0
 	pathState.LastTargetPos = nil
 	pathState.Status = PathStatus.IDLE
+	pathState.CurrentWaypointIndex = nil  -- V4.2新增：清理当前路点索引标记
 end
 
 --[[
@@ -354,6 +356,7 @@ function ClientPathService.BuildPath(unitModel, targetPos)
 		if waypoints and #waypoints >= 2 then
 			pathState.Waypoints = DeepCopyWaypoints(waypoints)
 			pathState.Index = 2  -- 跳过起点
+			pathState.CurrentWaypointIndex = nil  -- V4.2新增：清理路点索引标记，确保新路径会正确执行
 			pathState.Status = PathStatus.SUCCESS
 
 			-- V4.1修复：跳过初始“回头路点”（最多跳过2个，且只在起始阶段）
@@ -431,12 +434,6 @@ function ClientPathService.FollowPath(unitModel, onReached, onFailed)
 		return
 	end
 
-	-- 清理旧的Move连接
-	if pathState.MoveConnection then
-		pathState.MoveConnection:Disconnect()
-		pathState.MoveConnection = nil
-	end
-
 	-- 获取当前目标路点
 	local currentWaypoint = pathState.Waypoints[pathState.Index]
 	if not currentWaypoint then
@@ -444,15 +441,34 @@ function ClientPathService.FollowPath(unitModel, onReached, onFailed)
 		return
 	end
 
+	-- ==================== V4.2修复：防止路点索引死锁 ====================
+	-- 如果当前正在走向同一个路点（通过索引比较），且连接还在，则什么都不做，直接返回
+	-- 避免高频调用导致 MoveToFinished 事件被反复断开，导致永远无法前进到下一个路点
+	if pathState.MoveConnection and pathState.CurrentWaypointIndex == pathState.Index then
+		return
+	end
+
+	-- 记录当前正在前往的路点索引（用于比对）
+	pathState.CurrentWaypointIndex = pathState.Index
+	-- ==================== 修复结束 ====================
+
+	-- 清理旧的Move连接
+	if pathState.MoveConnection then
+		pathState.MoveConnection:Disconnect()
+		pathState.MoveConnection = nil
+	end
+
 	-- 移动到当前路点
 	humanoid:MoveTo(currentWaypoint)
 
 	-- 监听MoveToFinished
 	pathState.MoveConnection = humanoid.MoveToFinished:Connect(function(reached)
-		if pathState.MoveConnection then
-			pathState.MoveConnection:Disconnect()
-			pathState.MoveConnection = nil
-		end
+		-- 只有当连接匹配时才处理（防止异步冲突）
+		if not pathState.MoveConnection then return end
+
+		pathState.MoveConnection:Disconnect()
+		pathState.MoveConnection = nil
+		pathState.CurrentWaypointIndex = nil  -- 清除当前目标索引标记
 
 		if reached then
 			-- 到达当前路点，前进到下一个

@@ -574,6 +574,12 @@ local function CreateUnitModel(unitId, position, instanceId, level, gridWidth, g
 		end
 	end
 
+	-- V3.11新增：确保Humanoid的AutoRotate启用，防止行军时掉头bug
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid.AutoRotate = true
+	end
+
 	-- V2.5寻路优化：设置兵种碰撞组，关闭兵种间碰撞
 	local CollisionSystem = ServerScriptService.Systems:FindFirstChild("CollisionSystem")
 	if CollisionSystem then

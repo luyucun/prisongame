@@ -840,11 +840,13 @@ function StageService.LoadEnemyData(stageFolder, stageNum, chapterId)
 				end
 			end
 
-			-- V2.5/V3.x：对敌人也应用Humanoid优化，避免开战瞬间“摔倒→起身”
+			-- V2.5/V3.x：对敌人也应用Humanoid优化，避免开战瞬间"摔倒→起身"
 			local humanoid = unitModel:FindFirstChildOfClass("Humanoid")
 			if humanoid then
 				humanoid.PlatformStand = false
 				humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+				-- V3.11新增：确保Humanoid的AutoRotate启用，防止行军时掉头bug
+				humanoid.AutoRotate = true
 				pcall(function()
 					CollisionSystem.OptimizeHumanoid(humanoid)
 				end)
