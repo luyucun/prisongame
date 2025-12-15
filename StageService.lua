@@ -19,6 +19,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace = game:GetService("Workspace")
+local Players = game:GetService("Players")
 
 -- 引用配置和系统
 local EnemyConfig = require(ReplicatedStorage.Config.EnemyConfig)
@@ -38,6 +39,12 @@ local function DebugLog(msg)
 		print("[StageService] " .. tostring(msg))
 	end
 end
+
+-- 副本隔离：关卡所属玩家可通过，其它玩家永远阻挡（Vx.x新增）
+local STAGE_OWNER_ATTR = "OwnerUserId"
+local AIR_WALL_OPEN_ATTR = "AirWallOpen"
+local PLAYER_AIR_WALL_NAME = "PlayerAirWall"
+local OWNER_NOCOLLIDE_PREFIX = "OwnerNoCollide_"
 
 --[[
 V3.11新增：播放展示动画（敌人生成后自动播放）
@@ -237,6 +244,123 @@ local function FindAirWall(stageFolder)
 end
 
 --[[
+	确保“玩家隔离墙”存在：始终阻挡其它玩家，但不影响寻路/兵种
+	说明：
+	- 原AirWall继续用于关卡推进/触发NavMesh更新
+	- PlayerAirWall用于隔离其它玩家（Owner通过NoCollisionConstraint放行）
+]]
+local function EnsurePlayerAirWall(stageFolder, airWall)
+	if not stageFolder then
+		return nil
+	end
+
+	airWall = airWall or FindAirWall(stageFolder)
+	if not airWall or not airWall:IsA("BasePart") then
+		return nil
+	end
+
+	local existing = FindStagePart(stageFolder, PLAYER_AIR_WALL_NAME)
+	if existing and existing:IsA("BasePart") then
+		pcall(function()
+			existing.CFrame = airWall.CFrame
+		end)
+		pcall(function()
+			existing.Size = airWall.Size
+		end)
+		pcall(function()
+			existing.Anchored = true
+			existing.CanCollide = true
+			existing.CanTouch = false
+			existing.CanQuery = false
+			existing.Transparency = 1
+			existing.CastShadow = false
+			existing.CollisionGroup = "Players" -- 只阻挡玩家，不阻挡Allies/Enemies
+		end)
+
+		local modifier = existing:FindFirstChildOfClass("PathfindingModifier")
+		if not modifier then
+			modifier = Instance.new("PathfindingModifier")
+			modifier.Parent = existing
+		end
+		modifier.Label = "PlayerAirWall"
+		modifier.PassThrough = true
+
+		return existing
+	end
+
+	local newWall = airWall:Clone()
+	newWall.Name = PLAYER_AIR_WALL_NAME
+	pcall(function()
+		newWall.Anchored = true
+		newWall.CanCollide = true
+		newWall.CanTouch = false
+		newWall.CanQuery = false
+		newWall.Transparency = 1
+		newWall.CastShadow = false
+		newWall.CollisionGroup = "Players" -- 只阻挡玩家，不阻挡Allies/Enemies
+	end)
+
+	-- 防止模板里意外带脚本/特效
+	for _, descendant in ipairs(newWall:GetDescendants()) do
+		if descendant:IsA("BaseScript") or descendant:IsA("ParticleEmitter") or descendant:IsA("Beam") then
+			descendant:Destroy()
+		end
+	end
+
+	local modifier = newWall:FindFirstChildOfClass("PathfindingModifier")
+	if not modifier then
+		modifier = Instance.new("PathfindingModifier")
+		modifier.Parent = newWall
+	end
+	modifier.Label = "PlayerAirWall"
+	modifier.PassThrough = true
+
+	newWall.Parent = airWall.Parent or stageFolder
+	return newWall
+end
+
+local function ClearOwnerNoCollideConstraints(playerAirWall)
+	if not playerAirWall then
+		return
+	end
+
+	for _, child in ipairs(playerAirWall:GetChildren()) do
+		if child:IsA("NoCollisionConstraint") and string.sub(child.Name, 1, #OWNER_NOCOLLIDE_PREFIX) == OWNER_NOCOLLIDE_PREFIX then
+			child:Destroy()
+		end
+	end
+end
+
+local function ApplyOwnerNoCollideConstraints(playerAirWall, ownerPlayer)
+	if not playerAirWall or not ownerPlayer then
+		return false
+	end
+
+	local character = ownerPlayer.Character
+	if not character then
+		return false
+	end
+
+	ClearOwnerNoCollideConstraints(playerAirWall)
+
+	local created = 0
+	local prefix = OWNER_NOCOLLIDE_PREFIX .. tostring(ownerPlayer.UserId) .. "_"
+
+	for _, part in ipairs(character:GetDescendants()) do
+		if part:IsA("BasePart") then
+			local nc = Instance.new("NoCollisionConstraint")
+			nc.Name = prefix .. part.Name
+			nc.Part0 = playerAirWall
+			nc.Part1 = part
+			nc.Parent = playerAirWall
+			created = created + 1
+		end
+	end
+
+	return created > 0
+end
+
+--[[
     设置空气墙状态（V2.0.3新增）
     @param stageFolder Folder - 关卡文件夹
     @param isOpen boolean - true=开启（玩家可通过，CanCollide=false），false=关闭（阻挡玩家，CanCollide=true）
@@ -245,10 +369,33 @@ end
 function StageService.SetAirWallState(stageFolder, isOpen)
     local airWall = FindAirWall(stageFolder)
 
-    if not airWall then
+    if not airWall or not airWall:IsA("BasePart") then
         -- 空气墙缺失，返回false但不中断流程
         return false
     end
+
+	-- 记录开关状态（用于玩家重生后重新绑定隔离墙放行）
+	pcall(function()
+		stageFolder:SetAttribute(AIR_WALL_OPEN_ATTR, isOpen and true or false)
+	end)
+
+	-- 确保隔离墙存在：其它玩家永远阻挡
+	local playerAirWall = EnsurePlayerAirWall(stageFolder, airWall)
+	if playerAirWall then
+		-- 默认阻挡Owner；仅当本关解封时放行Owner
+		ClearOwnerNoCollideConstraints(playerAirWall)
+
+		if isOpen then
+			local ownerUserId = stageFolder:GetAttribute(STAGE_OWNER_ATTR)
+			if ownerUserId then
+				local ownerPlayer = Players:GetPlayerByUserId(ownerUserId)
+				if ownerPlayer then
+					-- 如果此时角色未加载，CharacterAdded监听会补一次
+					ApplyOwnerNoCollideConstraints(playerAirWall, ownerPlayer)
+				end
+			end
+		end
+	end
 
     -- 设置碰撞属性（isOpen=true时，CanCollide=false，允许通过）
     airWall.CanCollide = not isOpen
@@ -260,6 +407,37 @@ function StageService.SetAirWallState(stageFolder, isOpen)
     end
 
     return true
+end
+
+--[[
+	玩家重生/换角色后：重新绑定当前已解封关卡的隔离墙放行
+	@param playerId number - 玩家ID
+]]
+function StageService.RefreshPlayerAirWallConstraintsForPlayer(playerId)
+	local player = Players:GetPlayerByUserId(playerId)
+	if not player or not player.Character then
+		return
+	end
+
+	local cache = StageService.StageCache[playerId]
+	if not cache then
+		return
+	end
+
+	for _, stageFolder in pairs(cache) do
+		if stageFolder and stageFolder.Parent then
+			local ownerUserId = stageFolder:GetAttribute(STAGE_OWNER_ATTR)
+			if ownerUserId == playerId and stageFolder:GetAttribute(AIR_WALL_OPEN_ATTR) == true then
+				local airWall = FindAirWall(stageFolder)
+				if airWall and airWall:IsA("BasePart") then
+					local playerAirWall = EnsurePlayerAirWall(stageFolder, airWall)
+					if playerAirWall then
+						ApplyOwnerNoCollideConstraints(playerAirWall, player)
+					end
+				end
+			end
+		end
+	end
 end
 
 --[[
@@ -307,6 +485,9 @@ function StageService.GetOrCreateStage(playerId, stageNum, resetAirWall)
                         if resetAirWall then
                             StageService.SetAirWallState(cached, false)
                         end
+						pcall(function()
+							cached:SetAttribute(STAGE_OWNER_ATTR, playerId)
+						end)
                         return cached
                     end
                 end
@@ -333,6 +514,9 @@ function StageService.GetOrCreateStage(playerId, stageNum, resetAirWall)
                 if resetAirWall then
                     StageService.SetAirWallState(cached, false)
                 end
+				pcall(function()
+					cached:SetAttribute(STAGE_OWNER_ATTR, playerId)
+				end)
                 return cached
             end
         end
@@ -382,6 +566,9 @@ function StageService.GetOrCreateStage(playerId, stageNum, resetAirWall)
             if resetAirWall then
                 StageService.SetAirWallState(existing, false)
             end
+			pcall(function()
+				existing:SetAttribute(STAGE_OWNER_ATTR, playerId)
+			end)
             -- 缓存并返回
             if not StageService.StageCache[playerId] then
                 StageService.StageCache[playerId] = {}
@@ -393,6 +580,9 @@ function StageService.GetOrCreateStage(playerId, stageNum, resetAirWall)
         -- 2. 场景中不存在，动态生成Stage001
         local stage001 = StageService.GenerateStage001(homeId, playerId)  -- V3.7: 传递playerId
         if stage001 then
+			pcall(function()
+				stage001:SetAttribute(STAGE_OWNER_ATTR, playerId)
+			end)
             -- 缓存
             if not StageService.StageCache[playerId] then
                 StageService.StageCache[playerId] = {}
@@ -407,6 +597,9 @@ function StageService.GetOrCreateStage(playerId, stageNum, resetAirWall)
 
     -- 缓存
     if stageFolder then
+		pcall(function()
+			stageFolder:SetAttribute(STAGE_OWNER_ATTR, playerId)
+		end)
         if not StageService.StageCache[playerId] then
             StageService.StageCache[playerId] = {}
         end
@@ -493,6 +686,9 @@ function StageService.GenerateStage001(homeId, playerId)
 
         -- 7. 命名
         newStage.Name = "Stage001"
+		pcall(function()
+			newStage:SetAttribute(STAGE_OWNER_ATTR, playerId)
+		end)
 
         -- 8. 放入场景
         local stageContainer = Workspace.Home:FindFirstChild("PlayerHome" .. homeId):FindFirstChild("Stage")
@@ -610,6 +806,9 @@ function StageService.GenerateStage(playerId, stageNum)
 
         -- 命名
         newStage.Name = string.format("Stage%03d", stageNum)
+		pcall(function()
+			newStage:SetAttribute(STAGE_OWNER_ATTR, playerId)
+		end)
 
         -- 放入场景
         local stageContainer = Workspace.Home:FindFirstChild("PlayerHome" .. homeId):FindFirstChild("Stage")
@@ -974,6 +1173,31 @@ function StageService.LockStage(playerId, stageNum)
     end
 
     return StageService.SetAirWallState(stageFolder, false)
+end
+
+-- ==================== 玩家重生：隔离墙放行补丁 ====================
+
+local function SetupPlayerAirWallRefresh(player)
+	local function RefreshLater()
+		task.defer(function()
+			-- 等角色部件加载完成一点点，避免漏绑定
+			task.wait(0.2)
+			StageService.RefreshPlayerAirWallConstraintsForPlayer(player.UserId)
+		end)
+	end
+
+	player.CharacterAdded:Connect(function()
+		RefreshLater()
+	end)
+
+	if player.Character then
+		RefreshLater()
+	end
+end
+
+Players.PlayerAdded:Connect(SetupPlayerAirWallRefresh)
+for _, player in ipairs(Players:GetPlayers()) do
+	SetupPlayerAirWallRefresh(player)
 end
 
 -- 导出
