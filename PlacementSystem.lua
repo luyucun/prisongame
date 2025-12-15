@@ -729,6 +729,18 @@ function PlacementSystem.PlaceUnit(player, instanceId, position)
 	unitInstance.IsPlaced = true
 	unitInstance.PlacedPosition = actualPosition
 
+	-- 🔧 修复：将血量同步到模型的Humanoid
+	-- 确保model.Humanoid的血量与unitInstance一致（防止首战时读取错误血量）
+	local humanoid = model:FindFirstChild("Humanoid")
+	if humanoid then
+		-- 使用unitInstance的血量，如果没有则使用配置表的默认值
+		local health = unitInstance.Health or UnitConfig.CalculateHealth(unitInstance.UnitId, unitInstance.Level)
+		local maxHealth = unitInstance.MaxHealth or UnitConfig.CalculateHealth(unitInstance.UnitId, unitInstance.Level)
+		humanoid.MaxHealth = maxHealth
+		humanoid.Health = math.clamp(health, 0, maxHealth)
+		-- print(GameConfig.LOG_PREFIX, "[PlacementSystem.PlaceUnit] 同步血量到Humanoid:", unitInstance.UnitId, "HP:", humanoid.Health, "/", humanoid.MaxHealth)
+	end
+
 	-- V2.0: 占据网格 (使用gridWidth和gridDepth)
 	OccupyGrid(player, gridX, gridZ, gridWidth, gridDepth, instanceId)
 
@@ -1372,6 +1384,19 @@ function PlacementSystem.RestorePlacedUnits(player)
 				unitInstance.MaxHealth = savedData.MaxHealth
 			end
 
+			-- 🔧 修复：将血量同步到模型的Humanoid
+			-- 问题：如果不同步，model.Humanoid会保持模板默认值（通常100）
+			-- 导致首战开战时BattleManager读取错误的血量，造成"瞬间半血"
+			local humanoid = model:FindFirstChild("Humanoid")
+			if humanoid then
+				-- 使用存档的血量，如果没有则使用配置表的默认值
+				local health = savedData.Health or UnitConfig.CalculateHealth(savedData.UnitId, savedData.Level or 1)
+				local maxHealth = savedData.MaxHealth or UnitConfig.CalculateHealth(savedData.UnitId, savedData.Level or 1)
+				humanoid.MaxHealth = maxHealth
+				humanoid.Health = math.clamp(health, 0, maxHealth)  -- 确保血量不超过最大值
+				-- print(GameConfig.LOG_PREFIX, "[PlacementSystem] 同步血量到Humanoid:", savedData.UnitId, "HP:", humanoid.Health, "/", humanoid.MaxHealth)
+			end
+
 			-- 4.8 占据网格
 			OccupyGrid(player, savedData.GridX, savedData.GridZ, gridWidth, gridDepth, instanceId)
 
@@ -1700,6 +1725,21 @@ function PlacementSystem.GetPlacedUnitModels(player)
 	end
 
 	return units
+end
+
+--[[
+V4.0新增：暴露CreateUnitModel供CampaignManager使用
+用于战役结束后重新创建丢失的单位
+@param unitId string - 兵种ID
+@param position Vector3 - 生成位置
+@param instanceId string - 实例ID
+@param level number - 等级
+@param gridWidth number - 占地宽度
+@param gridDepth number - 占地深度
+@return Model|nil - 创建的单位模型
+]]
+function PlacementSystem.CreateUnitModel(unitId, position, instanceId, level, gridWidth, gridDepth)
+	return CreateUnitModel(unitId, position, instanceId, level, gridWidth, gridDepth)
 end
 
 return PlacementSystem

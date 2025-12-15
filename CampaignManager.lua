@@ -100,7 +100,8 @@ local function FireMainlineProgressEvent(player: Player?, action: string, chapte
 
 	-- 仅在正式服有意义；Studio里不会在后台看到数据，仍允许调用（无害），但必须保证不报错
 	local success, err = pcall(function()
-		AnalyticsService:FireCustomEvent(player, "MainlineProgress", {
+		-- 使用新版API LogCustomEvent 代替已废弃的 FireCustomEvent
+		AnalyticsService:LogCustomEvent(player, "MainlineProgress", 1, {
 			action = action, -- "StageClear" / "ChapterClear"
 			chapter = chapterId,
 			stage = stageNum,
@@ -2538,43 +2539,125 @@ function CampaignManager.RespawnUnits(campaignData)
 				end
 			end
 
-			-- 如果仍然无效,标记为失败但不阻止其他单位
+			-- V4.0修复：如果实例无法恢复，尝试重新创建单位
 			if not instanceValid then
-				warn(string.format("[CampaignManager] ❌ %s 无法恢复,需要玩家重新进入游戏", safeUnitId))
+				DebugLog(string.format("  ⚠ %s 实例无法恢复，尝试重新创建单位...", safeUnitId))
+
+				-- 方案3：从UnitConfig重新创建单位（最后的保险方案）
+				if PlacementSystem then
+					local success, newModel = pcall(function()
+						-- 使用PlacementSystem的内部CreateUnitModel函数重新创建
+						-- 注意：CreateUnitModel内部会设置Parent=Workspace并校准Y坐标
+						local placementModule = SystemsFolder:FindFirstChild("PlacementSystem")
+						if placementModule then
+							local PS = require(placementModule)
+
+							-- 调用CreateUnitModel创建新单位
+							-- 参数: unitId, position, instanceId, level, gridWidth, gridDepth
+							local newUnitModel = PS.CreateUnitModel(
+								unitData.UnitId,
+								targetPosition,
+								unitData.InstanceId,
+								unitData.Level or 1,
+								gridWidth,
+								gridDepth
+							)
+
+							return newUnitModel
+						end
+						return nil
+					end)
+
+					if success and newModel then
+						-- CreateUnitModel已经设置了Parent和位置，只需验证
+						if newModel.Parent then
+							currentInstance = newModel
+							instanceValid = true
+							DebugLog(string.format("    ✅ %s 重新创建成功", safeUnitId))
+
+							-- 立即重置透明度和UI
+							if UnitAI.ResetModelTransparency then
+								UnitAI.ResetModelTransparency(currentInstance)
+							end
+							local head = currentInstance:FindFirstChild("Head")
+							if head then
+								for _, child in ipairs(head:GetChildren()) do
+									if child:IsA("BillboardGui") then
+										child.Enabled = true
+									end
+								end
+							end
+
+							-- 更新PlacementSystem中的引用
+							local instanceId = unitData.InstanceId
+							if instanceId then
+								local placedUnitsData = PlacementSystem.GetPlacedUnits(campaignData.Player)
+								for _, pData in ipairs(placedUnitsData) do
+									if pData.InstanceId == instanceId then
+										pData.Model = currentInstance
+										DebugLog(string.format("    ✅ %s PlacementSystem引用已更新为新模型", safeUnitId))
+										break
+									end
+								end
+							end
+
+							-- V4.0修复：标记为新创建的单位，跳过后续的传送步骤
+							-- 因为CreateUnitModel已经正确设置了位置和Y轴校准
+							currentInstance:SetAttribute("_JustCreated", true)
+						end
+					end
+				end
+			end
+
+			-- 如果所有方案都失败，最终标记为失败
+			if not instanceValid then
+				warn(string.format("[CampaignManager] ❌ %s 无法恢复且无法重新创建，需要玩家重新进入游戏", safeUnitId))
 				failCount = failCount + 1
 				continue
 			end
 
-			recreateCount = recreateCount + 1
+			-- 统计重新创建的单位（只有当前instance和原始unitInstance不同时才计数）
+			if currentInstance ~= unitInstance then
+				recreateCount = recreateCount + 1
+			end
 		end
 
 		-- 执行复生流程
 		local teleportSuccess = false
 
-		-- V3.8修复：重置透明度（确保模型可见）
-		if currentInstance then
-			-- 立即重置一次
-			if UnitAI.ResetModelTransparency then
-				UnitAI.ResetModelTransparency(currentInstance)
+		-- V4.0修复：检查是否是新创建的单位（已经有正确位置，跳过传送）
+		local isJustCreated = currentInstance:GetAttribute("_JustCreated")
+		if isJustCreated then
+			-- 清除标记
+			currentInstance:SetAttribute("_JustCreated", nil)
+			teleportSuccess = true
+			DebugLog(string.format("    %s 是新创建的单位，跳过传送（位置已由CreateUnitModel设置）", safeUnitId))
+		else
+			-- V3.8修复：重置透明度（确保模型可见）
+			if currentInstance then
+				-- 立即重置一次
+				if UnitAI.ResetModelTransparency then
+					UnitAI.ResetModelTransparency(currentInstance)
+				end
 			end
+
+			-- 创建目标CFrame
+			local groundedCFrame = CFrame.new(targetPosition.X, targetPosition.Y, targetPosition.Z)
+
+			-- 执行传送
+			pcall(function()
+				if currentInstance.PivotTo then
+					currentInstance:PivotTo(groundedCFrame)
+					teleportSuccess = true
+				elseif currentInstance.PrimaryPart then
+					currentInstance:SetPrimaryPartCFrame(groundedCFrame)
+					teleportSuccess = true
+				elseif currentInstance:FindFirstChild("HumanoidRootPart") then
+					currentInstance.HumanoidRootPart.CFrame = groundedCFrame
+					teleportSuccess = true
+				end
+			end)
 		end
-
-		-- 创建目标CFrame
-		local groundedCFrame = CFrame.new(targetPosition.X, targetPosition.Y, targetPosition.Z)
-
-		-- 执行传送
-		pcall(function()
-			if currentInstance.PivotTo then
-				currentInstance:PivotTo(groundedCFrame)
-				teleportSuccess = true
-			elseif currentInstance.PrimaryPart then
-				currentInstance:SetPrimaryPartCFrame(groundedCFrame)
-				teleportSuccess = true
-			elseif currentInstance:FindFirstChild("HumanoidRootPart") then
-				currentInstance.HumanoidRootPart.CFrame = groundedCFrame
-				teleportSuccess = true
-			end
-		end)
 
 		if not teleportSuccess then
 			warn(string.format("[CampaignManager] ⚠ %s 传送失败", safeUnitId))
