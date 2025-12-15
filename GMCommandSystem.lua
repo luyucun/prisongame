@@ -19,6 +19,7 @@ GM命令系统模块
 - /addcoins <amount> : 添加金币
 - /clearcoins : 清空金币
 - /unitlist : 列出所有可用的兵种ID
+- /mainprogress : 查看主线通关打点(第几章第几关)
 - /addskill <skillId> [count] : 添加技能到背包 (V3.0)
 - /removeskill <skillId> [count] : 移除技能 (V3.0)
 - /clearskills : 清空技能背包 (V3.0)
@@ -333,6 +334,7 @@ local function CMD_Help(player, args)
 
 数据管理(V2.9):
 /resetdata - 重置所有玩家数据(需二次确认)
+/mainprogress - 查看主线通关打点(第几章第几关)
 
 系统调试:
 /iconpreload - 检查图标预加载状态
@@ -343,6 +345,24 @@ local function CMD_Help(player, args)
 提示: 按V键打开战斗测试UI
     ]]
     SendMessage(player, helpText)
+end
+
+--[[
+命令: /mainprogress
+查看主线通关打点（第几章第几关）
+]]
+local function CMD_MainProgress(player, args)
+    local progress = DataManager.GetChapterProgress(player)
+
+    local currentChapter = tonumber(progress.CurrentChapter) or 1
+    local completedChapters = tonumber(progress.CompletedChapters) or 0
+    local maxClearedChapter = tonumber(progress.MaxClearedChapter) or 1
+    local maxClearedStage = tonumber(progress.MaxClearedStage) or 0
+
+    SendMessage(player, "=== 主线通关打点 ===")
+    SendMessage(player, string.format("当前挑战章节: %d", currentChapter))
+    SendMessage(player, string.format("已通关章节数: %d", completedChapters))
+    SendMessage(player, string.format("最大通关进度: 第%d章第%d关", maxClearedChapter, maxClearedStage))
 end
 
 --[[
@@ -1091,6 +1111,7 @@ local COMMAND_HANDLERS = {
     ["addidlecoins"] = CMD_AddIdleCoins,  -- V2.6新增
     ["idlecoins"] = CMD_IdleCoins,        -- V2.6新增
     ["resetdata"] = CMD_ResetData,        -- V2.9新增
+    ["mainprogress"] = CMD_MainProgress,  -- 主线通关打点
     ["addskill"] = CMD_AddSkill,          -- V3.0新增
     ["removeskill"] = CMD_RemoveSkill,    -- V3.0新增
     ["clearskills"] = CMD_ClearSkills,    -- V3.0新增

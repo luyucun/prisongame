@@ -352,7 +352,17 @@ local function CreateProximityPromptForHome(homeId)
 		if playerHomeId == homeId then
 			IdleCoinSystem.OnCollectRequest(triggerPlayer)
 		else
-			print(GameConfig.LOG_PREFIX, "[IdleCoinSystem] 玩家 " .. triggerPlayer.Name .. " 尝试领取非自己基地的金币")
+			-- 玩家尝试领取其他玩家家园的金币，拒绝并给予反馈
+			print(GameConfig.LOG_PREFIX, "[IdleCoinSystem] 玩家 " .. triggerPlayer.Name .. " 尝试领取非自己基地的金币，已拒绝")
+
+			-- 发送错误提示到客户端（通过PlayerEvents RemoteEvent）
+			local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
+			if eventsFolder then
+				local playerEvents = eventsFolder:FindFirstChild("PlayerEvents")
+				if playerEvents and playerEvents:IsA("RemoteEvent") then
+					playerEvents:FireClient(triggerPlayer, "ShowError", "这不是你的邮箱！")
+				end
+			end
 		end
 	end)
 

@@ -230,7 +230,9 @@ end
 @return boolean - true表示移动设备
 ]]
 function PlacementHelper.IsMobileDevice()
-    return UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+    -- 只要支持触摸就按移动端处理
+    -- 说明：避免部分设备外接键盘导致KeyboardEnabled为true，从而误判为PC端
+    return UserInputService.TouchEnabled
 end
 
 --[[

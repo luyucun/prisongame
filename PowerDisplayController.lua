@@ -180,16 +180,71 @@ end
 	处理服务端发来的战斗力更新
 	@param totalPower number - 总战斗力
 ]]
-local function OnPowerUpdate(totalPower)
-	if not isInitialized then
+local function OnPowerUpdate(playerNameOrTotalPower, homeIdOrNil, totalPowerOrNil)
+	-- 🔥V3.9.2修复：兼容新旧两种参数格式
+	local playerName, homeId, totalPower
+
+	if type(playerNameOrTotalPower) == "number" and homeIdOrNil == nil and totalPowerOrNil == nil then
+		-- 旧版格式：OnPowerUpdate(totalPower)
+		-- 这是给自己的战力更新
+		if not isInitialized then
+			return
+		end
+
+		totalPower = playerNameOrTotalPower
+		playerName = player.Name
+		homeId = GetPlayerHomeId(false)
+
+		if not homeId then
+			return
+		end
+
+		UpdateAllDisplays(totalPower)
+		return
+	elseif type(playerNameOrTotalPower) == "string" and type(homeIdOrNil) == "number" and type(totalPowerOrNil) == "number" then
+		-- 新版格式：OnPowerUpdate(playerName, homeId, totalPower)
+		-- 这是广播给所有客户端的更新
+		playerName = playerNameOrTotalPower
+		homeId = homeIdOrNil
+		totalPower = totalPowerOrNil
+	else
+		-- 参数格式不正确
+		warn("[PowerDisplayController] OnPowerUpdate 参数格式不正确:", playerNameOrTotalPower, homeIdOrNil, totalPowerOrNil)
 		return
 	end
 
-	if not totalPower or type(totalPower) ~= "number" then
+	-- 查找对应基地的Information模型
+	local homeFolder = Workspace:FindFirstChild("Home")
+	if not homeFolder then
 		return
 	end
 
-	UpdateAllDisplays(totalPower)
+	local playerHome = homeFolder:FindFirstChild("PlayerHome" .. homeId)
+	if not playerHome then
+		return
+	end
+
+	local information = playerHome:FindFirstChild("Information")
+	if not information then
+		return
+	end
+
+	local part = information:FindFirstChild("Part")
+	if not part then
+		return
+	end
+
+	-- 更新所有SurfaceGui
+	for _, child in ipairs(part:GetChildren()) do
+		if child:IsA("SurfaceGui") and (child.Name == "SurfaceGui01" or child.Name == "SurfaceGui02") then
+			UpdateSurfaceGui(child, playerName, totalPower)
+		end
+	end
+
+	-- 如果是自己的战力更新，也更新本地缓存的显示
+	if homeId == GetPlayerHomeId(false) and isInitialized then
+		UpdateAllDisplays(totalPower)
+	end
 end
 
 -- ==================== 初始化 ====================

@@ -526,11 +526,21 @@ function BattleManager.StartBattle(battleId)
 		local unitId = unit:GetAttribute("UnitId") or unit.Name
 		local level = unit:GetAttribute("Level") or 1
 
+		-- V2.8.9修复：获取当前血量用于跨关卡血量继承
+		-- 攻击方单位（友军）在战役中需要保留残血状态
+		local currentHealth = nil
+		local humanoid = unit:FindFirstChild("Humanoid")
+		if humanoid and humanoid.Health > 0 then
+			currentHealth = humanoid.Health
+			DebugLog(string.format("[V2.8.9] 攻击方单位 %s 当前血量: %.1f", unit.Name, currentHealth))
+		end
+
 		-- V4.0调试：输出单位信息
 		DebugLog(string.format("[V4.0] 准备初始化攻击方单位: Name=%s, UnitId=%s, Level=%d, HasUnitIdAttr=%s",
 			unit.Name, tostring(unitId), level, tostring(unit:GetAttribute("UnitId") ~= nil)))
 
-		local success = CombatSystem.InitializeUnit(unit, unitId, level, BattleConfig.Team.ATTACK, battleId)
+		-- V2.8.9: 传递currentHealth参数实现血量继承
+		local success = CombatSystem.InitializeUnit(unit, unitId, level, BattleConfig.Team.ATTACK, battleId, currentHealth)
 
 		if success then
 			PhysicsManager.ConfigureUnitPhysics(unit, "ally")

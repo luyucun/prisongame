@@ -27,6 +27,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
+local ContextActionService = game:GetService("ContextActionService")
 
 -- 引用工具模块
 local PlacementHelper = require(script.Parent.Parent.Utils.PlacementHelper)
@@ -59,6 +60,15 @@ local placementState = {
 	isMobile = false,            -- 是否为移动设备
 	-- V2.0重构: placedModels使用GridWidth和GridDepth
 	placedModels = {},           -- 客户端跟踪已放置的模型 {model = {gridX, gridZ, gridWidth, gridDepth}}
+	lastIsValid = true,          -- 当前预览位置是否合法（用于移动端交互）
+	confirmInFlight = false,     -- 确认请求是否进行中（防止重复FireServer）
+	-- 移动端触摸跟踪（用于“点格子确认放置”）
+	activeTouch = nil,           -- 当前用于放置的触摸InputObject
+	touchStartPos = nil,         -- 触摸开始的屏幕坐标(Vector2)
+	touchStartTime = 0,          -- 触摸开始时间(os.clock)
+	-- PutConfirm UI按钮引用（用于避免点击UI时误触发世界确认）
+	mobileConfirmButton = nil,   -- PutConfirm/ButtonBg/Confirm
+	mobileCancelButton = nil,    -- PutConfirm/ButtonBg/Cancel
 }
 
 -- ==================== 初始化 ====================
@@ -346,6 +356,11 @@ function PlacementController.ConfirmPlacement()
 		return
 	end
 
+	-- 防止重复提交
+	if placementState.confirmInFlight then
+		return
+	end
+
 	-- 防御性检查：确保IdleFloor仍然有效
 	if not placementState.idleFloor or not placementState.idleFloor.Parent then
 		warn("[PlacementController] IdleFloor已失效或被删除，无法放置")
@@ -365,6 +380,7 @@ function PlacementController.ConfirmPlacement()
 	if placementEvents then
 		local confirmEvent = placementEvents:FindFirstChild("ConfirmPlacement")
 		if confirmEvent then
+			placementState.confirmInFlight = true
 			confirmEvent:FireServer(placementState.currentInstanceId, finalPosition)
 		end
 	end
@@ -415,6 +431,14 @@ function PlacementController.CancelPlacement()
 	placementState.currentGridDepth = 1
 	placementState.lastGridX = nil
 	placementState.lastGridZ = nil
+	placementState.lastIsValid = true
+	placementState.confirmInFlight = false
+	placementState.activeTouch = nil
+	placementState.touchStartPos = nil
+	placementState.touchStartTime = 0
+
+	-- 退出放置时，恢复移动端相机触摸旋转
+	UnbindCameraRotationBlock()
 
 	-- 通知BackpackDisplay退出放置模式
 	if _G.BackpackDisplay then
@@ -497,6 +521,7 @@ function UpdatePreviewPosition(worldPos)
 
 	-- 检测位置是否有效（用于切换Grid颜色）
 	local isValid = IsPositionValid(gridX, gridZ)
+	placementState.lastIsValid = isValid
 
 	-- V2.0: 更新Grid提示块（绿色或红色）
 	GridHelper.ShowGrid(placementState.currentGridWidth, snappedPos, isValid, placementState.currentGridDepth)
@@ -523,7 +548,8 @@ function ConnectPCInput()
 		end
 
 		-- 获取鼠标在地板上的位置
-		local mouseWorldPos = PlacementHelper.GetMouseWorldPosition(camera, mouse, placementState.idleFloor)
+		local currentCamera = Workspace.CurrentCamera or camera
+		local mouseWorldPos = PlacementHelper.GetMouseWorldPosition(currentCamera, mouse, placementState.idleFloor)
 		if mouseWorldPos then
 			UpdatePreviewPosition(mouseWorldPos)
 		end
@@ -559,6 +585,89 @@ end
 
 -- ==================== 移动端输入处理 ====================
 
+-- 移动端“点一下确认放置”的判定参数
+local TOUCH_TAP_MAX_MOVE_PX = 18
+local TOUCH_TAP_MAX_DURATION = 0.35
+
+-- 移动端拖动放置时屏蔽相机旋转（避免手指拖动物体导致镜头跟着转）
+local CAMERA_ROTATION_BLOCK_ACTION = "PlacementController_BlockCameraRotation"
+local cameraRotationBlockBound = false
+
+local function ToScreenVector2(pos)
+	return Vector2.new(pos.X, pos.Y)
+end
+
+local function IsPointInGuiObject(guiObject, screenPos: Vector2)
+	if not guiObject or not guiObject.Parent then
+		return false
+	end
+	if not guiObject:IsA("GuiObject") then
+		return false
+	end
+	if not guiObject.Visible then
+		return false
+	end
+
+	local absPos = guiObject.AbsolutePosition
+	local absSize = guiObject.AbsoluteSize
+	return screenPos.X >= absPos.X
+		and screenPos.X <= absPos.X + absSize.X
+		and screenPos.Y >= absPos.Y
+		and screenPos.Y <= absPos.Y + absSize.Y
+end
+
+local function IsTouchOnMobileConfirmUI(screenPos: Vector2)
+	if IsPointInGuiObject(placementState.mobileConfirmButton, screenPos) then
+		return true
+	end
+	if IsPointInGuiObject(placementState.mobileCancelButton, screenPos) then
+		return true
+	end
+	return false
+end
+
+local function BindCameraRotationBlock()
+	-- 方案一（官方推荐）：用ContextActionService吃掉触摸，阻止默认相机旋转
+	if cameraRotationBlockBound then
+		return
+	end
+	cameraRotationBlockBound = true
+
+	ContextActionService:BindActionAtPriority(
+		CAMERA_ROTATION_BLOCK_ACTION,
+		function(_, _, inputObject)
+			-- 只在“移动端放置状态”下拦截
+			if not placementState.isMobile or not placementState.isPlacing then
+				return Enum.ContextActionResult.Pass
+			end
+
+			-- 只拦截触摸输入
+			if inputObject and inputObject.UserInputType == Enum.UserInputType.Touch then
+				-- 允许点确认/取消按钮（避免阻止UI交互）
+				local screenPos = ToScreenVector2(inputObject.Position)
+				if IsTouchOnMobileConfirmUI(screenPos) then
+					return Enum.ContextActionResult.Pass
+				end
+				return Enum.ContextActionResult.Sink
+			end
+
+			return Enum.ContextActionResult.Pass
+		end,
+		false,
+		-- 相机默认优先级较低，使用高优先级+1确保先于相机处理
+		Enum.ContextActionPriority.High.Value + 1,
+		Enum.UserInputType.Touch
+	)
+end
+
+function UnbindCameraRotationBlock()
+	if not cameraRotationBlockBound then
+		return
+	end
+	cameraRotationBlockBound = false
+	ContextActionService:UnbindAction(CAMERA_ROTATION_BLOCK_ACTION)
+end
+
 --[[
 连接移动端输入事件
 ]]
@@ -583,10 +692,27 @@ function ConnectMobileInput()
 			return
 		end
 
+		-- 避免点击移动端确认/取消按钮时误移动预览
+		local startScreenPos = ToScreenVector2(touch.Position)
+		if IsTouchOnMobileConfirmUI(startScreenPos) then
+			return
+		end
+
+		-- 只追踪一个触摸（避免多指/摇杆导致预览跳动）
+		if placementState.activeTouch and placementState.activeTouch ~= touch then
+			return
+		end
+
 		-- 获取触摸点在地板上的位置
-		local touchWorldPos = PlacementHelper.GetTouchWorldPosition(camera, touch.Position, placementState.idleFloor)
+		local currentCamera = Workspace.CurrentCamera or camera
+		local touchWorldPos = PlacementHelper.GetTouchWorldPosition(currentCamera, touch.Position, placementState.idleFloor)
 		if touchWorldPos then
+			placementState.activeTouch = touch
+			placementState.touchStartPos = startScreenPos
+			placementState.touchStartTime = os.clock()
 			UpdatePreviewPosition(touchWorldPos)
+			-- 拖动开始：禁用相机触摸旋转
+			BindCameraRotationBlock()
 		end
 	end)
 
@@ -610,10 +736,81 @@ function ConnectMobileInput()
 			return
 		end
 
+		-- 只处理当前追踪的触摸
+		if not placementState.activeTouch or placementState.activeTouch ~= touch then
+			return
+		end
+
 		-- 获取触摸点在地板上的位置
-		local touchWorldPos = PlacementHelper.GetTouchWorldPosition(camera, touch.Position, placementState.idleFloor)
+		local currentCamera = Workspace.CurrentCamera or camera
+		local touchWorldPos = PlacementHelper.GetTouchWorldPosition(currentCamera, touch.Position, placementState.idleFloor)
 		if touchWorldPos then
 			UpdatePreviewPosition(touchWorldPos)
+		end
+	end)
+
+	-- 触摸结束：如果是“点一下”，则直接确认放置（移动端无需额外按钮）
+	UserInputService.TouchEnded:Connect(function(touch, gameProcessed)
+		-- ? V2.0.2关键修复：放置状态下允许穿透UI
+		if gameProcessed and not placementState.isPlacing then
+			return
+		end
+
+		-- ? 额外安全检查：避免在文本输入时误触发
+		if gameProcessed and UserInputService:GetFocusedTextBox() then
+			return
+		end
+
+		if not placementState.isPlacing or not placementState.previewModel then
+			return
+		end
+
+		if not placementState.idleFloor then
+			return
+		end
+
+		-- 只处理当前追踪的触摸
+		if not placementState.activeTouch or placementState.activeTouch ~= touch then
+			return
+		end
+
+		local endScreenPos = ToScreenVector2(touch.Position)
+
+		-- 如果点在确认/取消按钮上，交给按钮事件处理
+		if IsTouchOnMobileConfirmUI(endScreenPos) then
+			placementState.activeTouch = nil
+			placementState.touchStartPos = nil
+			placementState.touchStartTime = 0
+			-- 拖动结束：恢复相机触摸旋转
+			UnbindCameraRotationBlock()
+			return
+		end
+
+		local startPos = placementState.touchStartPos
+		local startTime = placementState.touchStartTime
+
+		-- 清理触摸追踪
+		placementState.activeTouch = nil
+		placementState.touchStartPos = nil
+		placementState.touchStartTime = 0
+		-- 拖动结束：恢复相机触摸旋转
+		UnbindCameraRotationBlock()
+
+		if not startPos or not startTime or startTime <= 0 then
+			return
+		end
+
+		local moveDist = (endScreenPos - startPos).Magnitude
+		local duration = os.clock() - startTime
+
+		-- 点一下：位移很小 + 时间很短
+		if moveDist <= TOUCH_TAP_MAX_MOVE_PX and duration <= TOUCH_TAP_MAX_DURATION then
+			local currentCamera = Workspace.CurrentCamera or camera
+			local touchWorldPos = PlacementHelper.GetTouchWorldPosition(currentCamera, touch.Position, placementState.idleFloor)
+			if touchWorldPos then
+				UpdatePreviewPosition(touchWorldPos)
+				PlacementController.ConfirmPlacement()
+			end
 		end
 	end)
 
@@ -640,6 +837,10 @@ function ConnectMobileUI()
 
 	local confirmButton = buttonBg:FindFirstChild("Confirm")
 	local cancelButton = buttonBg:FindFirstChild("Cancel")
+
+	-- 缓存按钮引用，用于TouchEnded时避免误触发
+	placementState.mobileConfirmButton = confirmButton
+	placementState.mobileCancelButton = cancelButton
 
 	if confirmButton then
 		confirmButton.MouseButton1Click:Connect(function()
@@ -705,6 +906,13 @@ end
 @param data table|nil
 ]]
 function OnPlacementResponse(success, message, data)
+	-- 无论成功失败都解除确认锁（允许玩家再次操作）
+	placementState.confirmInFlight = false
+	placementState.activeTouch = nil
+	placementState.touchStartPos = nil
+	placementState.touchStartTime = 0
+	UnbindCameraRotationBlock()
+
 	if success then
 		-- V2.0: 记录放置的位置，用于后续碰撞检测
 		if placementState.lastGridX and placementState.lastGridZ and placementState.idleFloor then

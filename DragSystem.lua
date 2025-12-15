@@ -27,6 +27,7 @@ local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ContextActionService = game:GetService("ContextActionService")
 
 -- 引用工具模块
 local PlacementHelper = require(script.Parent.Parent.Utils.PlacementHelper)
@@ -41,8 +42,49 @@ local player = Players.LocalPlayer
 local mouse = player:GetMouse()
 local camera = Workspace.CurrentCamera
 
+-- 前向声明：供相机输入拦截函数访问
+local dragState
+
+-- 移动端拖动时屏蔽相机触摸旋转（方案一：ContextActionService吃掉触摸）
+local BLOCK_CAMERA_ACTION = "DragSystem_BlockCameraTouch"
+local cameraBlockBound = false
+
+local function BindCameraTouchBlock()
+	if cameraBlockBound then
+		return
+	end
+	-- 仅在支持触摸的设备上启用
+	if not UserInputService.TouchEnabled then
+		return
+	end
+
+	cameraBlockBound = true
+	ContextActionService:BindActionAtPriority(
+		BLOCK_CAMERA_ACTION,
+		function()
+			-- 仅在拖动期间吃掉输入，平时不影响相机
+			if dragState and dragState.isDragging then
+				return Enum.ContextActionResult.Sink
+			end
+			return Enum.ContextActionResult.Pass
+		end,
+		false,
+		Enum.ContextActionPriority.High.Value + 1,
+		Enum.UserInputType.Touch,
+		Enum.UserInputType.MouseMovement
+	)
+end
+
+local function UnbindCameraTouchBlock()
+	if not cameraBlockBound then
+		return
+	end
+	cameraBlockBound = false
+	ContextActionService:UnbindAction(BLOCK_CAMERA_ACTION)
+end
+
 -- V2.0重构: 拖动状态使用GridWidth和GridDepth
-local dragState = {
+dragState = {
 	isDragging = false,
 	draggedModel = nil,
 	draggedInstanceId = nil,
@@ -86,6 +128,9 @@ function DragSystem.Initialize()
 	-- V1.4: 检测设备类型
 	dragState.isMobile = UserInputService.TouchEnabled and not UserInputService.MouseEnabled
 	-- print("[DragSystem] 设备类型:", dragState.isMobile and "移动端" or "PC端")
+
+	-- 移动端：提前绑定相机输入拦截，确保能作用于同一次触摸（避免拖动时镜头跟着转）
+	BindCameraTouchBlock()
 
 	-- 等待玩家角色加载
 	local character = player.Character or player.CharacterAdded:Wait()

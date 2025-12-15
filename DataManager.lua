@@ -319,6 +319,9 @@ local function CreateDefaultData(player)
             CurrentChapter = 1,       -- 默认从第1章开始
             CompletedChapters = 0,    -- 未通关任何章节
             CurrentHouseModel = "PrisonLv1",  -- 默认初始房屋
+            -- 主线最大通关进度（只增不减）：用于“最多打到哪关”统计与展示
+            MaxClearedChapter = 1,
+            MaxClearedStage = 0,
         },
         SkillInventory = {},  -- V3.0技能系统：初始化空技能背包
         TaskData = {  -- V3.3任务系统：初始化
@@ -332,6 +335,85 @@ local function CreateDefaultData(player)
         },
         LastSaveTime = os.time(),
     }
+end
+
+-- ==================== 主线进度工具（最大通关关卡） ====================
+
+local function GetStagesPerChapterSafe(chapterId: number): number
+    local defaultStages = (GameConfig.Campaign and GameConfig.Campaign.MaxStages) or 10
+
+    local ok, chapterConfig = pcall(function()
+        return StageConfig.GetChapterConfig and StageConfig.GetChapterConfig(chapterId)
+    end)
+
+    if ok and chapterConfig and chapterConfig.StagesPerChapter then
+        local stages = tonumber(chapterConfig.StagesPerChapter)
+        if stages and stages > 0 then
+            return stages
+        end
+    end
+
+    return defaultStages
+end
+
+local function EnsureChapterProgress(playerData)
+    if not playerData.ChapterProgress then
+        playerData.ChapterProgress = {
+            CurrentChapter = 1,
+            CompletedChapters = 0,
+            CurrentHouseModel = "PrisonLv1",
+            MaxClearedChapter = 1,
+            MaxClearedStage = 0,
+        }
+        return playerData.ChapterProgress
+    end
+
+    local progress = playerData.ChapterProgress
+
+    if progress.CurrentChapter == nil then
+        progress.CurrentChapter = 1
+    end
+    if progress.CompletedChapters == nil then
+        progress.CompletedChapters = 0
+    end
+    if progress.CurrentHouseModel == nil then
+        progress.CurrentHouseModel = "PrisonLv1"
+    end
+
+    local maxChapter = tonumber(progress.MaxClearedChapter)
+    local maxStage = tonumber(progress.MaxClearedStage)
+
+    -- 向后兼容：旧存档没有 MaxCleared* 字段时，用 CompletedChapters 推导最低保底值
+    if maxChapter == nil and maxStage == nil then
+        local completed = tonumber(progress.CompletedChapters) or 0
+        if completed > 0 then
+            progress.MaxClearedChapter = completed
+            progress.MaxClearedStage = GetStagesPerChapterSafe(completed)
+        else
+            progress.MaxClearedChapter = 1
+            progress.MaxClearedStage = 0
+        end
+        return progress
+    end
+
+    if maxChapter == nil then
+        maxChapter = 1
+    end
+    if maxStage == nil then
+        maxStage = 0
+    end
+
+    if maxChapter < 1 then
+        maxChapter = 1
+    end
+    if maxStage < 0 then
+        maxStage = 0
+    end
+
+    progress.MaxClearedChapter = maxChapter
+    progress.MaxClearedStage = maxStage
+
+    return progress
 end
 
 -- ==================== 公共接口 ====================
@@ -391,13 +473,7 @@ function DataManager.InitializePlayerData(player)
         end
 
         -- V2.8章节进度：确保ChapterProgress字段存在（向后兼容）
-        if not playerData.ChapterProgress then
-            playerData.ChapterProgress = {
-                CurrentChapter = 1,
-                CompletedChapters = 0,
-                CurrentHouseModel = "PrisonLv1",
-            }
-        end
+        EnsureChapterProgress(playerData)
 
         -- V3.0技能系统：确保SkillInventory字段存在（向后兼容）
         if not playerData.SkillInventory then
@@ -1280,16 +1356,16 @@ end
 function DataManager.GetChapterProgress(player)
     local playerData = DataManager.GetPlayerData(player)
     if not playerData then
-        return {CurrentChapter = 1, CompletedChapters = 0, CurrentHouseModel = "PrisonLv1"}
-    end
-
-    if not playerData.ChapterProgress then
-        playerData.ChapterProgress = {
+        return {
             CurrentChapter = 1,
             CompletedChapters = 0,
             CurrentHouseModel = "PrisonLv1",
+            MaxClearedChapter = 1,
+            MaxClearedStage = 0,
         }
     end
+
+    EnsureChapterProgress(playerData)
 
     return playerData.ChapterProgress
 end
@@ -1330,13 +1406,7 @@ function DataManager.SetCurrentChapter(player, chapterId)
         return false
     end
 
-    if not playerData.ChapterProgress then
-        playerData.ChapterProgress = {
-            CurrentChapter = 1,
-            CompletedChapters = 0,
-            CurrentHouseModel = "PrisonLv1",
-        }
-    end
+    EnsureChapterProgress(playerData)
 
     playerData.ChapterProgress.CurrentChapter = chapterId
     return true
@@ -1355,13 +1425,7 @@ function DataManager.CompleteChapter(player, chapterId)
         return false, 0
     end
 
-    if not playerData.ChapterProgress then
-        playerData.ChapterProgress = {
-            CurrentChapter = 1,
-            CompletedChapters = 0,
-            CurrentHouseModel = "PrisonLv1",
-        }
-    end
+    EnsureChapterProgress(playerData)
 
     -- 只有通关当前章节才更新进度（防止重复通关刷进度）
     if chapterId == playerData.ChapterProgress.CurrentChapter then
@@ -1369,6 +1433,20 @@ function DataManager.CompleteChapter(player, chapterId)
         if chapterId > playerData.ChapterProgress.CompletedChapters then
             playerData.ChapterProgress.CompletedChapters = chapterId
         end
+
+        -- 同步更新“主线最大通关关卡”（只增不减）
+        -- 章节通关等价于该章节最后一关已通关
+        do
+            local stagesPerChapter = GetStagesPerChapterSafe(chapterId)
+            local maxChapter = tonumber(playerData.ChapterProgress.MaxClearedChapter) or 1
+            local maxStage = tonumber(playerData.ChapterProgress.MaxClearedStage) or 0
+
+            if chapterId > maxChapter or (chapterId == maxChapter and stagesPerChapter > maxStage) then
+                playerData.ChapterProgress.MaxClearedChapter = chapterId
+                playerData.ChapterProgress.MaxClearedStage = stagesPerChapter
+            end
+        end
+
         -- V3.7.1修复：自动进入下一章，但不超过最大章节数
         -- 如果已打通最后一章，则保持在最后一章继续挑战
         local maxChapters = StageConfig.TotalChapters
@@ -1376,6 +1454,71 @@ function DataManager.CompleteChapter(player, chapterId)
     end
 
     return true, playerData.ChapterProgress.CompletedChapters
+end
+
+--[[
+获取玩家主线最大通关进度（只增不减）
+@param player Player - 玩家对象
+@return number, number - MaxClearedChapter, MaxClearedStage
+]]
+function DataManager.GetMaxClearedProgress(player)
+    local progress = DataManager.GetChapterProgress(player)
+    local maxChapter = tonumber(progress.MaxClearedChapter) or 1
+    local maxStage = tonumber(progress.MaxClearedStage) or 0
+    return maxChapter, maxStage
+end
+
+--[[
+更新玩家主线最大通关进度（只增不减）
+说明：用于“玩家最多通关到第几章第几关”的打点数据
+@param player Player - 玩家对象
+@param clearedChapter number - 本次通关的章节ID（从1开始）
+@param clearedStage number - 本次通关的关卡编号（章节内，从1开始；0表示尚未通关任何关卡）
+@return boolean, number, number - 是否发生更新, MaxClearedChapter, MaxClearedStage
+]]
+function DataManager.UpdateMaxClearedProgress(player, clearedChapter, clearedStage)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData then
+        warn(GameConfig.LOG_PREFIX, "UpdateMaxClearedProgress: 找不到玩家数据")
+        return false, 0, 0
+    end
+
+    EnsureChapterProgress(playerData)
+    local progress = playerData.ChapterProgress
+
+    local chapterId = tonumber(clearedChapter)
+    local stageNum = tonumber(clearedStage)
+    if not chapterId or not stageNum then
+        return false, tonumber(progress.MaxClearedChapter) or 1, tonumber(progress.MaxClearedStage) or 0
+    end
+
+    if chapterId < 1 then
+        chapterId = 1
+    end
+    if stageNum < 0 then
+        stageNum = 0
+    end
+
+    -- 保护：关卡编号不超过该章节的最大关卡数（避免异常数据写入）
+    local stagesPerChapter = GetStagesPerChapterSafe(chapterId)
+    if stageNum > stagesPerChapter then
+        stageNum = stagesPerChapter
+    end
+
+    local oldMaxChapter = tonumber(progress.MaxClearedChapter) or 1
+    local oldMaxStage = tonumber(progress.MaxClearedStage) or 0
+
+    local updated = false
+    if chapterId > oldMaxChapter then
+        progress.MaxClearedChapter = chapterId
+        progress.MaxClearedStage = stageNum
+        updated = true
+    elseif chapterId == oldMaxChapter and stageNum > oldMaxStage then
+        progress.MaxClearedStage = stageNum
+        updated = true
+    end
+
+    return updated, tonumber(progress.MaxClearedChapter) or 1, tonumber(progress.MaxClearedStage) or 0
 end
 
 --[[
@@ -1401,13 +1544,7 @@ function DataManager.SetCurrentHouseModel(player, modelName)
         return false
     end
 
-    if not playerData.ChapterProgress then
-        playerData.ChapterProgress = {
-            CurrentChapter = 1,
-            CompletedChapters = 0,
-            CurrentHouseModel = "PrisonLv1",
-        }
-    end
+    EnsureChapterProgress(playerData)
 
     playerData.ChapterProgress.CurrentHouseModel = modelName
     return true

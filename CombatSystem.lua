@@ -217,9 +217,10 @@ end
 @param level number - 等级
 @param team string - 阵营("Attack"或"Defense")
 @param battleId number - 所属战斗ID
+@param currentHealth number? - 可选，当前血量（用于战役中血量继承，不传则满血）
 @return boolean - 是否初始化成功
 ]]
-function CombatSystem.InitializeUnit(unitModel, unitId, level, team, battleId)
+function CombatSystem.InitializeUnit(unitModel, unitId, level, team, battleId, currentHealth)
 	if not unitModel or not unitModel:IsA("Model") then
 		WarnLog("InitializeUnit失败: unitModel无效")
 		return false
@@ -237,6 +238,17 @@ function CombatSystem.InitializeUnit(unitModel, unitId, level, team, battleId)
 	local attackRange = UnitConfig.GetAttackRange(unitId)
 	local moveSpeed = UnitConfig.GetMoveSpeed(unitId)
 
+	-- V2.8.9修复：支持血量继承
+	-- 如果传入了currentHealth，使用它（战役跨关卡血量继承）
+	-- 否则使用maxHealth（新单位/复生/测试）
+	local actualHealth = maxHealth
+	if currentHealth ~= nil and type(currentHealth) == "number" then
+		-- 确保血量在有效范围内：大于0且不超过最大值
+		actualHealth = math.clamp(currentHealth, 1, maxHealth)
+		DebugLog(string.format("血量继承: %s 传入血量=%d, 实际血量=%d/%d",
+			unitId, currentHealth, actualHealth, maxHealth))
+	end
+
 	-- 创建战斗状态
 	local combatState = {
 		UnitInstance = unitModel,
@@ -246,7 +258,7 @@ function CombatSystem.InitializeUnit(unitModel, unitId, level, team, battleId)
 		BattleId = battleId,
 
 		MaxHealth = maxHealth,
-		CurrentHealth = maxHealth,
+		CurrentHealth = actualHealth,  -- V2.8.9: 使用实际血量（可能是继承的残血）
 		Attack = attack,
 		AttackSpeed = attackSpeed,
 		AttackRange = attackRange,
@@ -274,12 +286,12 @@ function CombatSystem.InitializeUnit(unitModel, unitId, level, team, battleId)
 	-- 确保Humanoid.Health和CombatSystem.CurrentHealth一致
 	local humanoid = unitModel:FindFirstChild("Humanoid")
 	if humanoid then
-		humanoid.Health = maxHealth
+		humanoid.Health = actualHealth    -- V2.8.9: 同步实际血量
 		humanoid.MaxHealth = maxHealth
 	end
 
-	DebugLog(string.format("初始化兵种战斗状态: %s Lv.%d [%s] HP:%d ATK:%d",
-		unitId, level, team, maxHealth, attack))
+	DebugLog(string.format("初始化兵种战斗状态: %s Lv.%d [%s] HP:%d/%d ATK:%d",
+		unitId, level, team, actualHealth, maxHealth, attack))
 
 	return true
 end

@@ -32,6 +32,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local Players = game:GetService("Players")
+local AnalyticsService = game:GetService("AnalyticsService")
 
 -- 引用配置模块
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig") :: ModuleScript)
@@ -87,6 +88,29 @@ local PATH_CACHE_EXPIRY = 300
 local function DebugLog(...)
 	if GameConfig.Campaign.EnablePathDebugLogs or GameConfig.DEBUG_MODE then
 		print(GameConfig.LOG_PREFIX, "[CampaignManager]", ...)
+	end
+end
+
+-- ==================== 主线进度埋点（Roblox后台自定义事件） ====================
+
+local function FireMainlineProgressEvent(player: Player?, action: string, chapterId: number, stageNum: number, maxChapter: number, maxStage: number)
+	if not player then
+		return
+	end
+
+	-- 仅在正式服有意义；Studio里不会在后台看到数据，仍允许调用（无害），但必须保证不报错
+	local success, err = pcall(function()
+		AnalyticsService:FireCustomEvent(player, "MainlineProgress", {
+			action = action, -- "StageClear" / "ChapterClear"
+			chapter = chapterId,
+			stage = stageNum,
+			maxChapter = maxChapter,
+			maxStage = maxStage,
+		})
+	end)
+
+	if not success then
+		DebugLog("[Analytics] FireCustomEvent失败:", tostring(err))
 	end
 end
 
@@ -1738,6 +1762,18 @@ function CampaignManager.OnStageClear(campaignData, stageNum)
 		end
 	end
 
+	-- 主线通关打点：记录“最多通关到第几章第几关”（只增不减）
+	pcall(function()
+		local chapterId = campaignData.CurrentChapter or DataManager.GetCurrentChapter(player)
+		local updated, maxChapter, maxStage = DataManager.UpdateMaxClearedProgress(player, chapterId, stageNum)
+		if updated then
+			-- 节流保存即可，避免每关都强制写DataStore
+			DataManager.SavePlayerDataThrottled(player)
+			-- Roblox后台埋点（可在Creator Dashboard的Analytics里查看自定义事件）
+			FireMainlineProgressEvent(player, "StageClear", chapterId, stageNum, maxChapter, maxStage)
+		end
+	end)
+
 	-- 检查是否完成所有关卡
 	if stageNum >= campaignData.TotalStages then
 		return CampaignManager.OnVictory(campaignData)
@@ -1848,6 +1884,12 @@ function CampaignManager.OnVictory(campaignData)
 				DebugLog(string.format("[OnVictory] 不需要房屋升级 (shouldUpgrade=%s, isLastChapter=%s)",
 					tostring(shouldUpgrade), tostring(isLastChapter)))
 			end
+
+			-- Roblox后台埋点：章节通关（便于后台统计章节完成人数）
+			pcall(function()
+				local maxChapter, maxStage = DataManager.GetMaxClearedProgress(player)
+				FireMainlineProgressEvent(player, "ChapterClear", currentChapter, campaignData.TotalStages or 0, maxChapter, maxStage)
+			end)
 		end
 	end
 

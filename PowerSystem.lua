@@ -347,7 +347,24 @@ function PowerSystem.SyncPowerToClient(player, totalPower)
 	end
 
 	local success, result = pcall(function()
-		PowerUpdateEvent:FireClient(player, totalPower)
+		-- 🔥V3.9.2修复：广播战力更新给所有客户端，包含玩家和homeId信息
+		-- 这样所有客户端都能看到其他玩家的战力
+		local homeId = player:GetAttribute("HomeSlot")
+		if not homeId then
+			-- 兼容旧方式：从IntValue获取
+			local homeIdValue = player:FindFirstChild("HomeId")
+			if homeIdValue and homeIdValue:IsA("IntValue") then
+				homeId = homeIdValue.Value
+			end
+		end
+
+		if homeId and homeId > 0 then
+			-- 广播给所有客户端（包含玩家名字、基地ID和战力）
+			PowerUpdateEvent:FireAllClients(player.Name, homeId, totalPower)
+		else
+			-- 如果没有homeId，回退到只发送给该玩家（兼容旧行为）
+			PowerUpdateEvent:FireClient(player, totalPower)
+		end
 	end)
 
 	if not success then
