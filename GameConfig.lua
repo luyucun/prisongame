@@ -157,12 +157,14 @@ GameConfig.UI.ButtonScaleDuration = 0.1  -- 按钮缩放动画时长(秒)
 
 -- ==================== 挂机金币配置 (V2.6) ====================
 GameConfig.IdleCoin = {
-	CoinsPerMinute = 20,                 -- 每分钟产出金币数
+	CoinsPerMinute = 10,                  -- 每分钟产出金币数 🔥V3.9.3修改：从20改为10
 	MaxOfflineHours = 18,                 -- 最大离线产出小时数
 	MaxOfflineMinutes = 18 * 60,          -- 最大离线产出分钟数(6小时=360分钟)
-	ProximityTriggerDistance = 8,        -- 触发交互的距离(studs)
-	ProximityHoldDuration = 0.6,           -- 长按确认时长(秒)
-	ParticleEffectDuration = 1,          -- 粒子特效持续时长(秒)
+	ProximityTriggerDistance = 8,         -- 触发交互的距离(studs)
+	ProximityHoldDuration = 0.6,          -- 长按确认时长(秒)
+	ParticleEffectDuration = 1,           -- 粒子特效持续时长(秒)
+	-- 🔥V3.9.3新增：在线挂机金币配置
+	OnlineAccumulateInterval = 60,        -- 在线累计间隔(秒)，每60秒累计一次
 }
 
 -- ==================== 战斗金币配置 (V3.4) ====================

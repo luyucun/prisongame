@@ -45,6 +45,9 @@ local IdleCoinEvents = nil
 -- 存储每个基地的ProximityPrompt连接
 local promptConnections = {}
 
+-- 🔥V3.9.3新增：存储每个玩家的在线累计定时器
+local onlineTimers = {}
+
 -- ==================== 私有函数 ====================
 
 --[[
@@ -548,6 +551,9 @@ function IdleCoinSystem.OnPlayerJoin(player)
 			totalPendingCoins
 		))
 	end
+
+	-- 🔥V3.9.3新增：启动在线累计金币定时器
+	IdleCoinSystem.StartOnlineAccumulation(player)
 end
 
 --[[
@@ -556,6 +562,9 @@ end
 ]]
 function IdleCoinSystem.OnPlayerLeave(player)
 	LoadModules()
+
+	-- 🔥V3.9.3新增：停止在线累计金币定时器
+	IdleCoinSystem.StopOnlineAccumulation(player)
 
 	-- 记录登出时间
 	local currentTime = os.time()
@@ -567,6 +576,87 @@ function IdleCoinSystem.OnPlayerLeave(player)
 		player.Name,
 		currentTime
 	))
+end
+
+--[[
+🔥V3.9.3新增：启动在线累计金币定时器
+@param player Player - 玩家对象
+]]
+function IdleCoinSystem.StartOnlineAccumulation(player)
+	-- 如果已有定时器，先停止
+	if onlineTimers[player] then
+		IdleCoinSystem.StopOnlineAccumulation(player)
+	end
+
+	local interval = GameConfig.IdleCoin.OnlineAccumulateInterval or 60  -- 默认60秒
+	local coinsPerMinute = GameConfig.IdleCoin.CoinsPerMinute or 10
+
+	-- 创建定时器协程
+	onlineTimers[player] = true  -- 标记定时器已启动
+
+	task.spawn(function()
+		while onlineTimers[player] and player and player:IsDescendantOf(Players) do
+			task.wait(interval)
+
+			-- 再次检查定时器是否仍然有效
+			if not onlineTimers[player] or not player or not player:IsDescendantOf(Players) then
+				break
+			end
+
+			-- 计算这个间隔产生的金币
+			local coinsToAdd = math.floor(coinsPerMinute * (interval / 60))
+			if coinsToAdd > 0 then
+				-- 添加到待领取金币
+				local success, newTotal = DataManager.AddPendingIdleCoins(player, coinsToAdd)
+				if success then
+					-- 更新显示
+					local homeId = PlayerManager.GetPlayerHomeId(player)
+					if homeId and homeId > 0 then
+						UpdateMailDisplay(homeId, newTotal)
+					end
+
+					-- 通知客户端
+					IdleCoinSystem.SyncIdleCoinsToClient(player, newTotal)
+
+					print(string.format(
+						"%s [IdleCoinSystem] 玩家 %s 在线累计 %d 金币，总待领取 %d 金币",
+						GameConfig.LOG_PREFIX,
+						player.Name,
+						coinsToAdd,
+						newTotal
+					))
+				end
+			end
+		end
+
+		-- 清理标记
+		if onlineTimers[player] then
+			onlineTimers[player] = nil
+		end
+	end)
+
+	print(string.format(
+		"%s [IdleCoinSystem] 玩家 %s 在线累计定时器已启动 (间隔: %d秒, 每分钟: %d金币)",
+		GameConfig.LOG_PREFIX,
+		player.Name,
+		interval,
+		coinsPerMinute
+	))
+end
+
+--[[
+🔥V3.9.3新增：停止在线累计金币定时器
+@param player Player - 玩家对象
+]]
+function IdleCoinSystem.StopOnlineAccumulation(player)
+	if onlineTimers[player] then
+		onlineTimers[player] = nil
+		print(string.format(
+			"%s [IdleCoinSystem] 玩家 %s 在线累计定时器已停止",
+			GameConfig.LOG_PREFIX,
+			player.Name
+		))
+	end
 end
 
 --[[
