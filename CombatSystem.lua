@@ -1824,12 +1824,53 @@ function CombatSystem.OnClientPositionReport(player, battleId, unitModel, positi
 	local lastPos = unitState.LastServerPos or serverPos
 	local moved = (serverPos - lastPos).Magnitude
 
+	-- 服务器侧“卡住样本”统计：用于允许一次解卡瞬移（不需要服务端运行AI，仅做校验/放行）
+	local prevStuckSamples = unitState.StuckSamples or 0
+	local stuckMoveThreshold = BattleConfig.UNSTUCK_TELEPORT_STUCK_MOVE_THRESHOLD or 0.5
+
 	-- 允许一定的容差，避免网络抖动误判
 	local moveSpeed = unitState.MoveSpeed or 16
 	local tolerance = BattleConfig.POSITION_VALIDATION_TOLERANCE or 10
 	local maxAllowed = (moveSpeed * dt * 3) + tolerance
 
 	if moved > maxAllowed then
+		-- 允许客户端“解卡瞬移”：当服务端连续观测到单位几乎没动（卡住），且客户端处于Moving状态时，放行一次较大位移
+		-- 目的：配合ClientUnitAI的瞬移解卡，避免被位置校验回滚导致单位永久发呆/少兵
+		local allowUnstuckTeleport = (BattleConfig.ALLOW_UNSTUCK_TELEPORT ~= false)
+		local maxTeleportDist = BattleConfig.UNSTUCK_TELEPORT_MAX_DISTANCE or 150
+		local requiredSamples = BattleConfig.UNSTUCK_TELEPORT_STUCK_SAMPLES or 3
+		local teleportCooldown = BattleConfig.UNSTUCK_TELEPORT_COOLDOWN or 2.0
+		local lastTeleportTime = unitState.LastUnstuckTeleportTime or 0
+
+		if allowUnstuckTeleport
+			and state == "Moving"
+			and prevStuckSamples >= requiredSamples
+			and moved <= maxTeleportDist
+			and (now - lastTeleportTime) >= teleportCooldown then
+			DebugLog(string.format("[V4.11] 允许解卡瞬移: %s moved=%.1f, stuckSamples=%d",
+				unitModel.Name, moved, prevStuckSamples))
+			unitState.LastUnstuckTeleportTime = now
+			unitState.StuckSamples = 0
+
+			-- V4.12修复：不使用MoveTo到当前位置，避免单位原地站住
+			local humanoid = unitModel:FindFirstChildOfClass("Humanoid") or unitModel:FindFirstChild("Humanoid")
+			if humanoid then
+				pcall(function()
+					humanoid:Move(Vector3.zero)
+				end)
+			end
+
+			pcall(function()
+				rootPart.AssemblyLinearVelocity = Vector3.zero
+				rootPart.AssemblyAngularVelocity = Vector3.zero
+			end)
+
+			-- 接受该次位置变化，并更新基准
+			unitState.LastServerPosTime = now
+			unitState.LastServerPos = serverPos
+			return
+		end
+
 		unitState.PositionViolationCount = (unitState.PositionViolationCount or 0) + 1
 
 		WarnLog(string.format("[V4.0] 位置校验失败: %s 移动%.1f > 允许%.1f (dt=%.2f, speed=%.1f, 玩家:%s)",
@@ -1847,6 +1888,14 @@ function CombatSystem.OnClientPositionReport(player, battleId, unitModel, positi
 		rootPart.CFrame = CFrame.new(rollbackPos)
 		rootPart.AssemblyLinearVelocity = Vector3.zero
 		rootPart.AssemblyAngularVelocity = Vector3.zero
+
+		-- V4.12修复：回滚后清理移动状态，但不使用MoveTo到当前位置
+		local humanoid = unitModel:FindFirstChildOfClass("Humanoid") or unitModel:FindFirstChild("Humanoid")
+		if humanoid then
+			pcall(function()
+				humanoid:Move(Vector3.zero)
+			end)
+		end
 
 		-- 通知客户端矫正
 		local syncEvent = GetSyncUnitPositionEvent()
@@ -1879,6 +1928,13 @@ function CombatSystem.OnClientPositionReport(player, battleId, unitModel, positi
 		if syncEvent then
 			syncEvent:FireClient(player, battleId, unitModel, serverPos)
 		end
+	end
+
+	-- 更新“卡住样本”
+	if state == "Moving" and moved < stuckMoveThreshold then
+		unitState.StuckSamples = prevStuckSamples + 1
+	else
+		unitState.StuckSamples = 0
 	end
 
 	-- 更新基准

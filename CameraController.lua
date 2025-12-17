@@ -58,6 +58,11 @@ local currentWaypoints = nil
 local currentWaypointIndex = 1
 local lastPathTarget = nil
 local PATH_RECOMPUTE_DISTANCE = 5  -- 目标移动超过此距离时重新计算路径
+local PATH_RECALC_COOLDOWN = 0.25  -- 重新规划冷却（避免频繁ComputeAsync）
+local lastPathRequestTime = 0
+local isComputingPath = false
+local pathComputeRequestId = 0
+local blockedConnection = nil
 -- V2.10新增：卡住检测
 local lastCharacterPosition = nil
 local lastStuckCheckTime = nil  -- V4.0新增：用于时间戳累计，替代stuckCheckTime+Wait()
@@ -113,6 +118,90 @@ local function getIdleFloor()
 	end
 
 	return playerHome:FindFirstChild("IdleFloor")
+end
+
+-- ==================== V5.3修复：主角自动前进避障（异步寻路 + 不瞬移） ====================
+
+local function clearCharacterPath()
+	if blockedConnection then
+		blockedConnection:Disconnect()
+		blockedConnection = nil
+	end
+	if currentPath then
+		pcall(function()
+			currentPath:Destroy()
+		end)
+		currentPath = nil
+	end
+	currentWaypoints = nil
+	currentWaypointIndex = 1
+	lastPathTarget = nil
+end
+
+local function cancelPathCompute()
+	pathComputeRequestId += 1
+	isComputingPath = false
+end
+
+local function requestCharacterPathAsync(fromPos, toPos)
+	if not fromPos or not toPos then
+		return
+	end
+
+	local now = tick()
+	if isComputingPath then
+		return
+	end
+	if (now - lastPathRequestTime) < PATH_RECALC_COOLDOWN then
+		return
+	end
+
+	lastPathRequestTime = now
+	isComputingPath = true
+	pathComputeRequestId += 1
+	local requestId = pathComputeRequestId
+
+	local path = PathfindingService:CreatePath({
+		AgentRadius = 2,
+		AgentHeight = 5,
+		AgentCanJump = true,  -- 允许跳跃绕过障碍
+		AgentCanClimb = false,
+		WaypointSpacing = 4,
+	})
+
+	task.spawn(function()
+		local ok = pcall(function()
+			path:ComputeAsync(fromPos, toPos)
+		end)
+
+		-- 已有更新请求/已取消：丢弃结果
+		if requestId ~= pathComputeRequestId then
+			pcall(function() path:Destroy() end)
+			return
+		end
+
+		isComputingPath = false
+
+		if ok and path.Status == Enum.PathStatus.Success then
+			-- 用新路径替换旧路径（旧路径仍可继续走，直到这里切换）
+			clearCharacterPath()
+
+			currentPath = path
+			currentWaypoints = path:GetWaypoints()
+			currentWaypointIndex = 2  -- 跳过起点
+			lastPathTarget = toPos
+
+			blockedConnection = path.Blocked:Connect(function(blockedWaypointIndex)
+				if blockedWaypointIndex >= currentWaypointIndex then
+					-- 路径被阻挡：清掉路径，下一次循环会重新规划
+					clearCharacterPath()
+				end
+			end)
+		else
+			-- 不要回退直线MoveTo（会怼墙）；保持当前状态并等待下一次重试
+			pcall(function() path:Destroy() end)
+		end
+	end)
 end
 
 --[[
@@ -342,11 +431,9 @@ local function updateCharacterFollow(center, targetCFrame)
 	-- 到达目标附近后停止移动并面朝战场
 	if distanceToTarget <= WATCHPART_STOP_THRESHOLD then
 		humanoid:Move(Vector3.zero, false)
-		-- 清理寻路状态
-		currentPath = nil
-		currentWaypoints = nil
-		currentWaypointIndex = 1
-		lastPathTarget = nil
+		-- 清理寻路状态（不瞬移）
+		cancelPathCompute()
+		clearCharacterPath()
 		lastCharacterPosition = nil
 		lastStuckCheckTime = nil  -- V4.0修改：使用新变量名
 
@@ -393,50 +480,17 @@ local function updateCharacterFollow(center, targetCFrame)
 	elseif currentWaypointIndex > #currentWaypoints then
 		needNewPath = true
 	elseif isStuck then
-		-- V5.2修改：卡住时直接瞬移到目的地，而非重新规划路径
-		hrp.CFrame = CFrame.new(followTarget.X, hrp.Position.Y, followTarget.Z)
-		-- 清理寻路状态
-		currentPath = nil
-		currentWaypoints = nil
-		currentWaypointIndex = 1
-		lastPathTarget = nil
+		-- V5.3修复：卡住时重新规划路径（不瞬移）
+		clearCharacterPath()
+		lastPathRequestTime = 0  -- 允许立即重试
 		lastCharacterPosition = nil
 		lastStuckCheckTime = nil
-		return
+		needNewPath = true
 	end
 
 	if needNewPath then
-		-- 创建新路径
-		local path = PathfindingService:CreatePath({
-			AgentRadius = 2,
-			AgentHeight = 5,
-			AgentCanJump = true,  -- 允许跳跃绕过障碍
-			AgentCanClimb = false,
-			WaypointSpacing = 4,  -- 路径点间距
-		})
-
-		local success, errorMessage = pcall(function()
-			path:ComputeAsync(hrp.Position, followTarget)
-		end)
-
-		if success and path.Status == Enum.PathStatus.Success then
-			currentPath = path
-			currentWaypoints = path:GetWaypoints()
-			currentWaypointIndex = 2  -- 跳过起点
-			lastPathTarget = followTarget
-
-			-- 监听路径被阻塞事件
-			path.Blocked:Connect(function(blockedWaypointIndex)
-				if blockedWaypointIndex >= currentWaypointIndex then
-					-- 路径被阻塞，强制重新计算
-					currentPath = nil
-				end
-			end)
-		else
-			-- 寻路失败，直接朝目标移动
-			humanoid:MoveTo(followTarget)
-			return
-		end
+		-- 异步计算路径，避免ComputeAsync阻塞渲染/逻辑
+		requestCharacterPathAsync(hrp.Position, followTarget)
 	end
 
 	-- 沿路径点移动
@@ -460,8 +514,8 @@ local function updateCharacterFollow(center, targetCFrame)
 			end
 		end
 	else
-		-- 没有有效路径点，直接MoveTo
-		humanoid:MoveTo(followTarget)
+		-- 没有有效路径点：异步重试（不要回退直线MoveTo怼墙）
+		requestCharacterPathAsync(hrp.Position, followTarget)
 	end
 end
 
@@ -471,12 +525,9 @@ local function stopCharacterFollow()
 		return
 	end
 	humanoid:Move(Vector3.zero, false)
-	-- V4.0修改：清理寻路状态（不再清空路径，避免频繁重建）
-	-- 只有在真正需要停止时才清理，而不是每帧都清理
-	-- currentPath = nil  -- V4.0注释：不再每帧清空
-	-- currentWaypoints = nil
-	currentWaypointIndex = 1
-	-- lastPathTarget = nil
+	-- 清理寻路状态（停止跟随时才清理）
+	cancelPathCompute()
+	clearCharacterPath()
 	lastCharacterPosition = nil
 	lastStuckCheckTime = nil  -- V4.0修改：使用新变量名
 end

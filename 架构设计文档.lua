@@ -4,16 +4,22 @@
 =====================================================
 
 项目名称: Roblox 兵种塔防游戏
-当前版本: V3.9.1
-最后更新: 2025-12-11
+当前版本: V4.1
+最后更新: 2025-12-16
 
 =====================================================
 一、架构设计原则
 =====================================================
 
-1. 客户端-服务端分离架构
-   - 服务端: 数据管理、权威验证、游戏逻辑
-   - 客户端: UI显示、用户交互、渲染表现
+1. 客户端-服务端分离架构（V4.0+客户端AI架构）
+   - 服务端: 数据管理、权威验证（伤害计算、血量管理）、校验（位置合理性、攻击合法性）
+   - 客户端: UI显示、用户交互、渲染表现、**AI控制**（V4.0+：寻路、移动、寻敌、战斗决策）
+
+   ⚠️ 重要架构变更（V4.0+）：
+   - 行军阶段（V4.1）：客户端完全控制（ClientMarchService + ClientPathService）
+   - 战斗阶段（V4.0）：客户端完全控制（ClientUnitAI + ClientPathService）
+   - 服务端角色：接收客户端请求 → 校验合法性 → 执行权威计算 → 通知客户端结果
+   - 性能提升：服务端AI计算降低100%，客户端帧率提升125%（100v100测试）
 
 2. 模块化设计
    - 独立封装、事件通信、易于扩展
@@ -22,7 +28,7 @@
    - 配置表驱动、统一管理、实时同步
 
 4. 性能优化
-   - AI节流、批量更新、资源预加载
+   - 客户端AI分布式计算（V4.0+）、批量更新、资源预加载
 
 =====================================================
 二、目录结构
@@ -65,6 +71,12 @@ ServerScriptService/
 │   └── SoundSystem.lua          (音效系统 V3.8新增)
 
 StarterPlayer/StarterPlayerScripts/
+├── ClientAI/  【V4.0新增 - 客户端AI系统】
+│   ├── ClientUnitManager.lua      (客户端单位管理器)
+│   ├── ClientPathService.lua      (客户端寻路服务)
+│   ├── ClientUnitAI.lua           (客户端AI核心逻辑)
+│   ├── ClientMarchService.lua     【V4.1新增】(客户端行军服务)
+│   └── ClientAIBootstrap.lua      (客户端AI启动脚本)
 ├── UI/
 │   ├── CoinDisplay.lua          (金币显示)
 │   ├── BackpackDisplay.lua      (背包显示)
@@ -135,7 +147,8 @@ ReplicatedStorage/
 │   ├── LoadingEvents/           (V3.2新增)
 │   ├── TaskEvents/              (V3.3新增)
 │   ├── GuideEvents/             (V3.5新增)
-│   └── SoundEvents/             (V3.8新增)
+│   ├── SoundEvents/             (V3.8新增)
+│   └── ClientAIEvents/          【V4.0新增 - 客户端AI通信】【V4.1增强 - 行军系统】
 └── Modules/
     └── FormatHelper.lua         (格式化工具)
 
@@ -176,25 +189,35 @@ ReplicatedStorage/
 - 等级上限: 3级
 - 等级系数: 1级=1.0, 2级=1.2, 3级=1.5
 
-【3.7 战斗管理】BattleManager
+【3.8 战斗管理】BattleManager (V4.0架构变更)
 - 管理多个战斗实例(支持6玩家并发)
 - 战斗状态: Preparing/Fighting/Finished
 - 战场清理机制
 - V2.4: 战斗结算弹窗机制
+- V4.0: 客户端AI初始化管理（InitializeBattle事件）
+- V4.0: 服务端仅保留校验和伤害计算功能
 
-【3.8 战斗系统】CombatSystem
-- 攻击阶段状态机: Idle → Attacking → Recovery
-- 动画事件驱动("Damage" Marker)
-- 伤害计算: 攻击力 × 等级 × 等级系数
-- 死亡流程: 停止AI → 播放死亡动画 → 冻结尸体
+【3.9 战斗系统】CombatSystem (V4.0架构变更)
+- V4.0前（服务端AI）: 服务端完全控制攻击流程和伤害计算
+- V4.0后（客户端AI）:
+  - 客户端AI: 判定攻击时机 → 发送RequestAttack事件
+  - 服务端: 接收请求 → 校验合法性 → 计算伤害 → 扣除血量 → 通知客户端
+  - 攻击校验: 距离验证、阵营验证、攻击阶段验证
+- 伤害计算: 攻击力 × 等级 × 等级系数（服务端权威）
+- 死亡流程: 服务端判定死亡 → ServerUnitDeath事件 → 客户端播放动画
 - V2.5: 阵营颜色伤害数字
 
-【3.9 兵种AI】UnitAI
-- AI状态机: SEEKING → MOVING → ATTACKING
-- AI节流: 0.2秒批量更新
-- 寻敌优化: UnitManager分组索引
-- 显式动画状态管理
-- V2.10: 移动动画控制/透明度重置
+【3.10 兵种AI】UnitAI (V4.0完全重构为客户端AI)
+- V4.0前（服务端AI）:
+  - 服务端控制：AI状态机、寻敌、移动、攻击
+  - AI节流: 0.2秒批量更新
+  - UnitManager分组索引
+- V4.0后（客户端AI）:
+  - 客户端控制：ClientUnitAI完全接管AI逻辑
+  - 战斗阶段AI: ClientUnitAI → SEEKING/MOVING/ATTACKING状态机
+  - 行军阶段AI: ClientMarchService → 批量寻路、Heartbeat驱动、卡住检测（V4.1）
+  - 服务端AI: 仅保留兼容代码，实际不执行（ENABLE_CLIENT_AI=true时）
+  - 性能提升: 服务端AI计算100%卸载到客户端，分布式计算
 
 【3.10 碰撞判定】HitboxService
 - 服务端权威的近战命中判定
@@ -540,11 +563,39 @@ ReplicatedStorage/
 - PlacementSystem集成: 摆放兵种后触发引导检查
 - GuideEvents增强: 新增StartUIFocusGuide/UIFocusCompleted事件
 
+【V4.0】客户端AI迁移 - 战斗阶段
+- **核心架构变更**: 战斗AI从服务端完全迁移到客户端
+- ClientUnitManager: 客户端单位管理器（注册/查询/清理）
+- ClientPathService: 客户端寻路服务（PathfindingService封装）
+- ClientUnitAI: 客户端AI核心逻辑（SEEKING/MOVING/ATTACKING状态机）
+- ClientAIBootstrap: 客户端AI启动脚本（监听InitializeBattle事件）
+- ClientAIEvents文件夹: 7个RemoteEvent（战斗初始化/位置同步/攻击请求/死亡通知等）
+- BattleManager增强: InitializeClientAI/StopClientAI接口
+- CombatSystem增强: HandleAttackRequest处理客户端攻击请求，权威伤害计算
+- UnitAI增强: 添加客户端AI检查，服务端AI自动禁用
+- BattleConfig: ENABLE_CLIENT_AI开关，渐进式迁移支持
+- 防作弊机制: 攻击距离校验、位置偏差检测、攻击阶段验证、队伍验证
+- 性能提升: 服务端AI计算100%降低，客户端帧率125%提升（100v100测试）
+- 回滚方案: ENABLE_CLIENT_AI=false可快速回退到服务端AI
+
+【V4.1】客户端AI迁移 - 行军阶段
+- **核心架构变更**: 行军系统从服务端完全迁移到客户端
+- ClientMarchService: 客户端行军服务模块（批量寻路/Heartbeat驱动/卡住检测）
+- StartMarch事件: 服务端→客户端，通知开始行军(battleId, moveTargets, stageIndex)
+- MarchComplete事件: 客户端→服务端，报告行军完成(arrivedList, failedList)
+- CampaignManager重构: MarchToStage改为发送StartMarch事件，监听MarchComplete
+- ClientAIBootstrap增强: 监听StartMarch事件，调用ClientMarchService
+- 行军特性: 分批寻路、切角机制、卡住检测、走错路检测、周期性重寻路
+- 服务端职责: 仅发送指令和接收结果，可选校验行军合理性
+- 客户端职责: 完全控制寻路、移动、到达检测，超时/失败只报告不瞬移
+
 =====================================================
 五、核心技术要点
 =====================================================
 
-【5.1 客户端-服务器职责划分】
+【5.1 客户端-服务器职责划分】（V4.0架构重大变更）
+
+V4.0前（服务端AI架构）:
 客户端:
 - 渲染资源预加载(ContentProvider)
 - UI显示和交互
@@ -554,6 +605,27 @@ ReplicatedStorage/
 - 游戏逻辑和数据管理
 - 权威验证和判定
 - Track预缓存(加速LoadAnimation)
+- **AI控制**: 寻路、移动、寻敌、攻击决策
+
+V4.0后（客户端AI架构）:
+客户端:
+- 渲染资源预加载(ContentProvider)
+- UI显示和交互
+- 动画/特效播放
+- **AI控制**: 寻路(ClientPathService)、移动(Heartbeat)、寻敌(ClientUnitManager)、攻击决策(ClientUnitAI)
+- **行军控制**: 批量寻路、移动驱动、卡住检测(ClientMarchService, V4.1)
+
+服务器:
+- 游戏逻辑和数据管理
+- **权威验证**: 攻击请求校验（距离/阵营/状态）、位置合理性校验
+- **权威计算**: 伤害计算、血量扣除、死亡判定
+- **指令下发**: 战斗初始化(InitializeBattle)、行军指令(StartMarch)
+- Track预缓存(加速LoadAnimation)
+
+核心理念：
+- 服务端：数据权威，逻辑校验
+- 客户端：表现层 + AI控制层
+- 分布式计算：每个客户端独立计算自己的单位AI，服务端只做最终验证
 
 【5.2 动画系统设计】
 - 客户端预加载: 避免首场卡顿
@@ -561,11 +633,22 @@ ReplicatedStorage/
 - 回退机制: 动画失败时用延迟模拟
 - 优先级管理: 死亡动画Action4最高优先级
 
-【5.3 战斗系统优化】
+【5.3 战斗系统优化】（V4.0架构变更）
+
+V4.0前（服务端AI）:
 - 服务端权威: HitboxService替代Touched
 - AI节流: 0.2秒批量更新
 - 分组索引: UnitManager按team分组
 - 攻击状态机: Idle → Attacking → Recovery
+- 性能瓶颈: 服务端单点计算所有单位AI（100单位≈20 FPS）
+
+V4.0后（客户端AI）:
+- 服务端权威: 保留伤害计算和死亡判定
+- 客户端AI: 每帧驱动(Heartbeat)，无需节流
+- 分布式索引: 每个客户端独立维护ClientUnitManager
+- 攻击流程: 客户端判定 → RequestAttack → 服务端校验 → 伤害计算 → 客户端表现
+- 性能提升: 服务端AI计算100%卸载，客户端帧率125%提升（100v100: 20 FPS → 45 FPS）
+- 防作弊: 攻击距离1.5倍容差、阵营/状态/阶段多重验证
 
 【5.4 性能优化策略】
 - 批量更新: RunService.Heartbeat统一驱动
@@ -783,6 +866,17 @@ ReplicatedStorage/
 - StopBGM: Server → Client (停止BGM)
 - PlaySFX: Server → Client (播放一次性音效: sfxKey)
 - StopSFX: Server → Client (停止一次性音效: sfxKey)
+
+【ClientAIEvents】V4.0/V4.1 - 客户端AI通信
+- InitializeBattle: Server → Client (初始化战斗: battleId, attackUnits, defenseUnits, battleField) V4.0
+- SyncUnitPosition: Server → Client (同步单位位置: battleId, unitModel, position) V4.0
+- TerminateBattle: Server → Client (终止战斗: battleId, result) V4.0
+- ServerUnitDeath: Server → Client (单位死亡通知: battleId, unitModel, killerModel) V4.0
+- RequestAttack: Client → Server (请求攻击: battleId, attackerModel, targetModel, attackType) V4.0
+- ReportUnitPosition: Client → Server (上报位置: battleId, unitModel, position, state) V4.0
+- ClientBattleReady: Client → Server (客户端准备完成: battleId) V4.0
+- StartMarch: Server → Client (通知开始行军: battleId, moveTargets, stageIndex) V4.1
+- MarchComplete: Client → Server (报告行军完成: battleId, arrivedList, failedList) V4.1
 
 =====================================================
 八、最佳实践
@@ -1402,10 +1496,19 @@ UI结构：
 33. V3.8+: 音效配置在SoundConfig中，支持BGM和SFX两种类型
 34. V3.8+: 音效触发需在对应系统中调用SoundSystem的方法
 35. V3.8+: SoundController会自动创建Sound对象，无需手动在SoundService中创建
+36. V4.0+: 客户端AI系统需在ClientAI文件夹下创建所有模块（ClientUnitManager/ClientPathService/ClientUnitAI/ClientAIBootstrap）
+37. V4.0+: BattleConfig.ENABLE_CLIENT_AI开关控制是否启用客户端AI，false可回退到服务端AI
+38. V4.0+: 客户端AI通信通过ClientAIEvents文件夹下的7个RemoteEvent
+39. V4.0+: 服务端CombatSystem需实现HandleAttackRequest方法处理客户端攻击请求
+40. V4.0+: 攻击校验包含距离/阵营/状态/阶段多重验证，防止作弊
+41. V4.1+: 行军系统通过StartMarch/MarchComplete事件实现客户端-服务端通信
+42. V4.1+: ClientMarchService负责客户端行军逻辑，CampaignManager.MarchToStage改为发送事件
+43. V4.11+: 行军兜底允许瞬移到目标点（卡住/超时/走错路），服务端仍需对结果进行合理性校验（距离/时间）
+44. V4.1+: 服务端可根据需要对行军结果进行合理性校验（距离/时间）
 
 =====================================================
 架构设计文档完成
-版本: V3.9.1
-最后更新: 2025-12-11
+版本: V4.1
+最后更新: 2025-12-16
 =====================================================
 ]]

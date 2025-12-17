@@ -18,8 +18,20 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
-local character = player.Character or player.CharacterAdded:Wait()
-local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+local character = player.Character
+local humanoidRootPart = character and character:FindFirstChild("HumanoidRootPart") or nil
+
+-- 关键修复：不要在脚本顶部等待Character/HRP
+-- 否则会阻塞 _G.BackpackTrigger 接口注册，导致RemovalController等模块偶现找不到接口
+task.spawn(function()
+	local currentCharacter = player.Character or player.CharacterAdded:Wait()
+	character = currentCharacter
+
+	local hrp = currentCharacter:WaitForChild("HumanoidRootPart")
+	if character == currentCharacter then
+		humanoidRootPart = hrp
+	end
+end)
 
 -- 配置参数
 local CHECK_INTERVAL = 0.2  -- 检测间隔（秒）

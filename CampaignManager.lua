@@ -61,6 +61,11 @@ local SoundSystem = require(SystemsFolder:WaitForChild("SoundSystem") :: ModuleS
 -- 远程事件引用
 local CampaignEvents = nil
 
+-- V5.0新增：行军相关RemoteEvent
+local ClientAIEvents = nil
+local StartMarch = nil
+local MarchComplete = nil
+
 -- 战役状态枚举
 local CampaignState = {
 	IDLE = "Idle",
@@ -338,6 +343,23 @@ local function InitializeEvents()
 			-- 未找到CampaignEvents
 		end
 	end
+
+	-- V5.0新增：初始化行军相关RemoteEvent
+	if not ClientAIEvents then
+		local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
+		if eventsFolder then
+			ClientAIEvents = eventsFolder:FindFirstChild("ClientAIEvents")
+			if ClientAIEvents then
+				StartMarch = ClientAIEvents:FindFirstChild("StartMarch")
+				MarchComplete = ClientAIEvents:FindFirstChild("MarchComplete")
+			end
+		end
+
+		if not StartMarch or not MarchComplete then
+			warn(GameConfig.LOG_PREFIX, "[CampaignManager] 未找到行军相关RemoteEvent (StartMarch/MarchComplete)")
+		end
+	end
+
 	return CampaignEvents ~= nil
 end
 
@@ -1045,6 +1067,9 @@ function CampaignManager.MarchToStage(campaignData, stageNum)
 
 	campaignData.State = CampaignState.MARCHING
 
+	-- V5.0新增：记录当前关卡编号，供OnMarchComplete使用
+	campaignData.CurrentStage = stageNum
+
 	-- 通知客户端状态更新
 	if InitializeEvents() then
 		local stateUpdate = CampaignEvents:FindFirstChild("CampaignStateUpdate")
@@ -1085,6 +1110,16 @@ function CampaignManager.MarchToStage(campaignData, stageNum)
 				pcall(function()
 					PhysicsModule.ConfigureUnitPhysics(unitInstance, "ally")
 					DebugLog(string.format("  ✅ %s 已配置为友军碰撞组Allies", unitData.UnitId))
+				end)
+			end
+
+			-- V5.0关键：将单位的NetworkOwnership转移给客户端
+			-- 这样客户端才能流畅地控制单位移动
+			local rootPart = unitInstance:FindFirstChild("HumanoidRootPart") or unitInstance.PrimaryPart
+			if rootPart and rootPart:CanSetNetworkOwnership() then
+				pcall(function()
+					rootPart:SetNetworkOwner(player)
+					DebugLog(string.format("  ✅ %s NetworkOwnership已转移给客户端", unitData.UnitId))
 				end)
 			end
 		end
@@ -1258,73 +1293,59 @@ function CampaignManager.MarchToStage(campaignData, stageNum)
 	fireAttachHealthBars(marchingUnits)
 	DebugLog(string.format("✅ 行军开始，已为 %d 个单位附加血条", #marchingUnits))
 
-	-- V2.7新增：计算战场中心（敌方IdleFloorEnemy的中心）
-	local battleCenter = nil
-	local idleFloorEnemy = stageFolder:FindFirstChild("IdleFloorEnemy", true)
-	if idleFloorEnemy then
-		battleCenter = idleFloorEnemy.Position
-		DebugLog(string.format("🎯 战场中心位置: (%.1f, %.1f, %.1f)", battleCenter.X, battleCenter.Y, battleCenter.Z))
-	end
+	-- V5.0关键修改：改为发送行军指令到客户端，而非调用服务端PathService
+	DebugLog(string.format("[MarchToStage] 发送行军指令到客户端，单位数量: %d", moveCount))
 
-	-- 使用PathService进行批量寻路移动
-	-- V4.1修复：使用moveCount而非#moveTargets（字典取长度总是0）
-	DebugLog(string.format("[MarchToStage] 开始PathService寻路，目标数量: %d", moveCount))
-	local moveId = PathService.MoveUnitsToPositions(moveTargets, {
-		battleCenter = battleCenter,  -- V2.7新增：传递战场中心位置
+	if StartMarch then
+		-- V5.0修复：将moveTargets转换为可序列化的数组格式
+		-- RemoteEvent无法序列化Instance作为table的key，需要转换为数组
+		local serializableMoveTargets = {}
+		for unitInstance, targetCFrame in pairs(moveTargets) do
+			local instanceId = nil
+			pcall(function()
+				instanceId = unitInstance:GetAttribute("InstanceId")
+			end)
 
-		-- ⭐⭐ V5.6新增：战役状态检查函数 ⭐⭐
-		-- PathService的Heartbeat每帧调用此函数检查是否仍在行军状态
-		-- 如果返回false，整个行军任务会立即终止（不瞬移、不触发回调）
-		isStillMarching = function()
-			return campaignData.State == CampaignState.MARCHING
-		end,
-
-		onUnitArrived = function(unitInstance, status)
-			-- 单位到达时的回调：停止移动动画，播放idle动画
-			if unitInstance and unitInstance.Parent then
-				UnitAI.StopMoveAnimation(unitInstance)
-				DebugLog(string.format("  %s 到达目的地(%s)，已切换到idle动画", unitInstance.Name, status))
-			end
-		end,
-
-		onAllSettled = function(arrivedList, timedOutList, failedList)
-			-- 所有单位移动完成的回调
-			DebugLog(string.format("[MarchToStage] PathService移动完成 - 到达:%d, 超时:%d, 失败:%d",
-				#arrivedList, #timedOutList, #failedList))
-
-			-- 停止到达单位的移动动画
-			for _, unitInstance in ipairs(arrivedList) do
-				if unitInstance and unitInstance.Parent then
-					UnitAI.StopMoveAnimation(unitInstance)
-				end
-			end
-
-			for _, unitInstance in ipairs(timedOutList) do
-				if unitInstance and unitInstance.Parent then
-					UnitAI.StopMoveAnimation(unitInstance)
-				end
-			end
-
-			-- 进入战斗准备阶段
-			DebugLog("[MarchToStage] 行军完成，开始BeginBattlePrep...")
-			task.wait(0.1)
-			CampaignManager.BeginBattlePrep(campaignData, stageNum, arrivedList, timedOutList, failedList)
+			table.insert(serializableMoveTargets, {
+				unitModel = unitInstance,
+				instanceId = instanceId,
+				unitName = unitInstance.Name,
+				targetCFrame = targetCFrame
+			})
 		end
-	})
 
-	-- PathService启动后延迟播放移动动画(等待寻路系统初始化)
-	task.delay(0.1, function()
-		for unitInstance, unitData in pairs(campaignData.Units) do
-			if not unitData.IsDead and unitInstance and unitInstance.Parent then
-				UnitAI.PlayMoveAnimation(unitInstance)
+		-- 向客户端发送行军指令
+		local marchToken = tostring(tick()) .. "_" .. tostring(math.random(1000000, 9999999))
+		campaignData._PendingMarch = {
+			Token = marchToken,
+			Stage = stageNum,
+			StartTime = tick(),
+			Targets = moveTargets,
+		}
+
+		StartMarch:FireClient(player, campaignData.BattleId or 0, serializableMoveTargets, stageNum)
+
+		local moveTimeout = (GameConfig.Campaign and GameConfig.Campaign.MoveTimeout) or 30
+		task.delay(moveTimeout + 5, function()
+			local current = CampaignManager.ActiveCampaigns[playerId]
+			if current ~= campaignData then
+				return
 			end
-		end
-		DebugLog(string.format("✅ 已为 %d 个单位播放移动动画", moveCount))
-	end)
-
-	-- 保存移动任务ID用于可能的取消操作
-	if moveId then
-		campaignData.CurrentMoveId = moveId
+			if campaignData.State ~= CampaignState.MARCHING or (campaignData.CurrentStage or 0) ~= stageNum then
+				return
+			end
+			local pending = campaignData._PendingMarch
+			if not pending or pending.Token ~= marchToken then
+				return
+			end
+			warn(GameConfig.LOG_PREFIX, "[CampaignManager] MarchComplete timeout, ending campaign:", playerId, "Stage:", stageNum)
+			campaignData._PendingMarch = nil
+			CampaignManager.OnCampaignEnd(campaignData, false)
+		end)
+		DebugLog(string.format("✅ 已发送StartMarch事件到客户端，Stage=%d, Units=%d", stageNum, #serializableMoveTargets))
+	else
+		warn(GameConfig.LOG_PREFIX, "[CampaignManager] StartMarch事件不存在，行军失败")
+		return CampaignManager.OnCampaignEnd(campaignData, false)
 	end
 
 	-- V3.4新增：启动前进金币检查循环
@@ -1346,6 +1367,135 @@ function CampaignManager.MarchToStage(campaignData, stageNum)
 end
 
 --[[
+V5.0新增：处理客户端行军完成事件
+@param player Player - 玩家对象
+@param battleId number - 战斗ID
+@param arrivedList table - 到达的单位列表
+@param failedList table - 失败的单位列表
+]]
+function CampaignManager.OnMarchComplete(player, battleId, arrivedList, failedList)
+	local playerId = player.UserId
+	local campaignData = CampaignManager.ActiveCampaigns[playerId]
+
+	if not campaignData then
+		warn(GameConfig.LOG_PREFIX, "[CampaignManager] 收到MarchComplete但未找到战役数据:", playerId)
+		return
+	end
+
+	-- 验证BattleId (如果使用)
+	if battleId and campaignData.BattleId and battleId ~= campaignData.BattleId then
+		warn(GameConfig.LOG_PREFIX, "[CampaignManager] BattleId不匹配:", battleId, "vs", campaignData.BattleId)
+		return
+	end
+
+	-- 验证状态
+	if campaignData.State ~= CampaignState.MARCHING then
+		DebugLog(string.format("[OnMarchComplete] 当前状态不是MARCHING: %s", tostring(campaignData.State)))
+		return
+	end
+
+	DebugLog(string.format("[OnMarchComplete] 客户端行军完成 - 到达:%d, 失败:%d",
+		#arrivedList, #failedList))
+
+		local pendingMarch = campaignData._PendingMarch
+		campaignData._PendingMarch = nil
+
+		local statusByUnit = {}
+
+		local function MarkUnit(unitInstance, status)
+			if typeof(unitInstance) ~= "Instance" or not unitInstance:IsA("Model") then
+				return
+			end
+			local unitData = campaignData.Units[unitInstance]
+			if not unitData or unitData.IsDead or not unitInstance.Parent then
+				return
+			end
+			statusByUnit[unitInstance] = status
+		end
+
+		if type(arrivedList) == "table" then
+			for _, unitInstance in ipairs(arrivedList) do
+				MarkUnit(unitInstance, "Arrived")
+			end
+		end
+
+		if type(failedList) == "table" then
+			for _, unitInstance in ipairs(failedList) do
+				MarkUnit(unitInstance, "Failed")
+			end
+		end
+
+		for unitInstance, unitData in pairs(campaignData.Units) do
+			if unitInstance and unitInstance.Parent and unitData and not unitData.IsDead then
+				if not statusByUnit[unitInstance] then
+					statusByUnit[unitInstance] = "Failed"
+				end
+			end
+		end
+
+		if pendingMarch and pendingMarch.Targets then
+			local baseThreshold = (GameConfig.Campaign and GameConfig.Campaign.ArrivalThreshold) or 8
+			local validationThreshold = baseThreshold + 12
+			for unitInstance, status in pairs(statusByUnit) do
+				if status == "Arrived" then
+					local targetCFrame = pendingMarch.Targets[unitInstance]
+					if typeof(targetCFrame) == "CFrame" then
+						local rootPart = unitInstance:FindFirstChild("HumanoidRootPart") or unitInstance.PrimaryPart
+						if rootPart then
+							local currentPos = rootPart.Position
+							local targetPos = targetCFrame.Position
+							local dx = currentPos.X - targetPos.X
+							local dz = currentPos.Z - targetPos.Z
+							local distXZ = math.sqrt(dx * dx + dz * dz)
+							if distXZ > validationThreshold then
+								statusByUnit[unitInstance] = "Failed"
+							end
+						end
+					end
+				end
+			end
+		end
+
+		local verifiedArrived = {}
+		local verifiedFailed = {}
+
+		for unitInstance, status in pairs(statusByUnit) do
+			if status == "Arrived" then
+				table.insert(verifiedArrived, unitInstance)
+			else
+				table.insert(verifiedFailed, unitInstance)
+			end
+		end
+
+		arrivedList = verifiedArrived
+		failedList = verifiedFailed
+
+		DebugLog(string.format("[OnMarchComplete] After validation - arrived:%d, failed:%d", #arrivedList, #failedList))
+
+	-- 停止到达单位的移动动画
+	for _, unitInstance in ipairs(arrivedList) do
+		if unitInstance and unitInstance.Parent then
+			UnitAI.StopMoveAnimation(unitInstance)
+		end
+	end
+
+	for _, unitInstance in ipairs(failedList) do
+		if unitInstance and unitInstance.Parent then
+			UnitAI.StopMoveAnimation(unitInstance)
+		end
+	end
+
+	-- 获取当前关卡编号（从campaignData中推断）
+	-- 假设campaignData.CurrentStage存储了当前关卡编号
+	local stageNum = campaignData.CurrentStage or 1
+
+	-- 进入战斗准备阶段
+	DebugLog("[OnMarchComplete] 行军完成，开始BeginBattlePrep...")
+	task.wait(0.1)
+	CampaignManager.BeginBattlePrep(campaignData, stageNum, arrivedList, {}, failedList)
+end
+
+--[[
 战斗准备阶段(V2.0新增)
 处理PathService移动完成后的单位激活和战斗准备
 @param campaignData table - 战役数据
@@ -1357,53 +1507,38 @@ end
 function CampaignManager.BeginBattlePrep(campaignData, stageNum, arrivedList, timedOutList, failedList)
 	campaignData.State = CampaignState.PREPARE_BATTLE
 
-	-- ⭐⭐ V5.5关键修复：在战斗准备前强制取消所有行军任务 ⭐⭐
-	-- 这是解决"卡顿/回头/瞬移"问题的核心修复点
-	-- PathService的行军Heartbeat循环和UnitAI的战斗循环会冲突，
-	-- 两者同时发送MoveTo命令导致单位左右摇摆
+	-- ⭐⭐ V5.0修复：行军已由客户端控制，服务端无需清理PathService行军任务 ⭐⭐
+	-- 客户端在收到MarchComplete回调时已经完成行军，不需要服务端再干预
+	-- 但仍需清理单位状态，防止残留
 
-	-- 步骤1：先取消当前玩家的行军任务（如果有CurrentMoveId）
-	if campaignData.CurrentMoveId then
-		DebugLog(string.format("🛑 [V5.5修复] 强制取消当前行军任务: %s", tostring(campaignData.CurrentMoveId)))
-		PathService.CancelGroupMove(campaignData.CurrentMoveId)
-		campaignData.CurrentMoveId = nil
-	end
-
-	-- 步骤2：额外保险 - 调用CancelAllMoves清理所有可能残留的行军任务
-	-- 防止因CurrentMoveId丢失或异常导致的遗漏
-	local cancelledCount = PathService.CancelAllMoves()
-	if cancelledCount > 0 then
-		DebugLog(string.format("🛑 [V5.5修复] CancelAllMoves额外清理了 %d 个残留行军任务", cancelledCount))
-	end
-
-	-- 步骤3：清理所有友军单位的PathService残留状态并清除_ActiveMoveId
+	-- 清理所有友军单位的残留状态
 	for unitInstance, unitData in pairs(campaignData.Units) do
 		if unitInstance and unitInstance.Parent and not unitData.IsDead then
-			-- 清理路径状态（ClearPath已会清除_ActiveMoveId）
-			PathService.ClearPath(unitInstance)
-
 			-- 立即停止任何残留的移动指令
 			local humanoid = unitInstance:FindFirstChild("Humanoid")
 			if humanoid then
 				humanoid:Move(Vector3.zero)
 
-				-- 关键：清掉MoveTo残留的WalkToPoint，避免进入战斗时先“回头补位”再被战斗AI拉回
+				-- V4.12修复：不使用MoveTo到当前位置，避免单位原地站住
+				-- 尤其是瞬移后的单位，MoveTo到当前位置会阻止后续AI移动
+				-- 直接清除速度即可
 				local rootPart = unitInstance:FindFirstChild("HumanoidRootPart") or unitInstance.PrimaryPart
 				if rootPart then
-					humanoid:MoveTo(rootPart.Position)
+					pcall(function()
+						rootPart.AssemblyLinearVelocity = Vector3.zero
+						rootPart.AssemblyAngularVelocity = Vector3.zero
+					end)
 				end
 			end
 
-			-- 双保险：显式清除_ActiveMoveId属性
+			-- 标记战斗模式，通知客户端AI切换
 			pcall(function()
-				unitInstance:SetAttribute("_ActiveMoveId", nil)
+				unitInstance:SetAttribute("UnitAIMode", "CombatMode")
 			end)
 		end
 	end
 
-	-- ★ V2.8.8修复：增加等待时间到0.1秒，确保PathService的Heartbeat完全停止
-	-- 以及Humanoid的MoveTo/Move指令完全生效
-	-- 这可以防止残留的行军MoveTo与后续战斗AI冲突导致"回头"现象
+	-- ★ V2.8.8修复：增加等待时间到0.1秒，确保Humanoid的MoveTo/Move指令完全生效
 	task.wait(0.1)
 
 	-- 通知客户端状态更新
@@ -2990,6 +3125,21 @@ function CampaignManager.Initialize()
 		else
 			DebugLog("⚠ Events中未找到BattleControlEvents文件夹")
 		end
+	end
+
+	-- V5.0新增：监听客户端行军完成事件
+	if MarchComplete then
+		MarchComplete.OnServerEvent:Connect(function(player, battleId, arrivedList, failedList)
+			local success, err = pcall(function()
+				CampaignManager.OnMarchComplete(player, battleId, arrivedList, failedList)
+			end)
+			if not success then
+				warn("[CampaignManager] MarchComplete处理失败:", err)
+			end
+		end)
+		DebugLog("✅ 已监听MarchComplete远程事件")
+	else
+		DebugLog("⚠ 未找到MarchComplete事件")
 	end
 
 	-- 监听玩家离开事件

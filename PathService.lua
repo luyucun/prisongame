@@ -2,7 +2,14 @@
 脚本名称: PathService
 脚本类型: ModuleScript (服务端系统)
 脚本位置: ServerScriptService/Systems/PathService
-版本: V5.6 - 彻底修复行军/战斗MoveTo冲突
+版本: V5.11 - 修复V字型行军问题
+
+V5.11更新内容：
+1. ✅ 修复V字型行军：增强ShouldSkipInitialBacktrackWaypoint函数
+   - 放宽角度阈值：dot >= 0.1（跳过>84°偏离的路点），原来是dot >= -0.2（>102°）
+   - 缩小步长阈值：从18改为12，更积极地跳过近距离回头路点
+   - 增加可跳过路点数：从2个增加到4个
+   - 扩大检查范围：从前3个路点扩大到前5个
 
 V5.6更新内容：
 1. ✅ 关键修复：MoveUnitsToPositions支持isStillMarching状态检查函数
@@ -38,6 +45,8 @@ V5.2更新内容：
 ]]
 
 local PathService = {}
+
+-- V5.10: 行军寻路鲁棒性增强（初始NoPath自动重试 + 稳定顺序）
 
 -- ==================== 依赖服务 ====================
 
@@ -178,10 +187,14 @@ local function DeepCopyWaypoints(waypoints)
 end
 
 --[[
-V5.7修复：跳过“初始回头路点”
+V5.7修复：跳过"初始回头路点"
 NavMesh刚更新/起点靠近不可走区域边缘时，首个路点可能会落在目标反方向，
-表现为行军开局走一个“V”字。
+表现为行军开局走一个"V"字。
 该逻辑只在路径起始阶段(索引<=3)尝试跳过，避免影响正常绕障路径。
+
+V5.11修复（增强）：
+- 放宽角度阈值：dot >= 0.1 改为跳过侧向偏离的路点（>84°）
+- 缩小步长阈值：从18改为12，更积极地跳过近距离回头路点
 ]]
 local function ShouldSkipInitialBacktrackWaypoint(startPos, waypointPos, targetPos)
 	-- 只做XZ平面判断，忽略高度差
@@ -192,18 +205,20 @@ local function ShouldSkipInitialBacktrackWaypoint(startPos, waypointPos, targetP
 		return false
 	end
 
-	-- dot<0 表示路点在目标的反方向(>90°)
+	-- V5.11修复：dot < 0.1 表示路点偏离目标方向超过约84°
+	-- 原来是 dot >= -0.2（只跳过>102°），太宽松了，导致V字型行军
 	local dot = toTarget.Unit:Dot(toWaypoint.Unit)
-	if dot >= -0.2 then
+	if dot >= 0.1 then
 		return false
 	end
 
-	-- 路点比当前位置“更远离目标”且步长不大时，认为是NavMesh投影导致的回头路点
+	-- 路点比当前位置"更远离目标"且步长不大时，认为是NavMesh投影导致的回头路点
 	local startDist = GetHorizontalDistance(startPos, targetPos)
 	local waypointDist = GetHorizontalDistance(waypointPos, targetPos)
 	local stepDist = GetHorizontalDistance(startPos, waypointPos)
 
-	return stepDist <= 18 and (waypointDist - startDist) >= 2
+	-- V5.11修复：缩小步长阈值从18到12，更积极地跳过回头路点
+	return stepDist <= 12 and (waypointDist - startDist) >= 1
 end
 
 -- ==================== 动态Agent尺寸计算 ====================
@@ -383,12 +398,13 @@ local function BuildPathInternal(unitModel, targetPos, unitId)
 			pathState.Retries = 0
 			pathState.NearestReachablePoint = nil
 
-			-- V5.7修复：跳过初始“回头路点”（最多跳过2个，且只在起始阶段）
+			-- V5.11修复：跳过初始"回头路点"（最多跳过4个，且只在起始阶段）
+			-- 原来是最多2个，但某些NavMesh情况下可能生成更多回头路点
 			local skipped = 0
 			while pathState.Waypoints
 				and pathState.Index <= #pathState.Waypoints
-				and pathState.Index <= 3
-				and skipped < 2 do
+				and pathState.Index <= 5
+				and skipped < 4 do
 				local wp = pathState.Waypoints[pathState.Index]
 				if wp and ShouldSkipInitialBacktrackWaypoint(startPos, wp, targetPos) then
 					pathState.Index += 1
@@ -396,6 +412,9 @@ local function BuildPathInternal(unitModel, targetPos, unitId)
 				else
 					break
 				end
+			end
+			if pathState.Waypoints and pathState.Index > #pathState.Waypoints then
+				pathState.Index = #pathState.Waypoints
 			end
 			DebugLog(string.format("%s 寻路成功，%d个路径点", unitId or "Unknown", #pathState.Waypoints))
 			return true
@@ -413,12 +432,13 @@ local function BuildPathInternal(unitModel, targetPos, unitId)
 			pathState.Retries = 0
 			pathState.NearestReachablePoint = waypoints[#waypoints].Position
 
-			-- V5.7修复：跳过初始“回头路点”（最多跳过2个，且只在起始阶段）
+			-- V5.11修复：跳过初始"回头路点"（最多跳过4个，且只在起始阶段）
+			-- 原来是最多2个，但某些NavMesh情况下可能生成更多回头路点
 			local skipped = 0
 			while pathState.Waypoints
 				and pathState.Index <= #pathState.Waypoints
-				and pathState.Index <= 3
-				and skipped < 2 do
+				and pathState.Index <= 5
+				and skipped < 4 do
 				local wp = pathState.Waypoints[pathState.Index]
 				if wp and ShouldSkipInitialBacktrackWaypoint(startPos, wp, targetPos) then
 					pathState.Index += 1
@@ -426,6 +446,9 @@ local function BuildPathInternal(unitModel, targetPos, unitId)
 				else
 					break
 				end
+			end
+			if pathState.Waypoints and pathState.Index > #pathState.Waypoints then
+				pathState.Index = #pathState.Waypoints
 			end
 			DebugLog(string.format("⚠️ %s NoPath但有%d个路径点，标记为PARTIAL", unitId or "Unknown", #waypoints))
 			return true
@@ -468,12 +491,13 @@ local function BuildPathInternal(unitModel, targetPos, unitId)
 				pathState.LastRequestTime = tick()
 				pathState.Retries = 0
 
-				-- V5.7修复：跳过初始“回头路点”（最多跳过2个，且只在起始阶段）
+				-- V5.11修复：跳过初始"回头路点"（最多跳过4个，且只在起始阶段）
+				-- 原来是最多2个，但某些NavMesh情况下可能生成更多回头路点
 				local skipped = 0
 				while pathState.Waypoints
 					and pathState.Index <= #pathState.Waypoints
-					and pathState.Index <= 3
-					and skipped < 2 do
+					and pathState.Index <= 5
+					and skipped < 4 do
 					local wp = pathState.Waypoints[pathState.Index]
 					if wp and ShouldSkipInitialBacktrackWaypoint(startPos, wp, targetPos) then
 						pathState.Index += 1
@@ -481,6 +505,9 @@ local function BuildPathInternal(unitModel, targetPos, unitId)
 					else
 						break
 					end
+				end
+				if pathState.Waypoints and pathState.Index > #pathState.Waypoints then
+					pathState.Index = #pathState.Waypoints
 				end
 				DebugLog(string.format("%s 缩小半径后寻路成功", unitId or "Unknown"))
 				return true
@@ -804,6 +831,18 @@ function PathService.ClearPath(unitModel)
 			DebugLog(string.format("🛑 [V5.5] 从行军任务 %s 中移除单位并清除_ActiveMoveId", tostring(moveId)))
 		end
 	end
+	-- V4.12修复：不使用MoveTo到当前位置，避免单位原地站住
+	if unitModel and unitModel.Parent then
+		local humanoid = unitModel:FindFirstChild("Humanoid")
+		local rootPart = unitModel:FindFirstChild("HumanoidRootPart") or unitModel.PrimaryPart
+		if humanoid and rootPart then
+			pcall(function()
+				humanoid:Move(Vector3.zero)
+				rootPart.AssemblyLinearVelocity = Vector3.zero
+				rootPart.AssemblyAngularVelocity = Vector3.zero
+			end)
+		end
+	end
 end
 
 --[[
@@ -970,6 +1009,9 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 				Arrived = false,
 				StartTime = tick(),
 				PathRequested = false,
+				-- 寻路失败重试
+				PathFailCount = 0,
+				NextPathRetryTime = 0,
 				-- 卡住检测数据
 				LastStuckCheckTime = tick(),
 				LastStuckCheckPos = rootPart.Position,
@@ -997,7 +1039,103 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 		return nil
 	end
 
+	-- V5.10: 稳定遍历顺序，减少随机性与瞬时寻路峰值
+	local function GetUnitSortKey(unitInstance)
+		local key = nil
+		pcall(function()
+			key = unitInstance:GetAttribute("InstanceId")
+				or unitInstance:GetAttribute("UnitGuid")
+				or unitInstance:GetAttribute("UnitId")
+		end)
+		key = key or (unitInstance and unitInstance.Name) or ""
+		return tostring(key)
+	end
+
+	table.sort(unitsList, function(a, b)
+		return GetUnitSortKey(a) < GetUnitSortKey(b)
+	end)
+
 	DebugLog(string.format("[MoveUnitsToPositions] 开始移动 %d 个单位", totalCount))
+
+	-- ==================== V5.10: 寻路失败重试（防止随机单位原地踏步）====================
+
+	local function IsUnitStillValid(unitInstance)
+		local stillValid = true
+		if not unitInstance or not unitInstance.Parent then
+			return false
+		end
+		pcall(function()
+			local currentMoveId = unitInstance:GetAttribute("_ActiveMoveId")
+			local aiMode = unitInstance:GetAttribute("UnitAIMode")
+			if currentMoveId ~= moveId or aiMode == "CombatMode" or aiMode == "Combat" then
+				stillValid = false
+			end
+		end)
+		return stillValid
+	end
+
+	local function GetBestMoveTarget(unitInstance, data, pathState)
+		local nextWaypoint = PathService.GetNextWaypoint(unitInstance)
+		if nextWaypoint then
+			return nextWaypoint
+		end
+
+		if pathState and pathState.Status == PathStatus.PARTIAL then
+			local nearest = PathService.GetNearestReachablePoint(unitInstance)
+			if nearest then
+				return nearest
+			end
+		end
+
+		return data.TargetCFrame.Position
+	end
+
+	local function SchedulePathRetry(data)
+		local failCount = (data.PathFailCount or 0) + 1
+		data.PathFailCount = failCount
+
+		-- 指数退避 + jitter，避免一帧内大量单位同时重寻路
+		local expo = math.min(failCount, 4)
+		local backoff = math.min(2.0, 0.25 * (2 ^ expo))
+		data.NextPathRetryTime = tick() + backoff + (math.random() * CONFIG.REPATH_RANDOM_DELAY_MAX)
+	end
+
+	local function RequestPathRetry(unitInstance, data, unitId)
+		if not unitInstance or data.Arrived or data.PathRequested then
+			return
+		end
+
+		local now = tick()
+		local nextRetryTime = data.NextPathRetryTime or 0
+		if now < nextRetryTime then
+			return
+		end
+
+		if not IsUnitStillValid(unitInstance) then
+			return
+		end
+
+		data.PathRequested = true
+		PathService.RequestPathAsync(unitInstance, data.TargetPart, unitId, function(success, pathState)
+			data.PathRequested = false
+
+			if data.Arrived then return end
+			if not IsUnitStillValid(unitInstance) then return end
+
+			local humanoid = unitInstance:FindFirstChild("Humanoid")
+			if not humanoid then return end
+
+			if success and pathState and (pathState.Status == PathStatus.SUCCESS or pathState.Status == PathStatus.PARTIAL) then
+				data.PathFailCount = 0
+				data.NextPathRetryTime = 0
+				humanoid:MoveTo(GetBestMoveTarget(unitInstance, data, pathState))
+			else
+				SchedulePathRetry(data)
+				-- 即使寻路失败，也先给一个MoveTo，促使单位脱离拥挤点再重试
+				humanoid:MoveTo(data.TargetCFrame.Position)
+			end
+		end)
+	end
 
 	-- 分批发起寻路请求
 	local BATCH_SIZE = 4
@@ -1041,16 +1179,12 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 			if not humanoid then return end
 
 			if success and pathState and (pathState.Status == PathStatus.SUCCESS or pathState.Status == PathStatus.PARTIAL) then
-				local nextWaypoint = PathService.GetNextWaypoint(unitInstance)
-				if nextWaypoint then
-					humanoid:MoveTo(nextWaypoint)
-				elseif pathState.Status == PathStatus.PARTIAL then
-					humanoid:Move(Vector3.zero)
-				else
-					humanoid:MoveTo(data.TargetCFrame.Position)
-				end
+				data.PathFailCount = 0
+				data.NextPathRetryTime = 0
+				humanoid:MoveTo(GetBestMoveTarget(unitInstance, data, pathState))
 			else
-				humanoid:Move(Vector3.zero)
+				SchedulePathRetry(data)
+				humanoid:MoveTo(data.TargetCFrame.Position)
 				DebugLog(string.format("⚠️ [行军] %s 初始寻路失败", unitInstance.Name))
 			end
 		end)
@@ -1101,55 +1235,18 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 						DebugLog(string.format("⚠️ [行军] %s MoveToFinished连续失败%d次，重寻路",
 							unitInstance.Name, data.MoveToFailCount))
 						humanoid:Move(Vector3.zero)
-						PathService.ClearPath(unitInstance)
+						-- 仅清理寻路数据（不要用ClearPath，否则会清除_ActiveMoveId并把单位从本次行军任务里移除）
+						ClearPathData(unitInstance)
 						data.MoveToFailCount = 0
 						data.LastRepathTime = now
+						data.NextPathRetryTime = 0
 
 						-- 延迟后重寻路
 						local delay = math.random() * CONFIG.REPATH_RANDOM_DELAY_MAX
 						task.delay(delay, function()
 							if data.Arrived then return end
-
-							-- ⭐⭐ V5.5关键修复：延迟回调中也要验证行军身份 ⭐⭐
-							-- 防止单位已进入战斗后，这个延迟回调仍然发送MoveTo
-							local shouldSkip = false
-							pcall(function()
-								local currentMoveId = unitInstance:GetAttribute("_ActiveMoveId")
-								local aiMode = unitInstance:GetAttribute("UnitAIMode")
-								if currentMoveId ~= moveId or aiMode == "CombatMode" or aiMode == "Combat" then
-									shouldSkip = true
-								end
-							end)
-							if shouldSkip then
-								DebugLog(string.format("🛑 [V5.5] %s MoveToFinished延迟回调跳过：已进入战斗", unitInstance.Name))
-								return
-							end
-
-							data.PathRequested = true
-							PathService.RequestPathAsync(unitInstance, data.TargetPart, unitInstance.Name, function(success, pathState)
-								data.PathRequested = false
-								-- 再次检查，因为寻路是异步的
-								if data.Arrived then return end
-								local stillValid = true
-								pcall(function()
-									local currentMoveId = unitInstance:GetAttribute("_ActiveMoveId")
-									local aiMode = unitInstance:GetAttribute("UnitAIMode")
-									if currentMoveId ~= moveId or aiMode == "CombatMode" or aiMode == "Combat" then
-										stillValid = false
-									end
-								end)
-								if not stillValid then return end
-
-								local humanoid = unitInstance:FindFirstChild("Humanoid")
-								if success and pathState and (pathState.Status == PathStatus.SUCCESS or pathState.Status == PathStatus.PARTIAL) and humanoid then
-									local nextWaypoint = PathService.GetNextWaypoint(unitInstance)
-									if nextWaypoint then
-										humanoid:MoveTo(nextWaypoint)
-									end
-								elseif humanoid then
-									humanoid:Move(Vector3.zero)
-								end
-							end)
+							if not IsUnitStillValid(unitInstance) then return end
+							RequestPathRetry(unitInstance, data, unitId)
 						end)
 					end
 				else
@@ -1344,7 +1441,23 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 							humanoid:MoveTo(nextWaypoint)
 							data.LastMoveToUpdateTime = now
 						end
+					else
+						-- 兜底：路径存在但路点为空（例如Index越界/Partial走到尽头），仍然持续给MoveTo并等待重试寻路
+						local lastMoveToTime = data.LastMoveToUpdateTime or 0
+						if now - lastMoveToTime > 0.5 then
+							local fallback = nil
+							if pathStatus == PathStatus.PARTIAL then
+								fallback = PathService.GetNearestReachablePoint(unitInstance)
+							end
+							fallback = fallback or data.TargetCFrame.Position
+							humanoid:MoveTo(fallback)
+							data.LastMoveToUpdateTime = now
+						end
 					end
+				else
+					-- 无有效路径：按退避重试寻路（防止随机单位无路径后永久发呆）
+					local unitId = unitInstance:GetAttribute("UnitId") or unitInstance.Name
+					RequestPathRetry(unitInstance, data, unitId)
 				end
 				-- ==============================================================
 
@@ -1404,7 +1517,7 @@ function PathService.MoveUnitsToPositions(moveTargets, callbacks)
 
 					if isStuck then
 						-- 拥挤豁免
-						if IsInCrowdedArea(unitInstance, moveData) then
+						if (pathStatus == PathStatus.SUCCESS or pathStatus == PathStatus.PARTIAL) and IsInCrowdedArea(unitInstance, moveData) then
 							data.StuckCount = 0
 							DebugLog(string.format("⚠️ [行军] %s 疑似卡住但周围拥挤，豁免", unitInstance.Name))
 						else

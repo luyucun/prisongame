@@ -2,7 +2,7 @@
 脚本名称: ClientUnitAI
 脚本类型: ModuleScript (客户端系统)
 脚本位置: StarterPlayer/StarterPlayerScripts/ClientAI/ClientUnitAI
-版本: V4.0 - 客户端AI迁移专用
+版本: V4.10 - 卡住检测与瞬移解卡
 ]]
 
 --[[
@@ -12,6 +12,12 @@
 2. 驱动单位移动、寻敌、攻击动画播放
 3. 向服务端请求攻击判定
 4. 简化版AI，移除复杂围攻系统（客户端性能优先）
+
+V4.10更新：卡住检测与瞬移解卡
+- 从服务端UnitAI迁移卡住检测逻辑到客户端
+- 当单位连续多次被检测到速度过低（卡住），自动瞬移到目标位置
+- 配置参数：CONFIG.STUCK（检测间隔、速度阈值、连续次数阈值等）
+- 瞬移时使用射线检测确保落在地面上
 
 V4.0设计要点:
 - 与服务端UnitAI功能对齐，但大幅简化
@@ -32,6 +38,7 @@ local Players = game:GetService("Players")
 -- 引用本地客户端模块
 local ClientUnitManager = nil
 local ClientPathService = nil
+local ClientMarchService = nil
 
 -- ==================== 引用配置 ====================
 
@@ -117,6 +124,16 @@ local CONFIG = {
 		REPATH_COOLDOWN = 0.5,         -- 重新寻路冷却时间（秒）
 		DIRECT_MOVE_THRESHOLD = 8,     -- 距离小于此值时直接移动（studs）
 	},
+
+	-- V4.10新增：卡住检测配置（从服务端UnitAI迁移）
+	STUCK = {
+		CHECK_INTERVAL = 0.5,          -- 卡住检测间隔（秒）
+		MIN_VELOCITY = 0.5,            -- 最小移动速度阈值（studs/s）
+		COUNT_THRESHOLD = 3,           -- 连续卡住次数阈值（达到后瞬移）
+		MIN_DISTANCE_FOR_CHECK = 5,    -- 距离目标超过此值才检测卡住
+		TELEPORT_ENABLED = true,       -- 是否启用瞬移解卡
+		REPORT_MOVING_AFTER_TELEPORT = 0.8, -- 瞬移后短时间内仍以Moving上报，确保服务端位置校验放行
+	},
 }
 
 if BattleConfig then
@@ -149,6 +166,76 @@ local function GetDistance(modelA, modelB)
 	local rootB = modelB:FindFirstChild("HumanoidRootPart") or modelB.PrimaryPart
 	if not rootA or not rootB then return 99999 end
 	return (rootA.Position - rootB.Position).Magnitude
+end
+
+local function GetHorizontalDistance(pos1, pos2)
+	if not pos1 or not pos2 then return math.huge end
+	local dx = pos1.X - pos2.X
+	local dz = pos1.Z - pos2.Z
+	return math.sqrt(dx * dx + dz * dz)
+end
+
+--[[
+判断是否可以直线移动到目标点（无遮挡）
+用于决定是否需要启用寻路：距离再近，只要被障碍物挡住也必须走寻路，否则会出现“近距离怼墙”现象
+]]
+local function CanDirectMove(unitModel, targetPos, targetModel)
+	if not unitModel or not targetPos then
+		return false
+	end
+
+	local rootPart = unitModel:FindFirstChild("HumanoidRootPart") or unitModel.PrimaryPart
+	if not rootPart then
+		return false
+	end
+
+	-- 抬高一点，避免射线被地面/坡面误挡
+	-- V4.11：多高度水平射线，避免不同身高单位“有的会绕、有的怼墙”（且忽略其他单位的人群遮挡）
+	local humanoid = unitModel:FindFirstChild("Humanoid")
+	local hipHeight = humanoid and humanoid.HipHeight or 2
+	local footY = rootPart.Position.Y - hipHeight
+
+	local rayParams = RaycastParams.new()
+	rayParams.FilterType = Enum.RaycastFilterType.Exclude
+	rayParams.FilterDescendantsInstances = { unitModel }
+	rayParams.IgnoreWater = true
+
+	local function IsUnblockedAtY(sampleY)
+		-- 只做水平射线（XZ），避免高度差导致误判“被地面挡住”
+		local origin = Vector3.new(rootPart.Position.X, sampleY, rootPart.Position.Z)
+		local goal = Vector3.new(targetPos.X, sampleY, targetPos.Z)
+		local direction = goal - origin
+		local distance = direction.Magnitude
+		if distance < 0.5 then
+			return true
+		end
+
+		local result = workspace:Raycast(origin, direction, rayParams)
+		if not result then
+			return true
+		end
+
+		-- 命中目标本体也视为无阻挡（例如moveTarget在目标周围）
+		if targetModel and result.Instance and result.Instance:IsDescendantOf(targetModel) then
+			return true
+		end
+
+		-- 命中其他单位（带Humanoid）不视为静态障碍：避免人群遮挡导致频繁切换到寻路
+		local hitModel = result.Instance and result.Instance:FindFirstAncestorOfClass("Model")
+		if hitModel and hitModel ~= unitModel then
+			local hitHumanoid = hitModel:FindFirstChildOfClass("Humanoid") or hitModel:FindFirstChild("Humanoid")
+			if hitHumanoid then
+				return true
+			end
+		end
+
+		-- 命中点非常接近终点也视为无阻挡（浮点误差/轻微穿插）
+		return (result.Position - origin).Magnitude >= (distance - 1.0)
+	end
+
+	local lowY = footY + 1.0
+	local highY = footY + 3.0
+	return IsUnblockedAtY(lowY) and IsUnblockedAtY(highY)
 end
 
 --[[
@@ -658,7 +745,9 @@ local function UpdateMovingState(aiData, deltaTime)
 
 	-- V4.1增强：使用围攻位置系统计算目标位置
 	local humanoid = aiData.UnitModel:FindFirstChild("Humanoid")
-	if humanoid then
+	local myRootPart = aiData.UnitModel:FindFirstChild("HumanoidRootPart") or aiData.UnitModel.PrimaryPart
+	local targetRootPart = aiData.CurrentTarget:FindFirstChild("HumanoidRootPart") or aiData.CurrentTarget.PrimaryPart
+	if humanoid and myRootPart and targetRootPart then
 		-- 计算围攻位置（近战兵使用围攻系统，远程兵直接朝目标）
 		local moveTarget = nil
 		if aiData.UnitType == UnitConfig.UnitType.MELEE then
@@ -667,68 +756,218 @@ local function UpdateMovingState(aiData, deltaTime)
 
 		if not moveTarget then
 			-- 远程兵或围攻计算失败，使用传统方式（保持停靠距离）
-			local myRoot = aiData.UnitModel:FindFirstChild("HumanoidRootPart")
-			local targetRoot = aiData.CurrentTarget:FindFirstChild("HumanoidRootPart")
-			if myRoot and targetRoot then
-				local myPos = myRoot.Position
-				local targetPos = targetRoot.Position
-				local direction = (targetPos - myPos)
-				if direction.Magnitude > 0.1 then
-					direction = direction.Unit
-				else
-					direction = Vector3.new(1, 0, 0)
-				end
-				-- 远程兵需要保持停靠距离，不能直接冲到目标位置
-				local dockingDist = GetDockingDistance(aiData)
-				moveTarget = targetPos - direction * dockingDist
+			local myPos = myRootPart.Position
+			local targetPos = targetRootPart.Position
+			local direction = (targetPos - myPos)
+			if direction.Magnitude > 0.1 then
+				direction = direction.Unit
+			else
+				direction = Vector3.new(1, 0, 0)
 			end
+			-- 远程兵需要保持停靠距离，不能直接冲到目标位置
+			local dockingDist = GetDockingDistance(aiData)
+			moveTarget = targetPos - direction * dockingDist
 		end
 
 		if moveTarget then
-			-- ==================== V4.3修复：MoveTo控制权竞态 ====================
-			-- 寻路修复：使用ClientPathService进行寻路，避免与FollowPath的MoveTo冲突
-			if CONFIG.PATHFINDING.ENABLED and distance > CONFIG.PATHFINDING.DIRECT_MOVE_THRESHOLD then
-				-- 距离较远时使用寻路
+			-- ==================== V4.11：收敛移动驱动（战斗/行军同风格） ====================
+			-- 目标：减少MoveToFinished竞态，避免“追旧点/怼墙/走完路点后发呆”
+			local now = tick()
+			local distToMoveTarget = GetHorizontalDistance(myRootPart.Position, moveTarget)
+			local directMoveAllowed = CanDirectMove(aiData.UnitModel, moveTarget, aiData.CurrentTarget)
+			local shouldUsePath = CONFIG.PATHFINDING.ENABLED and not directMoveAllowed
+
+			-- 模式切换：只在切换时做一次清理，避免每帧互相踩踏
+			local desiredMode = shouldUsePath and "Path" or "Direct"
+			if aiData._MovementMode ~= desiredMode then
+				aiData._MovementMode = desiredMode
+				aiData._PathLastMoveToUpdateTime = 0
+
+				if desiredMode == "Direct" then
+					-- 切换到直线移动前，必须先清理路径状态，避免残留回调/路点状态影响
+					ClientPathService.StopMovement(aiData.UnitModel)
+				else
+					-- Heartbeat驱动切角：确保没有残留MoveToFinished回调推进Index
+					if ClientPathService.ClearMoveConnection then
+						ClientPathService.ClearMoveConnection(aiData.UnitModel)
+					end
+				end
+			end
+
+			if shouldUsePath then
+				-- 每帧RequestPath：内部自带复用/冷却，不会刷爆ComputeAsync；但能让目标移动触发重寻路
+				local result = ClientPathService.RequestPath(aiData.UnitModel, moveTarget)
 				local pathStatus = ClientPathService.GetPathStatus(aiData.UnitModel)
 
-				-- 检查是否需要重新寻路
-				local needRepath = ClientPathService.NeedRepath(aiData.UnitModel)
-				local noPath = pathStatus == ClientPathService.PathStatus.IDLE or pathStatus == ClientPathService.PathStatus.FAILED
-
-				if needRepath or noPath then
-					-- 请求新路径
-					local success = ClientPathService.RequestPath(aiData.UnitModel, moveTarget)
-					if success then
-						-- 开始跟随路径
-						ClientPathService.FollowPath(aiData.UnitModel, nil, nil)
-						DebugLog(aiData.UnitModel.Name, "寻路成功，开始跟随路径")
+				if pathStatus == ClientPathService.PathStatus.SUCCESS or pathStatus == ClientPathService.PathStatus.PARTIAL then
+					if ClientPathService.StepPath then
+						local stepResult = ClientPathService.StepPath(aiData.UnitModel, {
+							humanoid = humanoid,
+							currentPos = myRootPart.Position,
+							now = now,
+							lastMoveToUpdateTime = aiData._PathLastMoveToUpdateTime or 0,
+						})
+						if stepResult and stepResult.lastMoveToUpdateTime then
+							aiData._PathLastMoveToUpdateTime = stepResult.lastMoveToUpdateTime
+							if stepResult.moved then
+								aiData._LastMoveCommandTime = now
+							end
+						end
 					else
-						-- 寻路失败，回退到直线移动
-						-- V4.3关键：先清理路径状态，避免MoveToFinished冲突
-						ClientPathService.StopMovement(aiData.UnitModel)
-						humanoid:MoveTo(moveTarget)
-						DebugLog(aiData.UnitModel.Name, "寻路失败，使用直线移动")
+					local pathState = ClientPathService.GetPathState and ClientPathService.GetPathState(aiData.UnitModel)
+					if pathState and pathState.Waypoints and pathState.Index then
+						local currentWaypoint = pathState.Waypoints[pathState.Index]
+						if currentWaypoint then
+							-- 切角阈值：如果是中间点，距离 < 5 就切向下一个点
+							local distToWaypoint = GetHorizontalDistance(myRootPart.Position, currentWaypoint)
+							local isFinalPoint = pathState.Index >= #pathState.Waypoints
+							local reachThreshold = isFinalPoint and 1.5 or 5.0
+
+							if distToWaypoint < reachThreshold then
+								pathState.Index = pathState.Index + 1
+								aiData._PathLastMoveToUpdateTime = 0
+								currentWaypoint = pathState.Waypoints[pathState.Index]
+							end
+
+							-- 持续刷新MoveTo，防止MoveTo超时（默认8秒）导致发呆
+							local lastUpdate = aiData._PathLastMoveToUpdateTime or 0
+							if currentWaypoint and (lastUpdate == 0 or (now - lastUpdate) > 0.5) then
+								humanoid:MoveTo(currentWaypoint)
+								aiData._PathLastMoveToUpdateTime = now
+								aiData._LastMoveCommandTime = now
+							end
+						end
 					end
-				elseif pathStatus == ClientPathService.PathStatus.SUCCESS then
-					-- ✅ 已有有效路径，继续跟随
-					-- V4.3修复：不额外调用MoveTo，避免与FollowPath内部的MoveTo冲突
-					-- FollowPath会在内部自动调用humanoid:MoveTo(waypoint)
-					-- 这里只调用FollowPath，确保路径继续推进
-					ClientPathService.FollowPath(aiData.UnitModel, nil, nil)
+					end
+				elseif pathStatus == ClientPathService.PathStatus.QUEUED or pathStatus == ClientPathService.PathStatus.COMPUTING then
+					-- 异步排队/计算中：等待（不要直线MoveTo覆盖，也不要StopMovement清空排队）
+					DebugLog(aiData.UnitModel.Name, "等待寻路计算/排队:", result)
 				else
-					-- 路径正在计算中或其他状态，暂时直线移动
-					-- V4.3关键：先清理路径状态，避免MoveToFinished冲突
-					ClientPathService.StopMovement(aiData.UnitModel)
-					humanoid:MoveTo(moveTarget)
+					-- 冷却中且没有可用路径：仅在“直线无遮挡”时用低频MoveTo兜底，避免怼墙
+					if result == ClientPathService.PathRequestResult.COOLDOWN and directMoveAllowed then
+						local last = aiData._LastDirectMoveToTime or 0
+						if (now - last) > 0.5 then
+							humanoid:MoveTo(moveTarget)
+							aiData._LastDirectMoveToTime = now
+							aiData._LastMoveCommandTime = now
+						end
+					end
 				end
 			else
-				-- 距离较近时直接移动（不需要寻路）
-				-- V4.3关键修复：切换到直线移动前，必须先清理路径状态
-				-- 否则FollowPath的MoveToFinished回调还活着，会收到误触发
-				ClientPathService.StopMovement(aiData.UnitModel)
-				humanoid:MoveTo(moveTarget)
+				-- 直线移动：节流MoveTo，避免高频指令导致的竞态/抖动
+				local last = aiData._LastDirectMoveToTime or 0
+				if (now - last) > 0.25 then
+					humanoid:MoveTo(moveTarget)
+					aiData._LastDirectMoveToTime = now
+					aiData._LastMoveCommandTime = now
+				end
 			end
-			-- ==================== 修复结束 ====================
+			-- ==================== 收敛结束 ====================
+
+			-- ==================== V4.10新增：卡住检测与瞬移解卡 ====================
+			-- 从服务端UnitAI迁移的逻辑，防止单位被卡住后无法到达目标
+			local myRoot = myRootPart
+			if myRoot and CONFIG.STUCK.TELEPORT_ENABLED then
+				-- 避免“排队/计算中站着不动”被误判为卡住：只有近期真的发出过移动指令才检测
+				local lastMoveCmd = aiData._LastMoveCommandTime or 0
+				if (now - lastMoveCmd) <= (CONFIG.STUCK.CHECK_INTERVAL * 2.2) then
+					aiData._stuckTimer = (aiData._stuckTimer or 0) + deltaTime
+				else
+					aiData._stuckTimer = 0
+					aiData._stuckCount = 0
+				end
+
+				if aiData._stuckTimer >= CONFIG.STUCK.CHECK_INTERVAL then
+					aiData._stuckTimer = 0
+
+					local currentPos = myRoot.Position
+					local distToMoveTarget = GetHorizontalDistance(currentPos, moveTarget)
+
+					-- 只有距离移动目标足够远时才检测卡住（太近时可能只是在微调位置）
+					if distToMoveTarget > CONFIG.STUCK.MIN_DISTANCE_FOR_CHECK then
+						local lastPos = aiData._LastStuckCheckPos or currentPos
+						local movedDist = GetHorizontalDistance(currentPos, lastPos)
+						aiData._LastStuckCheckPos = currentPos
+
+						-- 是否在接近目标（距离在变小）
+						local prevDist = aiData._PrevDistanceToMoveTarget or distToMoveTarget
+						local isProgressing = distToMoveTarget < (prevDist - 0.1)
+						aiData._PrevDistanceToMoveTarget = distToMoveTarget
+
+						-- 根据WalkSpeed估算“应该走多远”
+						local walkSpeed = humanoid and humanoid.WalkSpeed or 16
+						local expectedDistance = walkSpeed * CONFIG.STUCK.CHECK_INTERVAL * 0.5
+						local minDistThreshold = math.max(CONFIG.STUCK.MIN_VELOCITY, expectedDistance * 0.3)
+
+						local isStuck = movedDist < minDistThreshold and not isProgressing
+						if isStuck then
+							aiData._stuckCount = (aiData._stuckCount or 0) + 1
+							DebugLog(string.format("%s 可能卡住: stuckCount=%d, moved=%.2f, dist=%.1f",
+								aiData.UnitModel.Name, aiData._stuckCount, movedDist, distToMoveTarget))
+						else
+							aiData._stuckCount = 0
+						end
+
+						-- 连续卡住次数达到阈值，执行瞬移解卡
+						if aiData._stuckCount >= CONFIG.STUCK.COUNT_THRESHOLD then
+							aiData._stuckCount = 0
+							DebugLog(string.format("%s 卡住瞬移! 目标位置: %.1f, %.1f, %.1f",
+								aiData.UnitModel.Name, moveTarget.X, moveTarget.Y, moveTarget.Z))
+
+							-- 瞬移到目标位置（保持当前朝向）
+							local currentCFrame = myRoot.CFrame
+							local targetY = moveTarget.Y
+
+							-- 射线检测确保落在地面上
+							local rayParams = RaycastParams.new()
+							rayParams.FilterType = Enum.RaycastFilterType.Exclude
+							rayParams.FilterDescendantsInstances = { aiData.UnitModel }
+							rayParams.IgnoreWater = true
+
+							local rayResult = workspace:Raycast(
+								Vector3.new(moveTarget.X, moveTarget.Y + 10, moveTarget.Z),
+								Vector3.new(0, -50, 0),
+								rayParams
+							)
+
+							if rayResult then
+								targetY = rayResult.Position.Y + 3 -- 加上角色高度偏移
+							end
+
+							-- 执行瞬移（保持Y轴旋转朝向）
+							local _, yRot, _ = currentCFrame:ToEulerAnglesYXZ()
+							myRoot.CFrame = CFrame.new(moveTarget.X, targetY, moveTarget.Z) * CFrame.Angles(0, yRot, 0)
+
+							-- 清除速度，防止瞬移后继续滑动
+							myRoot.AssemblyLinearVelocity = Vector3.zero
+							myRoot.AssemblyAngularVelocity = Vector3.zero
+
+							-- 重新请求路径（瞬移后位置变化）
+							ClientPathService.ClearPath(aiData.UnitModel)
+
+							-- 瞬移后：回到“正常寻敌”流程，避免停在原地不再攻击/移动
+							aiData._LastUnstuckTeleportTime = now
+							aiData._MovementMode = nil
+							aiData._PathLastMoveToUpdateTime = 0
+							aiData._LastDirectMoveToTime = 0
+							aiData._LastMoveCommandTime = now
+							aiData._stuckTimer = 0
+							aiData._LastStuckCheckPos = nil
+							aiData._PrevDistanceToMoveTarget = nil
+
+							aiData.State = AIState.IDLE
+							aiData.CurrentTarget = nil
+							aiData.IsAttacking = false
+							aiData.AttackCooldown = 0
+							PlayAnimation(aiData, AnimationState.IDLE)
+						end
+					else
+						-- 距离目标很近时重置卡住计数
+						aiData._stuckCount = 0
+					end
+				end
+			end
+			-- ==================== 卡住检测结束 ====================
 		end
 	end
 end
@@ -824,6 +1063,16 @@ end
 @param deltaTime number - 时间增量
 ]]
 local function UpdateSingleAI(aiData, deltaTime)
+	-- March期间由ClientMarchService接管移动与动画：暂停战斗AI，避免MoveTo/动画互相踩踏
+	if ClientMarchService
+		and ClientMarchService.GetMarchState
+		and aiData
+		and aiData.UnitModel
+		and aiData.State ~= AIState.DEAD then
+		if ClientMarchService.GetMarchState(aiData.UnitModel) == "Marching" then
+			return
+		end
+	end
 	-- 根据状态调用对应的更新函数
 	if aiData.State == AIState.IDLE then
 		UpdateIdleState(aiData, deltaTime)
@@ -866,15 +1115,29 @@ local function OnHeartbeat(deltaTime)
 	-- 定期上报位置到服务端
 	if positionReportTime >= CONFIG.POSITION_REPORT_INTERVAL then
 		positionReportTime = 0
+		local now = tick()
 		for unitModel, aiData in pairs(activeAIs) do
 			if unitModel and unitModel.Parent and aiData.State ~= AIState.DEAD then
 				local rootPart = unitModel:FindFirstChild("HumanoidRootPart")
 				if rootPart then
+					local reportState = aiData.State
+					if aiData._LastUnstuckTeleportTime
+						and (now - aiData._LastUnstuckTeleportTime) < (CONFIG.STUCK.REPORT_MOVING_AFTER_TELEPORT or 0) then
+						-- 瞬移解卡后短时间内仍按Moving上报：避免服务端因状态切换过快而回滚位置
+						reportState = AIState.MOVING
+					end
+					if ClientMarchService and ClientMarchService.GetMarchState then
+						if ClientMarchService.GetMarchState(unitModel) == "Marching" then
+							-- March中允许“解卡瞬移”校验放行：向服务端按Moving状态上报
+							reportState = AIState.MOVING
+						end
+					end
+
 					ReportUnitPosition:FireServer(
 						aiData.BattleId,
 						unitModel,
 						rootPart.Position,
-						aiData.State
+						reportState
 					)
 				end
 			end
@@ -889,9 +1152,10 @@ end
 @param unitManager ClientUnitManager
 @param pathService ClientPathService
 ]]
-function ClientUnitAI.Initialize(unitManager, pathService)
+function ClientUnitAI.Initialize(unitManager, pathService, marchService)
 	ClientUnitManager = unitManager
 	ClientPathService = pathService
+	ClientMarchService = marchService
 
 	-- 启动更新循环
 	if not updateConnection then
@@ -932,18 +1196,22 @@ function ClientUnitAI.StartAI(battleId, unitModel, unitId, level, team)
 	end
 
 	-- V4.1修复：启动战斗AI前，强制停止任何残留的移动指令（行军/旧MoveTo/旧路径）
-	-- 否则会出现“进入战斗先回头走一下再扭回来”的现象（旧目标点先被执行一帧）
+	-- 否则会出现"进入战斗先回头走一下再扭回来"的现象（旧目标点先被执行一帧）
+	-- V4.12修复：不使用humanoid:MoveTo(rootPart.Position)，因为这会让单位原地站住
+	-- 尤其是瞬移后的单位，MoveTo到当前位置会阻止后续AI移动命令
 	pcall(function()
 		if ClientPathService then
 			ClientPathService.StopMovement(unitModel)
 		end
 	end)
 	pcall(function()
-		humanoid:Move(Vector3.new(0, 0, 0))
+		humanoid:Move(Vector3.zero)
+		-- 直接清除WalkToPoint属性，避免MoveTo残留
 		local rootPart = unitModel:FindFirstChild("HumanoidRootPart") or unitModel.PrimaryPart
 		if rootPart then
-			-- 用“走到当前位置”覆盖掉可能残留的WalkToPoint
-			humanoid:MoveTo(rootPart.Position)
+			-- 清除速度，确保单位完全停止
+			rootPart.AssemblyLinearVelocity = Vector3.zero
+			rootPart.AssemblyAngularVelocity = Vector3.zero
 		end
 	end)
 
@@ -1031,6 +1299,17 @@ function ClientUnitAI.StartAI(battleId, unitModel, unitId, level, team)
 		AnimTrack = animTrack,
 		CurrentAnimTrack = nil,
 		CurrentAnimState = nil,
+
+		-- V4.10新增：卡住检测状态
+		_stuckTimer = 0,
+		_stuckCount = 0,
+		_LastStuckCheckPos = nil,
+		_PrevDistanceToMoveTarget = nil,
+		_LastUnstuckTeleportTime = 0,
+
+		-- V4.11：移动驱动辅助状态（避免路径/直线MoveTo互相踩踏）
+		_MovementMode = nil, -- "Path" | "Direct"
+		_LastMoveCommandTime = 0,
 	}
 
 	-- 注册到activeAIs
@@ -1139,13 +1418,30 @@ end
 
 --[[
 清理所有AI（战斗结束时调用）
+V4.8修复：增强清理逻辑，确保彻底清除所有状态
 ]]
 function ClientUnitAI.ClearAll()
+	-- V4.8修复：先收集所有需要清理的单位（避免迭代过程中修改字典）
+	local unitsToClean = {}
 	for unitModel, aiData in pairs(activeAIs) do
-		ClientUnitAI.StopAI(unitModel)
+		table.insert(unitsToClean, unitModel)
 	end
+
+	-- 逐个停止AI（包括停止动画、清理路径、停止移动）
+	for _, unitModel in ipairs(unitsToClean) do
+		pcall(function()
+			ClientUnitAI.StopAI(unitModel)
+		end)
+	end
+
+	-- V4.8修复：强制重置activeAIs为全新的空字典（不仅仅清空，而是重新创建）
+	-- 这可以彻底避免任何残留引用
 	activeAIs = {}
-	DebugLog("所有AI已清理")
+
+	-- V4.8修复：重置全局槽位计数器，避免ID冲突
+	nextSlotIdCounter = 1
+
+	DebugLog("所有AI已彻底清理")
 end
 
 --[[

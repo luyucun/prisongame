@@ -120,6 +120,57 @@ local function EaseInOutQuad(t)
 	end
 end
 
+--[[
+	收集门节点内所有BasePart的原始碰撞状态
+	用于在开门/关门动画期间临时禁用碰撞，避免门板旋转时把单位“扫飞”
+	@param nodeInfo table|nil - { Node: Model|Part, Origin: BasePart|nil, Type: "Model"|"Part" }
+	@return { { Part: BasePart, CanCollide: boolean } }
+]]
+local function CollectCollisionParts(nodeInfo)
+	local parts = {}
+	if not nodeInfo or not nodeInfo.Node then
+		return parts
+	end
+
+	if nodeInfo.Type == "Part" then
+		if nodeInfo.Node:IsA("BasePart") then
+			table.insert(parts, { Part = nodeInfo.Node, CanCollide = nodeInfo.Node.CanCollide })
+		end
+		return parts
+	end
+
+	-- Model：收集所有BasePart（包括Origin、装饰件、碰撞体等），恢复时按原始值回写
+	for _, descendant in ipairs(nodeInfo.Node:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			table.insert(parts, { Part = descendant, CanCollide = descendant.CanCollide })
+		end
+	end
+
+	return parts
+end
+
+--[[
+	设置门的碰撞开关
+	- canCollide=false：动画期间/门打开期间禁用碰撞，避免门板推开兵/玩家
+	- canCollide=true：门完全关闭后恢复到初始化时的原始碰撞状态
+]]
+local function SetDoorCollisions(doorData, canCollide)
+	if not doorData or not doorData.CollisionParts then
+		return
+	end
+
+	for _, entry in ipairs(doorData.CollisionParts) do
+		local part = entry.Part
+		if part and part.Parent then
+			if canCollide then
+				part.CanCollide = entry.CanCollide and true or false
+			else
+				part.CanCollide = false
+			end
+		end
+	end
+end
+
 -- ==================== 步骤1：资源定位与DoorData构建 ====================
 
 --[[
@@ -214,7 +265,18 @@ local function BuildDoorData(home)
 		Left = leftInfo,
 		Right = rightInfo,
 		State = DoorState.CLOSED,
-		Tweens = { Left = nil, Right = nil }
+		Tweens = { Left = nil, Right = nil },
+		-- 记录门的原始碰撞状态（用于在动画/开启期间临时禁用碰撞）
+		CollisionParts = (function()
+			local list = {}
+			for _, entry in ipairs(CollectCollisionParts(leftInfo)) do
+				table.insert(list, entry)
+			end
+			for _, entry in ipairs(CollectCollisionParts(rightInfo)) do
+				table.insert(list, entry)
+			end
+			return list
+		end)()
 	}, nil
 end
 
@@ -391,6 +453,8 @@ local function Transition(homeId, targetState, options)
 		rightAngle = DOOR_CONFIG.RightOpenAngle
 
 		if currentState == DoorState.OPEN then
+			-- 门已处于开启状态：确保碰撞关闭（避免门板阻挡/推开单位）
+			SetDoorCollisions(doorData, false)
 			if onCompleted then
 				task.spawn(onCompleted)
 			end
@@ -398,6 +462,8 @@ local function Transition(homeId, targetState, options)
 		end
 
 		if currentState == DoorState.OPENING then
+			-- 门正在开启：保持碰撞关闭
+			SetDoorCollisions(doorData, false)
 			return true
 		end
 
@@ -408,6 +474,8 @@ local function Transition(homeId, targetState, options)
 		rightAngle = DOOR_CONFIG.ClosedAngle
 
 		if currentState == DoorState.CLOSED then
+			-- 门已处于关闭状态：恢复碰撞（按原始配置）
+			SetDoorCollisions(doorData, true)
 			if onCompleted then
 				task.spawn(onCompleted)
 			end
@@ -415,6 +483,8 @@ local function Transition(homeId, targetState, options)
 		end
 
 		if currentState == DoorState.CLOSING then
+			-- 门正在关闭：关闭期间禁用碰撞避免扫飞
+			SetDoorCollisions(doorData, false)
 			return true
 		end
 
@@ -428,6 +498,9 @@ local function Transition(homeId, targetState, options)
 
 	-- 设置过渡状态
 	doorData.State = transitionState
+
+	-- 动画期间禁用门碰撞，避免门板旋转把单位/玩家推开
+	SetDoorCollisions(doorData, false)
 
 	-- 完成计数器：统计需要等待的门数
 	local totalDoors = 0
@@ -448,6 +521,7 @@ local function Transition(homeId, targetState, options)
 	if totalDoors == 0 then
 		WarnLog("PlayerHome" .. homeId .. " 没有任何可用的门")
 		doorData.State = finalState
+		SetDoorCollisions(doorData, finalState == DoorState.CLOSED)
 		if onCompleted then
 			task.spawn(onCompleted)
 		end
@@ -460,6 +534,9 @@ local function Transition(homeId, targetState, options)
 		if completedCount >= totalDoors then
 			-- 所有门都完成，切换到最终状态
 			doorData.State = finalState
+
+			-- 恢复/保持最终碰撞状态（关闭=恢复原始碰撞；开启=保持无碰撞）
+			SetDoorCollisions(doorData, finalState == DoorState.CLOSED)
 
 			-- 清理引用（避免残留）
 			doorData.Tweens.Left = nil
@@ -604,6 +681,8 @@ function DoorControlService.Initialize()
 
 		-- 确保状态标记为关闭
 		doorData.State = DoorState.CLOSED
+		-- 确保初始为“可碰撞”（按原始配置恢复），保证非战斗时门能阻挡/不穿模
+		SetDoorCollisions(doorData, true)
 
 		successCount = successCount + 1
 	end
@@ -773,6 +852,8 @@ function DoorControlService.SetDoorState(homeId, state)
 	end
 
 	doorData.State = finalState
+	-- 同步碰撞状态：开启=无碰撞；关闭=恢复原始碰撞
+	SetDoorCollisions(doorData, finalState == DoorState.CLOSED)
 	return true
 end
 

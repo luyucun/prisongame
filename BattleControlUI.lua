@@ -167,10 +167,13 @@ playButton.MouseButton1Click:Connect(function()
 	-- 开战点击后立刻隐藏背包
 	HideBackpackForBattle()
 
-	-- Immediately lock battle camera for smoother start
-	if _G.BattleCameraController and _G.BattleCameraController.Start then
-		_G.BattleCameraController.Start()
-	end
+	-- V5.7修复：移除此处的BattleCameraController.Start()调用
+	-- 原因：在点击按钮时，玩家可能在别人家溜达，此时：
+	-- 1. 服务端还没有完成玩家传送（TeleportPlayerToCommandPart）
+	-- 2. 单位还没有被标记为CampaignKeepInstance
+	-- 3. 镜头的computeCenter()会计算出错误的目标位置
+	-- 正确做法：由CameraController监听CampaignStateUpdate事件来启动镜头锁定
+	-- 这样可以确保服务端完成传送和准备后，镜头才开始跟随正确的位置
 
 	-- 触发服务器事件
 	local requestStart = CampaignEvents:FindFirstChild("RequestStartCampaign")

@@ -550,6 +550,29 @@ local function OnIdleFloorStateChanged(onFloor)
     end
 end
 
+local function BindBackpackTriggerIdleFloorListener()
+    local timeoutSeconds = 10
+    local startTime = os.clock()
+
+    while os.clock() - startTime < timeoutSeconds do
+        local backpackTrigger = _G.BackpackTrigger
+        if backpackTrigger and backpackTrigger.SubscribeIdleFloorChanged then
+            backpackTrigger.SubscribeIdleFloorChanged(OnIdleFloorStateChanged)
+            if backpackTrigger.IsOnIdleFloor then
+                OnIdleFloorStateChanged(backpackTrigger.IsOnIdleFloor())
+            end
+            return true
+        end
+        task.wait(0.2)
+    end
+
+    warn(string.format(
+        "[RemovalController] 未找到BackpackTrigger的IdleFloor监听接口（等待%.1fs后仍未就绪），Remove按钮显隐可能不会随站位更新",
+        timeoutSeconds
+    ))
+    return false
+end
+
 -- ==================== 全局访问 ====================
 
 -- 提供全局访问接口
@@ -561,14 +584,7 @@ task.spawn(function()
     RemovalController.Initialize()
 
     -- 订阅IdleFloor站位变化（依赖BackpackTrigger提供的接口）
-    if _G.BackpackTrigger and _G.BackpackTrigger.SubscribeIdleFloorChanged then
-        _G.BackpackTrigger.SubscribeIdleFloorChanged(OnIdleFloorStateChanged)
-        if _G.BackpackTrigger.IsOnIdleFloor then
-            OnIdleFloorStateChanged(_G.BackpackTrigger.IsOnIdleFloor())
-        end
-    else
-        warn("[RemovalController] 未找到BackpackTrigger的IdleFloor监听接口，Remove按钮显隐可能不会随站位更新")
-    end
+    BindBackpackTriggerIdleFloorListener()
 end)
 
 return RemovalController

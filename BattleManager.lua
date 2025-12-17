@@ -1086,6 +1086,11 @@ local function StopUnitResidualMovement(model)
 		model:SetAttribute("_ActiveMoveId", nil)
 	end)
 
+	-- V5.9修复：标记进入战斗模式，阻断PathService等残留MoveTo
+	pcall(function()
+		model:SetAttribute("UnitAIMode", "CombatMode")
+	end)
+
 	local humanoid = model:FindFirstChildOfClass("Humanoid") or model:FindFirstChild("Humanoid")
 	local rootPart = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
 
@@ -1093,12 +1098,8 @@ local function StopUnitResidualMovement(model)
 		pcall(function()
 			humanoid:Move(Vector3.zero)
 		end)
-		-- 关键：用“走到当前位置”覆盖掉可能残留的 WalkToPoint
-		if rootPart then
-			pcall(function()
-				humanoid:MoveTo(rootPart.Position)
-			end)
-		end
+		-- V4.12修复：不使用MoveTo到当前位置，避免单位原地站住
+		-- 尤其是瞬移后的单位，MoveTo到当前位置会阻止后续AI移动
 	end
 
 	-- 清掉残留速度，避免交接瞬间滑步/抖动
@@ -1253,6 +1254,9 @@ function BattleManager.TerminateClientAI(battleId, result)
 		for _, unit in ipairs(battle.AttackUnits) do
 			if unit and unit.Parent then
 				SetNetworkOwnerToServer(unit)
+				pcall(function()
+					unit:SetAttribute("UnitAIMode", nil)
+				end)
 				DebugLog(string.format("[V4.0] 恢复攻击方 %s 的NetworkOwner为服务端", unit.Name))
 			end
 		end
@@ -1263,6 +1267,9 @@ function BattleManager.TerminateClientAI(battleId, result)
 		for _, unit in ipairs(battle.DefenseUnits) do
 			if unit and unit.Parent then
 				SetNetworkOwnerToServer(unit)
+				pcall(function()
+					unit:SetAttribute("UnitAIMode", nil)
+				end)
 				DebugLog(string.format("[V4.0] 恢复防守方 %s 的NetworkOwner为服务端", unit.Name))
 			end
 		end

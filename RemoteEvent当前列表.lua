@@ -98,7 +98,9 @@ ReplicatedStorage
         ├──ServerUnitDeath（RemoteEvent） - 服务器→客户端：单位死亡通知(battleId, unitModel, killerModel)
         ├──RequestAttack（RemoteEvent） - 客户端→服务器：请求攻击(battleId, attackerModel, targetModel, attackType)
         ├──ReportUnitPosition（RemoteEvent） - 客户端→服务器：上报位置(battleId, unitModel, position, state)
-        └──ClientBattleReady（RemoteEvent） - 客户端→服务器：客户端准备完成(battleId)
+        ├──ClientBattleReady（RemoteEvent） - 客户端→服务器：客户端准备完成(battleId)
+        ├──StartMarch（RemoteEvent） 【V4.1新增 - 客户端行军系统】 - 服务器→客户端：通知开始行军(battleId, moveTargets, stageIndex)
+        └──MarchComplete（RemoteEvent） 【V4.1新增 - 客户端行军系统】 - 客户端→服务器：报告行军完成(battleId, arrivedList, failedList)
     └──PowerEvents（Folder）/  【V3.9.2新增 - 战斗力系统】
         ├──PowerUpdate（RemoteEvent） - 服务器→客户端：同步战斗力数值(totalPower)
         └──RequestPower（RemoteEvent） - 客户端→服务器：请求当前战斗力
@@ -833,6 +835,40 @@ CampaignStateUpdate事件变更（V3.6）：
 
 注意：服务端BattleManager.lua和CombatSystem.lua会在初始化时自动创建这些事件（如果不存在），
 但建议手动创建以确保事件在系统初始化前就存在。
+
+
+【V4.1客户端行军系统RemoteEvent创建说明】
+位置：ReplicatedStorage/Events/ClientAIEvents/ （已存在文件夹）
+🆕 StartMarch (RemoteEvent) - 需在Studio中手动创建
+🆕 MarchComplete (RemoteEvent) - 需在Studio中手动创建
+
+创建步骤：
+1. 打开Roblox Studio
+2. 导航到 ReplicatedStorage > Events > ClientAIEvents
+3. 右键点击 ClientAIEvents 文件夹
+4. 选择 "Insert Object" > "RemoteEvent"
+5. 将新建的 RemoteEvent 重命名为 "StartMarch"
+6. 重复步骤4-5，创建 "MarchComplete"
+7. 保存游戏
+
+功能说明：
+- StartMarch：服务器→客户端：通知客户端开始行军
+  参数：(battleId: number, moveTargets: table, stageIndex: number)
+  说明：服务端在CampaignManager.MarchToStage时通知客户端开始行军
+  moveTargets格式：数组格式 {{unitName=string, targetCFrame=CFrame}, ...}
+  注意：由于RemoteEvent无法序列化Instance作为table的key，使用unitName标识单位
+
+- MarchComplete：客户端→服务器：客户端报告行军完成
+  参数：(battleId: number, arrivedList: table, failedList: table)
+  说明：客户端行军完成后通知服务端，报告到达和失败的单位列表
+  arrivedList格式：{unitModel1, unitModel2, ...}
+  failedList格式：{unitModel1, unitModel2, ...}
+
+注意：
+1. 行军系统由客户端完全控制，服务端仅发送指令并接收结果
+2. 客户端使用ClientMarchService处理行军逻辑（寻路、移动、到达检测）
+3. 行军兜底：客户端可在卡住/超时/走错路时将单位瞬移到目标点，服务端对结果做距离/时间合理性校验
+4. 服务端可根据需要对行军结果进行校验（距离、时间合理性）
 
 
 【V4.0客户端AI迁移系统其他资源创建说明】

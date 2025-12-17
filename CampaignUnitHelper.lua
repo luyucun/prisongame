@@ -105,12 +105,14 @@ function CampaignUnitHelper.PrepareForBattle(unitModel)
 			PathService.ClearPath(unitModel)
 		end)
 
-		-- 2.1 关键：清掉MoveTo残留的WalkToPoint，避免进入战斗时先“回头补位”再被战斗AI拉回
+		-- 2.1 V4.12修复：不使用MoveTo到当前位置，避免单位原地站住
+		-- 尤其是瞬移后的单位，MoveTo到当前位置会阻止后续AI移动
 		pcall(function()
 			humanoid:Move(Vector3.zero)
 			local rootPart = unitModel:FindFirstChild("HumanoidRootPart") or unitModel.PrimaryPart
 			if rootPart then
-				humanoid:MoveTo(rootPart.Position)
+				rootPart.AssemblyLinearVelocity = Vector3.zero
+				rootPart.AssemblyAngularVelocity = Vector3.zero
 			end
 		end)
 

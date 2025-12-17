@@ -47,6 +47,7 @@ local dragState
 
 -- 移动端拖动时屏蔽相机触摸旋转（方案一：ContextActionService吃掉触摸）
 local BLOCK_CAMERA_ACTION = "DragSystem_BlockCameraTouch"
+local CAMERA_BLOCK_PRIORITY = Enum.ContextActionPriority.High.Value + 200
 local cameraBlockBound = false
 
 local function BindCameraTouchBlock()
@@ -61,15 +62,25 @@ local function BindCameraTouchBlock()
 	cameraBlockBound = true
 	ContextActionService:BindActionAtPriority(
 		BLOCK_CAMERA_ACTION,
-		function()
+		function(_, _, inputObject)
 			-- 仅在拖动期间吃掉输入，平时不影响相机
-			if dragState and dragState.isDragging then
-				return Enum.ContextActionResult.Sink
+			if not (dragState and dragState.isDragging) then
+				return Enum.ContextActionResult.Pass
 			end
-			return Enum.ContextActionResult.Pass
+
+			-- 只拦截当前拖动用的那根手指（避免影响移动摇杆/按钮等第二指操作）
+			if inputObject
+				and inputObject.UserInputType == Enum.UserInputType.Touch
+				and dragState.currentTouch
+				and inputObject ~= dragState.currentTouch
+			then
+				return Enum.ContextActionResult.Pass
+			end
+
+			return Enum.ContextActionResult.Sink
 		end,
 		false,
-		Enum.ContextActionPriority.High.Value + 1,
+		CAMERA_BLOCK_PRIORITY,
 		Enum.UserInputType.Touch,
 		Enum.UserInputType.MouseMovement
 	)
@@ -81,6 +92,53 @@ local function UnbindCameraTouchBlock()
 	end
 	cameraBlockBound = false
 	ContextActionService:UnbindAction(BLOCK_CAMERA_ACTION)
+end
+
+-- 移动端拖动期间屏蔽镜头旋转（方案二：临时切到Scriptable，彻底屏蔽默认镜头拖拽旋转）
+local dragCameraLock = {
+	active = false,
+	cameraType = nil,
+	cameraSubject = nil,
+}
+
+local function LockCameraDuringDrag()
+	if dragCameraLock.active then
+		return
+	end
+	if not UserInputService.TouchEnabled then
+		return
+	end
+	if not camera then
+		return
+	end
+
+	-- 如果其他系统已经接管了Scriptable镜头（战斗/房屋升级等），这里不重复接管，避免互相覆盖
+	if camera.CameraType == Enum.CameraType.Scriptable then
+		return
+	end
+
+	dragCameraLock.active = true
+	dragCameraLock.cameraType = camera.CameraType
+	dragCameraLock.cameraSubject = camera.CameraSubject
+
+	camera.CameraType = Enum.CameraType.Scriptable
+end
+
+local function UnlockCameraDuringDrag()
+	if not dragCameraLock.active then
+		return
+	end
+	dragCameraLock.active = false
+
+	if camera then
+		camera.CameraType = dragCameraLock.cameraType or Enum.CameraType.Custom
+		if dragCameraLock.cameraSubject then
+			camera.CameraSubject = dragCameraLock.cameraSubject
+		end
+	end
+
+	dragCameraLock.cameraType = nil
+	dragCameraLock.cameraSubject = nil
 end
 
 -- V2.0重构: 拖动状态使用GridWidth和GridDepth
@@ -470,6 +528,10 @@ function StartDragging(model)
 	-- print(string.format("[DragSystem] 开始拖动: %s Level: %d GridSize: %dx%d", model:GetFullName(), level, gridWidth, gridDepth))
 
 	dragState.isDragging = true
+	-- 移动端：拖动期间锁定镜头，避免手指拖动导致相机旋转
+	if dragState.isMobile then
+		LockCameraDuringDrag()
+	end
 	dragState.draggedModel = model
 	dragState.draggedInstanceId = instanceId
 	dragState.draggedUnitId = unitId
@@ -485,6 +547,7 @@ function StartDragging(model)
 	dragState.dragStartPos = originalPos
 
 	-- 保存原始CanCollide状态
+	local hrp = model:FindFirstChild("HumanoidRootPart")
 	local hrp = model:FindFirstChild("HumanoidRootPart")
 	if hrp then
 		dragState.originalCanCollide = hrp.CanCollide
@@ -819,6 +882,11 @@ function StopDragging()
 	dragState.canMerge = false
 	dragState.isRelocating = false
 	dragState.currentTouch = nil
+
+	-- 移动端：拖动结束后恢复镜头控制
+	if dragState.isMobile then
+		UnlockCameraDuringDrag()
+	end
 end
 
 -- ==================== 工具函数 ====================

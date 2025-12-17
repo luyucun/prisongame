@@ -2,7 +2,7 @@
 脚本名称: UnitManager
 脚本类型: ModuleScript (服务端系统)
 脚本位置: ServerScriptService/Systems/UnitManager
-版本: V2.6 修复版 - 移除导致卡死的空间网格，回归高效列表遍历
+版本: V2.6.1 - 修复战斗开始时寻敌位置缓存bug
 ]]
 
 --[[
@@ -11,6 +11,12 @@
 1. 管理所有战斗中的单位,按 battleId 和 team 分组
 2. 提供高效的寻敌接口
 3. 维护单位位置缓存,减少重复计算
+
+V2.6.1修复说明:
+- 🔧 修复战斗开始时寻敌bug：多个单位同时寻敌时获取到目标的过期位置
+- 症状：只有1-2个兵追目标当前位置，其他兵追目标之前站立的位置，到达后傻站很久才转向
+- 原因：0.1秒位置缓存导致后续单位获取到第一批单位缓存的旧位置
+- 解决：GetClosestEnemy()强制更新位置，确保获取实时位置（性能影响极小）
 
 V2.6修复说明:
 - 移除了V2.4引入的空间网格系统（SpatialGrid）
@@ -262,7 +268,11 @@ function UnitManager.GetClosestEnemy(unitModel, maxDistance, forceUpdatePosition
 		return nil, nil
 	end
 
-	local forceUpdate = forceUpdatePositions == true
+	-- 🔧 V2.6.1修复：战斗寻敌时强制更新位置缓存
+	-- 原因：战斗开始时多个单位几乎同时寻敌，如果使用缓存会导致后续单位获取过期位置
+	-- 表现：只有1-2个兵追目标当前位置，其他兵追目标之前站立的位置
+	-- 解决：始终强制更新敌方位置，确保获取实时位置（性能影响极小，N<200时可忽略）
+	local forceUpdate = true
 
 	-- 2. 获取自身位置
 	local myPos = GetUnitPosition(unitModel, forceUpdate)

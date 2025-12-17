@@ -1,8 +1,22 @@
 --=====================================================
 -- UnitAI.lua (Modified RTS/MOBA Smooth Combat Movement)
--- Version: V5.8 (修复开战回头Bug / Combat Start Protection)
+-- Version: V5.9 (修复兵种移动到敌人旧位置的Bug)
 --=====================================================
 --[[
+V5.9 修复兵种移动到敌人旧位置:
+1. _InAttackHold 恢复初始化为 false
+   - V5.8的true会导致兵种误以为已在攻击位置
+   - 现在根据实际距离判断是否进入攻击区
+
+2. 战斗开始保护期从0.5秒缩短到0.15秒
+   - 原来太长导致兵种在保护期内完全不移动
+   - 敌人位置已经变化但兵种还在原地
+
+3. 围攻位置更新更灵敏
+   - POSITION_UPDATE_COOLDOWN 从0.15改为0.08
+   - 位置差异阈值从1.5改为0.8
+   - 让围攻位置更快地跟随目标移动
+
 V5.8 开战回头修复:
 1. _InAttackHold 初始化为 true (而非 false)
    - 战斗开始时先原地站稳，不会立即去"找围攻位置"
@@ -109,7 +123,7 @@ local CONFIG = {
 
 		-- 角度抖动抑制
 		ANGLE_STABILITY_THRESHOLD = 0.3, -- 角度变化阈值(弧度),小于此值不更新
-		POSITION_UPDATE_COOLDOWN = 0.15, -- 位置更新冷却(秒)
+		POSITION_UPDATE_COOLDOWN = 0.08, -- V5.9: 位置更新冷却(秒) 从0.15改为0.08，更快响应目标移动
 
 		-- 调试
 		DEBUG_SURROUND = false,        -- 是否输出围攻调试日志
@@ -448,11 +462,12 @@ function SurroundSystem.ComputeSurroundPosition(model: Model, aiData, target: Mo
 	local surroundPos = targetPos + ringOffset + separationOffset
 
 	-- 抖动抑制: 如果新位置与上次位置差异很小,保持不变
+	-- V5.9: 缩小阈值从1.5到0.8，让围攻位置更灵敏地跟随目标移动
 	if aiData._LastSurroundPos then
 		local posDiff = (surroundPos - aiData._LastSurroundPos).Magnitude
 		local timeSinceUpdate = tick() - (aiData._LastSurroundTime or 0)
 
-		if posDiff < 1.5 and timeSinceUpdate < CONFIG.SURROUND.POSITION_UPDATE_COOLDOWN then
+		if posDiff < 0.8 and timeSinceUpdate < CONFIG.SURROUND.POSITION_UPDATE_COOLDOWN then
 			return aiData._LastSurroundPos, true
 		end
 	end
@@ -708,9 +723,9 @@ local function ShouldHoldAttackPosition(distance, dockingDistance, aiData)
 	-- 退出攻击（需要追上去）的阈值（更大）
 	local EXIT_RANGE = dockingDistance + 3.0
 
-	-- ★ V5.8修复：战斗开始后的保护期（0.5秒内不会因为距离原因退出保持区）
-	-- 这可以防止刚开战时因为位置计算抖动导致的"回头"现象
-	local COMBAT_START_PROTECTION = 0.5
+	-- ★ V5.9修复：战斗开始后的保护期（0.15秒内不会因为距离原因退出保持区）
+	-- 原来0.5秒太长，导致兵种在保护期内完全不移动，敌人位置已经变化
+	local COMBAT_START_PROTECTION = 0.15
 	local timeSinceCombatStart = tick() - (aiData._CombatStartTime or 0)
 	local inProtectionPeriod = timeSinceCombatStart < COMBAT_START_PROTECTION
 
@@ -789,8 +804,8 @@ local function HandleCombatMovement(model, aiData, deltaTime)
 	---------------------------------------------------
 	local holdPosition = ShouldHoldAttackPosition(distance, dockingDistance, aiData)
 
-	-- ★ V5.8修复：计算是否在战斗开始保护期内
-	local COMBAT_START_PROTECTION = 0.5
+	-- ★ V5.9修复：计算是否在战斗开始保护期内（缩短到0.15秒）
+	local COMBAT_START_PROTECTION = 0.15
 	local timeSinceCombatStart = tick() - (aiData._CombatStartTime or 0)
 	local inProtectionPeriod = timeSinceCombatStart < COMBAT_START_PROTECTION
 
@@ -987,9 +1002,9 @@ function UnitAI.StartAI(model)
 		CurrentAnimState = AnimationState.IDLE,
 		Tracks = {},  -- 动画轨道存储
 
-		-- ★ V5.8修复：初始化时设为true，防止刚开战就"回头找位置"
-		-- 让单位先原地站稳，第一次攻击判定后再根据距离决定是否移动
-		_InAttackHold = true,
+		-- ★ V5.9修复：恢复为false，让兵种根据实际距离判断是否进入攻击区
+		-- V5.8的true会导致兵种误以为已在攻击位置，实际距离敌人很远
+		_InAttackHold = false,
 		_CombatStartTime = tick(),  -- V5.8: 记录战斗开始时间
 		_stuckTimer = 0,
 		_stuckCount = 0,

@@ -313,6 +313,15 @@ BattleConfig.SERVER_POSITION_SYNC_INTERVAL = 1.0
 -- 客户端报告的位置与服务端位置偏差超过此值时，服务端强制同步
 BattleConfig.POSITION_VALIDATION_TOLERANCE = 10
 
+-- ==================== V4.11 解卡瞬移（客户端驱动 + 服务端校验放行） ====================
+-- 用途：配合客户端AI的“卡住瞬移解卡”，避免被位置校验回滚导致单位永久发呆/少兵进战斗
+-- 安全策略：仅在服务端连续观测到单位几乎不动（卡住样本）且客户端状态为Moving时，放行一次较大位移
+BattleConfig.ALLOW_UNSTUCK_TELEPORT = true
+BattleConfig.UNSTUCK_TELEPORT_MAX_DISTANCE = 150
+BattleConfig.UNSTUCK_TELEPORT_STUCK_SAMPLES = 3
+BattleConfig.UNSTUCK_TELEPORT_COOLDOWN = 2.0
+BattleConfig.UNSTUCK_TELEPORT_STUCK_MOVE_THRESHOLD = 0.5
+
 -- 攻击请求超时时间（秒）
 -- 客户端发起攻击请求后，服务端必须在此时间内响应
 BattleConfig.ATTACK_REQUEST_TIMEOUT = 0.2

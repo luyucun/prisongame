@@ -42,6 +42,7 @@ local ClientAIFolder = script.Parent
 local ClientUnitManager = require(ClientAIFolder:WaitForChild("ClientUnitManager"))
 local ClientPathService = require(ClientAIFolder:WaitForChild("ClientPathService"))
 local ClientUnitAI = require(ClientAIFolder:WaitForChild("ClientUnitAI"))
+local ClientMarchService = require(ClientAIFolder:WaitForChild("ClientMarchService"))  -- V5.0新增：客户端行军服务
 
 -- ==================== RemoteEvent引用 ====================
 
@@ -52,9 +53,14 @@ local ServerUnitDeath = ClientAIEvents:WaitForChild("ServerUnitDeath")
 local SyncUnitPosition = ClientAIEvents:WaitForChild("SyncUnitPosition")
 local ClientBattleReady = ClientAIEvents:WaitForChild("ClientBattleReady")
 
+-- V5.0新增：行军相关RemoteEvent
+local StartMarch = ClientAIEvents:WaitForChild("StartMarch")
+local MarchComplete = ClientAIEvents:WaitForChild("MarchComplete")
+
 -- ==================== 私有变量 ====================
 
 local activeBattles = {}  -- [battleId] = {attackUnits = {...}, defenseUnits = {...}}
+local currentCampaignState = nil
 
 -- ==================== 日志函数 ====================
 
@@ -68,6 +74,21 @@ local function WarnLog(...)
 	warn(GameConfig.LOG_PREFIX, "[ClientAIBootstrap]", ...)
 end
 
+-- ==================== 工具函数 ====================
+
+--[[
+计算表中元素数量
+@param t table - 表
+@return number - 元素数量
+]]
+local function CountTable(t)
+	local count = 0
+	for _ in pairs(t) do
+		count = count + 1
+	end
+	return count
+end
+
 -- ==================== 战斗初始化处理 ====================
 
 --[[
@@ -77,6 +98,65 @@ end
 @param defenseUnits table - 防守方单位列表 [{UnitModel=Model, UnitId=string, Level=number, Team="Defense"}, ...]
 @param battleField Folder - 战场文件夹
 ]]
+-- ==================== CampaignState清理 ====================
+
+local function IsIdleLikeCampaignState(state)
+	return state == "Idle" or state == "Victory" or state == "Defeat" or state == "Cleanup"
+end
+
+local function ResetAllClientAIState(reason)
+	DebugLog("ResetAllClientAIState:", reason or "unknown")
+
+	pcall(function()
+		if ClientMarchService and ClientMarchService.StopAllMarches then
+			ClientMarchService.StopAllMarches()
+		end
+	end)
+
+	pcall(function()
+		if ClientUnitAI and ClientUnitAI.ClearAll then
+			ClientUnitAI.ClearAll()
+		end
+	end)
+
+	pcall(function()
+		if ClientPathService and ClientPathService.ClearAll then
+			ClientPathService.ClearAll()
+		end
+	end)
+
+	pcall(function()
+		if ClientUnitManager and ClientUnitManager.GetAllBattleIds and ClientUnitManager.ClearBattle then
+			for _, battleId in ipairs(ClientUnitManager.GetAllBattleIds()) do
+				ClientUnitManager.ClearBattle(battleId)
+			end
+		else
+			for battleId, _ in pairs(activeBattles) do
+				ClientUnitManager.ClearBattle(battleId)
+			end
+		end
+	end)
+
+	activeBattles = {}
+end
+
+local function OnCampaignStateUpdate(state)
+	currentCampaignState = state or "Idle"
+
+	-- 离开Marching后立刻停掉残留行军任务，防止多局重开后兵被旧目标点瞬移走
+	if currentCampaignState ~= "Marching" then
+		pcall(function()
+			if ClientMarchService and ClientMarchService.StopAllMarches then
+				ClientMarchService.StopAllMarches()
+			end
+		end)
+	end
+
+	if IsIdleLikeCampaignState(currentCampaignState) then
+		ResetAllClientAIState("CampaignStateUpdate=" .. tostring(currentCampaignState))
+	end
+end
+
 local function OnInitializeBattle(battleId, attackUnits, defenseUnits, battleField)
 	DebugLog(string.format("收到战斗初始化: BattleId=%d, Attack=%d, Defense=%d",
 		battleId, #attackUnits, #defenseUnits))
@@ -87,35 +167,36 @@ local function OnInitializeBattle(battleId, attackUnits, defenseUnits, battleFie
 		return
 	end
 
-	-- 清理旧战斗数据（如果存在）
-	if activeBattles[battleId] then
-		WarnLog("战斗", battleId, "已存在，先清理旧数据")
+	-- ==================== V4.8修复：彻底清理所有客户端AI状态 ====================
+	-- 关键修复：不论是否是同一个battleId，都先全局清理所有AI状态，防止状态残留导致卡死
+	-- 这解决了以下问题：
+	-- 1. Restart时旧的activeAIs和pathStates没有被清理
+	-- 2. 旧的Humanoid.MoveToFinished连接仍然存在，导致MoveTo竞态
+	-- 3. 单位复生后实例引用相同，但状态没有重置
 
-		-- 直接执行清理逻辑，不调用OnTerminateBattle避免递归
-		local oldBattleData = activeBattles[battleId]
+	-- 先清理所有模块的全局状态（最彻底的方式）
+	DebugLog("彻底清理所有客户端AI状态...")
 
-		-- 停止所有单位AI
-		if oldBattleData.attackUnits then
-			for _, unitData in ipairs(oldBattleData.attackUnits) do
-				ClientUnitAI.StopAI(unitData.UnitModel)
-				ClientUnitManager.UnregisterUnit(unitData.UnitModel)
-			end
-		end
+	-- 0. V5.0新增：停止所有行军任务
+	ClientMarchService.StopAllMarches()
 
-		if oldBattleData.defenseUnits then
-			for _, unitData in ipairs(oldBattleData.defenseUnits) do
-				ClientUnitAI.StopAI(unitData.UnitModel)
-				ClientUnitManager.UnregisterUnit(unitData.UnitModel)
-			end
-		end
+	-- 1. 清理ClientUnitAI的所有activeAIs
+	ClientUnitAI.ClearAll()
 
-		-- 清理战斗数据
-		ClientUnitManager.ClearBattle(battleId)
-		ClientPathService.ClearAll()
+	-- 2. 清理ClientPathService的所有pathStates
+	ClientPathService.ClearAll()
 
-		-- 移除战斗记录
-		activeBattles[battleId] = nil
+	-- 3. 清理ClientUnitManager的所有单位索引
+	-- （遍历所有已记录的战斗ID并清理）
+	for existingBattleId, _ in pairs(activeBattles) do
+		ClientUnitManager.ClearBattle(existingBattleId)
 	end
+
+	-- 4. 清空本地战斗记录
+	activeBattles = {}
+
+	DebugLog("客户端AI状态清理完成，准备初始化新战斗")
+	-- ==================== 修复结束 ====================
 
 	-- 注册所有攻击方单位
 	for _, unitData in ipairs(attackUnits) do
@@ -187,6 +268,9 @@ local function OnTerminateBattle(battleId, result)
 		WarnLog("战斗", battleId, "不存在，无法终止")
 		return
 	end
+
+	-- V5.0新增：停止所有行军任务
+	ClientMarchService.StopAllMarches()
 
 	-- 停止所有单位AI
 	for _, unitData in ipairs(battleData.attackUnits) do
@@ -354,6 +438,110 @@ local function OnSyncUnitPosition(battleId, unitModel, position)
 	end
 end
 
+-- ==================== V5.0新增：行军处理 ====================
+
+--[[
+处理服务端发来的行军指令
+@param battleId number - 战斗ID
+@param serializableMoveTargets table - 数组格式: {{unitName=string, targetCFrame=CFrame}, ...}
+@param stageIndex number - 关卡索引
+]]
+local function OnStartMarch(battleId, serializableMoveTargets, stageIndex)
+	-- Ignore late StartMarch from previous rounds (e.g. after Restart/Respawn back to base)
+	if currentCampaignState and currentCampaignState ~= "Marching" then
+		WarnLog(string.format("Ignore StartMarch because CampaignState=%s (BattleId=%s, Stage=%s)",
+			tostring(currentCampaignState), tostring(battleId), tostring(stageIndex)))
+		return
+	end
+
+	-- Defensive: never allow overlapping march tasks
+	pcall(function()
+		ClientMarchService.StopAllMarches()
+	end)
+	DebugLog(string.format("收到行军指令: BattleId=%d, Units=%d, Stage=%d",
+		battleId, #serializableMoveTargets, stageIndex))
+
+	-- V5.0修复：将数组格式转换为 {[unitModel] = CFrame} 格式
+	local moveTargets = {}
+	local workspace = game:GetService("Workspace")
+
+	local instanceIdIndex = nil
+	local function BuildInstanceIdIndex()
+		if instanceIdIndex then
+			return
+		end
+		instanceIdIndex = {}
+		for _, obj in ipairs(workspace:GetDescendants()) do
+			if obj:IsA("Model") then
+				local id = nil
+				pcall(function()
+					id = obj:GetAttribute("InstanceId")
+				end)
+				if id and instanceIdIndex[id] == nil then
+					instanceIdIndex[id] = obj
+				end
+			end
+		end
+	end
+
+	local function ResolveMarchUnitModel(entry)
+		local unitModel = entry.unitModel
+		if typeof(unitModel) == "Instance" and unitModel:IsA("Model") then
+			return unitModel
+		end
+
+		local instanceId = entry.instanceId
+		if type(instanceId) == "string" and instanceId ~= "" then
+			BuildInstanceIdIndex()
+			local byId = instanceIdIndex and instanceIdIndex[instanceId]
+			if typeof(byId) == "Instance" and byId:IsA("Model") then
+				return byId
+			end
+		end
+
+		local unitName = entry.unitName
+		if type(unitName) == "string" and unitName ~= "" then
+			local byName = workspace:FindFirstChild(unitName, true)
+			if byName and byName:IsA("Model") then
+				return byName
+			end
+		end
+
+		return nil
+	end
+
+	for _, entry in ipairs(serializableMoveTargets) do
+		local targetCFrame = entry.targetCFrame
+		if typeof(targetCFrame) ~= "CFrame" then
+			local fallback = entry.unitName or entry.instanceId or "unknown"
+			warn(string.format("  [March] Invalid targetCFrame for %s", tostring(fallback)))
+		else
+			local unitModel = ResolveMarchUnitModel(entry)
+			if unitModel then
+				moveTargets[unitModel] = targetCFrame
+				DebugLog(string.format("  [March] Resolved unit: %s", unitModel.Name))
+			else
+				local fallback = entry.unitName or entry.instanceId or "unknown"
+				warn(string.format("  [March] Could not resolve unit: %s", tostring(fallback)))
+			end
+		end
+	end
+	DebugLog(string.format("成功解析 %d 个单位进行行军", CountTable(moveTargets)))
+
+	-- 调用ClientMarchService开始行军
+	ClientMarchService.MoveUnitsToPositions(moveTargets, {
+		onUnitArrived = function(unitModel, status)
+			DebugLog(unitModel.Name, "到达:", status)
+		end,
+		onAllSettled = function(arrivedList, timedOutList, failedList)
+			-- 向服务端报告行军完成
+			MarchComplete:FireServer(battleId, arrivedList, failedList)
+			DebugLog(string.format("行军完成: 到达=%d, 超时=%d, 失败=%d",
+				#arrivedList, #timedOutList, #failedList))
+		end
+	})
+end
+
 -- ==================== 初始化系统 ====================
 
 local function Initialize()
@@ -362,13 +550,42 @@ local function Initialize()
 	-- 初始化三大模块
 	ClientUnitManager.Initialize()
 	-- ClientPathService不需要Initialize，它是无状态服务
-	ClientUnitAI.Initialize(ClientUnitManager, ClientPathService)
+	ClientUnitAI.Initialize(ClientUnitManager, ClientPathService, ClientMarchService)
+
+	-- V5.0新增：初始化ClientMarchService
+	ClientMarchService.Initialize(ClientUnitManager, ClientPathService)
 
 	-- 绑定服务端事件
 	InitializeBattle.OnClientEvent:Connect(OnInitializeBattle)
 	TerminateBattle.OnClientEvent:Connect(OnTerminateBattle)
 	ServerUnitDeath.OnClientEvent:Connect(OnServerUnitDeath)
 	SyncUnitPosition.OnClientEvent:Connect(OnSyncUnitPosition)
+
+	-- V5.0新增：绑定行军事件
+	StartMarch.OnClientEvent:Connect(OnStartMarch)
+
+	-- Bind CampaignStateUpdate: clean up leftover marches/AIs when returning to base
+	task.spawn(function()
+		local eventsFolder = ReplicatedStorage:WaitForChild("Events", 10)
+		if not eventsFolder then
+			WarnLog("Events folder not found; leftover client AI state may persist across rounds")
+			return
+		end
+
+		local campaignEvents = eventsFolder:WaitForChild("CampaignEvents", 10)
+		if not campaignEvents then
+			WarnLog("CampaignEvents not found; leftover client AI state may persist across rounds")
+			return
+		end
+
+		local stateUpdateEvent = campaignEvents:WaitForChild("CampaignStateUpdate", 10)
+		if not stateUpdateEvent then
+			WarnLog("CampaignStateUpdate not found; leftover client AI state may persist across rounds")
+			return
+		end
+
+		stateUpdateEvent.OnClientEvent:Connect(OnCampaignStateUpdate)
+	end)
 
 	DebugLog("客户端AI系统初始化完成！")
 end
