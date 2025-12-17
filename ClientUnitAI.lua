@@ -199,8 +199,68 @@ local function CanDirectMove(unitModel, targetPos, targetModel)
 	rayParams.FilterType = Enum.RaycastFilterType.Exclude
 	rayParams.FilterDescendantsInstances = { unitModel }
 	rayParams.IgnoreWater = true
+	-- 使用单位自身碰撞组做射线查询，避免“Default查询组”与实际碰撞矩阵不一致导致误判无遮挡
+	rayParams.CollisionGroup = rootPart.CollisionGroup
 
-	local function IsUnblockedAtY(sampleY)
+	-- 多射线：在直线方向两侧各偏移一条射线，减少“看似无遮挡但会擦墙卡住”的情况
+	local flatDir = Vector3.new(targetPos.X - rootPart.Position.X, 0, targetPos.Z - rootPart.Position.Z)
+	local rightDir = Vector3.new(1, 0, 0)
+	if flatDir.Magnitude > 0.1 then
+		rightDir = Vector3.new(-flatDir.Z, 0, flatDir.X).Unit
+	end
+
+	local offsetDist = 0
+	if rootPart:IsA("BasePart") then
+		local sizeX = rootPart.Size.X
+		local sizeZ = rootPart.Size.Z
+		offsetDist = math.clamp(math.max(sizeX, sizeZ) * 0.5, 0.8, 3.0)
+	end
+
+	local rayOffsets = { Vector3.zero }
+	if offsetDist > 0 then
+		table.insert(rayOffsets, rightDir * offsetDist)
+		table.insert(rayOffsets, -rightDir * offsetDist)
+	end
+
+	local function IsHitIgnorable(result, origin, distance)
+		if not result then
+			return true
+		end
+
+		if targetModel and result.Instance and result.Instance:IsDescendantOf(targetModel) then
+			return true
+		end
+
+		local hitModel = result.Instance and result.Instance:FindFirstAncestorOfClass("Model")
+		if hitModel and hitModel ~= unitModel then
+			local hitHumanoid = hitModel:FindFirstChildOfClass("Humanoid") or hitModel:FindFirstChild("Humanoid")
+			if hitHumanoid then
+				return true
+			end
+		end
+
+		return (result.Position - origin).Magnitude >= (distance - 1.0)
+	end
+
+local function IsUnblockedAtY(sampleY)
+		local baseOrigin = Vector3.new(rootPart.Position.X, sampleY, rootPart.Position.Z)
+		local baseGoal = Vector3.new(targetPos.X, sampleY, targetPos.Z)
+
+		for _, offset in ipairs(rayOffsets) do
+			local origin = baseOrigin + offset
+			local goal = baseGoal + offset
+			local direction = goal - origin
+			local distance = direction.Magnitude
+			if distance >= 0.5 then
+				local result = workspace:Raycast(origin, direction, rayParams)
+				if result and not IsHitIgnorable(result, origin, distance) then
+					return false
+				end
+			end
+		end
+
+		return true
+		--[[ legacy single-ray implementation (disabled)
 		-- 只做水平射线（XZ），避免高度差导致误判“被地面挡住”
 		local origin = Vector3.new(rootPart.Position.X, sampleY, rootPart.Position.Z)
 		local goal = Vector3.new(targetPos.X, sampleY, targetPos.Z)
@@ -231,6 +291,7 @@ local function CanDirectMove(unitModel, targetPos, targetModel)
 
 		-- 命中点非常接近终点也视为无阻挡（浮点误差/轻微穿插）
 		return (result.Position - origin).Magnitude >= (distance - 1.0)
+		]]
 	end
 
 	local lowY = footY + 1.0
@@ -775,7 +836,10 @@ local function UpdateMovingState(aiData, deltaTime)
 			local now = tick()
 			local distToMoveTarget = GetHorizontalDistance(myRootPart.Position, moveTarget)
 			local directMoveAllowed = CanDirectMove(aiData.UnitModel, moveTarget, aiData.CurrentTarget)
-			local shouldUsePath = CONFIG.PATHFINDING.ENABLED and not directMoveAllowed
+			-- V5.2修复：直线无遮挡也不代表“长期直线移动一定安全”，远距离仍优先走寻路以确保稳定避障
+			local directThreshold = (CONFIG.PATHFINDING and CONFIG.PATHFINDING.DIRECT_MOVE_THRESHOLD) or 8
+			local shouldUsePath = CONFIG.PATHFINDING.ENABLED
+				and (not directMoveAllowed or distToMoveTarget > directThreshold)
 
 			-- 模式切换：只在切换时做一次清理，避免每帧互相踩踏
 			local desiredMode = shouldUsePath and "Path" or "Direct"
@@ -945,7 +1009,8 @@ local function UpdateMovingState(aiData, deltaTime)
 							-- 重新请求路径（瞬移后位置变化）
 							ClientPathService.ClearPath(aiData.UnitModel)
 
-							-- 瞬移后：回到“正常寻敌”流程，避免停在原地不再攻击/移动
+							-- V4.14修复：瞬移后保持CurrentTarget，切换到SEEKING状态重新评估距离
+							-- 不清除目标，避免瞬移后单位停止移动
 							aiData._LastUnstuckTeleportTime = now
 							aiData._MovementMode = nil
 							aiData._PathLastMoveToUpdateTime = 0
@@ -955,8 +1020,9 @@ local function UpdateMovingState(aiData, deltaTime)
 							aiData._LastStuckCheckPos = nil
 							aiData._PrevDistanceToMoveTarget = nil
 
-							aiData.State = AIState.IDLE
-							aiData.CurrentTarget = nil
+							-- 保持CurrentTarget，回到SEEKING状态重新评估
+							aiData.State = AIState.SEEKING
+							-- aiData.CurrentTarget 保持不变！
 							aiData.IsAttacking = false
 							aiData.AttackCooldown = 0
 							PlayAnimation(aiData, AnimationState.IDLE)

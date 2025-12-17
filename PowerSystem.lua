@@ -30,6 +30,69 @@ local playerPowerCache = {}
 local PowerEvents
 local PowerUpdateEvent
 
+-- ==================== Leaderstats ====================
+
+local LEADERSTATS_FOLDER_NAME = "leaderstats"
+local POWER_LEADERSTAT_NAME = "Power"
+
+local function GetOrCreateLeaderstatsFolder(player)
+	local leaderstats = player:FindFirstChild(LEADERSTATS_FOLDER_NAME)
+	if leaderstats and not leaderstats:IsA("Folder") then
+		return nil
+	end
+
+	if not leaderstats then
+		leaderstats = Instance.new("Folder")
+		leaderstats.Name = LEADERSTATS_FOLDER_NAME
+		leaderstats.Parent = player
+	end
+
+	return leaderstats
+end
+
+local function GetOrCreatePowerLeaderstat(player)
+	local leaderstats = GetOrCreateLeaderstatsFolder(player)
+	if not leaderstats then
+		return nil
+	end
+
+	local powerValue = leaderstats:FindFirstChild(POWER_LEADERSTAT_NAME)
+	if powerValue then
+		if powerValue:IsA("IntValue") or powerValue:IsA("NumberValue") then
+			return powerValue
+		end
+
+		return nil
+	end
+
+	powerValue = Instance.new("IntValue")
+	powerValue.Name = POWER_LEADERSTAT_NAME
+	powerValue.Value = 0
+	powerValue.Parent = leaderstats
+
+	return powerValue
+end
+
+local function SyncPowerToLeaderstats(player, totalPower)
+	if not player or not player:IsDescendantOf(Players) then
+		return
+	end
+
+	local success, result = pcall(function()
+		local powerValue = GetOrCreatePowerLeaderstat(player)
+		if not powerValue then
+			return
+		end
+
+		local value = math.floor(tonumber(totalPower) or 0)
+		powerValue.Value = value
+	end)
+
+	if not success then
+		warn("[PowerSystem] SyncPowerToLeaderstats 出错:", result)
+	end
+end
+
 -- ==================== 初始化 ====================
 
 function PowerSystem.Initialize()
@@ -98,6 +161,9 @@ function PowerSystem.OnPlayerJoin(player)
 		UnitPowers = {},
 		LastUpdate = tick()
 	}
+
+	-- 创建/初始化单服务器排行榜(leaderstats)
+	SyncPowerToLeaderstats(player, 0)
 
 	-- 延迟计算战斗力作为兜底
 	task.spawn(function()
@@ -341,6 +407,9 @@ function PowerSystem.SyncPowerToClient(player, totalPower)
 	if not player or not player:IsDescendantOf(Players) then
 		return
 	end
+
+	-- 同步到Roblox内置排行榜系统(单服务器)
+	SyncPowerToLeaderstats(player, totalPower)
 
 	if not PowerUpdateEvent then
 		return

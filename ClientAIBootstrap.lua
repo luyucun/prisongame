@@ -61,6 +61,7 @@ local MarchComplete = ClientAIEvents:WaitForChild("MarchComplete")
 
 local activeBattles = {}  -- [battleId] = {attackUnits = {...}, defenseUnits = {...}}
 local currentCampaignState = nil
+local currentCampaignStage = nil
 
 -- ==================== 日志函数 ====================
 
@@ -140,8 +141,16 @@ local function ResetAllClientAIState(reason)
 	activeBattles = {}
 end
 
-local function OnCampaignStateUpdate(state)
+local function OnCampaignStateUpdate(state, stageNum)
 	currentCampaignState = state or "Idle"
+	if type(stageNum) == "number" then
+		currentCampaignStage = stageNum
+	else
+		local parsed = tonumber(stageNum)
+		if parsed then
+			currentCampaignStage = parsed
+		end
+	end
 
 	-- 离开Marching后立刻停掉残留行军任务，防止多局重开后兵被旧目标点瞬移走
 	if currentCampaignState ~= "Marching" then
@@ -447,11 +456,27 @@ end
 @param stageIndex number - 关卡索引
 ]]
 local function OnStartMarch(battleId, serializableMoveTargets, stageIndex)
+	local stageNum = tonumber(stageIndex)
+
 	-- Ignore late StartMarch from previous rounds (e.g. after Restart/Respawn back to base)
-	if currentCampaignState and currentCampaignState ~= "Marching" then
+	-- StartMarch/CampaignStateUpdate are different RemoteEvents and can arrive out-of-order; don't require state==Marching here.
+	if currentCampaignState and IsIdleLikeCampaignState(currentCampaignState) then
 		WarnLog(string.format("Ignore StartMarch because CampaignState=%s (BattleId=%s, Stage=%s)",
 			tostring(currentCampaignState), tostring(battleId), tostring(stageIndex)))
 		return
+	end
+
+	-- Defensive: ignore obviously stale StartMarch that jumps too far ahead of our last known stage
+	if stageNum and currentCampaignStage and stageNum > (currentCampaignStage + 1) then
+		WarnLog(string.format("Ignore StartMarch because StageJump (CurrentStage=%s, IncomingStage=%s, CampaignState=%s)",
+			tostring(currentCampaignStage), tostring(stageNum), tostring(currentCampaignState)))
+		return
+	end
+
+	-- Treat StartMarch as authoritative for entering Marching (handles RemoteEvent reordering)
+	currentCampaignState = "Marching"
+	if stageNum then
+		currentCampaignStage = stageNum
 	end
 
 	-- Defensive: never allow overlapping march tasks
@@ -529,6 +554,13 @@ local function OnStartMarch(battleId, serializableMoveTargets, stageIndex)
 	DebugLog(string.format("成功解析 %d 个单位进行行军", CountTable(moveTargets)))
 
 	-- 调用ClientMarchService开始行军
+	-- Ensure march-mode flag is set locally so ClientMarchService's teleport fallback isn't blocked by stale CombatMode
+	for unitModel, _ in pairs(moveTargets) do
+		pcall(function()
+			unitModel:SetAttribute("UnitAIMode", "MarchMode")
+		end)
+	end
+
 	ClientMarchService.MoveUnitsToPositions(moveTargets, {
 		onUnitArrived = function(unitModel, status)
 			DebugLog(unitModel.Name, "到达:", status)

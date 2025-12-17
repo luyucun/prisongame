@@ -737,6 +737,15 @@ function StageService.GenerateStage(playerId, stageNum)
         local GameConfig = require(ReplicatedStorage.Config.GameConfig)
         local totalStages = GameConfig.Campaign.MaxStages
 
+        -- V3.11 fix: decide StageEnd by the chapter's real stage count (not global MaxStages)
+        local chapterId = StageService.GetPlayerChapter(playerId)
+        if chapterId then
+            local stagesInChapter = StageConfig.GetStagesPerChapter(chapterId)
+            if stagesInChapter and stagesInChapter > 0 then
+                totalStages = stagesInChapter
+            end
+        end
+
         -- 确定模板类型
         local templateName
         if stageNum >= totalStages then

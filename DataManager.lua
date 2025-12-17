@@ -346,10 +346,14 @@ local function GetStagesPerChapterSafe(chapterId: number): number
         return StageConfig.GetChapterConfig and StageConfig.GetChapterConfig(chapterId)
     end)
 
-    if ok and chapterConfig and chapterConfig.StagesPerChapter then
-        local stages = tonumber(chapterConfig.StagesPerChapter)
-        if stages and stages > 0 then
-            return stages
+    -- If chapter exists, prefer StageConfig's unified stage-count accessor (V3.10+ reads from EnemyConfig).
+    if ok and chapterConfig and StageConfig.GetStagesPerChapter then
+        local ok2, stages = pcall(function()
+            return StageConfig.GetStagesPerChapter(chapterId)
+        end)
+        local stagesNum = tonumber(stages)
+        if ok2 and stagesNum and stagesNum > 0 then
+            return stagesNum
         end
     end
 

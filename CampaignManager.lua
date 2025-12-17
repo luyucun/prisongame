@@ -823,8 +823,10 @@ function CampaignManager.StartCampaign(player)
 
 	-- V2.8新增: 获取玩家当前章节信息
 	local currentChapter = DataManager.GetCurrentChapter(player)
-	local chapterConfig = StageConfig.GetChapterConfig(currentChapter)
-	local totalStagesInChapter = chapterConfig and chapterConfig.StagesPerChapter or GameConfig.Campaign.MaxStages
+	local totalStagesInChapter = StageConfig.GetStagesPerChapter(currentChapter)
+	if not totalStagesInChapter or totalStagesInChapter <= 0 then
+		totalStagesInChapter = GameConfig.Campaign.MaxStages
+	end
 
 	-- 🔥V3.7修复：设置玩家章节缓存，让StageService能获取正确的模板风格
 	StageService.SetPlayerChapter(playerId, currentChapter)
@@ -1057,6 +1059,15 @@ end
 @param stageNum number - 关卡编号
 ]]
 function CampaignManager.MarchToStage(campaignData, stageNum)
+	-- Prevent stale/late march triggers after campaign ended (e.g. Retreat/Restart race with delayed tasks)
+	if campaignData.State == CampaignState.DEFEAT
+		or campaignData.State == CampaignState.VICTORY
+		or campaignData.State == CampaignState.CLEANUP
+		or campaignData.State == CampaignState.IDLE then
+		DebugLog(string.format("[MarchToStage] Skip because CampaignState=%s (Stage=%s)",
+			tostring(campaignData.State), tostring(stageNum)))
+		return
+	end
 	-- 验证玩家是否在线
 	local playerId = campaignData.PlayerId
 	local player = game.Players:GetPlayerByUserId(playerId)
@@ -1102,6 +1113,12 @@ function CampaignManager.MarchToStage(campaignData, stageNum)
 					-- AI模块不支持SetMode则跳过
 				end
 			end
+
+			-- V5.2修复：行军阶段必须显式标记UnitAIMode为MarchMode
+			-- 否则上一个关卡设置的CombatMode会残留，导致客户端行军兜底瞬移(TeleportToTarget)被禁止，单位卡住后只能原地踏步
+			pcall(function()
+				unitInstance:SetAttribute("UnitAIMode", "MarchMode")
+			end)
 
 			-- 配置单位物理碰撞组为友军
 			local PhysicsManager = ServerScriptService.Systems:FindFirstChild("PhysicsManager")
@@ -1428,30 +1445,85 @@ function CampaignManager.OnMarchComplete(player, battleId, arrivedList, failedLi
 		for unitInstance, unitData in pairs(campaignData.Units) do
 			if unitInstance and unitInstance.Parent and unitData and not unitData.IsDead then
 				if not statusByUnit[unitInstance] then
-					statusByUnit[unitInstance] = "Failed"
+					-- Client-side march has an unstuck teleport fallback; if server has a target for this unit, treat it as arrived.
+					if pendingMarch and pendingMarch.Targets and typeof(pendingMarch.Targets[unitInstance]) == "CFrame" then
+						statusByUnit[unitInstance] = "Arrived"
+					else
+						statusByUnit[unitInstance] = "Failed"
+					end
 				end
 			end
 		end
 
 		if pendingMarch and pendingMarch.Targets then
 			local baseThreshold = (GameConfig.Campaign and GameConfig.Campaign.ArrivalThreshold) or 8
-			local validationThreshold = baseThreshold + 12
+
+			local function GetDistXZ(unitInstance, targetPos)
+				local rootPart = unitInstance and (unitInstance:FindFirstChild("HumanoidRootPart") or unitInstance.PrimaryPart)
+				if not rootPart then
+					return math.huge
+				end
+				local currentPos = rootPart.Position
+				local dx = currentPos.X - targetPos.X
+				local dz = currentPos.Z - targetPos.Z
+				return math.sqrt(dx * dx + dz * dz)
+			end
+
+			-- V5.2修复：
+			-- 客户端“卡住瞬移”可能在上报 MarchComplete 时尚未完全复制到服务端，
+			-- 如果服务端用旧位置做一次性距离校验，会把单位误判为 Failed 并永久标记 IsDead，导致后续少兵参战。
+			-- 策略：仅对“疑似未复制完成”的 Arrived 单位做短暂重试等待（不影响正常流程）。
+			-- Client "unstuck teleport" may not replicate to server immediately; don't misclassify as Failed.
+			-- Instead, snap arrived units to the server-known target position to keep client/server in sync.
+			local function SnapUnitToTarget(unitInstance, targetCFrame)
+				if not unitInstance or not unitInstance.Parent or typeof(targetCFrame) ~= "CFrame" then
+					return false
+				end
+
+				local rootPart = unitInstance:FindFirstChild("HumanoidRootPart") or unitInstance.PrimaryPart
+				if not rootPart then
+					return false
+				end
+
+				local targetPos = targetCFrame.Position
+				local targetY = targetPos.Y
+
+				local rayParams = RaycastParams.new()
+				rayParams.FilterType = Enum.RaycastFilterType.Exclude
+				rayParams.FilterDescendantsInstances = { unitInstance }
+				rayParams.IgnoreWater = true
+
+				local rayResult = Workspace:Raycast(
+					Vector3.new(targetPos.X, targetPos.Y + 15, targetPos.Z),
+					Vector3.new(0, -80, 0),
+					rayParams
+				)
+				if rayResult then
+					targetY = rayResult.Position.Y + 3
+				end
+
+				local _, yRot, _ = rootPart.CFrame:ToEulerAnglesYXZ()
+				return pcall(function()
+					rootPart.CFrame = CFrame.new(targetPos.X, targetY, targetPos.Z) * CFrame.Angles(0, yRot, 0)
+					rootPart.AssemblyLinearVelocity = Vector3.zero
+					rootPart.AssemblyAngularVelocity = Vector3.zero
+				end)
+			end
+
 			for unitInstance, status in pairs(statusByUnit) do
-				if status == "Arrived" then
-					local targetCFrame = pendingMarch.Targets[unitInstance]
-					if typeof(targetCFrame) == "CFrame" then
-						local rootPart = unitInstance:FindFirstChild("HumanoidRootPart") or unitInstance.PrimaryPart
-						if rootPart then
-							local currentPos = rootPart.Position
-							local targetPos = targetCFrame.Position
-							local dx = currentPos.X - targetPos.X
-							local dz = currentPos.Z - targetPos.Z
-							local distXZ = math.sqrt(dx * dx + dz * dz)
-							if distXZ > validationThreshold then
-								statusByUnit[unitInstance] = "Failed"
-							end
-						end
+				local targetCFrame = pendingMarch.Targets[unitInstance]
+				if typeof(targetCFrame) == "CFrame" then
+					-- Regardless of what the client reported, if we have a target for this unit, keep it in the march result.
+					if status ~= "Arrived" then
+						statusByUnit[unitInstance] = "Arrived"
 					end
+
+					local distXZ = GetDistXZ(unitInstance, targetCFrame.Position)
+					if distXZ > baseThreshold then
+						SnapUnitToTarget(unitInstance, targetCFrame)
+					end
+				else
+					statusByUnit[unitInstance] = "Failed"
 				end
 			end
 		end
@@ -1937,6 +2009,16 @@ function CampaignManager.OnStageClear(campaignData, stageNum)
 	-- 更新当前关卡并继续行军
 	campaignData.CurrentStage = nextStage
 	task.wait(0.3)  -- 短暂等待确保状态切换完成,然后立即出发
+	-- Prevent race: if campaign state changed during the delay (Retreat/Restart/end), don't start a new march.
+	local currentCampaign = CampaignManager.ActiveCampaigns[playerId]
+	if currentCampaign ~= campaignData then
+		return
+	end
+	if campaignData.State ~= CampaignState.STAGE_CLEAR then
+		DebugLog(string.format("[OnStageClear] Skip MarchToStage because CampaignState=%s", tostring(campaignData.State)))
+		return
+	end
+
 	CampaignManager.MarchToStage(campaignData, nextStage)
 end
 

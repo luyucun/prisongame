@@ -55,6 +55,12 @@ function CollisionSystem.Initialize()
 		warn(LOG_PREFIX, "❌ 设置碰撞规则失败:", setErr)
 	end
 
+	-- V5.2修复：Units组不应与Players组碰撞（玩家隔离墙/玩家角色均使用Players组）
+	-- 否则会出现单位直冲“玩家隔离墙”(PlayerAirWall)后原地踏步卡住的问题
+	pcall(function()
+		PhysicsService:CollisionGroupSetCollidable(UNIT_GROUP, PLAYER_GROUP, false)
+	end)
+
 	-- 3. 监听新兵种生成（通过CollectionService的"Unit"标签）
 	-- 如果兵种模型有"Unit"标签，会自动应用碰撞设置
 	CollectionService:GetInstanceAddedSignal("Unit"):Connect(function(unit)

@@ -67,8 +67,6 @@ local GuideSystem = require(ServerScriptService.Systems.GuideSystem)
 local SoundSystem = require(ServerScriptService.Systems.SoundSystem)
 -- Robux购买处理器
 local MarketplaceHandler = require(ServerScriptService.Systems.MarketplaceHandler)
--- V1.0新增 - 排行榜系统
-local LeaderboardSystem = require(ServerScriptService.Systems.LeaderboardSystem)
 
 -- ==================== 系统初始化顺序 ====================
 
@@ -389,16 +387,6 @@ local function InitializeServer()
         warn(GameConfig.LOG_PREFIX, "Robux购买处理器初始化失败(异常):", result)
     elseif result == false then
         warn(GameConfig.LOG_PREFIX, "Robux购买处理器初始化失败(返回false),Robux购买功能将不可用")
-    end
-
-    -- 16. 初始化排行榜系统 (LeaderboardSystem)
-    success, result = pcall(function()
-        return LeaderboardSystem.Initialize()
-    end)
-    if not success then
-        warn(GameConfig.LOG_PREFIX, "排行榜系统初始化失败(异常):", result)
-    elseif result == false then
-        warn(GameConfig.LOG_PREFIX, "排行榜系统初始化失败(返回false),排行榜功能将不可用")
     end
 
     -- 检查是否有关键系统初始化失败
