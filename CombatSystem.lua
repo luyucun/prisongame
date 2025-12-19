@@ -1744,12 +1744,6 @@ function CombatSystem.OnClientAttackRequest(player, battleId, attackerModel, tar
 		return
 	end
 
-	local distance = (attackerRoot.Position - targetRoot.Position).Magnitude
-	local maxValidDistance = attackerState.AttackRange * 1.5 -- 允许1.5倍容差
-	if distance > maxValidDistance then
-		return
-	end
-
 	-- 校验通过，执行攻击
 	if not CombatSystem.BeginAttack(attackerModel, targetModel) then
 		WarnLog("[V4.0] BeginAttack失败")
@@ -1808,138 +1802,11 @@ function CombatSystem.OnClientPositionReport(player, battleId, unitModel, positi
 		return
 	end
 
-	-- 服务器观测到的当前位置（服务端权威参考）
-	local serverPos = rootPart.Position
 	local now = tick()
-
-	-- 首次上报：建立基准，不做判定（避免初始化/复制阶段误判）
-	if not unitState.LastServerPosTime then
-		unitState.LastServerPosTime = now
-		unitState.LastServerPos = serverPos
-		return
-	end
-
-	-- 速度/位移校验：限制异常瞬移（客户端驱动，服务端校验）
-	local dt = math.max(now - (unitState.LastServerPosTime or now), 0.01)
-	local lastPos = unitState.LastServerPos or serverPos
-	local moved = (serverPos - lastPos).Magnitude
-
-	-- 服务器侧“卡住样本”统计：用于允许一次解卡瞬移（不需要服务端运行AI，仅做校验/放行）
-	local prevStuckSamples = unitState.StuckSamples or 0
-	local stuckMoveThreshold = BattleConfig.UNSTUCK_TELEPORT_STUCK_MOVE_THRESHOLD or 0.5
-
-	-- 允许一定的容差，避免网络抖动误判
-	local moveSpeed = unitState.MoveSpeed or 16
-	local tolerance = BattleConfig.POSITION_VALIDATION_TOLERANCE or 10
-	local maxAllowed = (moveSpeed * dt * 3) + tolerance
-
-	if moved > maxAllowed then
-		-- 允许客户端“解卡瞬移”：当服务端连续观测到单位几乎没动（卡住），且客户端处于Moving状态时，放行一次较大位移
-		-- 目的：配合ClientUnitAI的瞬移解卡，避免被位置校验回滚导致单位永久发呆/少兵
-		local allowUnstuckTeleport = (BattleConfig.ALLOW_UNSTUCK_TELEPORT ~= false)
-		local maxTeleportDist = BattleConfig.UNSTUCK_TELEPORT_MAX_DISTANCE or 150
-		local requiredSamples = BattleConfig.UNSTUCK_TELEPORT_STUCK_SAMPLES or 3
-		local teleportCooldown = BattleConfig.UNSTUCK_TELEPORT_COOLDOWN or 2.0
-		local lastTeleportTime = unitState.LastUnstuckTeleportTime or 0
-
-		if allowUnstuckTeleport
-			and state == "Moving"
-			and prevStuckSamples >= requiredSamples
-			and moved <= maxTeleportDist
-			and (now - lastTeleportTime) >= teleportCooldown then
-			DebugLog(string.format("[V4.11] 允许解卡瞬移: %s moved=%.1f, stuckSamples=%d",
-				unitModel.Name, moved, prevStuckSamples))
-			unitState.LastUnstuckTeleportTime = now
-			unitState.StuckSamples = 0
-
-			-- V4.12修复：不使用MoveTo到当前位置，避免单位原地站住
-			local humanoid = unitModel:FindFirstChildOfClass("Humanoid") or unitModel:FindFirstChild("Humanoid")
-			if humanoid then
-				pcall(function()
-					humanoid:Move(Vector3.zero)
-				end)
-			end
-
-			pcall(function()
-				rootPart.AssemblyLinearVelocity = Vector3.zero
-				rootPart.AssemblyAngularVelocity = Vector3.zero
-			end)
-
-			-- 接受该次位置变化，并更新基准
-			unitState.LastServerPosTime = now
-			unitState.LastServerPos = serverPos
-			return
-		end
-
-		unitState.PositionViolationCount = (unitState.PositionViolationCount or 0) + 1
-
-		WarnLog(string.format("[V4.0] 位置校验失败: %s 移动%.1f > 允许%.1f (dt=%.2f, speed=%.1f, 玩家:%s)",
-			unitModel.Name, moved, maxAllowed, dt, moveSpeed, player.Name))
-
-		-- 强制回滚到上一次合法位置，并同步给客户端
-		local rollbackPos = lastPos
-
-		pcall(function()
-			if rootPart:CanSetNetworkOwnership() then
-				rootPart:SetNetworkOwner(nil) -- 临时收回所有权，确保回滚生效
-			end
-		end)
-
-		rootPart.CFrame = CFrame.new(rollbackPos)
-		rootPart.AssemblyLinearVelocity = Vector3.zero
-		rootPart.AssemblyAngularVelocity = Vector3.zero
-
-		-- V4.12修复：回滚后清理移动状态，但不使用MoveTo到当前位置
-		local humanoid = unitModel:FindFirstChildOfClass("Humanoid") or unitModel:FindFirstChild("Humanoid")
-		if humanoid then
-			pcall(function()
-				humanoid:Move(Vector3.zero)
-			end)
-		end
-
-		-- 通知客户端矫正
-		local syncEvent = GetSyncUnitPositionEvent()
-		if syncEvent then
-			syncEvent:FireClient(player, battleId, unitModel, rollbackPos)
-		end
-
-		-- 轻量恢复NetworkOwner（避免持续抢夺导致抖动）
-		task.delay(0.2, function()
-			if rootPart and rootPart.Parent then
-				pcall(function()
-					if rootPart:CanSetNetworkOwnership() then
-						rootPart:SetNetworkOwner(player)
-					end
-				end)
-			end
-		end)
-
-		-- 回滚后更新基准，避免下一次继续按异常位移计算
-		unitState.LastServerPosTime = now
-		unitState.LastServerPos = rollbackPos
-		return
-	end
-
-	-- 位置偏差（客户端上报 vs 服务端观测）过大时，通知客户端矫正到服务端观测值
-	-- 该逻辑用于修正网络抖动/丢包导致的可见不同步，不用于信任客户端位置
-	local reportDiff = (serverPos - position).Magnitude
-	if reportDiff > (BattleConfig.POSITION_VALIDATION_TOLERANCE or 10) then
-		local syncEvent = GetSyncUnitPositionEvent()
-		if syncEvent then
-			syncEvent:FireClient(player, battleId, unitModel, serverPos)
-		end
-	end
-
-	-- 更新“卡住样本”
-	if state == "Moving" and moved < stuckMoveThreshold then
-		unitState.StuckSamples = prevStuckSamples + 1
-	else
-		unitState.StuckSamples = 0
-	end
-
-	-- 更新基准
+	-- Trust client position to keep server hitbox aligned (anti-cheat disabled).
 	unitState.LastServerPosTime = now
-	unitState.LastServerPos = serverPos
+	unitState.LastServerPos = position
+	return
 end
 
 return CombatSystem

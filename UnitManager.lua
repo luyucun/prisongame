@@ -391,7 +391,10 @@ function UnitManager.ClearBattle(battleId)
 	for team, units in pairs(battleUnits[battleId]) do
 		-- 清理每个单位的缓存
 		for _, unit in ipairs(units) do
-			unitBattleInfo[unit] = nil
+			local info = unitBattleInfo[unit]
+			if info and info.BattleId == battleId then
+				unitBattleInfo[unit] = nil
+			end
 			unitPositionCache[unit] = nil
 		end
 	end
