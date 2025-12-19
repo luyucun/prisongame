@@ -73,7 +73,9 @@ local function DebugLog(...)
 end
 
 local function WarnLog(...)
-	warn(GameConfig.LOG_PREFIX, "[ClientAIBootstrap]", ...)
+	if BattleConfig.DEBUG_AI_LOGS or GameConfig.DEBUG_MODE then
+		warn(GameConfig.LOG_PREFIX, "[ClientAIBootstrap]", ...)
+	end
 end
 
 -- ==================== 工具函数 ====================

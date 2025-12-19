@@ -112,6 +112,30 @@ local function LoadUIHelpers()
     return ButtonEffectHelper ~= nil and CoinAnimationHelper ~= nil
 end
 
+local function ShowSystemError(text)
+    local tipsSystem = _G.TipsSystem
+    if tipsSystem and tipsSystem.ShowError then
+        tipsSystem.ShowError(text)
+        return true
+    end
+    return false
+end
+
+local function PlayPurchaseErrorSound()
+    local soundController = _G.SoundController
+    if soundController and soundController.PlaySFX then
+        soundController.PlaySFX("Error")
+    end
+end
+
+local function IsOutOfStockMessage(message)
+    return message and string.find(message, "库存不足")
+end
+
+local function IsNotEnoughCashMessage(message)
+    return message and string.find(message, "金币不足")
+end
+
 --[[
 初始化UI引用
 @return boolean - 是否成功
@@ -379,6 +403,8 @@ function OnPurchaseButtonClick(itemData)
         if DEBUG_MODE then
             print(LOG_PREFIX, "库存不足，无法购买:", itemData.UnitId)
         end
+        ShowSystemError("Out of stock")
+        PlayPurchaseErrorSound()
         return
     end
 
@@ -746,7 +772,19 @@ local function OnPurchaseResultReceived(success, message, unitId, newCoinAmount)
         end)
     else
         -- 购买失败
-        warn(LOG_PREFIX, "购买失败:", message)
+        if DEBUG_MODE then
+            warn(LOG_PREFIX, "购买失败:", message)
+        end
+
+        if IsOutOfStockMessage(message) then
+            if ShowSystemError("Out of stock") then
+                return
+            end
+        elseif IsNotEnoughCashMessage(message) then
+            if ShowSystemError("Not enough cash") then
+                return
+            end
+        end
 
         -- 显示失败消息
         local failNotification = Instance.new("TextLabel")

@@ -19,6 +19,8 @@ local RemovalController = {}
 -- 引用服务
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
+local DEBUG_MODE = GameConfig.DEBUG_MODE
 local Workspace = game:GetService("Workspace")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
@@ -505,7 +507,9 @@ function OnRemoveResponse(success, message, instanceId)
         --     RemovalController.ExitRemovalMode()
         -- end
     else
-        warn("[RemovalController] 回收失败:", message)
+        if DEBUG_MODE then
+            warn("[RemovalController] 回收失败:", message)
+        end
     end
 end
 

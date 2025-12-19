@@ -1029,7 +1029,9 @@ function OnPlacementResponse(success, message, data)
 		end)
 	else
 		-- 放置失败，显示错误信息
-		warn("[PlacementController] 放置失败:", message)
+		if DEBUG_MODE then
+			warn("[PlacementController] 放置失败:", message)
+		end
 	end
 end
 

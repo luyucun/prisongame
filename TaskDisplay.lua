@@ -231,7 +231,9 @@ end
 local function OnClaimButtonClicked()
     -- 检查是否可以领取
     if not CurrentTaskData or not CurrentTaskData.IsCompleted then
-        warn("[TaskDisplay] 任务未完成，无法领取")
+        if DEBUG_MODE then
+            warn("[TaskDisplay] 任务未完成，无法领取")
+        end
         return
     end
 

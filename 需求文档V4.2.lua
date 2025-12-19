@@ -1419,3 +1419,13 @@ GM
 5.TipsBg - IconBg - Icon是一个imagelabel，用于显示兵的头像
 6.TipsBg - ATK用于显示这个兵当前的攻击力数值，TipsBg - HP用于显示血量数值，TipsBg - Name用于显示兵种名字，TipsBg - Quality显示品质，这里与兵种商店逻辑一样，TipsBg - Range显示是近战还是远程，也就是配置中的Range或者Melee，TipsBg - Level用于显示等级数值，格式是Lv.X 
 
+
+需求文档V4.3  系统提示词
+
+1.当玩家购买商店内道具时，如果金币不足，需要提示英文文本：Not enough cash
+2.当玩家购买商店内道具时，如果库存不足，需要提示英文文本：Out of stock
+3.提示词显示使用StarterGui - TipsSystem - Frame - ErrorText，将ErrorText的Text设置为对应文本，并把Frame.Visible改为True
+4.Frame出现时需要有小动效：从屏幕中间位置浮动到Frame的目标位置（{0.5, 0}, {0.2, 0}），整体持续约1秒后自动隐藏
+5.提示词未消失前再次触发时，立即隐藏上一条提示并重新播放新的提示动画
+6.需要防止连续快速点击造成提示堆叠或异常（仅保留最新一次提示）
+7.库存不足时点击购买也要播放错误提示音效（与金币不足相同）

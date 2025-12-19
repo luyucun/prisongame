@@ -82,14 +82,14 @@ end
 ]]
 function HealthBarController.AttachHealthBar(unitModel)
     if not unitModel or not unitModel.Parent then
-        warn("[HealthBarController] AttachHealthBar: unitModel无效或已被销毁")
+        debugLog("AttachHealthBar: unitModel无效或已被销毁")
         return
     end
 
     -- 检查Head部件
     local head = unitModel:FindFirstChild("Head")
     if not head then
-        warn("[HealthBarController] AttachHealthBar: 未找到Head部件 - " .. unitModel.Name)
+        debugLog("AttachHealthBar: 未找到Head部件 - " .. unitModel.Name)
         return
     end
 
@@ -109,7 +109,7 @@ function HealthBarController.AttachHealthBar(unitModel)
     -- 获取血条模板
     local hpTemplate = ReplicatedStorage:FindFirstChild(HEALTH_BAR_TEMPLATE_PATH)
     if not hpTemplate then
-        warn("[HealthBarController] AttachHealthBar: 未找到HpTemplate模板")
+        debugLog("AttachHealthBar: 未找到HpTemplate模板")
         return
     end
 

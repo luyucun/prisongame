@@ -764,6 +764,17 @@ local function OnPurchaseUnit(player, unitId)
 			if stock <= 0 then
 				PurchaseLocks[player] = false
 				SendFailure(player, "库存不足，已售罄")
+				pcall(function()
+					if not SoundSystem then
+						local soundModule = ServerScriptService.Systems:FindFirstChild("SoundSystem")
+						if soundModule then
+							SoundSystem = require(soundModule)
+						end
+					end
+					if SoundSystem then
+						SoundSystem.OnPurchaseError(player)
+					end
+				end)
 				return
 			end
 		end
