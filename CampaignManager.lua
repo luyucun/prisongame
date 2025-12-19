@@ -2267,13 +2267,30 @@ function CampaignManager.OnCampaignEnd(campaignData, isVictory)
 		end
 	end
 
-	-- 设置超时自动完成机制(15秒后自动清理)
+	-- 设置超时自动完成机制(15秒兜底，仅离线玩家触发，在线玩家需手动确认)
 	task.delay(15, function()
-		if campaignData and campaignData.IsWaitingForConfirm then
-			-- 超时属于正常兜底流程（例如玩家不点确认/客户端卡死），默认不当成报错刷warn
-			DebugLog(string.format("玩家超过15秒未确认结算，自动完成清理，PlayerId=%d", campaignData.PlayerId))
-			CampaignManager.CompleteCampaignEnd(campaignData)
+		if not campaignData or not campaignData.IsWaitingForConfirm then
+			return
 		end
+
+		-- 在线玩家不自动清理，保持镜头与场景，等待确认
+		local player = campaignData.Player
+		local playerActive = false
+		if player then
+			local ok, result = pcall(function()
+				return player:IsDescendantOf(Players)
+			end)
+			playerActive = ok and result
+		end
+
+		if playerActive then
+			DebugLog(string.format("玩家在线未确认结算，跳过自动清理，PlayerId=%d", campaignData.PlayerId))
+			return
+		end
+
+		-- 玩家离线：兜底清理
+		DebugLog(string.format("玩家离线且未确认结算，自动完成清理，PlayerId=%d", campaignData.PlayerId))
+		CampaignManager.CompleteCampaignEnd(campaignData)
 	end)
 end
 

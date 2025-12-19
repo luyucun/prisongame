@@ -28,6 +28,9 @@ local surfaceGuis = {}
 local isInitialized = false
 local cachedHomeId = nil
 
+-- 缓存每个SurfaceGui的默认文本（用于玩家离线后恢复显示）
+local defaultDisplayCache = {} -- [SurfaceGui] = { NameText = string, PowerText = string }
+
 -- ==================== 工具函数 ====================
 
 --[[
@@ -130,6 +133,74 @@ local function InitializeSurfaceGuis()
 end
 
 --[[
+	获取/缓存SurfaceGui的默认文本（Name/Num）
+	@param surfaceGui SurfaceGui
+	@return table
+]]
+local function GetOrCacheDefaultDisplay(surfaceGui)
+	if not surfaceGui then
+		return { NameText = "", PowerText = "0" }
+	end
+
+	local cached = defaultDisplayCache[surfaceGui]
+	if cached then
+		return cached
+	end
+
+	local defaults = {
+		NameText = "",
+		PowerText = "0",
+	}
+
+	local frame = surfaceGui:FindFirstChild("Frame")
+	if frame then
+		local playerNameContainer = frame:FindFirstChild("PlayerName")
+		local nameLabel = playerNameContainer and playerNameContainer:FindFirstChild("Name")
+		if nameLabel and nameLabel:IsA("TextLabel") then
+			defaults.NameText = nameLabel.Text
+		end
+
+		local playerPowerContainer = frame:FindFirstChild("PlayerPower")
+		local numLabel = playerPowerContainer and playerPowerContainer:FindFirstChild("Num")
+		if numLabel and numLabel:IsA("TextLabel") then
+			defaults.PowerText = numLabel.Text
+		end
+	end
+
+	defaultDisplayCache[surfaceGui] = defaults
+	return defaults
+end
+
+local function ResetSurfaceGuiToDefault(surfaceGui)
+	if not surfaceGui then
+		return
+	end
+
+	local defaults = defaultDisplayCache[surfaceGui]
+	if not defaults then
+		-- 如果没缓存过，尝试读取当前作为默认（兜底，不阻断）
+		defaults = GetOrCacheDefaultDisplay(surfaceGui)
+	end
+
+	local frame = surfaceGui:FindFirstChild("Frame")
+	if not frame then
+		return
+	end
+
+	local playerNameContainer = frame:FindFirstChild("PlayerName")
+	local nameLabel = playerNameContainer and playerNameContainer:FindFirstChild("Name")
+	if nameLabel and nameLabel:IsA("TextLabel") then
+		nameLabel.Text = defaults.NameText or ""
+	end
+
+	local playerPowerContainer = frame:FindFirstChild("PlayerPower")
+	local numLabel = playerPowerContainer and playerPowerContainer:FindFirstChild("Num")
+	if numLabel and numLabel:IsA("TextLabel") then
+		numLabel.Text = defaults.PowerText or "0"
+	end
+end
+
+--[[
 	更新单个SurfaceGui的显示
 	@param surfaceGui SurfaceGui - 要更新的SurfaceGui
 	@param playerName string - 玩家名字
@@ -139,6 +210,9 @@ local function UpdateSurfaceGui(surfaceGui, playerName, power)
 	if not surfaceGui then
 		return
 	end
+
+	-- 先缓存默认文本（只缓存一次）
+	GetOrCacheDefaultDisplay(surfaceGui)
 
 	local frame = surfaceGui:FindFirstChild("Frame")
 	if not frame then
@@ -237,7 +311,11 @@ local function OnPowerUpdate(playerNameOrTotalPower, homeIdOrNil, totalPowerOrNi
 	-- 更新所有SurfaceGui
 	for _, child in ipairs(part:GetChildren()) do
 		if child:IsA("SurfaceGui") and (child.Name == "SurfaceGui01" or child.Name == "SurfaceGui02") then
-			UpdateSurfaceGui(child, playerName, totalPower)
+			-- ⚠️说明：Information面板现在由服务端写入（世界状态复制），客户端在“清空”事件时不应再本地写文本，
+			-- 否则在网络乱序/缓存默认文本不准时，可能把旧玩家信息写回去导致看起来“没清理”。
+			if playerName ~= "" then
+				UpdateSurfaceGui(child, playerName, totalPower)
+			end
 		end
 	end
 

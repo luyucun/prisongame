@@ -42,6 +42,10 @@ local player = Players.LocalPlayer
 local mouse = player:GetMouse()
 local camera = Workspace.CurrentCamera
 
+-- 触发拖动的最小位移（像素）
+local DRAG_START_MOVE_PX_MOUSE = 8
+local DRAG_START_MOVE_PX_TOUCH = 18
+
 -- 前向声明：供相机输入拦截函数访问
 local dragState
 
@@ -144,6 +148,10 @@ end
 -- V2.0重构: 拖动状态使用GridWidth和GridDepth
 dragState = {
 	isDragging = false,
+	isMouseDown = false,
+	pendingModel = nil,
+	pendingStartPos = nil,
+	pendingTouch = nil,
 	draggedModel = nil,
 	draggedInstanceId = nil,
 	draggedUnitId = nil,
@@ -167,6 +175,12 @@ local lastDragRestore = {
 	model = nil,
 	origin = nil,
 }
+
+local function ClearPendingDrag()
+	dragState.pendingModel = nil
+	dragState.pendingStartPos = nil
+	dragState.pendingTouch = nil
+end
 
 -- 远程事件
 local mergeEvents = nil
@@ -351,36 +365,43 @@ end
 function ConnectMouseEvents()
 	-- 鼠标按下 - 检测是否点击到已放置的兵种
 	UserInputService.InputBegan:Connect(function(input, gameProcessed)
-		if gameProcessed then
+		if input.UserInputType ~= Enum.UserInputType.MouseButton1 then
 			return
 		end
 
-		if input.UserInputType == Enum.UserInputType.MouseButton1 then
-			-- 创建射线检测
-			local mouseRay = camera:ScreenPointToRay(mouse.X, mouse.Y)
-			local rayOrigin = mouseRay.Origin
-			local rayDirection = mouseRay.Direction * 1000
+		dragState.isMouseDown = true
 
-			local raycastParams = RaycastParams.new()
-			raycastParams.FilterType = Enum.RaycastFilterType.Exclude
-			raycastParams.FilterDescendantsInstances = {player.Character}
+		if gameProcessed or dragState.isDragging then
+			return
+		end
 
-			local raycastResult = Workspace:Raycast(rayOrigin, rayDirection, raycastParams)
+		ClearPendingDrag()
 
-			if raycastResult then
-				local hitPart = raycastResult.Instance
-				if hitPart then
-					-- 查找父模型
-					local model = hitPart.Parent
-					while model and model ~= Workspace do
-						if model:FindFirstChild("Humanoid") and model:GetAttribute("InstanceId") then
-							-- 这是一个已放置的NPC模型
-							-- print("[DragSystem] 检测到点击模型:", model.Name)
-							StartDragging(model)
-							return
-						end
-						model = model.Parent
+		-- 创建射线检测
+		local mouseRay = camera:ScreenPointToRay(mouse.X, mouse.Y)
+		local rayOrigin = mouseRay.Origin
+		local rayDirection = mouseRay.Direction * 1000
+
+		local raycastParams = RaycastParams.new()
+		raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+		raycastParams.FilterDescendantsInstances = {player.Character}
+
+		local raycastResult = Workspace:Raycast(rayOrigin, rayDirection, raycastParams)
+
+		if raycastResult then
+			local hitPart = raycastResult.Instance
+			if hitPart then
+				-- 查找父模型
+				local model = hitPart.Parent
+				while model and model ~= Workspace do
+					if model:FindFirstChild("Humanoid") and model:GetAttribute("InstanceId") then
+						-- 这是一个已放置的NPC模型
+						-- print("[DragSystem] 检测到点击模型:", model.Name)
+						dragState.pendingModel = model
+						dragState.pendingStartPos = UserInputService:GetMouseLocation()
+						return
 					end
+					model = model.Parent
 				end
 			end
 		end
@@ -390,14 +411,27 @@ function ConnectMouseEvents()
 	RunService.RenderStepped:Connect(function()
 		if dragState.isDragging and dragState.draggedModel then
 			UpdateDragPosition()
+			return
+		end
+
+		if dragState.pendingModel and dragState.isMouseDown and dragState.pendingStartPos then
+			local currentPos = UserInputService:GetMouseLocation()
+			if (currentPos - dragState.pendingStartPos).Magnitude >= DRAG_START_MOVE_PX_MOUSE then
+				local model = dragState.pendingModel
+				ClearPendingDrag()
+				StartDragging(model)
+			end
 		end
 	end)
 
 	-- 鼠标释放 - 结束拖动
 	UserInputService.InputEnded:Connect(function(input, gameProcessed)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			dragState.isMouseDown = false
 			if dragState.isDragging then
 				StopDragging()
+			else
+				ClearPendingDrag()
 			end
 		end
 	end)
@@ -420,6 +454,8 @@ function ConnectMobileEvents()
 			return
 		end
 
+		ClearPendingDrag()
+
 		-- 创建射线检测
 		local touchPos = touch.Position
 		local touchRay = camera:ScreenPointToRay(touchPos.X, touchPos.Y)
@@ -436,17 +472,18 @@ function ConnectMobileEvents()
 			local hitPart = raycastResult.Instance
 			if hitPart then
 				-- 查找父模型
-				local model = hitPart.Parent
-				while model and model ~= Workspace do
-					if model:FindFirstChild("Humanoid") and model:GetAttribute("InstanceId") then
-						-- 这是一个已放置的NPC模型，开始拖动
-						-- print("[DragSystem] 移动端检测到触摸模型:", model.Name)
-						dragState.currentTouch = touch
-						StartDragging(model)
-						return
+					local model = hitPart.Parent
+					while model and model ~= Workspace do
+						if model:FindFirstChild("Humanoid") and model:GetAttribute("InstanceId") then
+							-- 这是一个已放置的NPC模型，准备拖动
+							-- print("[DragSystem] 移动端检测到触摸模型:", model.Name)
+							dragState.pendingTouch = touch
+							dragState.pendingStartPos = Vector2.new(touchPos.X, touchPos.Y)
+							dragState.pendingModel = model
+							return
+						end
+						model = model.Parent
 					end
-					model = model.Parent
-				end
 			end
 		end
 	end)
@@ -454,6 +491,21 @@ function ConnectMobileEvents()
 	-- 触摸移动 - 更新拖动位置
 	UserInputService.TouchMoved:Connect(function(touch, gameProcessed)
 		-- 不检查gameProcessed，允许拖动时穿过UI
+
+		if dragState.pendingModel and dragState.pendingTouch == touch and not dragState.isDragging then
+			local startPos = dragState.pendingStartPos
+			if startPos then
+				local currentPos = Vector2.new(touch.Position.X, touch.Position.Y)
+				if (currentPos - startPos).Magnitude >= DRAG_START_MOVE_PX_TOUCH then
+					local model = dragState.pendingModel
+					ClearPendingDrag()
+					StartDragging(model)
+					if dragState.isDragging then
+						dragState.currentTouch = touch
+					end
+				end
+			end
+		end
 
 		if not dragState.isDragging or not dragState.draggedModel then
 			return
@@ -470,6 +522,11 @@ function ConnectMobileEvents()
 
 	-- 触摸结束 - 停止拖动
 	UserInputService.TouchEnded:Connect(function(touch, gameProcessed)
+		if dragState.pendingTouch and touch == dragState.pendingTouch and not dragState.isDragging then
+			ClearPendingDrag()
+			return
+		end
+
 		if not dragState.isDragging then
 			return
 		end

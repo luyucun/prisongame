@@ -13,6 +13,7 @@ local PowerSystem = {}
 -- ==================== 服务引用 ====================
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
 
 -- ==================== 模块引用 ====================
 local PowerConfig = require(ReplicatedStorage.Config.PowerConfig)
@@ -29,6 +30,67 @@ local playerPowerCache = {}
 -- ==================== RemoteEvent ====================
 local PowerEvents
 local PowerUpdateEvent
+
+-- ==================== 3D信息面板（Information）同步 ====================
+
+--[[
+	服务端直接更新 Workspace 中的 Information 面板
+	目的：让所有客户端（包含后加入玩家 / StreamingEnabled 延迟加载）都能看到正确的玩家名与战斗力
+	@param homeId number
+	@param playerName string
+	@param totalPower number
+]]
+local function UpdateWorldInformationDisplay(homeId, playerName, totalPower)
+	if not homeId or homeId <= 0 then
+		return
+	end
+
+	local homeRoot = Workspace:FindFirstChild("Home")
+	if not homeRoot then
+		return
+	end
+
+	local playerHome = homeRoot:FindFirstChild("PlayerHome" .. tostring(homeId))
+	if not playerHome then
+		return
+	end
+
+	local information = playerHome:FindFirstChild("Information")
+	if not information then
+		return
+	end
+
+	local part = information:FindFirstChild("Part")
+	if not part then
+		return
+	end
+
+	local function ApplyToSurfaceGui(surfaceGui)
+		if not surfaceGui then
+			return
+		end
+
+		local frame = surfaceGui:FindFirstChild("Frame")
+		if not frame then
+			return
+		end
+
+		local playerNameContainer = frame:FindFirstChild("PlayerName")
+		local nameLabel = playerNameContainer and playerNameContainer:FindFirstChild("Name")
+		if nameLabel and nameLabel:IsA("TextLabel") then
+			nameLabel.Text = tostring(playerName or "")
+		end
+
+		local playerPowerContainer = frame:FindFirstChild("PlayerPower")
+		local numLabel = playerPowerContainer and playerPowerContainer:FindFirstChild("Num")
+		if numLabel and numLabel:IsA("TextLabel") then
+			numLabel.Text = tostring(math.floor(tonumber(totalPower) or 0))
+		end
+	end
+
+	ApplyToSurfaceGui(part:FindFirstChild("SurfaceGui01"))
+	ApplyToSurfaceGui(part:FindFirstChild("SurfaceGui02"))
+end
 
 -- ==================== Leaderstats ====================
 
@@ -261,6 +323,30 @@ end
 	玩家离开时清理缓存
 --]]
 function PowerSystem.OnPlayerLeave(player)
+	-- 玩家离线：广播清空对应基地的显示（客户端负责更新Information面板）
+	local homeId = nil
+	local cache = playerPowerCache[player]
+	if cache and type(cache.HomeId) == "number" then
+		homeId = cache.HomeId
+	end
+
+	if not homeId then
+		homeId = player and player:GetAttribute("HomeSlot")
+		if not homeId then
+			local homeIdValue = player and player:FindFirstChild("HomeId")
+			if homeIdValue and homeIdValue:IsA("IntValue") then
+				homeId = homeIdValue.Value
+			end
+		end
+	end
+
+	if PowerUpdateEvent and homeId and homeId > 0 then
+		pcall(function()
+			-- 使用空playerName作为“清空”信号，客户端恢复默认文本
+			PowerUpdateEvent:FireAllClients("", homeId, 0)
+		end)
+	end
+
 	playerPowerCache[player] = nil
 end
 
@@ -420,6 +506,13 @@ function PowerSystem.SyncPowerToClient(player, totalPower)
 		-- 这样所有客户端都能看到其他玩家的战力
 		local homeId = player:GetAttribute("HomeSlot")
 		if not homeId then
+			-- 优先从服务端数据读取（更可靠）
+			if DataManager and DataManager.GetPlayerHomeSlot then
+				homeId = DataManager.GetPlayerHomeSlot(player)
+			end
+		end
+
+		if not homeId then
 			-- 兼容旧方式：从IntValue获取
 			local homeIdValue = player:FindFirstChild("HomeId")
 			if homeIdValue and homeIdValue:IsA("IntValue") then
@@ -428,6 +521,15 @@ function PowerSystem.SyncPowerToClient(player, totalPower)
 		end
 
 		if homeId and homeId > 0 then
+			-- 记录homeId，供离线清理时使用（避免PlayerManager先清理属性导致取不到）
+			local cache = playerPowerCache[player]
+			if cache then
+				cache.HomeId = homeId
+			end
+
+			-- ✅服务端直接更新3D面板（所有客户端可见，并且对后加入/延迟加载也生效）
+			UpdateWorldInformationDisplay(homeId, player.Name, totalPower)
+
 			-- 广播给所有客户端（包含玩家名字、基地ID和战力）
 			PowerUpdateEvent:FireAllClients(player.Name, homeId, totalPower)
 		else

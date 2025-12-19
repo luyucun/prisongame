@@ -259,6 +259,12 @@ function MergeSystem.MergeUnits(player, instanceIdA, instanceIdB)
     newInstance.Level = newLevel
     -- V2.8.2修复: 同步更新GridSize（确保数据一致性）
     newInstance.GridSize = gridSize
+    -- 合成后重算血量，确保等级提升生效
+    local newMaxHealth = UnitConfig.CalculateHealth(newInstance.UnitId, newLevel)
+    if newMaxHealth > 0 then
+        newInstance.MaxHealth = newMaxHealth
+        newInstance.Health = newMaxHealth
+    end
 
     -- 6. 移除两个旧兵种（从背包和场地移除）
     PlacementSystem.RemovePlacedUnit(player, instanceIdA)

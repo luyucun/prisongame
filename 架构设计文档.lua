@@ -581,13 +581,13 @@ ReplicatedStorage/
 【V4.1】客户端AI迁移 - 行军阶段
 - **核心架构变更**: 行军系统从服务端完全迁移到客户端
 - ClientMarchService: 客户端行军服务模块（批量寻路/Heartbeat驱动/卡住检测）
-- StartMarch事件: 服务端→客户端，通知开始行军(battleId, moveTargets, stageIndex)
-- MarchComplete事件: 客户端→服务端，报告行军完成(arrivedList, failedList)
+- StartMarch事件: 服务端→客户端，通知开始行军(battleId, moveTargets, stageNum, marchToken)
+- MarchComplete事件: 客户端→服务端，报告行军完成(battleId, stageNum, marchToken, arrivedList, failedList)
 - CampaignManager重构: MarchToStage改为发送StartMarch事件，监听MarchComplete
 - ClientAIBootstrap增强: 监听StartMarch事件，调用ClientMarchService
 - 行军特性: 分批寻路、切角机制、卡住检测、走错路检测、周期性重寻路
 - 服务端职责: 仅发送指令和接收结果，可选校验行军合理性
-- 客户端职责: 完全控制寻路、移动、到达检测，超时/失败只报告不瞬移
+- 客户端职责: 完全控制寻路、移动、到达检测，卡住/走错路/超时会瞬移兜底并上报结果
 
 =====================================================
 五、核心技术要点
@@ -875,8 +875,8 @@ V4.0后（客户端AI）:
 - RequestAttack: Client → Server (请求攻击: battleId, attackerModel, targetModel, attackType) V4.0
 - ReportUnitPosition: Client → Server (上报位置: battleId, unitModel, position, state) V4.0
 - ClientBattleReady: Client → Server (客户端准备完成: battleId) V4.0
-- StartMarch: Server → Client (通知开始行军: battleId, moveTargets, stageIndex) V4.1
-- MarchComplete: Client → Server (报告行军完成: battleId, arrivedList, failedList) V4.1
+- StartMarch: Server → Client (通知开始行军: battleId, moveTargets, stageNum, marchToken) V4.1
+- MarchComplete: Client → Server (报告行军完成: battleId, stageNum, marchToken, arrivedList, failedList) V4.1
 
 =====================================================
 八、最佳实践

@@ -204,11 +204,13 @@ end
 ]]
 local function GetQualityColor(quality)
     local colors = {
-        ["Common"] = Color3.fromRGB(169, 169, 169),      -- 灰色
-        ["Uncommon"] = Color3.fromRGB(30, 255, 0),       -- 绿色
-        ["Rare"] = Color3.fromRGB(0, 112, 255),          -- 蓝色
-        ["Epic"] = Color3.fromRGB(163, 53, 238),         -- 紫色
-        ["Legendary"] = Color3.fromRGB(255, 128, 0),     -- 橙色
+        ["Common"] = Color3.fromRGB(225, 225, 225),      -- 灰色
+        ["Rare"] = Color3.fromRGB(0, 255, 255),          -- 青色
+        ["Elite"] = Color3.fromRGB(0, 255, 0),           -- 绿色
+        ["Epic"] = Color3.fromRGB(170, 0, 255),          -- 紫色
+        ["Legendary"] = Color3.fromRGB(255, 80, 0),      -- 橙色
+        ["Mythic"] = Color3.fromRGB(255, 0, 0),          -- 红色
+        ["Godly"] = Color3.fromRGB(255, 255, 255),       -- 白色
     }
     return colors[quality] or colors["Common"]
 end

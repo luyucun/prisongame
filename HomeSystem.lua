@@ -57,6 +57,46 @@ HomeData = {
 
 -- ==================== 私有函数 ====================
 
+-- Information面板的默认文本缓存（来自Studio初始值）
+local informationDefaultTexts = nil -- { [SurfaceGuiName] = { NameText = string, PowerText = string } }
+
+local function CacheInformationDefaultTexts(informationModel)
+    if informationDefaultTexts then
+        return
+    end
+
+    informationDefaultTexts = {}
+
+    local part = informationModel and informationModel:FindFirstChild("Part")
+    if not part then
+        return
+    end
+
+    for _, guiName in ipairs({"SurfaceGui01", "SurfaceGui02"}) do
+        local defaults = { NameText = "", PowerText = "0" }
+
+        local surfaceGui = part:FindFirstChild(guiName)
+        if surfaceGui then
+            local frame = surfaceGui:FindFirstChild("Frame")
+            if frame then
+                local playerNameContainer = frame:FindFirstChild("PlayerName")
+                local nameLabel = playerNameContainer and playerNameContainer:FindFirstChild("Name")
+                if nameLabel and nameLabel:IsA("TextLabel") then
+                    defaults.NameText = nameLabel.Text
+                end
+
+                local playerPowerContainer = frame:FindFirstChild("PlayerPower")
+                local numLabel = playerPowerContainer and playerPowerContainer:FindFirstChild("Num")
+                if numLabel and numLabel:IsA("TextLabel") then
+                    defaults.PowerText = numLabel.Text
+                end
+            end
+        end
+
+        informationDefaultTexts[guiName] = defaults
+    end
+end
+
 --[[
 获取基地文件夹
 @param homeSlot number - 基地编号
@@ -91,6 +131,9 @@ local function ResetInformationDisplay(homeFolder)
         return
     end
 
+    -- 先缓存默认文本（来自Studio初始值），用于玩家离线后恢复“默认显示”
+    CacheInformationDefaultTexts(information)
+
     for _, guiName in ipairs({"SurfaceGui01", "SurfaceGui02"}) do
         local surfaceGui = part:FindFirstChild(guiName)
         if surfaceGui then
@@ -99,13 +142,15 @@ local function ResetInformationDisplay(homeFolder)
                 local playerNameContainer = frame:FindFirstChild("PlayerName")
                 local nameLabel = playerNameContainer and playerNameContainer:FindFirstChild("Name")
                 if nameLabel and nameLabel:IsA("TextLabel") then
-                    nameLabel.Text = ""
+                    local defaults = informationDefaultTexts and informationDefaultTexts[guiName]
+                    nameLabel.Text = (defaults and defaults.NameText) or ""
                 end
 
                 local playerPowerContainer = frame:FindFirstChild("PlayerPower")
                 local numLabel = playerPowerContainer and playerPowerContainer:FindFirstChild("Num")
                 if numLabel and numLabel:IsA("TextLabel") then
-                    numLabel.Text = "0"
+                    local defaults = informationDefaultTexts and informationDefaultTexts[guiName]
+                    numLabel.Text = (defaults and defaults.PowerText) or "0"
                 end
             end
         end
@@ -413,6 +458,19 @@ function HomeSystem.Initialize()
                 if not spawnLocation then
                     warn(GameConfig.LOG_PREFIX, "警告:", playerHomeName, "缺少SpawnLocation")
                 end
+            end
+        end
+
+        -- 🔥重要：预缓存Information面板的“Studio默认文本”
+        -- 说明：战斗力系统会在服务端直接写入Information面板文本，如果我们等到玩家离线时才缓存默认值，
+        --      很可能把“玩家当前名字/战斗力”误当成默认值，导致离线清理时无法恢复默认显示。
+        -- 做法：在服务器启动阶段（还未写入玩家数据前）提前读取一次作为默认值。
+        for i = GameConfig.MIN_HOME_SLOT, GameConfig.MAX_HOME_SLOT do
+            local playerHome = homeFolder:FindFirstChild(GameConfig.HOME_PREFIX .. i)
+            local information = playerHome and playerHome:FindFirstChild("Information")
+            if information then
+                CacheInformationDefaultTexts(information)
+                break
             end
         end
 

@@ -99,8 +99,8 @@ ReplicatedStorage
         ├──RequestAttack（RemoteEvent） - 客户端→服务器：请求攻击(battleId, attackerModel, targetModel, attackType)
         ├──ReportUnitPosition（RemoteEvent） - 客户端→服务器：上报位置(battleId, unitModel, position, state)
         ├──ClientBattleReady（RemoteEvent） - 客户端→服务器：客户端准备完成(battleId)
-        ├──StartMarch（RemoteEvent） 【V4.1新增 - 客户端行军系统】 - 服务器→客户端：通知开始行军(battleId, moveTargets, stageIndex)
-        └──MarchComplete（RemoteEvent） 【V4.1新增 - 客户端行军系统】 - 客户端→服务器：报告行军完成(battleId, arrivedList, failedList)
+        ├──StartMarch（RemoteEvent） 【V4.1新增 - 客户端行军系统】 - 服务器→客户端：通知开始行军(battleId, moveTargets, stageNum, marchToken)
+        └──MarchComplete（RemoteEvent） 【V4.1新增 - 客户端行军系统】 - 客户端→服务器：报告行军完成(battleId, stageNum, marchToken, arrivedList, failedList)
     └──PowerEvents（Folder）/  【V3.9.2新增 - 战斗力系统】
         ├──PowerUpdate（RemoteEvent） - 服务器→客户端：同步战斗力数值(totalPower)
         └──RequestPower（RemoteEvent） - 客户端→服务器：请求当前战斗力
@@ -853,13 +853,14 @@ CampaignStateUpdate事件变更（V3.6）：
 
 功能说明：
 - StartMarch：服务器→客户端：通知客户端开始行军
-  参数：(battleId: number, moveTargets: table, stageIndex: number)
+  参数：(battleId: number, moveTargets: table, stageNum: number, marchToken: string)
   说明：服务端在CampaignManager.MarchToStage时通知客户端开始行军
   moveTargets格式：数组格式 {{unitName=string, targetCFrame=CFrame}, ...}
   注意：由于RemoteEvent无法序列化Instance作为table的key，使用unitName标识单位
+  marchToken说明：本次行军的唯一Token，用于服务端校验MarchComplete的延迟/乱序包
 
 - MarchComplete：客户端→服务器：客户端报告行军完成
-  参数：(battleId: number, arrivedList: table, failedList: table)
+  参数：(battleId: number, stageNum: number, marchToken: string, arrivedList: table, failedList: table)
   说明：客户端行军完成后通知服务端，报告到达和失败的单位列表
   arrivedList格式：{unitModel1, unitModel2, ...}
   failedList格式：{unitModel1, unitModel2, ...}
