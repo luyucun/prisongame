@@ -69,6 +69,11 @@ local lastStuckCheckTime = nil  -- V4.0新增：用于时间戳累计，替代st
 local STUCK_TIME_THRESHOLD = 0.5  -- 卡住超过0.5秒就重新规划
 local STUCK_DISTANCE_THRESHOLD = 0.5  -- 移动距离小于0.5视为卡住
 
+-- V5.10：主角AI跟随遇障瞬移（避免攀爬翻墙导致掉队/Streaming区域不更新）
+local FOLLOW_OBSTACLE_TELEPORT_COOLDOWN = 0.35
+local FOLLOW_OBSTACLE_TELEPORT_GROUND_OFFSET = 3
+local lastFollowObstacleTeleportTime = 0
+
 local isActive = false
 local renderConnection = nil
 local characterAddedConnection = nil
@@ -141,6 +146,65 @@ end
 local function cancelPathCompute()
 	pathComputeRequestId += 1
 	isComputingPath = false
+end
+
+local function teleportCharacterTo(targetPos, lookAtPos)
+	local humanoid = getHumanoid()
+	local character = player.Character
+	if not humanoid or not character or typeof(targetPos) ~= "Vector3" then
+		return false
+	end
+
+	local hrp = character:FindFirstChild("HumanoidRootPart")
+	if not hrp then
+		return false
+	end
+
+	-- 停止移动并清理寻路状态（避免残留MoveTo/Blocked回调继续推进）
+	humanoid:Move(Vector3.zero, false)
+	cancelPathCompute()
+	clearCharacterPath()
+	lastCharacterPosition = nil
+	lastStuckCheckTime = nil
+
+	local targetY = targetPos.Y
+
+	-- 射线检测确保落在地面上（避免落点悬空/穿地/落在兵身上）
+	local rayParams = RaycastParams.new()
+	rayParams.FilterType = Enum.RaycastFilterType.Exclude
+	local filterList = { character }
+	local unitsFolder = Workspace:FindFirstChild("Units")
+	if unitsFolder then
+		table.insert(filterList, unitsFolder)
+	end
+	rayParams.FilterDescendantsInstances = filterList
+	rayParams.IgnoreWater = true
+
+	local rayResult = Workspace:Raycast(
+		Vector3.new(targetPos.X, targetPos.Y + 10, targetPos.Z),
+		Vector3.new(0, -200, 0),
+		rayParams
+	)
+	if rayResult then
+		targetY = rayResult.Position.Y + FOLLOW_OBSTACLE_TELEPORT_GROUND_OFFSET
+	end
+
+	local finalPos = Vector3.new(targetPos.X, targetY, targetPos.Z)
+	local finalCF = CFrame.new(finalPos)
+	if typeof(lookAtPos) == "Vector3" then
+		finalCF = CFrame.new(finalPos, Vector3.new(lookAtPos.X, targetY, lookAtPos.Z))
+	end
+
+	local ok = pcall(function()
+		hrp.CFrame = finalCF
+		hrp.AssemblyLinearVelocity = Vector3.zero
+		hrp.AssemblyAngularVelocity = Vector3.zero
+	end)
+	if not ok then
+		return false
+	end
+
+	return true
 end
 
 local function requestCharacterPathAsync(fromPos, toPos)
@@ -254,11 +318,27 @@ end
 local function collectAllyPositions()
 	local positions = {}
 
+	-- V4.2修复：获取当前玩家的HomeSlot，只统计自己的单位
+	local myHomeSlot = player:GetAttribute("HomeSlot")
+	if not myHomeSlot then
+		-- 如果还没分配HomeSlot，回退到IdleFloor
+		local idleFloor = getIdleFloor()
+		if idleFloor then
+			table.insert(positions, idleFloor.Position)
+		end
+		return positions
+	end
+
+	-- 只遍历当前玩家的单位
 	for _, inst in ipairs(Workspace:GetDescendants()) do
 		if inst:IsA("Model") and inst:GetAttribute("CampaignKeepInstance") then
-			local rootPart = inst:FindFirstChild("HumanoidRootPart") or inst.PrimaryPart
-			if rootPart then
-				table.insert(positions, rootPart.Position)
+			-- 检查单位是否属于当前玩家
+			local unitHomeSlot = inst:GetAttribute("HomeSlot")
+			if unitHomeSlot == myHomeSlot then
+				local rootPart = inst:FindFirstChild("HumanoidRootPart") or inst.PrimaryPart
+				if rootPart then
+					table.insert(positions, rootPart.Position)
+				end
 			end
 		end
 	end
@@ -447,6 +527,17 @@ local function updateCharacterFollow(center, targetCFrame)
 		return
 	end
 
+	-- V5.10：遇到障碍开始攀爬时立刻瞬移到跟随目标（避免爬墙/翻越导致掉队）
+	local now = tick()
+	if humanoid:GetState() == Enum.HumanoidStateType.Climbing then
+		if (now - lastFollowObstacleTeleportTime) >= FOLLOW_OBSTACLE_TELEPORT_COOLDOWN then
+			if teleportCharacterTo(followTarget, center) then
+				lastFollowObstacleTeleportTime = now
+				return
+			end
+		end
+	end
+
 	-- V4.0重构：卡住检测 - 移除Wait()，使用时间戳计算
 	local currentPos = hrp.Position
 	local isStuck = false
@@ -469,6 +560,16 @@ local function updateCharacterFollow(center, targetCFrame)
 		end
 	end
 	lastCharacterPosition = currentPos
+
+	-- V5.10：卡住时直接瞬移兜底（避免在障碍附近反复重寻路但仍怼墙/攀爬）
+	if isStuck then
+		if (currentTime - lastFollowObstacleTeleportTime) >= FOLLOW_OBSTACLE_TELEPORT_COOLDOWN then
+			if teleportCharacterTo(followTarget, center) then
+				lastFollowObstacleTeleportTime = currentTime
+				return
+			end
+		end
+	end
 
 	-- V2.10新增：使用PathfindingService进行智能寻路
 	-- 检查是否需要重新计算路径

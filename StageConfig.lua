@@ -32,11 +32,19 @@ StageConfig.Chapters = {
 		ChapterId = 1,
 		ChapterName = "Chapter 1",
 		EnemyChapterRef = 1,  -- V3.10: 引用EnemyConfig.Chapters[1]
+		StagesPerChapter = 10,  -- 🔥修复：显式指定关卡数，防止读取失败时回退到默认值3
 		StageTemplateStyle = "Style01",  -- V3.7: 使用Style01风格的关卡模板
 		Rewards = {
-			[1] = {Coins = 100},
-			[2] = {Coins = 150},
-			[3] = {Coins = 200},
+			[1] = {Coins = 10},
+			[2] = {Coins = 10},
+			[3] = {Coins = 10},
+			[4] = {Coins = 10},
+			[5] = {Coins = 10},
+			[6] = {Coins = 10},
+			[7] = {Coins = 10},
+			[8] = {Coins = 10},
+			[9] = {Coins = 10},
+			[10] = {Coins = 10},
 		}
 	},
 	-- 第二章
@@ -44,11 +52,29 @@ StageConfig.Chapters = {
 		ChapterId = 2,
 		ChapterName = "Chapter 2",
 		EnemyChapterRef = 2,  -- V3.10: 引用EnemyConfig.Chapters[2]
+		StagesPerChapter = 20,  -- 🔥修复：显式指定关卡数，防止读取失败时回退到默认值3
 		StageTemplateStyle = "Style02",  -- V3.7: 使用Style02风格
 		Rewards = {
-			[1] = {Coins = 250},
-			[2] = {Coins = 300},
-			[3] = {Coins = 400},
+			[1] = {Coins = 10},
+			[2] = {Coins = 10},
+			[3] = {Coins = 10},
+			[4] = {Coins = 10},
+			[5] = {Coins = 10},
+			[6] = {Coins = 10},
+			[7] = {Coins = 10},
+			[8] = {Coins = 10},
+			[9] = {Coins = 10},
+			[10] = {Coins = 10},
+			[11] = {Coins = 10},
+			[12] = {Coins = 10},
+			[13] = {Coins = 10},
+			[14] = {Coins = 10},
+			[15] = {Coins = 10},
+			[16] = {Coins = 10},
+			[17] = {Coins = 10},
+			[18] = {Coins = 10},
+			[19] = {Coins = 10},
+			[20] = {Coins = 10},
 		}
 	},
 }

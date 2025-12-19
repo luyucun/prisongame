@@ -1158,38 +1158,42 @@ function BattleManager.InitializeClientAI(battleId, attackUnits, defenseUnits, b
 	-- 获取战场Folder（用于客户端获取IdleFloorDefense/Enemy）
 	local battleField = battle.BattleField  -- 假设battle实例中存储了BattleField引用
 
-	-- 构建攻击方单位数据
-	local attackUnitsData = {}
+	-- V5.3修复：直接传递Instance数组，避免嵌套数组的序列化问题
+	-- Roblox RemoteEvent 可以正确传输 Instance 数组（顶层数组元素）
+	-- 客户端通过 Instance 的 Attribute 获取 UnitId/Level/Team 信息
+
+	-- 确保所有单位都有正确的 Attribute 设置
 	for _, unit in ipairs(attackUnits) do
-		local unitId = unit:GetAttribute("UnitId") or unit.Name
-		local level = unit:GetAttribute("Level") or 1
-		table.insert(attackUnitsData, {
-			UnitModel = unit,
-			UnitId = unitId,
-			Level = level,
-			Team = BattleConfig.Team.ATTACK,
-		})
+		if not unit:GetAttribute("UnitId") then
+			unit:SetAttribute("UnitId", unit.Name:match("^(%d+)") or unit.Name)
+		end
+		if not unit:GetAttribute("Level") then
+			unit:SetAttribute("Level", 1)
+		end
+		unit:SetAttribute("Team", BattleConfig.Team.ATTACK)
+		DebugLog(string.format("[V5.3] 攻击方单位准备: %s, UnitId=%s, Level=%d",
+			unit.Name, tostring(unit:GetAttribute("UnitId")), unit:GetAttribute("Level") or 1))
 	end
 
-	-- 构建防守方单位数据
-	local defenseUnitsData = {}
 	for _, unit in ipairs(defenseUnits) do
-		local unitId = unit:GetAttribute("UnitId") or unit.Name
-		local level = unit:GetAttribute("Level") or 1
-		table.insert(defenseUnitsData, {
-			UnitModel = unit,
-			UnitId = unitId,
-			Level = level,
-			Team = BattleConfig.Team.DEFENSE,
-		})
+		if not unit:GetAttribute("UnitId") then
+			unit:SetAttribute("UnitId", unit.Name:match("^(%d+)") or unit.Name)
+		end
+		if not unit:GetAttribute("Level") then
+			unit:SetAttribute("Level", 1)
+		end
+		unit:SetAttribute("Team", BattleConfig.Team.DEFENSE)
+		DebugLog(string.format("[V5.3] 防守方单位准备: %s, UnitId=%s, Level=%d",
+			unit.Name, tostring(unit:GetAttribute("UnitId")), unit:GetAttribute("Level") or 1))
 	end
 
 	-- 向玩家客户端发送初始化事件
+	-- V5.3: 直接传递 Instance 数组（attackUnits, defenseUnits）
 	local player = Players:GetPlayerByUserId(battle.PlayerId)
 	if player then
-		initializeBattleEvent:FireClient(player, battleId, attackUnitsData, defenseUnitsData, battleField)
-		DebugLog(string.format("[V4.0] 已向玩家 %s 发送战斗初始化事件 (BattleId=%d, Attack=%d, Defense=%d)",
-			player.Name, battleId, #attackUnitsData, #defenseUnitsData))
+		initializeBattleEvent:FireClient(player, battleId, attackUnits, defenseUnits, battleField)
+		DebugLog(string.format("[V5.3] 已向玩家 %s 发送战斗初始化事件 (BattleId=%d, Attack=%d, Defense=%d)",
+			player.Name, battleId, #attackUnits, #defenseUnits))
 	else
 		WarnLog("[V4.0] 找不到玩家，无法发送初始化事件")
 	end

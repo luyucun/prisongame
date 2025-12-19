@@ -3,7 +3,7 @@
 脚本名称: CampaignManager
 脚本类型: ModuleScript (服务端核心)
 脚本位置: ServerScriptService/Systems/CampaignManager.lua
-版本: V2.8.8 (配合UnitAI V5.8修复开战回头Bug)
+版本: V2.8.9 (V5.5空气墙修复)
 =====================================================
 
 功能描述:
@@ -19,6 +19,9 @@
 - V2.8.8新增:
   - BeginBattlePrep中增加等待时间到0.1秒
   - 确保行军MoveTo完全清理后再启动战斗AI
+- V2.8.9新增:
+  - OnStageClear时重新刷新当前关卡空气墙的NoCollisionConstraint
+  - 修复玩家通关后被当前关卡空气墙阻挡的问题
 
 状态机:
 IDLE → PREPARING → MARCHING → FIGHTING → STAGE_CLEAR/DEFEAT → CLEANUP → IDLE
@@ -939,6 +942,9 @@ function CampaignManager.StartCampaign(player)
 
 			-- 设置战役保持标记,防止被误删除
 			unitModel:SetAttribute("CampaignKeepInstance", true)
+			-- V4.2修复：设置HomeSlot属性，用于客户端镜头过滤
+			unitModel:SetAttribute("HomeSlot", campaignData.HomeId)
+
 
 			-- 解除单位锚定,允许移动
 			SetUnitAnchored(unitModel, false)
@@ -1148,23 +1154,20 @@ function CampaignManager.MarchToStage(campaignData, stageNum)
 		return CampaignManager.OnCampaignEnd(campaignData, false)
 	end
 
+	-- V5.3调试：记录空气墙操作
+	DebugLog(string.format("[MarchToStage] 准备开启第%d关空气墙", stageNum))
+
 	-- 启用当前关卡空气墙
-	StageService.SetAirWallState(stageFolder, true)
+	local result = StageService.SetAirWallState(stageFolder, true)
+	DebugLog(string.format("[MarchToStage] SetAirWallState(Stage%03d, true) 结果=%s", stageNum, tostring(result)))
 
-	-- 预加载下一关并禁用其空气墙
-	local nextStageNum = stageNum + 1
-	if nextStageNum <= campaignData.TotalStages then
-		local nextStageFolder = nil
-		if StageService.StageCache[campaignData.PlayerId] and
-			StageService.StageCache[campaignData.PlayerId][nextStageNum] then
-			nextStageFolder = StageService.StageCache[campaignData.PlayerId][nextStageNum]
-		end
-
-		-- 禁用下一关空气墙允许通行
-		if nextStageFolder then
-			StageService.SetAirWallState(nextStageFolder, false)
-		end
-	end
+	-- V5.4修复：移除关闭下一关空气墙的逻辑
+	-- 原因：OnStageClear 已经负责管理空气墙状态
+	--   - OnStageClear(N) 会开启第N+1关空气墙，并关闭第N+2关空气墙
+	--   - 如果 MarchToStage(N+1) 再关闭第N+2关，会导致重复操作
+	-- 而且这里关闭下一关是错误的：当 MarchToStage(N) 被调用时，
+	-- 玩家正准备行军到第N关打仗，第N+1关应该保持之前的状态
+	-- （已经被 OnStageClear(N-1) 设置为关闭了）
 
 	-- ⭐⭐ V4.0关键修复：修改空气墙后等待NavMesh稳定 ⭐⭐
 	-- AirWall 的 CanCollide 属性改变会触发 NavMesh 更新
@@ -1340,7 +1343,8 @@ function CampaignManager.MarchToStage(campaignData, stageNum)
 			Targets = moveTargets,
 		}
 
-		StartMarch:FireClient(player, campaignData.BattleId or 0, serializableMoveTargets, stageNum)
+		-- V5.6修复：附带行军Token，用于服务端校验MarchComplete乱序/延迟包
+		StartMarch:FireClient(player, campaignData.BattleId or 0, serializableMoveTargets, stageNum, marchToken)
 
 		local moveTimeout = (GameConfig.Campaign and GameConfig.Campaign.MoveTimeout) or 30
 		task.delay(moveTimeout + 5, function()
@@ -1390,13 +1394,46 @@ V5.0新增：处理客户端行军完成事件
 @param arrivedList table - 到达的单位列表
 @param failedList table - 失败的单位列表
 ]]
-function CampaignManager.OnMarchComplete(player, battleId, arrivedList, failedList)
+function CampaignManager.OnMarchComplete(player, battleId, ...)
 	local playerId = player.UserId
 	local campaignData = CampaignManager.ActiveCampaigns[playerId]
 
 	if not campaignData then
 		warn(GameConfig.LOG_PREFIX, "[CampaignManager] 收到MarchComplete但未找到战役数据:", playerId)
 		return
+	end
+
+	-- V5.6修复：兼容两种参数格式
+	-- 旧：MarchComplete(battleId, arrivedList, failedList)
+	-- 新：MarchComplete(battleId, stageNum, marchToken, arrivedList, failedList)
+	local stageNum = nil
+	local marchToken = nil
+	local arrivedList = nil
+	local failedList = nil
+
+	do
+		local args = table.pack(...)
+		-- new signature: (stageNum, token, arrivedList, failedList)
+		if (type(args[1]) == "number" or type(args[1]) == "string") and type(args[3]) == "table" then
+			stageNum = tonumber(args[1])
+			if type(args[2]) == "string" then
+				marchToken = args[2]
+			end
+			arrivedList = args[3]
+			failedList = args[4]
+		else
+			-- old signature: (arrivedList, failedList)
+			arrivedList = args[1]
+			failedList = args[2]
+		end
+	end
+
+	-- 兜底：确保列表为table，避免远程参数异常导致长度运算报错
+	if type(arrivedList) ~= "table" then
+		arrivedList = {}
+	end
+	if type(failedList) ~= "table" then
+		failedList = {}
 	end
 
 	-- 验证BattleId (如果使用)
@@ -1415,7 +1452,28 @@ function CampaignManager.OnMarchComplete(player, battleId, arrivedList, failedLi
 		#arrivedList, #failedList))
 
 		local pendingMarch = campaignData._PendingMarch
+		if not pendingMarch then
+			DebugLog("[OnMarchComplete] 忽略MarchComplete：无PendingMarch（可能已重开/乱序）")
+			return
+		end
+
+		-- V5.6修复：严格校验关卡与Token，防止延迟/乱序的MarchComplete把当前行军顶掉
+		local expectedStage = pendingMarch.Stage or (campaignData.CurrentStage or 1)
+		if stageNum and expectedStage and stageNum ~= expectedStage then
+			DebugLog(string.format("[OnMarchComplete] 忽略MarchComplete：Stage不匹配 (incoming=%s, expected=%s)",
+				tostring(stageNum), tostring(expectedStage)))
+			return
+		end
+		if marchToken and pendingMarch.Token and marchToken ~= pendingMarch.Token then
+			DebugLog(string.format("[OnMarchComplete] 忽略MarchComplete：Token不匹配 (incoming=%s, expected=%s)",
+				tostring(marchToken), tostring(pendingMarch.Token)))
+			return
+		end
+
+		-- 通过校验后才清除PendingMarch
 		campaignData._PendingMarch = nil
+		-- 以PendingMarch为准（旧客户端不回传stageNum时也能正确推进）
+		stageNum = stageNum or expectedStage
 
 		local statusByUnit = {}
 
@@ -1557,12 +1615,11 @@ function CampaignManager.OnMarchComplete(player, battleId, arrivedList, failedLi
 		end
 	end
 
-	-- 获取当前关卡编号（从campaignData中推断）
-	-- 假设campaignData.CurrentStage存储了当前关卡编号
-	local stageNum = campaignData.CurrentStage or 1
+	-- 使用校验后的stageNum（避免乱序包导致关卡号错位）
+	stageNum = stageNum or (campaignData.CurrentStage or 1)
 
 	-- 进入战斗准备阶段
-	DebugLog("[OnMarchComplete] 行军完成，开始BeginBattlePrep...")
+	DebugLog(string.format("[OnMarchComplete] 行军完成(Stage=%d)，开始BeginBattlePrep...", stageNum))
 	task.wait(0.1)
 	CampaignManager.BeginBattlePrep(campaignData, stageNum, arrivedList, {}, failedList)
 end
@@ -1990,18 +2047,46 @@ function CampaignManager.OnStageClear(campaignData, stageNum)
 	-- 准备进入下一关
 	local nextStage = stageNum + 1
 
+	-- V5.5关键修复：重新开启当前关卡的空气墙，确保PlayerAirWall的NoCollisionConstraint有效
+	-- 问题：玩家通关第N关后需要穿过第N关的空气墙去第N+1关
+	-- 但战斗期间PlayerAirWall的NoCollisionConstraint可能因角色变化而失效
+	-- 解决：在OnStageClear时重新调用SetAirWallState刷新约束
+	local currentStageFolder = StageService.GetOrCreateStage(campaignData.PlayerId, stageNum, false)
+	if currentStageFolder then
+		local result = StageService.SetAirWallState(currentStageFolder, true)
+		DebugLog(string.format("[OnStageClear] V5.5修复: 刷新当前关卡Stage%03d空气墙约束, 结果=%s", stageNum, tostring(result)))
+	end
+
+	-- V5.3调试：记录空气墙操作
+	DebugLog(string.format("[OnStageClear] 准备开启第%d关空气墙", nextStage))
+
 	-- 预加载下一关并启用其空气墙
 	local nextStageFolder = StageService.GetOrCreateStage(campaignData.PlayerId, nextStage, false)
 	if nextStageFolder then
-		StageService.SetAirWallState(nextStageFolder, true)
+		local result = StageService.SetAirWallState(nextStageFolder, true)
+		DebugLog(string.format("[OnStageClear] SetAirWallState(Stage%03d, true) 结果=%s", nextStage, tostring(result)))
+	else
+		warn(GameConfig.LOG_PREFIX, "[CampaignManager]", string.format("[OnStageClear] 获取第%d关失败，无法开启空气墙", nextStage))
 	end
 
 	-- 预加载下下一关并禁用其空气墙
 	if nextStage + 1 <= campaignData.TotalStages then
+		local preloadStageNum = nextStage + 1
+		DebugLog(string.format("[OnStageClear] 异步预加载第%d关并关闭空气墙", preloadStageNum))
 		task.spawn(function()
-			local nextNextStageFolder = StageService.GetOrCreateStage(campaignData.PlayerId, nextStage + 1, false)
+			local nextNextStageFolder = StageService.GetOrCreateStage(campaignData.PlayerId, preloadStageNum, false)
 			if nextNextStageFolder then
-				StageService.SetAirWallState(nextNextStageFolder, false)
+				-- V5.3修复：在异步任务中检查当前关卡状态，避免竞态条件
+				-- 如果玩家已经打到或超过了预加载的关卡，不要关闭其空气墙
+				local currentStageNow = campaignData.CurrentStage or 1
+				if currentStageNow >= preloadStageNum then
+					DebugLog(string.format("[OnStageClear] 异步: 跳过关闭Stage%03d空气墙，因为CurrentStage=%d >= %d",
+						preloadStageNum, currentStageNow, preloadStageNum))
+					return
+				end
+
+				local result = StageService.SetAirWallState(nextNextStageFolder, false)
+				DebugLog(string.format("[OnStageClear] 异步: SetAirWallState(Stage%03d, false) 结果=%s", preloadStageNum, tostring(result)))
 			end
 		end)
 	end
@@ -2209,14 +2294,29 @@ function CampaignManager.CompleteCampaignEnd(campaignData)
 	end
 
 	campaignData.IsWaitingForConfirm = false
-	RestorePlayerMovement(campaignData)
-	DebugLog(string.format("✅ CompleteCampaignEnd开始，PlayerId=%d", campaignData.PlayerId))
 
-	-- V3.8新增：玩家确认后停止胜利音效并切换回通用BGM
-	pcall(function()
-		SoundSystem.OnVictoryConfirm(campaignData.Player)
-		SoundSystem.OnBattleEnd(campaignData.Player)
-	end)
+	-- 玩家已离线/正在离线：禁止发客户端事件/禁止复活单位，只做服务器清场
+	local player = campaignData.Player
+	local playerActive = false
+	if player then
+		local ok, result = pcall(function()
+			return player:IsDescendantOf(Players)
+		end)
+		playerActive = ok and result
+	end
+	local skipClientFlow = campaignData.PlayerLeft == true or not playerActive
+
+	if not skipClientFlow then
+		RestorePlayerMovement(campaignData)
+
+		-- V3.8新增：玩家确认后停止胜利音效并切换回通用BGM
+		pcall(function()
+			SoundSystem.OnVictoryConfirm(player)
+			SoundSystem.OnBattleEnd(player)
+		end)
+	end
+
+	DebugLog(string.format("✅ CompleteCampaignEnd开始，PlayerId=%d", campaignData.PlayerId))
 
 	-- ==================== 修复核心：强制清理移动和AI ====================
 
@@ -2243,6 +2343,47 @@ function CampaignManager.CompleteCampaignEnd(campaignData)
 				humanoid:Move(Vector3.zero) -- 物理刹车
 			end
 		end
+	end
+
+	-- 玩家离线：到这里为止只做“停止移动/AI”，接下来直接清场并结束
+	if skipClientFlow then
+		-- 移除所有战役单位的血条
+		local campaignUnits = {}
+		for unitInstance, _ in pairs(campaignData.Units) do
+			if unitInstance then
+				table.insert(campaignUnits, unitInstance)
+			end
+		end
+		if #campaignUnits > 0 then
+			fireDetachHealthBars(campaignUnits)
+		end
+
+		-- 关闭家园战斗特效并清理关卡
+		SetHomeFightingEffect(campaignData.HomeId, false)
+		StageService.CleanupStages(campaignData.PlayerId)
+		ClearPathCache(campaignData.HomeId)
+
+		-- 彻底销毁残留单位模型（防止离线后仍在家园中出现）
+		for unitInstance, _ in pairs(campaignData.Units) do
+			if unitInstance then
+				pcall(function()
+					if unitInstance.Parent then
+						unitInstance:Destroy()
+					end
+				end)
+			end
+		end
+
+		-- 关门兜底
+		pcall(function()
+			DoorControlService.CloseDoor(campaignData.HomeId)
+		end)
+
+		-- 移除战役数据
+		CampaignManager.ActiveCampaigns[campaignData.PlayerId] = nil
+		campaignData.PlayerLeft = nil
+		DebugLog(string.format("  玩家已离线，已强制清理战役: PlayerId=%d", campaignData.PlayerId))
+		return
 	end
 
 	-- =================================================================
@@ -2777,7 +2918,8 @@ function CampaignManager.RespawnUnits(campaignData)
 								unitData.InstanceId,
 								unitData.Level or 1,
 								gridWidth,
-								gridDepth
+								gridDepth,
+								campaignData.HomeId
 							)
 
 							return newUnitModel
@@ -3211,10 +3353,8 @@ function CampaignManager.Initialize()
 
 	-- V5.0新增：监听客户端行军完成事件
 	if MarchComplete then
-		MarchComplete.OnServerEvent:Connect(function(player, battleId, arrivedList, failedList)
-			local success, err = pcall(function()
-				CampaignManager.OnMarchComplete(player, battleId, arrivedList, failedList)
-			end)
+		MarchComplete.OnServerEvent:Connect(function(player, battleId, ...)
+			local success, err = pcall(CampaignManager.OnMarchComplete, player, battleId, ...)
 			if not success then
 				warn("[CampaignManager] MarchComplete处理失败:", err)
 			end
@@ -3230,7 +3370,12 @@ function CampaignManager.Initialize()
 		local campaignData = CampaignManager.ActiveCampaigns[playerId]
 
 		if campaignData then
-			CampaignManager.OnCampaignEnd(campaignData, false)
+			-- 玩家离线时不走“等确认/复活单位”的流程，直接强制清理
+			campaignData.PlayerLeft = true
+			campaignData.IsWaitingForConfirm = true
+			pcall(function()
+				CampaignManager.CompleteCampaignEnd(campaignData)
+			end)
 		end
 	end)
 

@@ -338,7 +338,15 @@ local function ApplyOwnerNoCollideConstraints(playerAirWall, ownerPlayer)
 
 	local character = ownerPlayer.Character
 	if not character then
-		return false
+		-- V5.5修复：如果角色不存在，尝试等待一小段时间
+		-- 这在角色刚重生或正在加载时可能发生
+		character = ownerPlayer.Character or ownerPlayer.CharacterAdded:Wait()
+		if not character then
+			warn(string.format("[StageService] ApplyOwnerNoCollideConstraints: 等待后仍无角色，玩家=%s", ownerPlayer.Name))
+			return false
+		end
+		-- 等待角色完全加载
+		task.wait(0.1)
 	end
 
 	ClearOwnerNoCollideConstraints(playerAirWall)
@@ -367,10 +375,13 @@ end
     @return boolean - 是否设置成功
 ]]
 function StageService.SetAirWallState(stageFolder, isOpen)
+	local stageName = stageFolder and stageFolder.Name or "nil"
+
     local airWall = FindAirWall(stageFolder)
 
     if not airWall or not airWall:IsA("BasePart") then
         -- 空气墙缺失，返回false但不中断流程
+		warn(string.format("[StageService] SetAirWallState 失败: Stage=%s 的 AirWall 未找到", stageName))
         return false
     end
 
@@ -387,14 +398,22 @@ function StageService.SetAirWallState(stageFolder, isOpen)
 
 		if isOpen then
 			local ownerUserId = stageFolder:GetAttribute(STAGE_OWNER_ATTR)
+
 			if ownerUserId then
 				local ownerPlayer = Players:GetPlayerByUserId(ownerUserId)
+
 				if ownerPlayer then
 					-- 如果此时角色未加载，CharacterAdded监听会补一次
-					ApplyOwnerNoCollideConstraints(playerAirWall, ownerPlayer)
+					local success = ApplyOwnerNoCollideConstraints(playerAirWall, ownerPlayer)
+				else
+					warn(string.format("[StageService] PlayerAirWall失败: Stage=%s 找不到玩家(UserId=%s)", stageName, tostring(ownerUserId)))
 				end
+			else
+				warn(string.format("[StageService] PlayerAirWall失败: Stage=%s 没有OwnerUserId属性", stageName))
 			end
 		end
+	else
+		warn(string.format("[StageService] PlayerAirWall失败: Stage=%s 无法创建PlayerAirWall", stageName))
 	end
 
     -- 设置碰撞属性（isOpen=true时，CanCollide=false，允许通过）
@@ -1117,7 +1136,11 @@ function StageService.CleanupStages(playerId)
         -- V2.0.1修改：遍历并销毁所有关卡（包括Stage001）
         for stageNum, stageFolder in pairs(cache) do
             if stageFolder and stageFolder.Parent then
-                stageFolder:Destroy()
+                -- 保险：如果关卡已被复用给其它玩家（OwnerUserId变化），不要误删
+                local ownerUserId = stageFolder:GetAttribute(STAGE_OWNER_ATTR)
+                if not ownerUserId or ownerUserId == playerId then
+                    stageFolder:Destroy()
+                end
             end
         end
 

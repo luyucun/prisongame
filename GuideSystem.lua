@@ -212,9 +212,19 @@ local function CheckTriggerCondition(player, guideConfig)
 		local dm = GetDataManager()
 		if dm then
 			local idleCoinData = dm.GetIdleCoinData(player)
-			if idleCoinData and (idleCoinData.PendingCoins or 0) > 0 then
-				-- 条件是金币数>0，只有真正有挂机金币时才触发
-				return true
+			if idleCoinData then
+				-- 优化：必须“离线过一次再上来”才触发离线金币引导
+				-- 说明：挂机金币存在在线累计逻辑，PendingCoins可能在首次在线过程中变为>0；
+				-- 但离线金币引导只应在玩家至少登出过一次（LastLogoutTime>0）后才出现。
+				local lastLogoutTime = tonumber(idleCoinData.LastLogoutTime) or 0
+				if lastLogoutTime <= 0 then
+					return false
+				end
+
+				if (idleCoinData.PendingCoins or 0) > 0 then
+					-- 条件：离线过 + 待领取金币>0
+					return true
+				end
 			end
 		end
 		return false

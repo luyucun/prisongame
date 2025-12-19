@@ -1,4 +1,4 @@
---[[
+﻿--[[
 脚本名称: GameConfig
 脚本类型: ModuleScript (配置模块)
 脚本位置: ReplicatedStorage/Config/GameConfig
@@ -67,7 +67,7 @@ GameConfig.PUT_CONFIRM_GUI_NAME = "PutConfirm"
 -- ==================== 战役系统配置 (V2.0) ====================
 -- 战役关卡配置
 GameConfig.Campaign = {
-	MaxStages = 8,                       -- 最大关卡数
+	MaxStages = 30,                       -- 最大关卡数
 	StageGenerateOffset = 170,           -- 关卡Z轴间距(studs)
 	MoveTimeout = 30,                    -- 移动超时(秒)
 	ArrivalThreshold = 8,                -- 到达阈值(studs) - V2.0修复：放宽到8，避免因敌人存在导致无法到达

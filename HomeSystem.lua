@@ -18,6 +18,7 @@ local HomeSystem = {}
 -- 引用服务
 local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 
 -- 引用模块
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
@@ -76,6 +77,76 @@ local function GetHomeFolder(homeSlot)
     end
 
     return playerHome
+end
+
+-- 重置家园信息面板显示（玩家名/战斗力）
+local function ResetInformationDisplay(homeFolder)
+    local information = homeFolder and homeFolder:FindFirstChild("Information")
+    if not information then
+        return
+    end
+
+    local part = information:FindFirstChild("Part")
+    if not part then
+        return
+    end
+
+    for _, guiName in ipairs({"SurfaceGui01", "SurfaceGui02"}) do
+        local surfaceGui = part:FindFirstChild(guiName)
+        if surfaceGui then
+            local frame = surfaceGui:FindFirstChild("Frame")
+            if frame then
+                local playerNameContainer = frame:FindFirstChild("PlayerName")
+                local nameLabel = playerNameContainer and playerNameContainer:FindFirstChild("Name")
+                if nameLabel and nameLabel:IsA("TextLabel") then
+                    nameLabel.Text = ""
+                end
+
+                local playerPowerContainer = frame:FindFirstChild("PlayerPower")
+                local numLabel = playerPowerContainer and playerPowerContainer:FindFirstChild("Num")
+                if numLabel and numLabel:IsA("TextLabel") then
+                    numLabel.Text = "0"
+                end
+            end
+        end
+    end
+end
+
+-- 重置Mail上的待领取金币显示
+local function ResetMailDisplay(homeFolder)
+    local mailModel = homeFolder and homeFolder:FindFirstChild("Mail")
+    if not mailModel then
+        return
+    end
+
+    local idleEarnings = mailModel:FindFirstChild("IdleEarnings")
+    local fightingGui = idleEarnings and idleEarnings:FindFirstChild("Fighting")
+    local bg = fightingGui and fightingGui:FindFirstChild("Bg")
+    local numberLabel = bg and bg:FindFirstChild("Number")
+
+    if numberLabel and numberLabel:IsA("TextLabel") then
+        numberLabel.Text = "0"
+    end
+end
+
+-- 兜底：清掉所有标记了HomeSlot的单位模型（避免玩家离线后残留）
+local function DestroyUnitModelsByHomeSlot(homeId)
+    if not homeId then
+        return
+    end
+
+    for _, inst in ipairs(Workspace:GetDescendants()) do
+        if inst:IsA("Model") then
+            local slot = inst:GetAttribute("HomeSlot")
+            if slot == homeId then
+                -- 只清理单位模型，避免误删家园里的其它Model
+                local unitId = inst:GetAttribute("UnitId")
+                if unitId ~= nil and inst:FindFirstChildOfClass("Humanoid") then
+                    inst:Destroy()
+                end
+            end
+        end
+    end
 end
 
 -- ==================== 公共接口 ====================
@@ -240,6 +311,13 @@ function HomeSystem.CleanupPlayerHome(homeId, player)
     end)
 
     -- 调用原有清理逻辑
+    local homeFolder = GetHomeFolder(homeId)
+    if homeFolder then
+        ResetInformationDisplay(homeFolder)
+        ResetMailDisplay(homeFolder)
+    end
+
+    DestroyUnitModelsByHomeSlot(homeId)
     HomeSystem.ClearPlayerHome(player)
 
     if GameConfig.DEBUG_MODE then

@@ -25,6 +25,7 @@ V4.0设计要点:
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
 
 -- ==================== 获取本地玩家 ====================
 
@@ -88,6 +89,114 @@ local function CountTable(t)
 		count = count + 1
 	end
 	return count
+end
+
+-- ==================== Streaming预加载（修复：客户端虚空/看不到敌人导致战斗卡死） ====================
+
+local STREAMING_PREFETCH = {
+	MAX_WAIT = 2.5,          -- 最多等待Streaming的时间（秒），避免无限卡死
+	MIN_DISTANCE = 80,       -- 两次请求位置太近则跳过（studs）
+	MIN_INTERVAL = 0.5,      -- 两次请求最小间隔（秒）
+}
+
+local lastStreamRequestPos = nil
+local lastStreamRequestTime = 0
+
+local function RequestStreamAround(position, context)
+	if typeof(position) ~= "Vector3" then
+		return
+	end
+	if not Workspace.StreamingEnabled then
+		return
+	end
+
+	local now = tick()
+	if lastStreamRequestPos and (position - lastStreamRequestPos).Magnitude < STREAMING_PREFETCH.MIN_DISTANCE then
+		if (now - lastStreamRequestTime) < STREAMING_PREFETCH.MIN_INTERVAL then
+			return
+		end
+	end
+
+	lastStreamRequestPos = position
+	lastStreamRequestTime = now
+
+	local finished = false
+	task.spawn(function()
+		local ok, err = pcall(function()
+			Workspace:RequestStreamAroundAsync(position)
+		end)
+		if not ok and BattleConfig.DEBUG_AI_LOGS then
+			warn(GameConfig.LOG_PREFIX, "[ClientAIBootstrap]", "RequestStreamAroundAsync失败:", tostring(err), "ctx=", tostring(context))
+		end
+		finished = true
+	end)
+
+	local start = tick()
+	while not finished and (tick() - start) < STREAMING_PREFETCH.MAX_WAIT do
+		task.wait(0.05)
+	end
+end
+
+local function GetModelRootPosition(model)
+	if typeof(model) ~= "Instance" or not model:IsA("Model") then
+		return nil
+	end
+	local root = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
+	if root and root:IsA("BasePart") then
+		return root.Position
+	end
+	return nil
+end
+
+local function GetAverageTargetPosition(moveTargets)
+	if type(moveTargets) ~= "table" then
+		return nil
+	end
+	local sum = Vector3.new(0, 0, 0)
+	local count = 0
+	for _, targetCFrame in pairs(moveTargets) do
+		if typeof(targetCFrame) == "CFrame" then
+			sum += targetCFrame.Position
+			count += 1
+		end
+	end
+	if count > 0 then
+		return sum / count
+	end
+	return nil
+end
+
+local function GetBattleFieldFocusPosition(battleField, attackUnits, defenseUnits)
+	if typeof(battleField) == "Instance" then
+		local watchPart = battleField:FindFirstChild("WatchPart", true)
+		if watchPart and watchPart:IsA("BasePart") then
+			return watchPart.Position
+		end
+		local idleFloor = battleField:FindFirstChild("IdleFloor", true)
+		if idleFloor and idleFloor:IsA("BasePart") then
+			return idleFloor.Position
+		end
+	end
+
+	-- 兜底：用单位位置作为Streaming中心
+	if type(defenseUnits) == "table" then
+		for _, unitModel in ipairs(defenseUnits) do
+			local pos = GetModelRootPosition(unitModel)
+			if pos then
+				return pos
+			end
+		end
+	end
+	if type(attackUnits) == "table" then
+		for _, unitModel in ipairs(attackUnits) do
+			local pos = GetModelRootPosition(unitModel)
+			if pos then
+				return pos
+			end
+		end
+	end
+
+	return nil
 end
 
 -- ==================== 战斗初始化处理 ====================
@@ -176,6 +285,9 @@ local function OnInitializeBattle(battleId, attackUnits, defenseUnits, battleFie
 		return
 	end
 
+	-- V5.6修复：StreamingEnabled时，确保战场区域先被加载（否则客户端可能看不到敌人，AI找不到目标导致战斗卡死）
+	RequestStreamAround(GetBattleFieldFocusPosition(battleField, attackUnits, defenseUnits), "InitializeBattle BattleId=" .. tostring(battleId))
+
 	-- ==================== V4.8修复：彻底清理所有客户端AI状态 ====================
 	-- 关键修复：不论是否是同一个battleId，都先全局清理所有AI状态，防止状态残留导致卡死
 	-- 这解决了以下问题：
@@ -207,12 +319,26 @@ local function OnInitializeBattle(battleId, attackUnits, defenseUnits, battleFie
 	DebugLog("客户端AI状态清理完成，准备初始化新战斗")
 	-- ==================== 修复结束 ====================
 
+	-- V5.3修复：服务端现在直接传递Instance数组
+	-- 从Instance的Attribute中获取UnitId/Level/Team信息
+	DebugLog(string.format("收到攻击方单位数量: %d, 防守方单位数量: %d", #attackUnits, #defenseUnits))
+
 	-- 注册所有攻击方单位
-	for _, unitData in ipairs(attackUnits) do
-		local unitModel = unitData.UnitModel
-		local unitId = unitData.UnitId
-		local level = unitData.Level
-		local team = unitData.Team
+	local registeredAttackUnits = {}
+	for i, unitModel in ipairs(attackUnits) do
+		-- V5.3：验证Instance有效性
+		if not unitModel or typeof(unitModel) ~= "Instance" then
+			WarnLog(string.format("注册攻击方单位失败[%d]: unitModel无效，类型=%s", i, typeof(unitModel)))
+			continue
+		end
+
+		-- V5.3：从Attribute获取信息
+		local unitId = unitModel:GetAttribute("UnitId") or unitModel.Name:match("^(%d+)") or unitModel.Name
+		local level = unitModel:GetAttribute("Level") or 1
+		local team = unitModel:GetAttribute("Team") or "Attack"
+
+		DebugLog(string.format("注册攻击方单位[%d]: %s, UnitId=%s, Level=%d, Team=%s",
+			i, unitModel.Name, tostring(unitId), level, tostring(team)))
 
 		-- 注册到ClientUnitManager
 		local success = ClientUnitManager.RegisterUnit(battleId, team, unitModel, unitId, level)
@@ -220,6 +346,7 @@ local function OnInitializeBattle(battleId, attackUnits, defenseUnits, battleFie
 			WarnLog("注册攻击方单位失败:", unitModel.Name)
 			continue
 		end
+		table.insert(registeredAttackUnits, unitModel)
 
 		-- 启动ClientUnitAI
 		success = ClientUnitAI.StartAI(battleId, unitModel, unitId, level, team)
@@ -228,12 +355,22 @@ local function OnInitializeBattle(battleId, attackUnits, defenseUnits, battleFie
 		end
 	end
 
-	-- V4.0修复：防守方也由客户端AI控制，服务端仅做伤害/死亡校验
-	for _, unitData in ipairs(defenseUnits) do
-		local unitModel = unitData.UnitModel
-		local unitId = unitData.UnitId
-		local level = unitData.Level
-		local team = unitData.Team
+	-- V5.3修复：防守方也由客户端AI控制
+	local registeredDefenseUnits = {}
+	for i, unitModel in ipairs(defenseUnits) do
+		-- V5.3：验证Instance有效性
+		if not unitModel or typeof(unitModel) ~= "Instance" then
+			WarnLog(string.format("注册防守方单位失败[%d]: unitModel无效，类型=%s", i, typeof(unitModel)))
+			continue
+		end
+
+		-- V5.3：从Attribute获取信息
+		local unitId = unitModel:GetAttribute("UnitId") or unitModel.Name:match("^(%d+)") or unitModel.Name
+		local level = unitModel:GetAttribute("Level") or 1
+		local team = unitModel:GetAttribute("Team") or "Defense"
+
+		DebugLog(string.format("注册防守方单位[%d]: %s, UnitId=%s, Level=%d, Team=%s",
+			i, unitModel.Name, tostring(unitId), level, tostring(team)))
 
 		-- 注册到ClientUnitManager
 		local success = ClientUnitManager.RegisterUnit(battleId, team, unitModel, unitId, level)
@@ -241,6 +378,7 @@ local function OnInitializeBattle(battleId, attackUnits, defenseUnits, battleFie
 			WarnLog("注册防守方单位失败:", unitModel.Name)
 			continue
 		end
+		table.insert(registeredDefenseUnits, unitModel)
 
 		-- V4.0修复：为防守方也启动ClientUnitAI
 		success = ClientUnitAI.StartAI(battleId, unitModel, unitId, level, team)
@@ -249,10 +387,35 @@ local function OnInitializeBattle(battleId, attackUnits, defenseUnits, battleFie
 		end
 	end
 
+	-- V5.6兜底：如果RemoteEvent传过来的DefenseUnits在客户端尚未完成复制/Streaming导致为空，则从battleField中重建敌军列表
+	if #registeredDefenseUnits == 0 and typeof(battleField) == "Instance" then
+		local idleFloorEnemy = battleField:FindFirstChild("IdleFloorEnemy", true)
+		if idleFloorEnemy then
+			for _, child in ipairs(idleFloorEnemy:GetChildren()) do
+				if child:IsA("Model") and (child:FindFirstChildOfClass("Humanoid") or child:FindFirstChild("Humanoid")) then
+					if not ClientUnitManager.IsUnitRegistered(child) then
+						local unitId = child:GetAttribute("UnitId") or child.Name:match("^(%d+)") or child.Name
+						local level = child:GetAttribute("Level") or 1
+						local team = child:GetAttribute("Team") or "Defense"
+
+						local ok = ClientUnitManager.RegisterUnit(battleId, team, child, unitId, level)
+						if ok then
+							table.insert(registeredDefenseUnits, child)
+							local started = ClientUnitAI.StartAI(battleId, child, unitId, level, team)
+							if not started then
+								WarnLog("兜底启动防守方AI失败:", child.Name)
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+
 	-- 记录战斗数据
 	activeBattles[battleId] = {
-		attackUnits = attackUnits,
-		defenseUnits = defenseUnits,
+		attackUnits = registeredAttackUnits,
+		defenseUnits = registeredDefenseUnits,
 		battleField = battleField,
 	}
 
@@ -281,15 +444,21 @@ local function OnTerminateBattle(battleId, result)
 	-- V5.0新增：停止所有行军任务
 	ClientMarchService.StopAllMarches()
 
-	-- 停止所有单位AI
-	for _, unitData in ipairs(battleData.attackUnits) do
-		ClientUnitAI.StopAI(unitData.UnitModel)
-		ClientUnitManager.UnregisterUnit(unitData.UnitModel)
+	-- V5.3修复：现在attackUnits和defenseUnits是Instance数组，不是包含UnitModel字段的表
+	-- 停止所有攻击方单位AI
+	for _, unitModel in ipairs(battleData.attackUnits) do
+		if unitModel and typeof(unitModel) == "Instance" then
+			ClientUnitAI.StopAI(unitModel)
+			ClientUnitManager.UnregisterUnit(unitModel)
+		end
 	end
 
-	for _, unitData in ipairs(battleData.defenseUnits) do
-		ClientUnitAI.StopAI(unitData.UnitModel)
-		ClientUnitManager.UnregisterUnit(unitData.UnitModel)
+	-- 停止所有防守方单位AI
+	for _, unitModel in ipairs(battleData.defenseUnits) do
+		if unitModel and typeof(unitModel) == "Instance" then
+			ClientUnitAI.StopAI(unitModel)
+			ClientUnitManager.UnregisterUnit(unitModel)
+		end
 	end
 
 	-- 清理战斗数据
@@ -455,7 +624,7 @@ end
 @param serializableMoveTargets table - 数组格式: {{unitName=string, targetCFrame=CFrame}, ...}
 @param stageIndex number - 关卡索引
 ]]
-local function OnStartMarch(battleId, serializableMoveTargets, stageIndex)
+local function OnStartMarch(battleId, serializableMoveTargets, stageIndex, marchToken)
 	local stageNum = tonumber(stageIndex)
 
 	-- Ignore late StartMarch from previous rounds (e.g. after Restart/Respawn back to base)
@@ -488,7 +657,7 @@ local function OnStartMarch(battleId, serializableMoveTargets, stageIndex)
 
 	-- V5.0修复：将数组格式转换为 {[unitModel] = CFrame} 格式
 	local moveTargets = {}
-	local workspace = game:GetService("Workspace")
+	local workspace = Workspace
 
 	local instanceIdIndex = nil
 	local function BuildInstanceIdIndex()
@@ -553,6 +722,10 @@ local function OnStartMarch(battleId, serializableMoveTargets, stageIndex)
 	end
 	DebugLog(string.format("成功解析 %d 个单位进行行军", CountTable(moveTargets)))
 
+	-- V5.6修复：StreamingEnabled时，先请求加载目标关卡区域，降低NoPath/卡住→瞬移导致的“客户端虚空/敌人不显示”概率
+	local avgTargetPos = GetAverageTargetPosition(moveTargets)
+	RequestStreamAround(avgTargetPos, "StartMarch Stage=" .. tostring(stageNum or stageIndex))
+
 	-- 调用ClientMarchService开始行军
 	-- Ensure march-mode flag is set locally so ClientMarchService's teleport fallback isn't blocked by stale CombatMode
 	for unitModel, _ in pairs(moveTargets) do
@@ -567,7 +740,7 @@ local function OnStartMarch(battleId, serializableMoveTargets, stageIndex)
 		end,
 		onAllSettled = function(arrivedList, timedOutList, failedList)
 			-- 向服务端报告行军完成
-			MarchComplete:FireServer(battleId, arrivedList, failedList)
+			MarchComplete:FireServer(battleId, stageNum or 0, marchToken, arrivedList, failedList)
 			DebugLog(string.format("行军完成: 到达=%d, 超时=%d, 失败=%d",
 				#arrivedList, #timedOutList, #failedList))
 		end

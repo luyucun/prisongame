@@ -184,7 +184,8 @@ function DragSystem.Initialize()
 	GridHelper.Initialize()
 
 	-- V1.4: 检测设备类型
-	dragState.isMobile = UserInputService.TouchEnabled and not UserInputService.MouseEnabled
+	-- 只要支持触摸就按移动端处理（避免部分设备 MouseEnabled=true 导致误判，从而不触发镜头锁定）
+	dragState.isMobile = PlacementHelper.IsMobileDevice()
 	-- print("[DragSystem] 设备类型:", dragState.isMobile and "移动端" or "PC端")
 
 	-- 移动端：提前绑定相机输入拦截，确保能作用于同一次触摸（避免拖动时镜头跟着转）

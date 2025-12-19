@@ -475,6 +475,17 @@ function PlayerManager.OnPlayerRemoving(player)
             PlacementSystem.OnPlayerLeaving(player)
         end
 
+        -- 🔥修复：清理关卡缓存/关卡场景（防止玩家离线后关卡仍残留在家园中）
+        local stageModule = ServerScriptService:WaitForChild("Systems"):FindFirstChild("StageService")
+        if stageModule then
+            local StageService = require(stageModule :: ModuleScript)
+            if StageService and StageService.CleanupStages then
+                pcall(function()
+                    StageService.CleanupStages(player.UserId)
+                end)
+            end
+        end
+
         -- 5. 清除玩家数据
         DataManager.ClearPlayerData(player)
     else

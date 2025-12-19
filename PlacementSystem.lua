@@ -377,7 +377,7 @@ end
 @param gridDepth number - V2.0: Z轴方向占用格子数 (可选,默认等于gridWidth)
 @return Model|nil
 ]]
-local function CreateUnitModel(unitId, position, instanceId, level, gridWidth, gridDepth)
+local function CreateUnitModel(unitId, position, instanceId, level, gridWidth, gridDepth, homeSlot)
 	-- V2.0: 处理默认参数
 	level = level or 1
 	gridWidth = gridWidth or 1
@@ -470,6 +470,11 @@ local function CreateUnitModel(unitId, position, instanceId, level, gridWidth, g
 	model:SetAttribute("GridDepth", gridDepth)
 	-- V2.1补充：添加只读属性用于调试兵种类型（可选）
 	model:SetAttribute("UnitType", UnitConfig.IsRangedUnit(unitId) and "Ranged" or "Melee")
+
+	-- V6.0新增：标记HomeSlot（用于玩家离线时兜底清理残留单位）
+	if type(homeSlot) == "number" and homeSlot > 0 then
+		model:SetAttribute("HomeSlot", homeSlot)
+	end
 
 	-- V1.4: 更新等级显示
 	UpdateLevelDisplay(model, level)
@@ -695,6 +700,8 @@ function PlacementSystem.PlaceUnit(player, instanceId, position)
 
 	-- 获取兵种实例
 	local unitInstance = InventorySystem.GetUnitByInstanceId(player, instanceId)
+	local playerData = DataManager.GetPlayerData(player)
+	local homeSlot = playerData and playerData.HomeSlot
 	local idleFloor = GetPlayerIdleFloor(player)
 	local floorCenter = idleFloor.Position
 
@@ -712,7 +719,7 @@ function PlacementSystem.PlaceUnit(player, instanceId, position)
 	local finalPosition = PlacementConfig.GridToWorld(gridX, gridZ, floorCenter, gridWidth, gridDepth)
 
 	-- V2.0: 传递gridWidth和gridDepth到CreateUnitModel
-	local model = CreateUnitModel(unitInstance.UnitId, finalPosition, instanceId, unitInstance.Level, gridWidth, gridDepth)
+	local model = CreateUnitModel(unitInstance.UnitId, finalPosition, instanceId, unitInstance.Level, gridWidth, gridDepth, homeSlot)
 	if not model then
 		return false, "创建模型失败"
 	end
@@ -1223,6 +1230,8 @@ end
 ]]
 function PlacementSystem.RestorePlacedUnits(player)
 	local userId = player.UserId
+	local playerData = DataManager.GetPlayerData(player)
+	local homeSlot = playerData and playerData.HomeSlot
 
 	-- 1. 获取玩家的IdleFloor
 	local idleFloor = GetPlayerIdleFloor(player)
@@ -1353,7 +1362,8 @@ function PlacementSystem.RestorePlacedUnits(player)
 				instanceId,
 				savedData.Level or 1,
 				gridWidth,
-				gridDepth
+				gridDepth,
+				homeSlot
 			)
 
 			if not model then
@@ -1738,8 +1748,8 @@ V4.0新增：暴露CreateUnitModel供CampaignManager使用
 @param gridDepth number - 占地深度
 @return Model|nil - 创建的单位模型
 ]]
-function PlacementSystem.CreateUnitModel(unitId, position, instanceId, level, gridWidth, gridDepth)
-	return CreateUnitModel(unitId, position, instanceId, level, gridWidth, gridDepth)
+function PlacementSystem.CreateUnitModel(unitId, position, instanceId, level, gridWidth, gridDepth, homeSlot)
+	return CreateUnitModel(unitId, position, instanceId, level, gridWidth, gridDepth, homeSlot)
 end
 
 return PlacementSystem
