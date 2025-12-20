@@ -14,6 +14,7 @@ local PowerSystem = {}
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
+local ServerScriptService = game:GetService("ServerScriptService")
 
 -- ==================== 模块引用 ====================
 local PowerConfig = require(ReplicatedStorage.Config.PowerConfig)
@@ -22,6 +23,35 @@ local UnitConfig = require(ReplicatedStorage.Config.UnitConfig)
 -- 延迟加载避免循环依赖
 local DataManager
 local InventorySystem
+local BadgeSystem
+local badgeSystemLoadWarned = false
+
+-- Lazy-load BadgeSystem to avoid circular dependencies
+local function LoadBadgeSystem()
+	if BadgeSystem then
+		return true
+	end
+
+	local badgeModule = ServerScriptService.Systems:FindFirstChild("BadgeSystem")
+	if badgeModule then
+		local success, result = pcall(require, badgeModule)
+		if success and result then
+			BadgeSystem = result
+			return true
+		end
+		if not badgeSystemLoadWarned then
+			badgeSystemLoadWarned = true
+			warn("[PowerSystem] Failed to load BadgeSystem:", result)
+		end
+		return false
+	end
+
+	if not badgeSystemLoadWarned then
+		badgeSystemLoadWarned = true
+		warn("[PowerSystem] BadgeSystem module not found.")
+	end
+	return false
+end
 
 -- ==================== 数据存储 ====================
 -- 玩家战斗力缓存
@@ -303,6 +333,13 @@ function PowerSystem.OnPlayerJoin(player)
 		cache.TotalPower = totalPower
 		cache.LastUpdate = tick()
 
+		-- V4.4: check power badges
+		if LoadBadgeSystem() then
+			pcall(function()
+				BadgeSystem.OnPowerUpdated(player, totalPower)
+			end)
+		end
+
 		-- 延迟30秒后主动推送一次（兜底）
 		task.wait(30)
 
@@ -413,6 +450,13 @@ function PowerSystem.RecalculatePlayerPower(player)
 
 		cache.TotalPower = totalPower
 		cache.LastUpdate = tick()
+
+		-- V4.4: check power badges
+		if LoadBadgeSystem() then
+			pcall(function()
+				BadgeSystem.OnPowerUpdated(player, totalPower)
+			end)
+		end
 
 		PowerSystem.SyncPowerToClient(player, totalPower)
 	end)

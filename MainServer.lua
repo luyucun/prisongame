@@ -30,6 +30,7 @@ local InventorySystem = require(ServerScriptService.Systems.InventorySystem)
 local PlacementSystem = require(ServerScriptService.Systems.PlacementSystem)
 local MergeSystem = require(ServerScriptService.Systems.MergeSystem)  -- V1.4新增
 local PowerSystem = require(ServerScriptService.Systems.PowerSystem) -- V3.9.2新增 战斗力系统
+local BadgeSystem = require(ServerScriptService.Systems.BadgeSystem) -- V4.4 badge system
 local PhysicsManager = require(ServerScriptService.Systems.PhysicsManager)
 local GMCommandSystem = require(ServerScriptService.Systems.GMCommandSystem)
 -- V1.5新增 - 战斗系统
@@ -184,6 +185,16 @@ local function InitializeServer()
         warn(GameConfig.LOG_PREFIX, "战斗力系统初始化失败(异常):", result)
     elseif result == false then
         warn(GameConfig.LOG_PREFIX, "战斗力系统初始化失败(返回false),战斗力显示将不可用")
+    end
+
+    -- 5.56 initialize badge system (V4.4)
+    success, result = pcall(function()
+        return BadgeSystem.Initialize()
+    end)
+    if not success then
+        warn(GameConfig.LOG_PREFIX, "badge system init failed (error):", result)
+    elseif result == false then
+        warn(GameConfig.LOG_PREFIX, "badge system init failed (returned false)")
     end
 
     -- 5.6. 初始化商店系统(V2.1新增 - 数据驱动版)
