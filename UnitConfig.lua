@@ -1173,6 +1173,52 @@ UnitConfig.Units = {
 		PathfindingAgentHeight = 5,
 		PathfindingAgentCanJump = true,
 	},
+	
+	-- 90001: 警察
+	["90001"] = {
+		UnitId = "90001",
+		Name = "Police",
+		ModelPath = "Role/Shield/FBI",
+		Type = UnitConfig.UnitType.MELEE,
+		BaseLevel = 1,
+		Price = 200,
+		GridSize = 1,
+		KillReward = 10,  -- V3.4: 基础击杀金币奖励
+		Description = "重装战士",
+		Icon = "rbxassetid://88477019377142",
+		Quality = "Godly",
+		BaseHealth = 100,
+		BaseAttack = 20,
+		BaseAttackSpeed = 1,
+		BaseAttackRange = 4,
+		BaseMoveSpeed = 20,
+		ProjectileSpeed = 0,
+		ShowAnimationId = "99124852185123",
+		IdleAnimationId = "93833104502127",
+		MoveAnimationId = "100464525349954",
+		AttackAnimationId = "129070884392025",
+		DeathAnimationId = "83615027736898",
+		WeaponName = "Weapon",
+		ProjectileModelPath = "",
+		CombatProfile = {
+			HitboxRadius = 3.2,           -- 拳头命中球半径(稍大容错)
+			HitboxAngle = 120,            -- 挥拳扇区
+			HitboxHeight = 6,             -- 身体中部高度覆盖
+			HitboxMaxTargets = 1,
+			UseAnimationEvent = true,
+			AnimationEventName = "Damage",
+			ContactOffset = 0.8,          -- 拳头前伸补偿
+			HitboxShape = "Sphere",
+			HitboxPartName = "RightHand", -- 没有武器，用右手为命中源
+			HitboxAttachmentName = "",
+			HitboxOffset = Vector3.new(0, 0, 0),
+			HitboxLength = 0,
+			HitboxBoxSize = nil,
+		},
+		PathfindingAgentRadius = 2,
+		PathfindingAgentHeight = 5,
+		PathfindingAgentCanJump = true,
+	},
 
 }
 

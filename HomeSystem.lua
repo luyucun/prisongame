@@ -174,6 +174,86 @@ local function ResetMailDisplay(homeFolder)
     end
 end
 
+-- 重置房屋到默认模型（不改玩家存档，仅清理场景）
+local function ResetHouseModelToDefault(homeFolder)
+	if not homeFolder then
+		return
+	end
+
+	EnsureHouseModulesLoaded()
+	if not HouseConfig then
+		return
+	end
+
+	local defaultModelName = HouseConfig.GetHouseModelByChapter(0)
+	if not defaultModelName or defaultModelName == "" then
+		return
+	end
+
+	local houseFolder = homeFolder:FindFirstChild("House")
+	if not houseFolder then
+		return
+	end
+
+	local currentHouseModel = nil
+	for _, child in ipairs(houseFolder:GetChildren()) do
+		if child:IsA("Model") then
+			currentHouseModel = child
+			break
+		end
+	end
+
+	if currentHouseModel and currentHouseModel.Name == defaultModelName then
+		return
+	end
+
+	local templateFolder = ReplicatedStorage:FindFirstChild("House")
+	if not templateFolder then
+		warn(GameConfig.LOG_PREFIX, "HomeSystem.ResetHouseModelToDefault: ReplicatedStorage/House不存在")
+		return
+	end
+
+	local template = templateFolder:FindFirstChild(defaultModelName)
+	if not template or not template:IsA("Model") then
+		warn(GameConfig.LOG_PREFIX, "HomeSystem.ResetHouseModelToDefault: 找不到模板", defaultModelName)
+		return
+	end
+
+	local newHouseModel = template:Clone()
+	newHouseModel.Name = defaultModelName
+
+	if currentHouseModel then
+		-- 对齐旧房屋的底部中心与朝向，避免偏移
+		local currentBBoxCF, currentBBoxSize = currentHouseModel:GetBoundingBox()
+		local currentBottomY = currentBBoxCF.Position.Y - currentBBoxSize.Y / 2
+		local currentCenterX = currentBBoxCF.Position.X
+		local currentCenterZ = currentBBoxCF.Position.Z
+
+		local currentPivot = currentHouseModel:GetPivot()
+		local _, currentYRotation, _ = currentPivot:ToEulerAnglesYXZ()
+
+		local newBBoxCF, newBBoxSize = newHouseModel:GetBoundingBox()
+		local newPivot = newHouseModel:GetPivot()
+		local newBBoxBottomY = newBBoxCF.Position.Y - newBBoxSize.Y / 2
+		local pivotY = newPivot.Position.Y
+		local pivotToBottomY = pivotY - newBBoxBottomY
+		local pivotToCenterX = newPivot.Position.X - newBBoxCF.Position.X
+		local pivotToCenterZ = newPivot.Position.Z - newBBoxCF.Position.Z
+
+		local targetPivotX = currentCenterX + pivotToCenterX
+		local targetPivotY = currentBottomY + pivotToBottomY
+		local targetPivotZ = currentCenterZ + pivotToCenterZ
+
+		local targetCFrame = CFrame.new(targetPivotX, targetPivotY, targetPivotZ) * CFrame.Angles(0, currentYRotation, 0)
+		newHouseModel:PivotTo(targetCFrame)
+	end
+
+	newHouseModel.Parent = houseFolder
+	if currentHouseModel then
+		currentHouseModel:Destroy()
+	end
+end
+
 -- 兜底：清掉所有标记了HomeSlot的单位模型（避免玩家离线后残留）
 local function DestroyUnitModelsByHomeSlot(homeId)
     if not homeId then
@@ -360,6 +440,7 @@ function HomeSystem.CleanupPlayerHome(homeId, player)
     if homeFolder then
         ResetInformationDisplay(homeFolder)
         ResetMailDisplay(homeFolder)
+		ResetHouseModelToDefault(homeFolder)
     end
 
     DestroyUnitModelsByHomeSlot(homeId)

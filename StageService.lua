@@ -991,13 +991,18 @@ function StageService.LoadEnemyData(stageFolder, stageNum, chapterId)
 			unitModel.Name = enemyData.UnitId .. "_Lv" .. (enemyData.Level or 1) .. "_" .. index
 
 			-- 应用等级加成
-			if unitModel:FindFirstChild("Humanoid") then
-				local baseHP = unitInfo.Health or 100
-				local baseAttack = unitInfo.Attack or 10
-				local levelMultiplier = 1 + (enemyData.Level - 1) * 0.2
+			local humanoid = unitModel:FindFirstChild("Humanoid")
+			if humanoid then
+				local level = enemyData.Level or 1
+				local maxHealth = UnitConfig.CalculateHealth(enemyData.UnitId, level)
+				if maxHealth <= 0 then
+					local baseHealth = unitInfo.BaseHealth or 100
+					local coefficient = UnitConfig.GetLevelCoefficient and UnitConfig.GetLevelCoefficient(level) or 1
+					maxHealth = baseHealth * level * coefficient
+				end
 
-				unitModel.Humanoid.MaxHealth = baseHP * levelMultiplier
-				unitModel.Humanoid.Health = baseHP * levelMultiplier
+				humanoid.MaxHealth = maxHealth
+				humanoid.Health = maxHealth
 			end
 
 			-- V2.2: 使用统一的LevelDisplayHelper更新等级显示

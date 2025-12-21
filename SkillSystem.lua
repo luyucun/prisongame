@@ -27,11 +27,13 @@ local Workspace = game:GetService("Workspace")
 -- 引用配置
 local SkillConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("SkillConfig"))
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
+local BattleConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("BattleConfig"))
 
 -- 延迟加载的模块引用(避免循环依赖)
 local DataManager = nil
 local CombatSystem = nil
 local UnitManager = nil
+local CampaignManager = nil
 
 -- 远程事件引用
 local SkillEvents = nil
@@ -78,6 +80,16 @@ local function InitializeModules()
 			local um = systemsFolder:FindFirstChild("UnitManager")
 			if um then
 				UnitManager = require(um)
+			end
+		end
+	end
+
+	if not CampaignManager then
+		local systemsFolder = ServerScriptService:FindFirstChild("Systems")
+		if systemsFolder then
+			local cm = systemsFolder:FindFirstChild("CampaignManager")
+			if cm then
+				CampaignManager = require(cm)
 			end
 		end
 	end
@@ -140,47 +152,127 @@ local function DebugLog(...)
 end
 
 --[[
+归一化阵营（兼容旧的"ally"/"enemy"）
+@param team string|nil
+@return string
+]]
+local function NormalizeTeam(team)
+	local attackTeam = (BattleConfig and BattleConfig.Team and BattleConfig.Team.ATTACK) or "Attack"
+	local defenseTeam = (BattleConfig and BattleConfig.Team and BattleConfig.Team.DEFENSE) or "Defense"
+
+	if not team or team == "" then
+		return attackTeam
+	end
+
+	if team == "ally" or team == "Allies" or team == attackTeam or team == "Attack" then
+		return attackTeam
+	end
+
+	if team == "enemy" or team == "Enemies" or team == defenseTeam or team == "Defense" then
+		return defenseTeam
+	end
+
+	-- 默认当作玩家阵营
+	return attackTeam
+end
+
+local function GetEnemyTeam(team)
+	if UnitManager and UnitManager.GetEnemyTeam then
+		return UnitManager.GetEnemyTeam(team)
+	end
+
+	local attackTeam = (BattleConfig and BattleConfig.Team and BattleConfig.Team.ATTACK) or "Attack"
+	local defenseTeam = (BattleConfig and BattleConfig.Team and BattleConfig.Team.DEFENSE) or "Defense"
+
+	if team == attackTeam then
+		return defenseTeam
+	elseif team == defenseTeam then
+		return attackTeam
+	end
+
+	return nil
+end
+
+local function GetPlayerBattleId(player)
+	if not player then
+		return nil
+	end
+
+	InitializeModules()
+	if CampaignManager and CampaignManager.ActiveCampaigns then
+		local campaignData = CampaignManager.ActiveCampaigns[player.UserId]
+		return campaignData and campaignData.CurrentBattleId or nil
+	end
+
+	return nil
+end
+
+--[[
 获取范围内的敌方单位
 @param position Vector3 - 中心位置
 @param radius number - 半径(studs)
-@param casterTeam string - 释放者阵营("ally"或"enemy")
+@param casterTeam string - 释放者阵营("Attack"/"Defense"或"ally"/"enemy")
+@param battleId number|nil - 战斗ID（可选）
 @return table - 敌方单位列表
 ]]
-local function GetEnemiesInRange(position, radius, casterTeam)
+local function GetEnemiesInRange(position, radius, casterTeam, battleId)
 	InitializeModules()
 
 	local enemies = {}
-	local targetTeam = casterTeam == "ally" and "enemy" or "ally"
+	if not position or type(radius) ~= "number" then
+		return enemies
+	end
 
-	-- 方案1: 使用UnitManager获取单位(如果可用)
-	if UnitManager and UnitManager.GetAllUnits then
-		local allUnits = UnitManager.GetAllUnits()
-		for _, unitModel in ipairs(allUnits) do
-			local team = unitModel:GetAttribute("Team")
-			if team == targetTeam then
-				local rootPart = unitModel:FindFirstChild("HumanoidRootPart")
-				if rootPart then
-					local distance = (rootPart.Position - position).Magnitude
-					if distance <= radius then
-						table.insert(enemies, unitModel)
-					end
-				end
+	local normalizedTeam = NormalizeTeam(casterTeam)
+	local targetTeam = GetEnemyTeam(normalizedTeam)
+	if not targetTeam then
+		return enemies
+	end
+
+	local function IsEnemyInRange(unitModel)
+		if not unitModel or not unitModel.Parent then
+			return false
+		end
+
+		if unitModel:GetAttribute("IsDead") then
+			return false
+		end
+
+		local team = unitModel:GetAttribute("Team")
+		if team ~= targetTeam then
+			return false
+		end
+
+		local humanoid = unitModel:FindFirstChild("Humanoid")
+		if humanoid and humanoid.Health <= 0 then
+			return false
+		end
+
+		local rootPart = unitModel:FindFirstChild("HumanoidRootPart") or unitModel.PrimaryPart
+		if not rootPart then
+			return false
+		end
+
+		local distance = (rootPart.Position - position).Magnitude
+		return distance <= radius
+	end
+
+	-- 优先：使用UnitManager并限定战斗ID，避免跨战斗误伤
+	if UnitManager and battleId and UnitManager.GetBattleUnits then
+		local battleUnits = UnitManager.GetBattleUnits(battleId, targetTeam)
+		for _, unitModel in ipairs(battleUnits) do
+			if IsEnemyInRange(unitModel) then
+				table.insert(enemies, unitModel)
 			end
 		end
-	else
-		-- 方案2: 遍历Workspace查找带有Humanoid的模型
-		for _, child in ipairs(Workspace:GetDescendants()) do
-			if child:IsA("Model") and child:FindFirstChild("Humanoid") then
-				local team = child:GetAttribute("Team")
-				if team == targetTeam then
-					local rootPart = child:FindFirstChild("HumanoidRootPart")
-					if rootPart then
-						local distance = (rootPart.Position - position).Magnitude
-						if distance <= radius then
-							table.insert(enemies, child)
-						end
-					end
-				end
+		return enemies
+	end
+
+	-- 兜底：遍历Workspace查找带有Humanoid的模型
+	for _, child in ipairs(Workspace:GetDescendants()) do
+		if child:IsA("Model") and child:FindFirstChild("Humanoid") then
+			if IsEnemyInRange(child) then
+				table.insert(enemies, child)
 			end
 		end
 	end
@@ -193,8 +285,9 @@ end
 @param unitModel Model - 目标单位
 @param damage number - 伤害值
 @param skillId number - 技能ID(用于日志)
+@param attackerTeam string - 攻击者阵营
 ]]
-local function DealDamageToUnit(unitModel, damage, skillId)
+local function DealDamageToUnit(unitModel, damage, skillId, attackerTeam)
 	InitializeModules()
 
 	local humanoid = unitModel:FindFirstChild("Humanoid")
@@ -206,7 +299,7 @@ local function DealDamageToUnit(unitModel, damage, skillId)
 	if CombatSystem and CombatSystem.TakeDamage then
 		-- CombatSystem.TakeDamage(unitModel, damage, attacker, attackerTeam)
 		-- 技能伤害没有具体攻击者,传nil
-		CombatSystem.TakeDamage(unitModel, damage, nil, "ally")
+		CombatSystem.TakeDamage(unitModel, damage, nil, attackerTeam)
 	else
 		-- 直接扣血
 		humanoid.Health = humanoid.Health - damage
@@ -218,8 +311,8 @@ local function DealDamageToUnit(unitModel, damage, skillId)
 			if battleEvents then
 				local showDamageEvent = battleEvents:FindFirstChild("ShowDamageNumber")
 				if showDamageEvent then
-					-- 白色字体(我方对敌方)
-					showDamageEvent:FireAllClients(unitModel, damage, "ally")
+					local targetTeam = unitModel:GetAttribute("Team")
+					showDamageEvent:FireAllClients(unitModel, damage, attackerTeam, targetTeam)
 				end
 			end
 		end
@@ -228,51 +321,57 @@ local function DealDamageToUnit(unitModel, damage, skillId)
 	DebugLog(string.format("技能 %d 对 %s 造成 %d 点伤害", skillId, unitModel.Name, damage))
 end
 
---[[
-执行即时伤害技能效果
-@param skillData table - 技能配置
-@param position Vector3 - 释放位置
-]]
-local function ExecuteInstantDamage(skillData, position)
-	local radius = skillData.Range / 2  -- Range是直径,转换为半径
-	local enemies = GetEnemiesInRange(position, radius, "ally")
+	--[[
+	执行即时伤害技能效果
+	@param skillData table - 技能配置
+	@param position Vector3 - 释放位置
+	@param casterTeam string - 释放者阵营
+	@param battleId number|nil - 战斗ID（可选）
+	]]
+	local function ExecuteInstantDamage(skillData, position, casterTeam, battleId)
+		local radius = skillData.Range / 2  -- Range是直径,转换为半径
+		local enemies = GetEnemiesInRange(position, radius, casterTeam, battleId)
 
-	for _, enemyUnit in ipairs(enemies) do
-		DealDamageToUnit(enemyUnit, skillData.Damage, skillData.SkillId)
+		for _, enemyUnit in ipairs(enemies) do
+			DealDamageToUnit(enemyUnit, skillData.Damage, skillData.SkillId, casterTeam)
+		end
+
+		DebugLog(string.format("即时伤害技能 %s 命中 %d 个敌人", skillData.Name, #enemies))
 	end
 
-	DebugLog(string.format("即时伤害技能 %s 命中 %d 个敌人", skillData.Name, #enemies))
-end
-
---[[
-创建DOT效果
-@param skillData table - 技能配置
-@param position Vector3 - 释放位置
-@return string - DOT效果ID
-]]
-local function CreateDOTEffect(skillData, position)
+	--[[
+	创建DOT效果
+	@param skillData table - 技能配置
+	@param position Vector3 - 释放位置
+	@param casterTeam string - 释放者阵营
+	@param battleId number|nil - 战斗ID（可选）
+	@return string - DOT效果ID
+	]]
+	local function CreateDOTEffect(skillData, position, casterTeam, battleId)
 	DOTEffectIdCounter = DOTEffectIdCounter + 1
 	local effectId = "DOT_" .. DOTEffectIdCounter
 
 	local totalTicks = math.floor(skillData.Duration / skillData.TickInterval)
 
-	ActiveDOTEffects[effectId] = {
-		SkillId = skillData.SkillId,
-		SkillData = skillData,
-		Position = position,
-		Radius = skillData.Range / 2,  -- 直径转半径
-		TickDamage = skillData.TickDamage,
-		TickInterval = skillData.TickInterval,
-		RemainingTicks = totalTicks - 1,  -- 修复：减1因为下面立即执行了第一次伤害
-		NextTickTime = tick() + skillData.TickInterval,
-		StartTime = tick(),
-	}
+		ActiveDOTEffects[effectId] = {
+			SkillId = skillData.SkillId,
+			SkillData = skillData,
+			Position = position,
+			Radius = skillData.Range / 2,  -- 直径转半径
+			TickDamage = skillData.TickDamage,
+			TickInterval = skillData.TickInterval,
+			CasterTeam = casterTeam,
+			BattleId = battleId,
+			RemainingTicks = totalTicks - 1,  -- 修复：减1因为下面立即执行了第一次伤害
+			NextTickTime = tick() + skillData.TickInterval,
+			StartTime = tick(),
+		}
 
-	-- 立即执行第一次伤害（释放瞬间）
-	local enemies = GetEnemiesInRange(position, skillData.Range / 2, "ally")
-	for _, enemyUnit in ipairs(enemies) do
-		DealDamageToUnit(enemyUnit, skillData.TickDamage, skillData.SkillId)
-	end
+		-- 立即执行第一次伤害（释放瞬间）
+		local enemies = GetEnemiesInRange(position, skillData.Range / 2, casterTeam, battleId)
+		for _, enemyUnit in ipairs(enemies) do
+			DealDamageToUnit(enemyUnit, skillData.TickDamage, skillData.SkillId, casterTeam)
+		end
 
 	DebugLog(string.format("DOT效果 %s 创建成功, 总tick数: %d, 首次命中: %d 个敌人",
 		effectId, totalTicks, #enemies))
@@ -291,9 +390,9 @@ local function ProcessDOTEffects()
 		if currentTime >= effectData.NextTickTime then
 			if effectData.RemainingTicks > 0 then
 				-- 执行伤害
-				local enemies = GetEnemiesInRange(effectData.Position, effectData.Radius, "ally")
+				local enemies = GetEnemiesInRange(effectData.Position, effectData.Radius, effectData.CasterTeam, effectData.BattleId)
 				for _, enemyUnit in ipairs(enemies) do
-					DealDamageToUnit(enemyUnit, effectData.TickDamage, effectData.SkillId)
+					DealDamageToUnit(enemyUnit, effectData.TickDamage, effectData.SkillId, effectData.CasterTeam)
 				end
 
 				effectData.RemainingTicks = effectData.RemainingTicks - 1
@@ -470,15 +569,17 @@ function SkillSystem.HandleCastSkillRequest(player, skillId, position)
 
 	-- 获取技能配置
 	local skillData = SkillConfig.GetSkillById(skillId)
+	local casterTeam = NormalizeTeam(BattleConfig.Team.ATTACK)
+	local battleId = GetPlayerBattleId(player)
 
 	-- 生成特效
 	SpawnSkillEffect(player, skillData, position)
 
 	-- 执行技能效果
 	if skillData.EffectType == SkillConfig.EffectType.INSTANT then
-		ExecuteInstantDamage(skillData, position)
+		ExecuteInstantDamage(skillData, position, casterTeam, battleId)
 	elseif skillData.EffectType == SkillConfig.EffectType.DOT then
-		CreateDOTEffect(skillData, position)
+		CreateDOTEffect(skillData, position, casterTeam, battleId)
 	end
 
 	-- 发送成功响应

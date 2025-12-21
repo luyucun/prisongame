@@ -232,7 +232,8 @@ if stateUpdateEvent then
 
 		elseif state == "Victory" then
 			-- 战役胜利
-			playButton.Visible = true
+			-- 等待结算确认完成后再进入Idle，否则重开会被服务端拒绝
+			playButton.Visible = false
 			retreatButton.Visible = false
 			ShowVictoryUI()
 			HideBackpackForBattle()
@@ -241,7 +242,8 @@ if stateUpdateEvent then
 
 		elseif state == "Defeat" then
 			-- 战役失败
-			playButton.Visible = true
+			-- 等待结算确认完成后再进入Idle，否则重开会被服务端拒绝
+			playButton.Visible = false
 			retreatButton.Visible = false
 			ShowDefeatUI()
 			HideBackpackForBattle()

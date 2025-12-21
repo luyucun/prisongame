@@ -24,27 +24,27 @@ EnemyConfig.Chapters[1] = {
 	Stages = {
 		-- 第1关: 简单测试
 		[1] = {
-			{UnitId = "10001", Level = 1, GridPos = {X = 7, Y = 7}},
+			{UnitId = "90001", Level = 1, GridPos = {X = 7, Y = 7}},
 		},
 
 		-- 第2关: 增加难度
 		[2] = {
-			{UnitId = "10001", Level = 1, GridPos = {X = 7, Y = 7}},
-			{UnitId = "10001", Level = 1, GridPos = {X = 8, Y = 7}},
+			{UnitId = "90001", Level = 1, GridPos = {X = 7, Y = 7}},
+			{UnitId = "90001", Level = 1, GridPos = {X = 8, Y = 7}},
 		},
 
 		-- 第3关: 更强的敌人
 		[3] = {
-			{UnitId = "10001", Level = 1, GridPos = {X = 7, Y = 7}},
-			{UnitId = "10001", Level = 1, GridPos = {X = 8, Y = 7}},
-			{UnitId = "10001", Level = 1, GridPos = {X = 6, Y = 7}},
+			{UnitId = "90001", Level = 1, GridPos = {X = 7, Y = 7}},
+			{UnitId = "90001", Level = 1, GridPos = {X = 8, Y = 7}},
+			{UnitId = "90001", Level = 1, GridPos = {X = 6, Y = 7}},
 		},
 
 		-- 第3关: 更强的敌人
 		[4] = {
 			{UnitId = "10002", Level = 1, GridPos = {X = 7, Y = 7}},
-			{UnitId = "10001", Level = 1, GridPos = {X = 5, Y = 7}},
-			{UnitId = "10001", Level = 1, GridPos = {X = 9, Y = 7}},
+			{UnitId = "90001", Level = 1, GridPos = {X = 5, Y = 7}},
+			{UnitId = "90001", Level = 1, GridPos = {X = 9, Y = 7}},
 		},
 
 		-- 第3关: 更强的敌人
@@ -52,14 +52,14 @@ EnemyConfig.Chapters[1] = {
 			{UnitId = "10003", Level = 1, GridPos = {X = 9, Y = 7}},
 			{UnitId = "10003", Level = 1, GridPos = {X = 5, Y = 7}},
 			{UnitId = "10004", Level = 1, GridPos = {X = 7, Y = 10}},
-			{UnitId = "10001", Level = 1, GridPos = {X = 7, Y = 3}},
+			{UnitId = "90001", Level = 1, GridPos = {X = 7, Y = 3}},
 		},
 
 		-- 第3关: 更强的敌人
 		[6] = {
-			{UnitId = "10001", Level = 1, GridPos = {X = 5, Y = 3}},
-			{UnitId = "10001", Level = 1, GridPos = {X = 9, Y = 3}},
-			{UnitId = "10001", Level = 1, GridPos = {X = 7, Y = 5}},
+			{UnitId = "90001", Level = 1, GridPos = {X = 5, Y = 3}},
+			{UnitId = "90001", Level = 1, GridPos = {X = 9, Y = 3}},
+			{UnitId = "90001", Level = 1, GridPos = {X = 7, Y = 5}},
 			{UnitId = "10005", Level = 1, GridPos = {X = 9, Y = 7}},
 			{UnitId = "10005", Level = 1, GridPos = {X = 7, Y = 7}},
 			{UnitId = "10005", Level = 1, GridPos = {X = 5, Y = 7}},
@@ -67,9 +67,9 @@ EnemyConfig.Chapters[1] = {
 
 		-- 第3关: 更强的敌人
 		[7] = {
-			{UnitId = "10001", Level = 1, GridPos = {X = 5, Y = 3}},
-			{UnitId = "10001", Level = 1, GridPos = {X = 9, Y = 3}},
-			{UnitId = "10001", Level = 1, GridPos = {X = 7, Y = 5}},
+			{UnitId = "90001", Level = 1, GridPos = {X = 5, Y = 3}},
+			{UnitId = "90001", Level = 1, GridPos = {X = 9, Y = 3}},
+			{UnitId = "90001", Level = 1, GridPos = {X = 7, Y = 5}},
 			{UnitId = "10005", Level = 1, GridPos = {X = 9, Y = 7}},
 			{UnitId = "10005", Level = 1, GridPos = {X = 7, Y = 7}},
 			{UnitId = "10005", Level = 1, GridPos = {X = 5, Y = 7}},
@@ -79,8 +79,8 @@ EnemyConfig.Chapters[1] = {
 
 		-- 第3关: 更强的敌人
 		[8] = {
-			{UnitId = "10001", Level = 1, GridPos = {X = 5, Y = 3}},
-			{UnitId = "10001", Level = 1, GridPos = {X = 9, Y = 3}},
+			{UnitId = "90001", Level = 1, GridPos = {X = 5, Y = 3}},
+			{UnitId = "90001", Level = 1, GridPos = {X = 9, Y = 3}},
 			{UnitId = "10005", Level = 1, GridPos = {X = 9, Y = 7}},
 			{UnitId = "10005", Level = 1, GridPos = {X = 7, Y = 7}},
 			{UnitId = "10005", Level = 1, GridPos = {X = 5, Y = 7}},
@@ -91,8 +91,8 @@ EnemyConfig.Chapters[1] = {
 
 		-- 第3关: 更强的敌人
 		[9] = {
-			{UnitId = "10001", Level = 1, GridPos = {X = 5, Y = 3}},
-			{UnitId = "10001", Level = 1, GridPos = {X = 9, Y = 3}},
+			{UnitId = "90001", Level = 1, GridPos = {X = 5, Y = 3}},
+			{UnitId = "90001", Level = 1, GridPos = {X = 9, Y = 3}},
 			{UnitId = "10005", Level = 1, GridPos = {X = 9, Y = 7}},
 			{UnitId = "10005", Level = 1, GridPos = {X = 7, Y = 7}},
 			{UnitId = "10005", Level = 1, GridPos = {X = 5, Y = 7}},
@@ -114,10 +114,10 @@ EnemyConfig.Chapters[1] = {
 			{UnitId = "10004", Level = 1, GridPos = {X = 7, Y = 5}},
 			{UnitId = "10004", Level = 1, GridPos = {X = 9, Y = 5}},
 			{UnitId = "10004", Level = 1, GridPos = {X = 11, Y = 5}},
-			{UnitId = "10001", Level = 1, GridPos = {X = 5, Y = 1}},
-			{UnitId = "10001", Level = 1, GridPos = {X = 6, Y = 1}},
-			{UnitId = "10001", Level = 1, GridPos = {X = 8, Y = 1}},
-			{UnitId = "10001", Level = 1, GridPos = {X = 9, Y = 1}},
+			{UnitId = "90001", Level = 1, GridPos = {X = 5, Y = 1}},
+			{UnitId = "90001", Level = 1, GridPos = {X = 6, Y = 1}},
+			{UnitId = "90001", Level = 1, GridPos = {X = 8, Y = 1}},
+			{UnitId = "90001", Level = 1, GridPos = {X = 9, Y = 1}},
 		},
 	}
 }

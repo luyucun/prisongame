@@ -286,8 +286,8 @@ function CombatSystem.InitializeUnit(unitModel, unitId, level, team, battleId, c
 	-- 确保Humanoid.Health和CombatSystem.CurrentHealth一致
 	local humanoid = unitModel:FindFirstChild("Humanoid")
 	if humanoid then
-		humanoid.Health = actualHealth    -- V2.8.9: 同步实际血量
 		humanoid.MaxHealth = maxHealth
+		humanoid.Health = actualHealth    -- V2.8.9: 同步实际血量
 	end
 
 	DebugLog(string.format("初始化兵种战斗状态: %s Lv.%d [%s] HP:%d/%d ATK:%d",
@@ -700,10 +700,11 @@ end
 兵种受到伤害
 @param unitModel Model - 受伤的兵种模型
 @param damage number - 伤害值
-@param attacker Model - 攻击者模型(可选)
-@return boolean - 是否造成了伤害
-]]
-function CombatSystem.TakeDamage(unitModel, damage, attacker)
+	@param attacker Model - 攻击者模型(可选)
+	@param attackerTeamOverride string - 攻击者阵营(可选，用于技能等无攻击者场景)
+	@return boolean - 是否造成了伤害
+	]]
+function CombatSystem.TakeDamage(unitModel, damage, attacker, attackerTeamOverride)
 	local state = unitStates[unitModel]
 
 	if not state then
@@ -737,8 +738,8 @@ function CombatSystem.TakeDamage(unitModel, damage, attacker)
 				local showDamageNumberEvent = battleEventsFolder:FindFirstChild("ShowDamageNumber")
 				if showDamageNumberEvent then
 					-- V2.5新增：扩展事件参数，加入阵营信息
-					-- 获取攻击者的Team属性
-					local attackerTeam = attacker and attacker:GetAttribute("Team") or nil
+					-- 获取攻击者的Team属性（可被覆盖，用于技能伤害）
+					local attackerTeam = attackerTeamOverride or (attacker and attacker:GetAttribute("Team") or nil)
 					local targetTeam = state.Team
 					-- 发送给所有客户端: 单位模型, 伤害值, 攻击者阵营, 被击中者阵营
 					showDamageNumberEvent:FireAllClients(unitModel, damage, attackerTeam, targetTeam)
