@@ -61,6 +61,36 @@ local DoorControlService = require(SystemsFolder:WaitForChild("DoorControlServic
 -- V3.8新增 - 音效系统
 local SoundSystem = require(SystemsFolder:WaitForChild("SoundSystem") :: ModuleScript)
 
+-- 徽章系统（延迟加载，避免循环依赖）
+local BadgeSystem
+local badgeSystemLoadWarned = false
+
+local function LoadBadgeSystem()
+	if BadgeSystem then
+		return true
+	end
+
+	local badgeModule = SystemsFolder:FindFirstChild("BadgeSystem")
+	if badgeModule then
+		local success, result = pcall(require, badgeModule)
+		if success and result then
+			BadgeSystem = result
+			return true
+		end
+		if not badgeSystemLoadWarned then
+			badgeSystemLoadWarned = true
+			warn("[CampaignManager] Failed to load BadgeSystem:", result)
+		end
+		return false
+	end
+
+	if not badgeSystemLoadWarned then
+		badgeSystemLoadWarned = true
+		warn("[CampaignManager] BadgeSystem module not found.")
+	end
+	return false
+end
+
 -- 远程事件引用
 local CampaignEvents = nil
 
@@ -2161,6 +2191,7 @@ function CampaignManager.OnVictory(campaignData)
 	-- V2.8新增: 更新章节进度
 	local player = campaignData.Player
 	if player then
+		local completedBefore = tonumber(DataManager.GetCompletedChapters(player)) or 0
 		local success, newCompletedChapters = DataManager.CompleteChapter(player, currentChapter)
 		if success then
 			DebugLog(string.format("[OnVictory] 玩家 %s 通关章节 %d，已通关章节数: %d",
@@ -2168,6 +2199,13 @@ function CampaignManager.OnVictory(campaignData)
 
 			-- 保存数据
 			DataManager.SavePlayerDataThrottled(player, true)  -- 强制保存
+
+			-- V4.4.3: 首次通关章节徽章
+			if newCompletedChapters and newCompletedChapters > completedBefore then
+				if LoadBadgeSystem() then
+					BadgeSystem.OnChapterCompleted(player, currentChapter, newCompletedChapters)
+				end
+			end
 
 			-- V3.9修改+修复: 判断是否真正需要房屋升级并且不是最后一章
 			-- 只有真的要换房子且不是最后一章才设置pending标记，避免触发镜头效果

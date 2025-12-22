@@ -13,10 +13,19 @@ local PowerDisplayController = {}
 -- ==================== 服务引用 ====================
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 -- ==================== 本地引用 ====================
+if RunService:IsServer() then
+	return PowerDisplayController
+end
+
 local player = Players.LocalPlayer
 local Workspace = game:GetService("Workspace")
+
+if not player then
+	return PowerDisplayController
+end
 
 -- ==================== RemoteEvent ====================
 local PowerEvents
@@ -27,6 +36,10 @@ local informationModel = nil
 local surfaceGuis = {}
 local isInitialized = false
 local cachedHomeId = nil
+local lastLocalPower = nil
+local powerTipSuppressCount = 0
+local suppressedBaselinePower = nil
+local pendingPower = nil
 
 -- 缓存每个SurfaceGui的默认文本（用于玩家离线后恢复显示）
 local defaultDisplayCache = {} -- [SurfaceGui] = { NameText = string, PowerText = string }
@@ -248,6 +261,88 @@ local function UpdateAllDisplays(power)
 	end
 end
 
+local function BeginPowerTipSuppression()
+	powerTipSuppressCount = powerTipSuppressCount + 1
+	if powerTipSuppressCount == 1 then
+		suppressedBaselinePower = lastLocalPower
+		pendingPower = nil
+	end
+end
+
+local function EndPowerTipSuppression()
+	if powerTipSuppressCount <= 0 then
+		return
+	end
+
+	powerTipSuppressCount = powerTipSuppressCount - 1
+	if powerTipSuppressCount > 0 then
+		return
+	end
+
+	if pendingPower == nil then
+		suppressedBaselinePower = nil
+		return
+	end
+
+	local basePower = suppressedBaselinePower
+	if basePower == nil then
+		lastLocalPower = pendingPower
+	else
+		if pendingPower ~= basePower then
+			local tipsSystem = _G.TipsSystem
+			if tipsSystem and tipsSystem.ShowPowerChange then
+				tipsSystem.ShowPowerChange(basePower, pendingPower)
+			end
+		end
+		lastLocalPower = pendingPower
+	end
+
+	pendingPower = nil
+	suppressedBaselinePower = nil
+end
+
+local function HandleLocalPowerChange(totalPower)
+	totalPower = math.floor(tonumber(totalPower) or 0)
+
+	if lastLocalPower == nil then
+		lastLocalPower = totalPower
+		return
+	end
+
+	if powerTipSuppressCount > 0 then
+		pendingPower = totalPower
+		return
+	end
+
+	if totalPower == lastLocalPower then
+		return
+	end
+
+	local tipsSystem = _G.TipsSystem
+	if tipsSystem and tipsSystem.ShowPowerChange then
+		tipsSystem.ShowPowerChange(lastLocalPower, totalPower)
+	end
+
+	lastLocalPower = totalPower
+end
+
+local function IsLocalPowerUpdate(playerName, homeId)
+	if playerName == player.Name then
+		return true
+	end
+
+	local localHomeId = GetPlayerHomeId(false)
+	return localHomeId and homeId == localHomeId
+end
+
+function PowerDisplayController.BeginPowerTipSuppression()
+	BeginPowerTipSuppression()
+end
+
+function PowerDisplayController.EndPowerTipSuppression()
+	EndPowerTipSuppression()
+end
+
 -- ==================== RemoteEvent处理 ====================
 
 --[[
@@ -261,11 +356,13 @@ local function OnPowerUpdate(playerNameOrTotalPower, homeIdOrNil, totalPowerOrNi
 	if type(playerNameOrTotalPower) == "number" and homeIdOrNil == nil and totalPowerOrNil == nil then
 		-- 旧版格式：OnPowerUpdate(totalPower)
 		-- 这是给自己的战力更新
+		totalPower = math.floor(tonumber(playerNameOrTotalPower) or 0)
+		HandleLocalPowerChange(totalPower)
+
 		if not isInitialized then
 			return
 		end
 
-		totalPower = playerNameOrTotalPower
 		playerName = player.Name
 		homeId = GetPlayerHomeId(false)
 
@@ -280,7 +377,7 @@ local function OnPowerUpdate(playerNameOrTotalPower, homeIdOrNil, totalPowerOrNi
 		-- 这是广播给所有客户端的更新
 		playerName = playerNameOrTotalPower
 		homeId = homeIdOrNil
-		totalPower = totalPowerOrNil
+		totalPower = math.floor(tonumber(totalPowerOrNil) or 0)
 	else
 		-- 参数格式不正确
 		warn("[PowerDisplayController] OnPowerUpdate 参数格式不正确:", playerNameOrTotalPower, homeIdOrNil, totalPowerOrNil)
@@ -322,6 +419,10 @@ local function OnPowerUpdate(playerNameOrTotalPower, homeIdOrNil, totalPowerOrNi
 	-- 如果是自己的战力更新，也更新本地缓存的显示
 	if homeId == GetPlayerHomeId(false) and isInitialized then
 		UpdateAllDisplays(totalPower)
+	end
+
+	if IsLocalPowerUpdate(playerName, homeId) then
+		HandleLocalPowerChange(totalPower)
 	end
 end
 
@@ -412,15 +513,19 @@ end
 
 -- ==================== 启动 ====================
 
-player.CharacterAdded:Connect(OnCharacterAdded)
+if player then
+	player.CharacterAdded:Connect(OnCharacterAdded)
 
-task.spawn(function()
-	local success, err = pcall(PowerDisplayController.Initialize)
-	if not success then
-		warn("[PowerDisplayController] 初始化出错:", err)
-	end
-end)
+	task.spawn(function()
+		local success, err = pcall(PowerDisplayController.Initialize)
+		if not success then
+			warn("[PowerDisplayController] 初始化出错:", err)
+		end
+	end)
+end
 
 -- ==================== 导出 ====================
+
+_G.PowerDisplayController = PowerDisplayController
 
 return PowerDisplayController

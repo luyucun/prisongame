@@ -64,6 +64,8 @@ local LoadingSystem = require(ServerScriptService.Systems.LoadingSystem)
 local TaskSystem = require(ServerScriptService.Systems.TaskSystem)
 -- V3.5新增 - 新手引导系统
 local GuideSystem = require(ServerScriptService.Systems.GuideSystem)
+-- V4.5新增 - 对话系统
+local TalkSystem = require(ServerScriptService.Systems.TalkSystem)
 -- V3.8新增 - 音效系统
 local SoundSystem = require(ServerScriptService.Systems.SoundSystem)
 -- Robux购买处理器
@@ -378,6 +380,16 @@ local function InitializeServer()
         warn(GameConfig.LOG_PREFIX, "新手引导系统初始化失败(异常):", result)
     elseif result == false then
         warn(GameConfig.LOG_PREFIX, "新手引导系统初始化失败(返回false)")
+    end
+
+    -- 13.5 初始化对话系统 (V4.5新增)
+    success, result = pcall(function()
+        return TalkSystem.Initialize()
+    end)
+    if not success then
+        warn(GameConfig.LOG_PREFIX, "对话系统初始化失败(异常):", result)
+    elseif result == false then
+        warn(GameConfig.LOG_PREFIX, "对话系统初始化失败(返回false)")
     end
 
     -- 14. 初始化音效系统 (V3.8新增)

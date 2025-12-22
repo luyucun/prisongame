@@ -15,10 +15,12 @@ local BadgeService = game:GetService("BadgeService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local ServerScriptService = game:GetService("ServerScriptService")
 
 -- ==================== Modules ====================
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
 local BadgeConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("BadgeConfig"))
+local DataManager = require(ServerScriptService:WaitForChild("Core"):WaitForChild("DataManager"))
 
 -- ==================== Debug ====================
 local _print = print
@@ -147,6 +149,14 @@ local function GetPlayerPower(player)
 	return 0
 end
 
+local function GetCompletedChapters(player)
+	if not player or not player:IsDescendantOf(Players) then
+		return 0
+	end
+	local completed = DataManager.GetCompletedChapters(player)
+	return tonumber(completed) or 0
+end
+
 local function SafeUserHasBadge(userId, badgeId)
 	local userIdNum = tonumber(userId)
 	local badgeIdNum = tonumber(badgeId)
@@ -253,6 +263,7 @@ local function AwardBadgeIfNeeded(player, badgeId)
 end
 
 local JOIN_BADGES = BadgeConfig.GetBadgesByTrigger(BadgeConfig.TriggerType.PLAYER_JOIN)
+local CHAPTER_BADGES = BadgeConfig.GetChapterBadges()
 local POWER_BADGES = BadgeConfig.GetPowerBadges()
 
 local function CheckJoinBadges(player)
@@ -297,11 +308,39 @@ local function CheckPowerBadges(player, powerValue)
 	end
 end
 
+local function CheckChapterBadges(player, completedChapters)
+	if not player or not player:IsDescendantOf(Players) then
+		return
+	end
+
+	local userId = player.UserId
+	local completed = tonumber(completedChapters) or 0
+	if completed <= 0 then
+		return
+	end
+
+	for _, badge in ipairs(CHAPTER_BADGES) do
+		local required = tonumber(badge.RequiredChapter) or 0
+		if required > 0 and completed >= required then
+			local badgeIdNum = tonumber(badge.Id)
+			if badgeIdNum and not HasBadgeCached(userId, badgeIdNum) then
+				if not IsPendingBadge(userId, badgeIdNum) or ShouldAttemptBadgeNow(userId, badgeIdNum) then
+					AwardBadgeIfNeeded(player, badgeIdNum)
+				end
+			end
+		end
+	end
+end
+
 function BadgeSystem.CheckAllBadges(player)
 	if not player or not player:IsDescendantOf(Players) then
 		return
 	end
 	CheckJoinBadges(player)
+	local completedChapters = GetCompletedChapters(player)
+	if completedChapters > 0 then
+		CheckChapterBadges(player, completedChapters)
+	end
 	local powerValue = GetPlayerPower(player)
 	if powerValue > 0 then
 		CheckPowerBadges(player, powerValue)
@@ -320,11 +359,41 @@ function BadgeSystem.OnPlayerJoin(player)
 			if not player or not player:IsDescendantOf(Players) then
 				return
 			end
+			local completedChapters = GetCompletedChapters(player)
+			if completedChapters > 0 then
+				CheckChapterBadges(player, completedChapters)
+			end
 			local powerValue = GetPlayerPower(player)
 			if powerValue > 0 then
 				CheckPowerBadges(player, powerValue)
 			end
 		end)
+	end)
+end
+
+function BadgeSystem.OnChapterCompleted(player, chapterId, completedChapters)
+	if not player or not player:IsDescendantOf(Players) then
+		return
+	end
+
+	local chapterNum = tonumber(chapterId) or 0
+	if chapterNum <= 0 then
+		return
+	end
+
+	local completed = tonumber(completedChapters)
+	if not completed then
+		completed = GetCompletedChapters(player)
+	end
+	if completed <= 0 then
+		return
+	end
+
+	task.spawn(function()
+		if not player or not player:IsDescendantOf(Players) then
+			return
+		end
+		CheckChapterBadges(player, completed)
 	end)
 end
 

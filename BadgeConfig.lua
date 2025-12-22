@@ -13,6 +13,7 @@ local BadgeConfig = {}
 BadgeConfig.TriggerType = {
 	PLAYER_JOIN = "PLAYER_JOIN",
 	POWER = "POWER",
+	CHAPTER_CLEAR = "CHAPTER_CLEAR",
 }
 
 BadgeConfig.Badges = {
@@ -20,6 +21,12 @@ BadgeConfig.Badges = {
 		Key = "WELCOME",
 		Id = 1068309156030736,
 		Trigger = BadgeConfig.TriggerType.PLAYER_JOIN,
+	},
+	{
+		Key = "CHAPTER_1_CLEAR",
+		Id = 2832522491747257,
+		Trigger = BadgeConfig.TriggerType.CHAPTER_CLEAR,
+		RequiredChapter = 1,
 	},
 	{
 		Key = "POWER_3000",
@@ -42,6 +49,14 @@ function BadgeConfig.GetBadgesByTrigger(triggerType)
 			table.insert(result, badge)
 		end
 	end
+	return result
+end
+
+function BadgeConfig.GetChapterBadges()
+	local result = BadgeConfig.GetBadgesByTrigger(BadgeConfig.TriggerType.CHAPTER_CLEAR)
+	table.sort(result, function(a, b)
+		return (a.RequiredChapter or 0) < (b.RequiredChapter or 0)
+	end)
 	return result
 end
 

@@ -29,6 +29,11 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local SoundService = game:GetService("SoundService")
+local FormatHelper = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("FormatHelper"))
+local StageConfig = nil
+pcall(function()
+    StageConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("StageConfig"))
+end)
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -38,17 +43,30 @@ local victoryGui = playerGui:FindFirstChild("Victory")
 local effectFrame = nil
 local informationFrame = nil
 local confirmButton = nil
+local bgFrame = nil
+local progressBg = nil
+local progressPlayerIcon = nil
+local cashNumLabel = nil
+local distanceTextLabel = nil
 
 -- 获取远程事件
 local events = ReplicatedStorage:WaitForChild("Events")
 local battleEvents = events:WaitForChild("BattleEvents")
 local victoryPopupEvent = battleEvents:WaitForChild("VictoryPopup")
 local victoryConfirmEvent = battleEvents:WaitForChild("VictoryConfirm")
+local battleStateUpdateEvent = battleEvents:WaitForChild("BattleStateUpdate", 5)
 
 -- 本地变量
 local currentBattleId = nil
 local isVictoryShowing = false
 local uiInitialized = false
+local campaignCoinTotal = 0
+local battleCoinTotal = 0
+local isCampaignActive = false
+local isBattleActive = false
+local lastCampaignChapter = nil
+local lastCampaignTotalStages = nil
+local lastCampaignStage = nil
 
 -- 调试日志（已禁用）
 local function DebugLog(...)
@@ -86,6 +104,111 @@ local function SafeWaitForChild(parent, childName, timeout)
     return nil
 end
 
+local function ScaleUDim2(value, scale)
+    return UDim2.new(value.X.Scale * scale, value.X.Offset * scale, value.Y.Scale * scale, value.Y.Offset * scale)
+end
+
+local function GetPercentColor(percent)
+    if percent <= 20 then
+        return Color3.fromRGB(0, 255, 0)
+    elseif percent <= 50 then
+        return Color3.fromRGB(255, 255, 0)
+    end
+    return Color3.fromRGB(255, 0, 0)
+end
+
+local function FormatCashAmount(amount)
+    local numberAmount = tonumber(amount) or 0
+    return "+$" .. FormatHelper.FormatNumberWithCommas(numberAmount)
+end
+
+local function SetPlayerIconImage(imageLabel)
+    if not imageLabel then
+        return
+    end
+
+    local success, result = pcall(function()
+        return Players:GetUserThumbnailAsync(player.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size100x100)
+    end)
+
+    if success and result then
+        imageLabel.Image = result
+    end
+end
+
+local function GetDistanceProgress(stageNum, preferStageProgress)
+    local progressValue = nil
+    local distanceGui = playerGui:FindFirstChild("Distance")
+    if distanceGui then
+        local distanceBg = distanceGui:FindFirstChild("Bg")
+        local distanceProgressBg = distanceBg and distanceBg:FindFirstChild("ProgressBg")
+        local distancePlayerIcon = distanceProgressBg and distanceProgressBg:FindFirstChild("PlayerIcon")
+        if distancePlayerIcon and distancePlayerIcon.Position then
+            progressValue = distancePlayerIcon.Position.X.Scale
+        end
+    end
+
+    local stageToUse = tonumber(stageNum) or tonumber(lastCampaignStage) or 0
+    local totalStages = tonumber(lastCampaignTotalStages)
+
+    if (not totalStages or totalStages <= 0) and StageConfig then
+        local chapterToUse = tonumber(lastCampaignChapter) or tonumber(player:GetAttribute("CurrentChapter")) or 1
+        totalStages = StageConfig.GetStagesPerChapter(chapterToUse)
+    end
+
+    if preferStageProgress and stageToUse > 0 and totalStages and totalStages > 0 then
+        return math.clamp(stageToUse / totalStages, 0, 1)
+    end
+
+    if type(progressValue) == "number" then
+        return math.clamp(progressValue, 0, 1)
+    end
+
+    if stageToUse > 0 and totalStages and totalStages > 0 then
+        return math.clamp(stageToUse / totalStages, 0, 1)
+    end
+
+    return 0
+end
+
+local function UpdateDistanceText(progress)
+    if not distanceTextLabel then
+        return
+    end
+
+    local remaining = math.clamp(1 - progress, 0, 1)
+    local remainingPercent = math.floor(remaining * 100 + 0.5)
+    local color = GetPercentColor(remainingPercent)
+
+    distanceTextLabel.RichText = true
+    distanceTextLabel.Text = string.format(
+        '<font color="rgb(255,255,255)">Distance to Escape:</font> <font color="rgb(%d,%d,%d)">%d%%</font>',
+        math.floor(color.R * 255),
+        math.floor(color.G * 255),
+        math.floor(color.B * 255),
+        remainingPercent
+    )
+end
+
+local function AddBattleCoins(amount)
+    if type(amount) ~= "number" or amount <= 0 then
+        return
+    end
+
+    if isCampaignActive then
+        campaignCoinTotal = campaignCoinTotal + amount
+    elseif isBattleActive then
+        battleCoinTotal = battleCoinTotal + amount
+    end
+end
+
+local function GetCurrentCoinTotal(isCampaignBattle)
+    if isCampaignBattle then
+        return campaignCoinTotal
+    end
+    return battleCoinTotal
+end
+
 --[[
 初始化UI元素
 @return boolean - 是否初始化成功
@@ -110,6 +233,7 @@ local function InitializeUI()
     -- 获取子元素（移除Back Frame）
     effectFrame = SafeWaitForChild(victoryGui, "Effect", 2)
     informationFrame = SafeWaitForChild(victoryGui, "Information", 2)
+    bgFrame = SafeWaitForChild(victoryGui, "Bg", 2)
 
     -- 检查必需的UI元素
     local missingElements = {}
@@ -135,6 +259,19 @@ local function InitializeUI()
         end
 
         DebugLog("✅ 确认按钮已找到")
+
+        cashNumLabel = SafeWaitForChild(informationFrame, "CashNum", 2)
+        distanceTextLabel = SafeWaitForChild(informationFrame, "DistanceText", 2)
+        if distanceTextLabel then
+            distanceTextLabel.RichText = true
+        end
+    end
+
+    if bgFrame then
+        progressBg = SafeWaitForChild(bgFrame, "ProgressBg", 2)
+        if progressBg then
+            progressPlayerIcon = SafeWaitForChild(progressBg, "PlayerIcon", 2)
+        end
     end
 
     return true
@@ -257,6 +394,57 @@ local function PlayTextPopAnimation(textLabel, duration)
     return popOut
 end
 
+local function PlayGuiScaleIn(guiObject, duration)
+    if not guiObject then return end
+
+    duration = duration or 0.4
+
+    local originalSize = guiObject.Size
+    local originalBackgroundTransparency = guiObject.BackgroundTransparency
+    local originalTextTransparency = nil
+    local originalStrokeTransparency = nil
+    local originalImageTransparency = nil
+
+    if guiObject:IsA("TextLabel") or guiObject:IsA("TextButton") then
+        originalTextTransparency = guiObject.TextTransparency
+        originalStrokeTransparency = guiObject.TextStrokeTransparency
+        guiObject.TextTransparency = 1
+        guiObject.TextStrokeTransparency = 1
+    end
+
+    if guiObject:IsA("ImageLabel") or guiObject:IsA("ImageButton") then
+        originalImageTransparency = guiObject.ImageTransparency
+        guiObject.ImageTransparency = 1
+    end
+
+    guiObject.BackgroundTransparency = 1
+    guiObject.Size = ScaleUDim2(originalSize, 0.85)
+    guiObject.Visible = true
+
+    local goals = {
+        Size = originalSize,
+        BackgroundTransparency = originalBackgroundTransparency
+    }
+
+    if originalTextTransparency ~= nil then
+        goals.TextTransparency = originalTextTransparency
+        goals.TextStrokeTransparency = originalStrokeTransparency
+    end
+
+    if originalImageTransparency ~= nil then
+        goals.ImageTransparency = originalImageTransparency
+    end
+
+    local tween = TweenService:Create(
+        guiObject,
+        TweenInfo.new(duration, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+        goals
+    )
+    tween:Play()
+
+    return tween
+end
+
 --[[
 播放按钮淡入动画
 @param button GuiButton - 按钮对象
@@ -357,6 +545,23 @@ local function ShowVictoryUI(battleId, result, stageNum, extraRewards)
 
     -- 显示Information Frame（作为容器）
     informationFrame.Visible = true
+    if bgFrame then
+        bgFrame.Visible = true
+    end
+
+    local progressValue = GetDistanceProgress(stageNum, isCampaign)
+    if progressPlayerIcon then
+        SetPlayerIconImage(progressPlayerIcon)
+        progressPlayerIcon.Position = UDim2.new(progressValue, 0, 0.5, 0)
+    end
+
+    if cashNumLabel then
+        cashNumLabel.Text = FormatCashAmount(GetCurrentCoinTotal(isCampaign))
+    end
+
+    if distanceTextLabel then
+        UpdateDistanceText(progressValue)
+    end
 
     -- 获取UI元素
     local leftBat = informationFrame:FindFirstChild("ImageLabel") -- 左边棒球棍
@@ -376,6 +581,9 @@ local function ShowVictoryUI(battleId, result, stageNum, extraRewards)
     if rightBat then rightBat.Visible = false end
     if victoryText then victoryText.Visible = false end
     if confirmButton then confirmButton.Visible = false end
+    if cashNumLabel then cashNumLabel.Visible = false end
+    if distanceTextLabel then distanceTextLabel.Visible = false end
+    if progressBg then progressBg.Visible = false end
 
     -- 播放动画序列
     task.spawn(function()
@@ -398,9 +606,31 @@ local function ShowVictoryUI(battleId, result, stageNum, extraRewards)
             PlayTextPopAnimation(victoryText, 0.5)
         end
 
-        task.wait(0.9) -- 等待文本动画完成后再延迟0.5秒
+        task.wait(0.6) -- 等待文本动画完成
 
-        -- 4. Confirm按钮淡入（0.3秒）
+        -- 4. CashNum弹出（0.4秒）
+        if cashNumLabel then
+            PlayGuiScaleIn(cashNumLabel, 0.4)
+            task.wait(0.5)
+        end
+
+        -- 5. DistanceText + ProgressBg 同时动画
+        local hasDistanceAnimation = false
+        if distanceTextLabel then
+            PlayGuiScaleIn(distanceTextLabel, 0.4)
+            hasDistanceAnimation = true
+        end
+
+        if progressBg then
+            PlayGuiScaleIn(progressBg, 0.4)
+            hasDistanceAnimation = true
+        end
+
+        if hasDistanceAnimation then
+            task.wait(0.5)
+        end
+
+        -- 6. Confirm按钮淡入（0.3秒）
         if confirmButton then
             PlayButtonFadeIn(confirmButton, 0.3)
         end
@@ -435,6 +665,10 @@ local function HideVictoryUI()
         effectFrame.Visible = false
     end
 
+    if bgFrame then
+        bgFrame.Visible = false
+    end
+
     isVictoryShowing = false
     currentBattleId = nil
 
@@ -467,6 +701,12 @@ local function OnConfirmButtonClick()
             _G.BattleCameraController.Stop()
         end
 
+        if isCampaign then
+            campaignCoinTotal = 0
+        else
+            battleCoinTotal = 0
+        end
+
         -- 立即隐藏UI（无延迟）
         HideVictoryUI()
     else
@@ -490,12 +730,86 @@ local function Initialize()
         -- 初始状态：隐藏所有UI
         if effectFrame then effectFrame.Visible = false end
         if informationFrame then informationFrame.Visible = false end
+        if bgFrame then bgFrame.Visible = false end
 
         DebugLog("✅ UI元素初始化完成")
     end
 
+    -- 连接战役状态更新
+    local campaignEvents = events:FindFirstChild("CampaignEvents")
+    if campaignEvents then
+        local campaignStateUpdate = campaignEvents:FindFirstChild("CampaignStateUpdate")
+        if not campaignStateUpdate then
+            campaignStateUpdate = campaignEvents:WaitForChild("CampaignStateUpdate", 5)
+        end
+
+        if campaignStateUpdate then
+            campaignStateUpdate.OnClientEvent:Connect(function(state, stageNum, chapter, totalStagesInChapter)
+                if chapter then
+                    lastCampaignChapter = chapter
+                end
+
+                if totalStagesInChapter then
+                    lastCampaignTotalStages = totalStagesInChapter
+                end
+
+                if stageNum then
+                    lastCampaignStage = stageNum
+                end
+
+                if state == "Preparing" then
+                    campaignCoinTotal = 0
+                    isCampaignActive = true
+                elseif state == "Idle" or state == "Cleanup" then
+                    isCampaignActive = false
+                    campaignCoinTotal = 0
+                else
+                    isCampaignActive = true
+                end
+            end)
+        end
+    end
+
+    -- 连接战斗状态更新（非战役）
+    if battleStateUpdateEvent then
+        battleStateUpdateEvent.OnClientEvent:Connect(function(battleId, state)
+            if isCampaignActive then
+                return
+            end
+
+            if state == "Fighting" then
+                battleCoinTotal = 0
+                isBattleActive = true
+            elseif state == "Finished" then
+                isBattleActive = false
+            end
+        end)
+    end
+
+    -- 监听战斗金币收益
+    local function ConnectCoinEarnedEvent(event)
+        if not event then
+            return
+        end
+
+        event.OnClientEvent:Connect(function(amount)
+            AddBattleCoins(amount)
+        end)
+    end
+
+    local coinEarnedEvent = battleEvents:FindFirstChild("CoinEarnedEffect")
+    if coinEarnedEvent then
+        ConnectCoinEarnedEvent(coinEarnedEvent)
+    else
+        battleEvents.ChildAdded:Connect(function(child)
+            if child.Name == "CoinEarnedEffect" and child:IsA("RemoteEvent") then
+                ConnectCoinEarnedEvent(child)
+            end
+        end)
+    end
+
     -- 连接服务器VictoryPopup事件
-victoryPopupEvent.OnClientEvent:Connect(function(battleId, result, stageNum, extraRewards)
+    victoryPopupEvent.OnClientEvent:Connect(function(battleId, result, stageNum, extraRewards)
         local success, err = pcall(function()
             -- 战役结算用 battleId=0，允许显示；普通战斗需>0
             local isCampaign = (battleId == 0)

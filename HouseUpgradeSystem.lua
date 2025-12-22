@@ -26,14 +26,9 @@ V3.9房屋升级表现流程：
 4. 客户端镜头拉高看向房屋（1秒）
 5. 等待1秒
 6. 服务端替换房屋（旧房屋消失，新房屋出现）
-7. 播放HouseChange特效（1秒后移除）
 8. 等待1秒
 9. 客户端恢复镜头控制
 
-V3.9.1新增：
-- 房屋替换时播放HouseChange特效
-- 特效从ReplicatedStorage/Effect/HouseChange复制
-- 特效放置在新房屋位置，1秒后自动移除
 ]]
 
 local HouseUpgradeSystem = {}
@@ -103,8 +98,6 @@ end
 -- 调试日志开关
 local DEBUG_LOGS = false
 
--- 特效配置
-local HOUSE_CHANGE_EFFECT_DURATION = 1.5  -- 房屋替换特效持续时间（秒）
 
 --[[
 输出调试日志
@@ -114,62 +107,6 @@ local function DebugLog(...)
 	if DEBUG_LOGS then
 		print("[HouseUpgradeSystem]", ...)
 	end
-end
-
---[[
-播放房屋替换特效（V3.9.1新增）
-@param position Vector3 - 特效播放位置
-]]
-local function PlayHouseChangeEffect(position)
-	-- 获取特效模板
-	local effectFolder = ReplicatedStorage:FindFirstChild("Effect")
-	if not effectFolder then
-		warn("[HouseUpgradeSystem] ReplicatedStorage/Effect文件夹不存在")
-		return
-	end
-
-	local effectTemplate = effectFolder:FindFirstChild("HouseChange")
-	if not effectTemplate then
-		warn("[HouseUpgradeSystem] HouseChange特效模板不存在")
-		return
-	end
-
-	-- 1. 克隆特效（子节点通过Weld自动跟随）
-	local effect = effectTemplate:Clone()
-
-	-- 2. 先挂载到Workspace
-	effect.Parent = Workspace
-
-	-- 3. 立即锚定，防止物理引擎干扰（子节点保持不锚定，通过Weld跟随）
-	if effect:IsA("Model") then
-		if effect.PrimaryPart then
-			effect.PrimaryPart.Anchored = true
-		end
-	elseif effect:IsA("BasePart") then
-		effect.Anchored = true
-	end
-
-	-- 4. 移动到目标位置
-	if effect:IsA("Model") then
-		effect:PivotTo(CFrame.new(position))
-	elseif effect:IsA("BasePart") then
-		effect.CFrame = CFrame.new(position)
-	end
-
-	DebugLog(string.format(
-		"播放房屋替换特效，位置=(%.2f, %.2f, %.2f)",
-		position.X,
-		position.Y,
-		position.Z
-	))
-
-	-- 1.5秒后移除特效
-	task.delay(HOUSE_CHANGE_EFFECT_DURATION, function()
-		if effect and effect.Parent then
-			effect:Destroy()
-			DebugLog("房屋替换特效已移除")
-		end
-	end)
 end
 
 --[[
@@ -355,11 +292,6 @@ function HouseUpgradeSystem.ReplaceHouseModel(player, newModelName)
 
 	-- 再销毁旧房屋模型
 	currentHouseModel:Destroy()
-
-	-- V3.9.1新增：播放房屋替换特效
-	-- 特效位置使用新房屋的轴点位置（与房屋轴点对齐）
-	local effectPosition = targetCFrame.Position
-	PlayHouseChangeEffect(effectPosition)
 
 	-- 更新DataManager中的房屋模型名称
 	DataManager.SetCurrentHouseModel(player, newModelName)

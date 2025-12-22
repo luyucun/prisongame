@@ -145,6 +145,20 @@ local function UnlockCameraDuringDrag()
 	dragCameraLock.cameraSubject = nil
 end
 
+local function BeginPowerTipSuppression()
+	local powerController = _G.PowerDisplayController
+	if powerController and powerController.BeginPowerTipSuppression then
+		powerController.BeginPowerTipSuppression()
+	end
+end
+
+local function EndPowerTipSuppression()
+	local powerController = _G.PowerDisplayController
+	if powerController and powerController.EndPowerTipSuppression then
+		powerController.EndPowerTipSuppression()
+	end
+end
+
 -- V2.0重构: 拖动状态使用GridWidth和GridDepth
 dragState = {
 	isDragging = false,
@@ -882,6 +896,7 @@ function StopDragging()
 		-- 发送合成请求到服务端
 		local requestEvent = mergeEvents:FindFirstChild("RequestMerge")
 		if requestEvent then
+			BeginPowerTipSuppression()
 			requestEvent:FireServer(dragState.draggedInstanceId, targetInstanceId)
 		end
 
@@ -1171,6 +1186,7 @@ end
 ]]
 function OnMergeResponse(success, message, newUnitData)
 	-- print("[DragSystem] 收到合成响应:", success, message)
+	EndPowerTipSuppression()
 
 	if success then
 		-- print("[DragSystem] 合成成功! 新等级:", newUnitData and newUnitData.Level or "?")

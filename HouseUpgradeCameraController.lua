@@ -47,8 +47,8 @@ local CAMERA_HEIGHT = 30  -- 镜头高度
 local CAMERA_DISTANCE = 40  -- 镜头距离房屋的距离
 local CAMERA_ANGLE = math.rad(30)  -- 镜头俯视角度（30度）
 local TWEEN_DURATION = 1.0  -- 镜头移动时长
-local WAIT_BEFORE_REPLACE = 1.0  -- 房屋替换前等待时间
-local WAIT_AFTER_REPLACE = 3.0  -- 房屋替换后等待时间（V3.9.1修改：1秒→3秒）
+local WAIT_BEFORE_REPLACE = 0.8  -- 房屋替换前等待时间
+local WAIT_AFTER_REPLACE = 1.8  -- 房屋替换后等待时间（V3.9.1修改：1秒→3秒）
 
 -- RemoteEvent引用
 local HouseUpgradeEvents = nil

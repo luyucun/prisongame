@@ -240,6 +240,12 @@ end
 @param player Player - 玩家对象
 ]]
 function PlayerManager.OnPlayerAdded(player)
+    -- 修复：首先检查player对象是否有效
+    if not player or not player:IsA("Player") or not player:IsDescendantOf(Players) then
+        warn(GameConfig.LOG_PREFIX, "OnPlayerAdded收到无效的player对象")
+        return
+    end
+
     if GameConfig.DEBUG_MODE then
         print(GameConfig.LOG_PREFIX, "玩家加入:", player.Name)
     end
@@ -256,6 +262,12 @@ function PlayerManager.OnPlayerAdded(player)
     if skipHomeAssignment then
         -- Studio Play Here模式：根据玩家当前位置选择最近的基地
         -- 需要等待角色加载完成
+        -- 修复：在访问CharacterAdded前再次检查player有效性
+        if not player or not player:IsDescendantOf(Players) then
+            warn(GameConfig.LOG_PREFIX, "玩家对象在Play Here模式下已失效")
+            return
+        end
+
         local character = player.Character or player.CharacterAdded:Wait()
         local humanoidRootPart = character:WaitForChild("HumanoidRootPart", 10)
 
@@ -402,6 +414,12 @@ function PlayerManager.OnPlayerAdded(player)
     end
 
     -- 连接玩家重生事件（必须在检查Character之前连接，避免竞态条件）
+    -- 修复：在访问CharacterAdded前再次检查player有效性
+    if not player or not player:IsDescendantOf(Players) then
+        warn(GameConfig.LOG_PREFIX, "玩家对象在CharacterAdded连接时已失效:", player and player.Name or "nil")
+        return
+    end
+
     local characterAddedConnection = player.CharacterAdded:Connect(function(character)
         HandleCharacterSpawn(character)
     end)

@@ -122,12 +122,32 @@ end
 local function collectAllyPositions()
 	local positions = {}
 
+	-- 仅统计当前玩家自己的单位
+	local myHomeSlot = player:GetAttribute("HomeSlot")
+	if not myHomeSlot then
+		local idleFloor = getHomeIdleFloor()
+		if idleFloor then
+			table.insert(positions, idleFloor.Position)
+		end
+		return positions
+	end
+
 	for _, inst in ipairs(Workspace:GetDescendants()) do
 		if inst:IsA("Model") and inst:GetAttribute("CampaignKeepInstance") then
-			local rootPart = inst:FindFirstChild("HumanoidRootPart") or inst.PrimaryPart
-			if rootPart then
-				table.insert(positions, rootPart.Position)
+			local unitHomeSlot = inst:GetAttribute("HomeSlot")
+			if unitHomeSlot == myHomeSlot then
+				local rootPart = inst:FindFirstChild("HumanoidRootPart") or inst.PrimaryPart
+				if rootPart then
+					table.insert(positions, rootPart.Position)
+				end
 			end
+		end
+	end
+
+	if #positions == 0 then
+		local idleFloor = getHomeIdleFloor()
+		if idleFloor then
+			table.insert(positions, idleFloor.Position)
 		end
 	end
 

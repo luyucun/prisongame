@@ -6,6 +6,9 @@
 职责: 检测玩家靠近商店NPC并自动打开/关闭商店UI
 ]]
 
+-- V4.5：对话系统接管KeepShoper01交互，旧的自动商店触发停用
+local DISABLE_SHOP_TRIGGER = true
+
 local ShopTrigger = {}
 
 -- 引用服务
@@ -277,6 +280,11 @@ end
 初始化ShopTrigger
 ]]
 function ShopTrigger.Initialize()
+	if DISABLE_SHOP_TRIGGER then
+		print("[ShopTrigger] 已停用（对话系统接管KeepShoper01）")
+		return
+	end
+
 	print("[ShopTrigger] 初始化商店触发器...")
 
 	-- 等待角色加载
