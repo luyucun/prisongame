@@ -44,23 +44,30 @@ local requestTalkList = nil
 local talkListEvent = nil
 local selectTalkOption = nil
 local talkResponseEvent = nil
+local currencyEvents = nil
 
 -- 状态
+local isNearNPC = false
 local isNearNPC = false
 local isListOpen = false
 local isDialogOpen = false
 local manualClosed = false
 local listDirty = true
 local pendingOpen = false
+local lastRequestTime = 0
+local lastCurrencyRequest = 0
 
 local currentNPC = nil
 local currentPrompt = nil
+local promptConnection = nil
+local SetupPrompt = nil
 local currentDialogues = {}
 local currentDialogIndex = 0
 
 local listTween = nil
 local bottomTween = nil
 local arrowTween = nil
+local listVisibilityConn = nil
 
 -- ==================== 工具方法 ====================
 
@@ -158,10 +165,66 @@ local function StopArrowFloat()
 	end
 end
 
+local function BindPrompt(prompt: ProximityPrompt?)
+	if promptConnection then
+		promptConnection:Disconnect()
+		promptConnection = nil
+	end
+
+	currentPrompt = prompt
+	if currentPrompt then
+		promptConnection = currentPrompt.Triggered:Connect(function(triggerPlayer)
+			if triggerPlayer == player then
+				TalkController.OpenTalkList(true)
+			end
+		end)
+	end
+end
+
 local function SetPromptEnabled(enabled: boolean)
+	if not currentPrompt or not currentPrompt.Parent then
+		if currentNPC then
+			SetupPrompt(currentNPC)
+		end
+	end
 	if currentPrompt then
 		currentPrompt.Enabled = enabled
 	end
+end
+
+local function SetupVisibilityWatch()
+	if talkFrame and not listVisibilityConn then
+		listVisibilityConn = talkFrame:GetPropertyChangedSignal("Visible"):Connect(function()
+			if talkFrame.Visible then
+				return
+			end
+			if isNearNPC and not isDialogOpen then
+				isListOpen = false
+				manualClosed = true
+				listDirty = true
+				pendingOpen = false
+				SetPromptEnabled(true)
+			end
+		end)
+	end
+end
+
+local function RequestCurrencySync()
+	if not currencyEvents then
+		local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
+		currencyEvents = eventsFolder and eventsFolder:FindFirstChild("CurrencyEvents")
+	end
+	if not currencyEvents then
+		return
+	end
+	local now = tick()
+	if now - lastCurrencyRequest < 0.2 then
+		return
+	end
+	lastCurrencyRequest = now
+	pcall(function()
+		currencyEvents:FireServer()
+	end)
 end
 
 -- ==================== UI 初始化 ====================
@@ -295,23 +358,17 @@ local function GetNPCCenterPart(npc)
 		or npc:FindFirstChildWhichIsA("BasePart")
 end
 
-local function SetupPrompt(npc)
-	currentPrompt = nil
+SetupPrompt = function(npc)
 	if not npc then
+		BindPrompt(nil)
 		return
 	end
 	local part = GetNPCCenterPart(npc)
 	if not part then
+		BindPrompt(nil)
 		return
 	end
-	currentPrompt = part:FindFirstChildWhichIsA("ProximityPrompt")
-	if currentPrompt then
-		currentPrompt.Triggered:Connect(function(triggerPlayer)
-			if triggerPlayer == player then
-				TalkController.OpenTalkList(true)
-			end
-		end)
-	end
+	BindPrompt(part:FindFirstChildWhichIsA("ProximityPrompt"))
 end
 
 -- ==================== 列表生成 ====================
@@ -420,6 +477,8 @@ local function CloseTalkList(manual: boolean)
 	end
 	isListOpen = false
 	listDirty = true
+	pendingOpen = false
+	lastRequestTime = 0
 	if manual then
 		manualClosed = true
 		if isNearNPC then
@@ -457,6 +516,10 @@ local function CloseDialog()
 	end
 	isDialogOpen = false
 	StopArrowFloat()
+	currentDialogues = {}
+	currentDialogIndex = 0
+	pendingOpen = false
+	lastRequestTime = 0
 end
 
 local function AdvanceDialog()
@@ -470,7 +533,15 @@ local function AdvanceDialog()
 		end
 	else
 		CloseDialog()
-		ShowTalkList()
+		listDirty = true
+		if isNearNPC then
+			ShowTalkList()
+			if requestTalkList then
+				pendingOpen = true
+				lastRequestTime = tick()
+				requestTalkList:FireServer()
+			end
+		end
 	end
 end
 
@@ -492,6 +563,7 @@ function TalkController.OpenTalkList(forceRefresh: boolean)
 
 	if listDirty and requestTalkList then
 		pendingOpen = true
+		lastRequestTime = tick()
 		requestTalkList:FireServer()
 	else
 		ShowTalkList()
@@ -525,6 +597,7 @@ local function OnTalkListReceived(options)
 
 	if pendingOpen then
 		pendingOpen = false
+		lastRequestTime = 0
 		if isNearNPC and not isDialogOpen and not manualClosed then
 			ShowTalkList()
 		end
@@ -537,6 +610,7 @@ local function OnTalkResponse(success, action, talkId, dialogues)
 	end
 
 	if action == "DIALOG" then
+		listDirty = true
 		ShowDialog(dialogues or {})
 	elseif action == "OPEN_SHOP" then
 		CloseTalkList(true)
@@ -544,6 +618,8 @@ local function OnTalkResponse(success, action, talkId, dialogues)
 	elseif action == "CLOSE_LIST" then
 		CloseTalkList(true)
 	end
+
+	RequestCurrencySync()
 end
 
 local function ConnectTalkBottomClick()
@@ -606,8 +682,15 @@ local function CheckDistance()
 	end
 
 	-- 兜底：仍在范围内但列表未打开时，自动尝试打开
-	if inRange and not isListOpen and not isDialogOpen and not pendingOpen and not manualClosed then
-		TalkController.OpenTalkList(true)
+	if inRange and not isListOpen and not isDialogOpen and not manualClosed then
+		if pendingOpen then
+			if tick() - lastRequestTime > 1.5 then
+				pendingOpen = false
+				TalkController.OpenTalkList(true)
+			end
+		else
+			TalkController.OpenTalkList(true)
+		end
 	end
 
 	if inRange and manualClosed then
@@ -622,6 +705,7 @@ function TalkController.Initialize()
 		return false
 	end
 
+	SetupVisibilityWatch()
 	ConnectTalkBottomClick()
 
 	if talkListEvent then

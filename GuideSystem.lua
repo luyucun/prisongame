@@ -11,7 +11,7 @@
 2. 处理引导触发条件判断
 3. 与客户端同步引导状态
 4. 提供GM命令接口
-V3.9.1新增: HAS_FIRST_UNIT/ARRIVED_IDLE_FLOOR/FIRST_UNIT_PLACED触发条件，UI聚焦引导支持
+V3.9.1新增: HAS_TWO_UNITS/ARRIVED_IDLE_FLOOR/TWO_UNITS_PLACED触发条件，UI聚焦引导支持
 ]]
 
 local GuideSystem = {}
@@ -148,6 +148,51 @@ local function GetPlayerGuideData(player)
 	return playerData.GuideData
 end
 
+local function GetUnitCount(playerData)
+	if not playerData then
+		return 0
+	end
+
+	local count = 0
+	if playerData.Units then
+		for _, unitData in ipairs(playerData.Units) do
+			if unitData then
+				count = count + 1
+			end
+		end
+	end
+
+	if count > 0 then
+		return count
+	end
+
+	count = 0
+	if playerData.Inventory then
+		for _, unitCount in pairs(playerData.Inventory) do
+			if type(unitCount) == "number" and unitCount > 0 then
+				count = count + unitCount
+			end
+		end
+	end
+
+	return count
+end
+
+local function GetPlacedUnitCount(playerData)
+	if not playerData or not playerData.PlacedUnits then
+		return 0
+	end
+
+	local count = 0
+	for _, unitData in pairs(playerData.PlacedUnits) do
+		if unitData then
+			count = count + 1
+		end
+	end
+
+	return count
+end
+
 --[[
 检查引导是否已完成
 @param player Player - 玩家对象
@@ -208,29 +253,24 @@ local function CheckTriggerCondition(player, guideConfig)
 			return false
 		end
 
-		-- 检查挂机金币数量
+		-- 检查挂机金币数量（仅允许登录时已有的待领取金币触发）
 		local dm = GetDataManager()
 		if dm then
 			local idleCoinData = dm.GetIdleCoinData(player)
 			if idleCoinData then
-				-- 优化：必须“离线过一次再上来”才触发离线金币引导
-				-- 说明：挂机金币存在在线累计逻辑，PendingCoins可能在首次在线过程中变为>0；
-				-- 但离线金币引导只应在玩家至少登出过一次（LastLogoutTime>0）后才出现。
-				local lastLogoutTime = tonumber(idleCoinData.LastLogoutTime) or 0
-				if lastLogoutTime <= 0 then
+				if not idleCoinData.GuideEligibleOnLogin then
 					return false
 				end
 
 				if (idleCoinData.PendingCoins or 0) > 0 then
-					-- 条件：离线过 + 待领取金币>0
 					return true
 				end
 			end
 		end
 		return false
 
-	elseif condition == "HAS_FIRST_UNIT" then
-		-- 获得第一个兵种
+	elseif condition == "HAS_TWO_UNITS" then
+		-- 获得两个兵种
 		if IsGuideCompleted(player, guideConfig.GuideId) then
 			return false
 		end
@@ -240,23 +280,20 @@ local function CheckTriggerCondition(player, guideConfig)
 			return false
 		end
 
-		-- 检查背包是否有兵种
+		-- 检查背包是否有两个兵种
 		local dm = GetDataManager()
 		if dm then
 			local playerData = dm.GetPlayerData(player)
 			if playerData then
-				-- 🔥修复：优先检查新的 Units 数组
-				if playerData.Units and #playerData.Units > 0 then
+				local unitCount = GetUnitCount(playerData)
+				if unitCount >= 2 then
 					return true
 				end
 
-				-- 兼容旧的 Inventory map
-				if playerData.Inventory then
-					for unitId, count in pairs(playerData.Inventory) do
-						if count and count > 0 then
-							return true
-						end
-					end
+				-- 仅买了一个兵但已自行摆放，则视为已完成IdleFloor引导
+				local placedCount = GetPlacedUnitCount(playerData)
+				if placedCount > 0 then
+					GuideSystem.GMCompleteGuide(player, guideConfig.GuideId)
 				end
 			end
 		end
@@ -271,8 +308,8 @@ local function CheckTriggerCondition(player, guideConfig)
 		-- 检查引导1003是否已完成
 		return IsGuideCompleted(player, 1003)
 
-	elseif condition == "FIRST_UNIT_PLACED" then
-		-- 首次摆放兵种
+	elseif condition == "TWO_UNITS_PLACED" then
+		-- 摆放两个兵种
 		if IsGuideCompleted(player, guideConfig.GuideId) then
 			return false
 		end
@@ -283,16 +320,14 @@ local function CheckTriggerCondition(player, guideConfig)
 			return false
 		end
 
-		-- 检查是否有兵种被摆放在IdleFloor上
+		-- 检查是否有两个兵种被摆放在IdleFloor上
 		local dm = GetDataManager()
 		if dm then
 			local playerData = dm.GetPlayerData(player)
 			if playerData and playerData.PlacedUnits then
-				-- 检查是否有任何兵种被摆放
-				for _, unitData in pairs(playerData.PlacedUnits) do
-					if unitData then
-						return true
-					end
+				local placedCount = GetPlacedUnitCount(playerData)
+				if placedCount >= 2 then
+					return true
 				end
 			end
 		end

@@ -543,12 +543,31 @@ end
 将单位钳定到地面（防止被顶起后沿空中移动）
 @param aiData table - AI数据
 ]]
+local function ResolveGroundOffsetY(aiData, rootPart)
+	if aiData._GroundOffsetY then
+		return aiData._GroundOffsetY
+	end
+
+	local unitModel = aiData.UnitModel
+	local humanoid = unitModel and unitModel:FindFirstChild("Humanoid")
+	local offset = nil
+	if humanoid and humanoid.HipHeight and humanoid.HipHeight > 0 then
+		offset = humanoid.HipHeight
+	else
+		offset = rootPart.Size.Y * 0.5
+	end
+
+	aiData._GroundOffsetY = offset
+	return offset
+end
+
 local function ClampToGround(aiData)
 	if not CONFIG.GROUND_CLAMP.ENABLED then return end
 
 	local unitModel = aiData.UnitModel
 	local rootPart = unitModel:FindFirstChild("HumanoidRootPart")
 	if not rootPart then return end
+	local groundOffset = ResolveGroundOffsetY(aiData, rootPart)
 
 	-- 检测间隔控制
 	local now = tick()
@@ -569,7 +588,7 @@ local function ClampToGround(aiData)
 
 		local result = workspace:Raycast(rayOrigin, rayDirection, rayParams)
 		if result then
-			aiData._BaseGroundY = result.Position.Y
+			aiData._BaseGroundY = result.Position.Y + groundOffset
 		else
 			aiData._BaseGroundY = rootPart.Position.Y
 		end
@@ -592,7 +611,7 @@ local function ClampToGround(aiData)
 
 		local result = workspace:Raycast(rayOrigin, rayDirection, rayParams)
 		if result then
-			local targetY = result.Position.Y + 3  -- 加上角色高度偏移
+			local targetY = result.Position.Y + groundOffset
 			-- 平滑下降而非瞬移
 			local newY = currentY - math.min(heightDiff * 0.5, 2)
 			newY = math.max(newY, targetY)
@@ -981,6 +1000,7 @@ local function UpdateMovingState(aiData, deltaTime)
 							-- 瞬移到目标位置（保持当前朝向）
 							local currentCFrame = myRoot.CFrame
 							local targetY = moveTarget.Y
+							local groundOffset = ResolveGroundOffsetY(aiData, myRoot)
 
 							-- 射线检测确保落在地面上
 							local rayParams = RaycastParams.new()
@@ -995,7 +1015,7 @@ local function UpdateMovingState(aiData, deltaTime)
 							)
 
 							if rayResult then
-								targetY = rayResult.Position.Y + 3 -- 加上角色高度偏移
+								targetY = rayResult.Position.Y + groundOffset
 							end
 
 							-- 执行瞬移（保持Y轴旋转朝向）

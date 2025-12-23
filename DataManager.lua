@@ -75,8 +75,9 @@ PlayerData = {
         }
     },
     IdleCoinData = {           -- V2.6挂机金币系统
-        LastLogoutTime = number,   -- 上次登出时间戳
-        PendingCoins = number,     -- 待领取的挂机金币
+        LastLogoutTime = number,       -- 上次登出时间戳
+        PendingCoins = number,         -- 待领取的挂机金币
+        GuideEligibleOnLogin = boolean,-- 是否允许本次登录触发挂机金币引导
     },
     ChapterProgress = {        -- V2.8章节进度系统
         CurrentChapter = number,   -- 当前挑战章节(从1开始)
@@ -254,6 +255,7 @@ local function SaveToDataStore(player, playerData, userId)
 	local dataToSave = {
 		UserId = playerData.UserId,
 		HomeSlot = playerData.HomeSlot,
+		IsNewPlayer = playerData.IsNewPlayer,
 		Currency = SanitizeForDataStore(playerData.Currency),
 		Units = CleanUnits(playerData.Units),  -- 关键：清洗Units中的Vector3等类型
 		PlacedUnits = SanitizeForDataStore(playerData.PlacedUnits),  -- 🔥修复持久化：保存放置数据
@@ -308,6 +310,7 @@ local function CreateDefaultData(player)
     return {
         UserId = player.UserId,
         Player = player,
+        IsNewPlayer = true,  -- 新玩家标记（首次进店流程使用）
         HomeSlot = 0,  -- 初始为0,由PlayerManager分配
         Currency = {
             Coins = GameConfig.INITIAL_COINS,  -- 初始金币100
@@ -318,6 +321,7 @@ local function CreateDefaultData(player)
         IdleCoinData = {  -- V2.6挂机金币系统：初始化
             LastLogoutTime = 0,
             PendingCoins = 0,
+            GuideEligibleOnLogin = false,
         },
         ChapterProgress = {  -- V2.8章节进度系统：初始化
             CurrentChapter = 1,       -- 默认从第1章开始
@@ -453,6 +457,9 @@ function DataManager.InitializePlayerData(player)
         -- 使用加载的数据，但重新设置Player引用
         playerData = loadedData
         playerData.Player = player
+        if playerData.IsNewPlayer == nil then
+            playerData.IsNewPlayer = false  -- 已有存档默认不是新玩家
+        end
 
         -- 🔥重要：清除旧的HomeSlot，让PlayerManager重新分配
         -- HomeSlot是运行时动态分配的，不应该从存档恢复
@@ -480,6 +487,7 @@ function DataManager.InitializePlayerData(player)
             playerData.IdleCoinData = {
                 LastLogoutTime = 0,
                 PendingCoins = 0,
+                GuideEligibleOnLogin = false,
             }
         end
 
@@ -1213,14 +1221,21 @@ end
 function DataManager.GetIdleCoinData(player)
     local playerData = DataManager.GetPlayerData(player)
     if not playerData then
-        return {LastLogoutTime = 0, PendingCoins = 0}
+        return {
+            LastLogoutTime = 0,
+            PendingCoins = 0,
+            GuideEligibleOnLogin = false,
+        }
     end
 
     if not playerData.IdleCoinData then
         playerData.IdleCoinData = {
             LastLogoutTime = 0,
             PendingCoins = 0,
+            GuideEligibleOnLogin = false,
         }
+    elseif playerData.IdleCoinData.GuideEligibleOnLogin == nil then
+        playerData.IdleCoinData.GuideEligibleOnLogin = false
     end
 
     return playerData.IdleCoinData
@@ -1243,7 +1258,10 @@ function DataManager.SetPendingIdleCoins(player, coins)
         playerData.IdleCoinData = {
             LastLogoutTime = 0,
             PendingCoins = 0,
+            GuideEligibleOnLogin = false,
         }
+    elseif playerData.IdleCoinData.GuideEligibleOnLogin == nil then
+        playerData.IdleCoinData.GuideEligibleOnLogin = false
     end
 
     playerData.IdleCoinData.PendingCoins = coins
@@ -1267,7 +1285,10 @@ function DataManager.SetLastLogoutTime(player, timestamp)
         playerData.IdleCoinData = {
             LastLogoutTime = 0,
             PendingCoins = 0,
+            GuideEligibleOnLogin = false,
         }
+    elseif playerData.IdleCoinData.GuideEligibleOnLogin == nil then
+        playerData.IdleCoinData.GuideEligibleOnLogin = false
     end
 
     playerData.IdleCoinData.LastLogoutTime = timestamp
@@ -1291,7 +1312,10 @@ function DataManager.AddPendingIdleCoins(player, amount)
         playerData.IdleCoinData = {
             LastLogoutTime = 0,
             PendingCoins = 0,
+            GuideEligibleOnLogin = false,
         }
+    elseif playerData.IdleCoinData.GuideEligibleOnLogin == nil then
+        playerData.IdleCoinData.GuideEligibleOnLogin = false
     end
 
     playerData.IdleCoinData.PendingCoins = (playerData.IdleCoinData.PendingCoins or 0) + amount
@@ -1314,12 +1338,16 @@ function DataManager.ClearPendingIdleCoins(player)
         playerData.IdleCoinData = {
             LastLogoutTime = 0,
             PendingCoins = 0,
+            GuideEligibleOnLogin = false,
         }
         return 0
+    elseif playerData.IdleCoinData.GuideEligibleOnLogin == nil then
+        playerData.IdleCoinData.GuideEligibleOnLogin = false
     end
 
     local oldAmount = playerData.IdleCoinData.PendingCoins or 0
     playerData.IdleCoinData.PendingCoins = 0
+    playerData.IdleCoinData.GuideEligibleOnLogin = false
     return oldAmount
 end
 

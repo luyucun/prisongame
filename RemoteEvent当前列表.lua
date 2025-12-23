@@ -95,7 +95,8 @@ ReplicatedStorage
         └──StopSFX（RemoteEvent） - 服务器→客户端：停止一次性音效(sfxKey)
     └──HouseUpgradeEvents（Folder）/  【V3.9新增】
         ├──StartUpgradeSequence（RemoteEvent） - 服务器→客户端：开始房屋升级镜头表现(homeSlot)
-        └──ClientCameraReady（RemoteEvent） - 客户端→服务器：镜头就位通知
+        ├──ClientCameraReady（RemoteEvent） - 客户端→服务器：镜头就位通知
+        └──UpgradeSequenceComplete（RemoteEvent） - 客户端→服务器：镜头表现完成
     └──ClientAIEvents（Folder）/  【V4.0新增 - 客户端AI迁移】
         ├──InitializeBattle（RemoteEvent） - 服务器→客户端：初始化战斗(battleId, attackUnits, defenseUnits, battleField)
         ├──SyncUnitPosition（RemoteEvent） - 服务器→客户端：同步单位位置(battleId, unitModel, position)
@@ -956,6 +957,7 @@ CampaignStateUpdate事件变更（V3.6）：
 位置：ReplicatedStorage/Events/HouseUpgradeEvents/ （新建文件夹）
 🆕 StartUpgradeSequence (RemoteEvent) - 需在Studio中手动创建（或由服务端自动创建）
 🆕 ClientCameraReady (RemoteEvent) - 需在Studio中手动创建（或由服务端自动创建）
+🆕 UpgradeSequenceComplete (RemoteEvent) - 需在Studio中手动创建（或由服务端自动创建）
 
 创建步骤：
 1. 打开Roblox Studio
@@ -967,7 +969,8 @@ CampaignStateUpdate事件变更（V3.6）：
 7. 选择 "Insert Object" > "RemoteEvent"
 8. 将新建的 RemoteEvent 重命名为 "StartUpgradeSequence"
 9. 重复步骤7-8，创建 "ClientCameraReady"
-10. 保存游戏
+10. 重复步骤7-8，创建 "UpgradeSequenceComplete"
+11. 保存游戏
 
 功能说明：
 - StartUpgradeSequence：服务器→客户端：开始房屋升级镜头表现
@@ -977,6 +980,10 @@ CampaignStateUpdate事件变更（V3.6）：
 - ClientCameraReady：客户端→服务器：镜头就位通知
   参数：无（服务器根据玩家身份处理）
   触发时机：客户端镜头移动到位后通知服务端可以替换房屋
+
+- UpgradeSequenceComplete：客户端→服务器：镜头表现完成
+  参数：无（服务器根据玩家身份处理）
+  触发时机：镜头表现结束并恢复玩家视角后
 
 注意：服务端HouseUpgradeSystem.lua会在初始化时自动创建这些事件（如果不存在），
 但建议手动创建以确保事件在系统初始化前就存在。

@@ -22,7 +22,7 @@ GameConfig.USE_STUDIO_DATASTORE_SUFFIX = true
 GameConfig.MAX_PLAYERS = 6
 
 -- 玩家初始货币配置
-GameConfig.INITIAL_COINS = 200
+GameConfig.INITIAL_COINS = 0
 
 -- ==================== 基地相关配置 ====================
 -- 基地数量(对应玩家数量)

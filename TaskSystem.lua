@@ -603,6 +603,19 @@ function TaskSystem.OnCompleteBattle(player)
     if not success then
         warn("[TaskSystem] OnCompleteBattle 错误: " .. tostring(err))
     end
+
+    local guideSuccess, guideErr = pcall(function()
+        local guideModule = ServerScriptService.Systems:FindFirstChild("GuideSystem")
+        if guideModule and guideModule:IsA("ModuleScript") then
+            local GuideSystem = require(guideModule :: ModuleScript)
+            if not GuideSystem.IsGuideCompleted(player, 1005) then
+                GuideSystem.GMCompleteGuide(player, 1005)
+            end
+        end
+    end)
+    if not guideSuccess then
+        warn("[TaskSystem] OnCompleteBattle 引导完成错误: " .. tostring(guideErr))
+    end
 end
 
 --[[

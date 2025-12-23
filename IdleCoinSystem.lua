@@ -527,6 +527,7 @@ function IdleCoinSystem.OnPlayerJoin(player)
 	-- 累加到待领取金币
 	local totalPendingCoins = existingPendingCoins + offlineCoins
 	DataManager.SetPendingIdleCoins(player, totalPendingCoins)
+	idleCoinData.GuideEligibleOnLogin = (totalPendingCoins > 0)
 
 	-- 获取玩家基地ID（MainServer已等待HomeSlot设置完成，这里应该能直接获取到）
 	local homeId = PlayerManager.GetPlayerHomeId(player)

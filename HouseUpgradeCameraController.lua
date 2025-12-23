@@ -269,6 +269,14 @@ function HouseUpgradeCameraController.StartUpgradeSequence(homeSlot)
 		-- 6. 恢复镜头控制
 		RestoreCameraState()
 		isUpgrading = false
+
+		-- Notify server sequence complete
+		if InitializeEvents() then
+			local completeEvent = HouseUpgradeEvents:FindFirstChild("UpgradeSequenceComplete")
+			if completeEvent then
+				completeEvent:FireServer()
+			end
+		end
 	end)
 end
 

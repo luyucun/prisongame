@@ -49,14 +49,14 @@ GuideConfig.Guides = {
 		Enabled = true,                       -- 是否启用
 	},
 
-	-- 引导3：前往IdleFloor中心（获得第一个兵种后）
+	-- 引导3：前往IdleFloor中心（获得两个兵种后）
 	[1003] = {
 		GuideId = 1003,
 		GuideType = GuideConfig.GuideType.IDLE_FLOOR,
 		Name = "IdleFloorGuide",
 		Description = "引导前往IdleFloor中心",
 		TargetName = "IdleFloor",             -- 目标对象名称
-		TriggerCondition = "HAS_FIRST_UNIT",  -- 触发条件：获得第一个兵种
+		TriggerCondition = "HAS_TWO_UNITS",   -- 触发条件：获得两个兵种
 		ArrivalDistance = 15,                 -- 到达判定距离(studs)
 		Sort = 3,                             -- 排序
 		Enabled = true,                       -- 是否启用
@@ -76,16 +76,29 @@ GuideConfig.Guides = {
 		SkipIfNoUnits = true,                 -- 如果背包没有兵种则跳过
 	},
 
-	-- 引导5：点击Attack按钮（首次摆放兵种后）
+	-- 引导5：点击Attack按钮（摆放两个兵种后）
 	[1005] = {
 		GuideId = 1005,
 		GuideType = GuideConfig.GuideType.UI_FOCUS,
 		Name = "AttackButtonGuide",
 		Description = "引导点击Attack按钮",
 		TargetUIPath = "MainGui/BattleControl/Play", -- UI路径
-		TriggerCondition = "FIRST_UNIT_PLACED", -- 触发条件：首次摆放兵种
+		TriggerCondition = "TWO_UNITS_PLACED",  -- 触发条件：摆放两个兵种
 		Sort = 5,                             -- 排序
 		Enabled = true,                       -- 是否启用
+	},
+
+	-- Guide 6: shop guide after house upgrade cinematic
+	[1006] = {
+		GuideId = 1006,
+		GuideType = GuideConfig.GuideType.SHOP,
+		Name = "ShopGuideAfterUpgrade",
+		Description = "Guide player to shop after house upgrade cinematic",
+		TargetName = "KeepShoper01",
+		TriggerCondition = "MANUAL",
+		ArrivalDistance = 10,
+		Sort = 6,
+		Enabled = true,
 	},
 }
 

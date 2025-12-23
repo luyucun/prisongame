@@ -28,11 +28,11 @@ TalkConfig.Options = {
 		Sort = 1,
 		OneTime = true,
 		Condition = { Type = TalkConfig.ConditionType.DEFAULT },
-		OptionText = "这里发生了什么?",
+		OptionText = "What is this place?",
 		Action = TalkConfig.OptionType.DIALOG,
 		Dialogues = {
-			"你被绑架了",
-			"我现在给你200金币",
+			"You're locked up. I can help you bust out.",
+			"Here's some CASH. Go hire two INMATES to help you escape.",
 		},
 		RewardCoins = 200,
 	},
@@ -41,10 +41,10 @@ TalkConfig.Options = {
 		Sort = 2,
 		OneTime = true,
 		Condition = { Type = TalkConfig.ConditionType.CHAPTER_COMPLETED, Chapter = 1 },
-		OptionText = "为什么我还没逃离",
+		OptionText = "Why am I still in prison?",
 		Action = TalkConfig.OptionType.DIALOG,
 		Dialogues = {
-			"因为还有其他监狱",
+			"You're marked as the MOST DANGEROUS inmate, so there are multiple layers of security outside.",
 		},
 	},
 	[1003] = {
@@ -52,7 +52,7 @@ TalkConfig.Options = {
 		Sort = 3,
 		OneTime = false,
 		Condition = { Type = TalkConfig.ConditionType.TALK_COMPLETED, TalkId = 1001 },
-		OptionText = "购买囚犯",
+		OptionText = "Hire INMATES",
 		Action = TalkConfig.OptionType.OPEN_SHOP,
 	},
 	[1004] = {
@@ -60,11 +60,11 @@ TalkConfig.Options = {
 		Sort = 4,
 		OneTime = false,
 		Condition = { Type = TalkConfig.ConditionType.TALK_COMPLETED, TalkId = 1001 },
-		OptionText = "如何提升实力",
+		OptionText = "Expand Army?",
 		Action = TalkConfig.OptionType.DIALOG,
 		Dialogues = {
-			"1.不断挑战获得金币，以及领取挂机金币奖励，然后购买各种兵种",
-			"2.合成更高等级的兵",
+			"1.Get more CASH from challenges or AFK to buy powerful INMATES and expand your ARMY.",
+			"2.Drag and MERGE two inmates of the same level to get a HIGHER level inmate with much more POWER!",
 		},
 	},
 	[10005] = {
@@ -72,7 +72,7 @@ TalkConfig.Options = {
 		Sort = 5,
 		OneTime = false,
 		Condition = { Type = TalkConfig.ConditionType.TALK_COMPLETED, TalkId = 1001 },
-		OptionText = "离开",
+		OptionText = "Exit",
 		Action = TalkConfig.OptionType.CLOSE_LIST,
 	},
 }

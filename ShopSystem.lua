@@ -35,7 +35,17 @@ local LastPurchaseTime = {}   -- 最后购买时间（冷却机制）
 local PlayerStockData = {}    -- 玩家库存数据: [player] = {[shopId] = {[unitId] = stock, LastRefreshTime = tick()}}
 local RefreshTimers = {}      -- 刷新定时器: [player] = timer
 local TimerUpdateConnections = {} -- 倒计时更新连接: [player] = connection
-local LastTimerUpdate = {}    -- V2.1修复：定时器更新时间戳，移出Player实例 [player] = timestamp
+local LastTimerUpdate = {}    -- V2.1修复：定时器更新时间戳，移出Player实例 [player] = timestamp
+
+local FIRST_OPEN_UNIT_ID = "10001"
+local FIRST_OPEN_STOCK = 2
+local FIRST_OPEN_STATE = {
+	NEW = 0,
+	ACTIVE = 1,
+	SOLD_OUT = 2,
+	COMPLETED = 3,
+}
+
 
 -- 事件引用
 local ShopEvents = nil
@@ -220,13 +230,86 @@ local function InitializePlayerStock(player, shopId)
 end
 
 --[[ 刷新商店库存 ]]
-local function RefreshShopStock(player, shopId, isFirstRefresh)
+local function EnsureFirstOpenState(player, shopId)
+	if shopId ~= "UnitShop" or not DataManager then
+		return FIRST_OPEN_STATE.COMPLETED
+	end
+	local shopData = DataManager.GetShopData(player, shopId)
+	if not shopData then
+		return FIRST_OPEN_STATE.COMPLETED
+	end
+	if shopData.FirstOpenState == nil then
+		local playerData = DataManager.GetPlayerData(player)
+		if playerData and playerData.IsNewPlayer then
+			shopData.FirstOpenState = FIRST_OPEN_STATE.NEW
+		else
+			shopData.FirstOpenState = FIRST_OPEN_STATE.COMPLETED
+		end
+		DataManager.SavePlayerDataThrottled(player)
+	end
+	return shopData.FirstOpenState
+end
+
+local function SetFirstOpenState(player, shopId, newState)
+	if shopId ~= "UnitShop" or not DataManager then
+		return
+	end
+	local shopData = DataManager.GetShopData(player, shopId)
+	if not shopData then
+		return
+	end
+	shopData.FirstOpenState = newState
+	if newState == FIRST_OPEN_STATE.COMPLETED then
+		local playerData = DataManager.GetPlayerData(player)
+		if playerData then
+			playerData.IsNewPlayer = false
+		end
+	end
+	DataManager.SavePlayerDataThrottled(player)
+end
+
+local function ApplyFirstOpenStock(player, shopId)
+	InitializePlayerStock(player, shopId)
+	local stockData = PlayerStockData[player][shopId]
+	if not stockData then
+		return nil
+	end
+
+	local currentStock = stockData[FIRST_OPEN_UNIT_ID]
+	if type(currentStock) ~= "number" then
+		currentStock = FIRST_OPEN_STOCK
+	end
+
+	local shopData = ShopConfig.Shops[shopId]
+	if shopData then
+		for _, itemConfig in ipairs(shopData.Items) do
+			if itemConfig.ItemType == "Unit" then
+				stockData[itemConfig.UnitId] = 0
+			end
+		end
+	end
+
+	stockData[FIRST_OPEN_UNIT_ID] = currentStock
+
+	if DataManager then
+		DataManager.SetShopStock(player, shopId, stockData)
+	end
+
+	return currentStock
+end
+
+local function RefreshShopStock(player, shopId, isFirstRefresh, forceNormal)
 	if not GameConfig.Shop.EnableStockSystem then
 		return {} -- 库存系统未启用
 	end
 
 	InitializePlayerStock(player, shopId)
-
+	if shopId == "UnitShop" then
+		local firstOpenState = EnsureFirstOpenState(player, shopId)
+		if firstOpenState ~= FIRST_OPEN_STATE.COMPLETED and not forceNormal then
+			return PlayerStockData[player][shopId] or {}
+		end
+	end
 	local stockData = PlayerStockData[player][shopId]
 	local shopData = ShopConfig.Shops[shopId]
 
@@ -636,6 +719,17 @@ local function OnRequestShopList(player)
 			shopId = "UnitShop"
 		end
 
+		local firstOpenState = nil
+		local refreshedStock = nil
+		if shopId == "UnitShop" then
+			firstOpenState = EnsureFirstOpenState(player, shopId)
+			if firstOpenState == FIRST_OPEN_STATE.SOLD_OUT then
+				refreshedStock = RefreshShopStock(player, shopId, false, true)
+				SetFirstOpenState(player, shopId, FIRST_OPEN_STATE.COMPLETED)
+				firstOpenState = FIRST_OPEN_STATE.COMPLETED
+			end
+		end
+
 		local shopItems = {}
 		local useFallback = false
 
@@ -654,6 +748,42 @@ local function OnRequestShopList(player)
 			end
 		end
 
+		if shopId == "UnitShop" and firstOpenState and firstOpenState ~= FIRST_OPEN_STATE.COMPLETED and not useFallback then
+			if firstOpenState == FIRST_OPEN_STATE.NEW then
+				SetFirstOpenState(player, shopId, FIRST_OPEN_STATE.ACTIVE)
+				firstOpenState = FIRST_OPEN_STATE.ACTIVE
+			end
+
+			local filteredItems = {}
+			for _, item in ipairs(shopItems) do
+				if item.UnitId == FIRST_OPEN_UNIT_ID then
+					item.RobuxPrice = 0
+					table.insert(filteredItems, item)
+					break
+				end
+			end
+			shopItems = filteredItems
+
+			local currentStock = ApplyFirstOpenStock(player, shopId) or FIRST_OPEN_STOCK
+			local stockData = GetPlayerStock(player, shopId)
+
+			for _, item in ipairs(shopItems) do
+				if GameConfig.Shop.EnableStockSystem then
+					item.Stock = stockData[item.UnitId] or 0
+				else
+					item.Stock = currentStock
+				end
+				local isRanged = UnitConfig.IsRangedUnit(item.UnitId)
+				item.Type = isRanged and UnitConfig.UnitType.RANGED or UnitConfig.UnitType.MELEE
+			end
+
+			if ShopListEvent then
+				ShopListEvent:FireClient(player, shopItems)
+			end
+
+			return
+		end
+
 		if GameConfig.Shop.EnableStockSystem and not useFallback then
 			if not PlayerStockData[player] or not PlayerStockData[player][shopId] then
 				warn(string.format(
@@ -670,7 +800,7 @@ local function OnRequestShopList(player)
 				end
 			end
 
-			local stockData = GetPlayerStock(player, shopId)
+			local stockData = refreshedStock or GetPlayerStock(player, shopId)
 
 			for _, item in ipairs(shopItems) do
 				item.Stock = stockData[item.UnitId] or 0
@@ -752,6 +882,22 @@ local function OnPurchaseUnit(player, unitId)
 			end
 		end
 
+		local firstOpenState = nil
+		if shopId == "UnitShop" then
+			firstOpenState = EnsureFirstOpenState(player, shopId)
+			if firstOpenState ~= FIRST_OPEN_STATE.COMPLETED then
+				if unitId ~= FIRST_OPEN_UNIT_ID then
+					PurchaseLocks[player] = false
+					SendFailure(player, "商品未上架")
+					return
+				end
+				if firstOpenState == FIRST_OPEN_STATE.NEW then
+					SetFirstOpenState(player, shopId, FIRST_OPEN_STATE.ACTIVE)
+					firstOpenState = FIRST_OPEN_STATE.ACTIVE
+				end
+				ApplyFirstOpenStock(player, shopId)
+			end
+		end
 		local onSale, reason = ShopConfig.IsUnitOnSale(shopId, unitId, player)
 		if not onSale then
 			PurchaseLocks[player] = false
@@ -855,6 +1001,13 @@ local function OnPurchaseUnit(player, unitId)
 			end
 		end
 
+		if firstOpenState and firstOpenState ~= FIRST_OPEN_STATE.COMPLETED and unitId == FIRST_OPEN_UNIT_ID then
+			local remainingStock = GetPlayerStock(player, shopId, unitId)
+			if remainingStock <= 0 then
+				SetFirstOpenState(player, shopId, FIRST_OPEN_STATE.SOLD_OUT)
+			end
+		end
+
 		LastPurchaseTime[player] = now
 		PurchaseLocks[player] = false
 
@@ -911,6 +1064,15 @@ local function OnPurchaseUnitRobux(player, unitId)
 			shopId = "UnitShop"
 		end
 
+		local firstOpenState = nil
+		if shopId == "UnitShop" then
+			firstOpenState = EnsureFirstOpenState(player, shopId)
+			if firstOpenState ~= FIRST_OPEN_STATE.COMPLETED then
+				PurchaseLocks[player] = false
+				SendFailure(player, "新手阶段暂不支持Robux购买")
+				return
+			end
+		end
 		local onSale, reason = ShopConfig.IsUnitOnSale(shopId, unitId, player)
 		if not onSale then
 			PurchaseLocks[player] = false

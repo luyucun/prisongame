@@ -49,6 +49,25 @@ local isInitialized = false
 
 -- RemoteEvent引用
 local HouseUpgradeEvents = nil
+local upgradeEventsConnected = false
+local pendingShopGuideAfterUpgrade = {}
+local GuideSystem = nil
+
+--[[
+延迟加载GuideSystem（避免循环依赖）
+]]
+local function GetGuideSystem()
+	if not GuideSystem then
+		local systemsFolder = ServerScriptService:FindFirstChild("Systems")
+		if systemsFolder then
+			local guideModule = systemsFolder:FindFirstChild("GuideSystem")
+			if guideModule then
+				GuideSystem = require(guideModule)
+			end
+		end
+	end
+	return GuideSystem
+end
 
 --[[
 初始化RemoteEvent（V3.9新增）
@@ -91,6 +110,15 @@ local function InitializeEvents()
 		print("[HouseUpgradeSystem] 已创建ClientCameraReady事件")
 	end
 
+	-- 创建UpgradeSequenceComplete事件（客户端→服务端：镜头表现完成）
+	local completeEvent = houseUpgradeFolder:FindFirstChild("UpgradeSequenceComplete")
+	if not completeEvent then
+		completeEvent = Instance.new("RemoteEvent")
+		completeEvent.Name = "UpgradeSequenceComplete"
+		completeEvent.Parent = houseUpgradeFolder
+		print("[HouseUpgradeSystem] 已创建UpgradeSequenceComplete事件")
+	end
+
 	HouseUpgradeEvents = houseUpgradeFolder
 	return true
 end
@@ -121,6 +149,26 @@ local function EnsureInitialized()
 
 	-- 初始化RemoteEvent
 	InitializeEvents()
+
+	-- 监听镜头表现完成事件（只绑定一次）
+	if not upgradeEventsConnected and HouseUpgradeEvents then
+		local completeEvent = HouseUpgradeEvents:FindFirstChild("UpgradeSequenceComplete")
+		if completeEvent then
+			completeEvent.OnServerEvent:Connect(function(player)
+				if not player or not player.Parent then
+					return
+				end
+				if pendingShopGuideAfterUpgrade[player.UserId] then
+					pendingShopGuideAfterUpgrade[player.UserId] = nil
+					local guideSystem = GetGuideSystem()
+					if guideSystem then
+						guideSystem.TriggerGuide(player, 1006)
+					end
+				end
+			end)
+		end
+		upgradeEventsConnected = true
+	end
 
 	isInitialized = true
 end
@@ -436,6 +484,9 @@ function HouseUpgradeSystem.OnChapterCompleted(player, chapterId, useCinematic)
 
 			if useCinematic then
 				-- V3.9新增：使用镜头表现的升级
+				if chapterId == 1 then
+					pendingShopGuideAfterUpgrade[player.UserId] = true
+				end
 				HouseUpgradeSystem.ReplaceHouseModelWithCinematic(player, newModelName)
 			else
 				-- 直接升级（无镜头表现）
