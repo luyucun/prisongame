@@ -1,4 +1,4 @@
---[[
+﻿--[[
 脚本名称: DataManager
 脚本类型: ModuleScript (服务端核心)
 脚本位置: ServerScriptService/Core/DataManager
@@ -42,8 +42,32 @@ end
 local playerDataCache = {}
 
 -- 🔥修复服务器关闭时数据保存：保存状态跟踪
-local pendingSaves = {}  -- [UserId] = true 表示正在保存
+local pendingSaves = {}  -- [UserId] = in-flight save count
 local isShuttingDown = false  -- 服务器是否正在关闭
+local LOAD_RETRY_ATTEMPTS = isStudio and 1 or 3
+local LOAD_RETRY_DELAY_SECONDS = 0.5
+
+local function AddPendingSave(userId)
+    if not userId then
+        return
+    end
+    pendingSaves[userId] = (pendingSaves[userId] or 0) + 1
+end
+
+local function RemovePendingSave(userId)
+    if not userId then
+        return
+    end
+    local current = pendingSaves[userId]
+    if not current then
+        return
+    end
+    if current <= 1 then
+        pendingSaves[userId] = nil
+    else
+        pendingSaves[userId] = current - 1
+    end
+end
 
 --[[
 玩家数据结构:
@@ -179,65 +203,82 @@ end
 从DataStore加载玩家数据（V2.1库存系统：实现真正的持久化）
 @param player Player - 玩家对象
 @return table|nil - 加载的数据，失败返回nil
+@return string - ok | missing | error
 ]]
 local function LoadFromDataStore(player)
-	local success, data = pcall(function()
-		return PlayerDataStore:GetAsync("Player_" .. player.UserId)
-	end)
-
-	-- Studio环境下如果DataStore访问失败，可能是未开启API Access
-	if not success and isStudio then
-		warn(string.format(
-			"[DataManager] ⚠️ Studio DataStore访问失败（可能未开启API Access），使用空数据 - 玩家:%s 错误:%s",
-			player.Name,
-			tostring(data)
-		))
-		return nil
+	if not player then
+		return nil, "error"
 	end
 
-	if success and data then
-		-- 还原Vector3等类型（如果需要）
-		if data.Units then
-			data.Units = RestoreFromDataStore(data.Units)
+	local lastError = nil
+	for attempt = 1, LOAD_RETRY_ATTEMPTS do
+		local success, data = pcall(function()
+			return PlayerDataStore:GetAsync("Player_" .. player.UserId)
+		end)
+
+		if success then
+			if not data then
+				return nil, "missing"
+			end
+
+			-- 还原Vector3等类型（如果需要）
+			if data.Units then
+				data.Units = RestoreFromDataStore(data.Units)
+			end
+			if data.Currency then
+				data.Currency = RestoreFromDataStore(data.Currency)
+			end
+			if data.PlacedUnits then
+				data.PlacedUnits = RestoreFromDataStore(data.PlacedUnits)  -- ??修复持久化：恢复放置数据
+			end
+			if data.ShopData then
+				data.ShopData = RestoreFromDataStore(data.ShopData)
+			end
+			if data.IdleCoinData then
+				data.IdleCoinData = RestoreFromDataStore(data.IdleCoinData)  -- V2.6：恢复挂机金币数据
+			end
+			if data.ChapterProgress then
+				data.ChapterProgress = RestoreFromDataStore(data.ChapterProgress)  -- V2.8：恢复章节进度数据
+			end
+			if data.SkillInventory then
+				data.SkillInventory = RestoreFromDataStore(data.SkillInventory)  -- V3.0：恢复技能背包数据
+			end
+			if data.TaskData then
+				data.TaskData = RestoreFromDataStore(data.TaskData)  -- V3.3：恢复任务数据
+			end
+			if data.GuideData then
+				data.GuideData = RestoreFromDataStore(data.GuideData)  -- V3.5：恢复引导数据
+			end
+			if data.TalkData then
+				data.TalkData = RestoreFromDataStore(data.TalkData)  -- V4.5对话数据
+			end
+
+			return data, "ok"
 		end
-		if data.Currency then
-			data.Currency = RestoreFromDataStore(data.Currency)
+
+		lastError = data
+		if attempt < LOAD_RETRY_ATTEMPTS then
+			task.wait(LOAD_RETRY_DELAY_SECONDS * attempt)
 		end
-		if data.PlacedUnits then
-			data.PlacedUnits = RestoreFromDataStore(data.PlacedUnits)  -- 🔥修复持久化：恢复放置数据
-		end
-		if data.ShopData then
-			data.ShopData = RestoreFromDataStore(data.ShopData)
-		end
-		if data.IdleCoinData then
-			data.IdleCoinData = RestoreFromDataStore(data.IdleCoinData)  -- V2.6：恢复挂机金币数据
-		end
-		if data.ChapterProgress then
-			data.ChapterProgress = RestoreFromDataStore(data.ChapterProgress)  -- V2.8：恢复章节进度数据
-		end
-		if data.SkillInventory then
-			data.SkillInventory = RestoreFromDataStore(data.SkillInventory)  -- V3.0：恢复技能背包数据
-		end
-		if data.TaskData then
-			data.TaskData = RestoreFromDataStore(data.TaskData)  -- V3.3：恢复任务数据
-		end
-		if data.GuideData then
-			data.GuideData = RestoreFromDataStore(data.GuideData)  -- V3.5：恢复引导数据
-		end
-		if data.TalkData then
-			data.TalkData = RestoreFromDataStore(data.TalkData)  -- V4.5对话数据
-		end
-		return data
-	elseif not success then
-		warn(string.format(
-			"%s [DataManager] DataStore加载失败 - 玩家:%s 错误:%s",
-			GameConfig.LOG_PREFIX,
-			player.Name,
-			tostring(data)
-		))
 	end
 
-	return nil
+	if isStudio then
+		warn(string.format(
+			"[DataManager] Studio DataStore load failed (API Access?) - player:%s error:%s",
+			player.Name,
+			tostring(lastError)
+		))
+		return nil, "missing"
+	end
+
+	warn(string.format(
+		"%s [DataManager] DataStore load failed after %d attempts - player:%s error:%s",
+		GameConfig.LOG_PREFIX,
+		LOAD_RETRY_ATTEMPTS,
+		player.Name,
+		tostring(lastError)
+	))
+	return nil, "error"
 end
 
 --[[
@@ -446,12 +487,18 @@ function DataManager.InitializePlayerData(player)
 
     -- 检查是否已存在数据
     if playerDataCache[player.UserId] then
+        playerDataCache[player.UserId].Player = player
         return playerDataCache[player.UserId]
     end
 
     -- V2.1库存系统：尝试从DataStore加载数据
-    local loadedData = LoadFromDataStore(player)
+    local loadedData, loadStatus = LoadFromDataStore(player)
     local playerData
+
+    if loadStatus == "error" then
+        warn(GameConfig.LOG_PREFIX, "InitializePlayerData: DataStore load failed -", player.Name)
+        return nil
+    end
 
     if loadedData then
         -- 使用加载的数据，但重新设置Player引用
@@ -514,7 +561,8 @@ function DataManager.InitializePlayerData(player)
             playerData.GuideData = {
                 CompletedGuides = {},
             }
-        end
+        end
+
         -- V4.5对话系统：确保TalkData字段存在（向后兼容）
         if not playerData.TalkData then
             playerData.TalkData = {
@@ -830,17 +878,22 @@ end
 --[[
 保存玩家数据（V2.1库存系统：保存到DataStore）
 @param player Player - 玩家对象
+@param waitForDataSeconds number - optional wait before saving when data is missing
 @return boolean - 是否保存成功
 ]]
-function DataManager.SavePlayerData(player)
+function DataManager.SavePlayerData(player, waitForDataSeconds)
+    local userId = player and player.UserId
+    AddPendingSave(userId)
+
     local playerData = DataManager.GetPlayerData(player)
+    if not playerData and waitForDataSeconds and waitForDataSeconds > 0 then
+        playerData = DataManager.WaitForPlayerData(player, waitForDataSeconds)
+    end
     if not playerData then
+        RemovePendingSave(userId)
         warn(GameConfig.LOG_PREFIX, "SavePlayerData: 找不到玩家数据")
         return false
     end
-
-    -- 🔥修复服务器关闭时数据保存：标记保存开始
-    pendingSaves[player.UserId] = true
 
     -- 🔥修复持久化：只在保存成功后才更新LastSaveTime，避免保存失败后节流机制阻止重试
     local saveSuccess = SaveToDataStore(player, playerData)
@@ -849,7 +902,7 @@ function DataManager.SavePlayerData(player)
     end
 
     -- 🔥修复服务器关闭时数据保存：标记保存完成
-    pendingSaves[player.UserId] = nil
+    RemovePendingSave(userId)
 
     return saveSuccess
 end
@@ -864,11 +917,39 @@ function DataManager.ClearPlayerData(player)
     end
 
     -- 保存数据
-    DataManager.SavePlayerData(player)
+    local saveSuccess = DataManager.SavePlayerData(player, 3)
+    if saveSuccess then
+        -- 从缓存中移除
+        playerDataCache[player.UserId] = nil
+        return
+    end
 
-    -- 从缓存中移除
-    playerDataCache[player.UserId] = nil
+    local userId = player.UserId
+    local originalPlayer = player
+    if not playerDataCache[userId] then
+        warn(GameConfig.LOG_PREFIX, "ClearPlayerData: cache missing, skip cleanup -", player.Name)
+        return
+    end
 
+    warn(GameConfig.LOG_PREFIX, "ClearPlayerData: save failed, keep cache and retry -", player.Name)
+    task.spawn(function()
+        local retryDelay = 2
+        local maxAttempts = 3
+        for attempt = 1, maxAttempts do
+            task.wait(retryDelay)
+            if not playerDataCache[userId] or playerDataCache[userId].Player ~= originalPlayer then
+                return
+            end
+            local success = DataManager.SaveCachedPlayerData(userId)
+            if success then
+                if playerDataCache[userId] and playerDataCache[userId].Player == originalPlayer then
+                    playerDataCache[userId] = nil
+                end
+                return
+            end
+            retryDelay = retryDelay * 2
+        end
+    end)
 end
 
 -- ==================== 🔥修复持久化：放置单位数据管理 ====================
@@ -1089,13 +1170,13 @@ function DataManager.SaveCachedPlayerData(userId)
     end
 
     -- 标记保存开始
-    pendingSaves[userId] = true
+    AddPendingSave(userId)
 
     -- 创建临时Player对象用于保存（仅用于日志）
     local success = SaveToDataStore(nil, playerData, userId)
 
     -- 标记保存完成
-    pendingSaves[userId] = nil
+    RemovePendingSave(userId)
 
     return success
 end
@@ -1111,9 +1192,11 @@ function DataManager.WaitForAllSavesToComplete(timeout)
 
     while tick() - startTime < timeout do
         local hasPendingSaves = false
-        for _ in pairs(pendingSaves) do
-            hasPendingSaves = true
-            break
+        for _, count in pairs(pendingSaves) do
+            if count and count > 0 then
+                hasPendingSaves = true
+                break
+            end
         end
 
         if not hasPendingSaves then
@@ -1133,8 +1216,10 @@ end
 ]]
 function DataManager.GetPendingSaveCount()
     local count = 0
-    for _ in pairs(pendingSaves) do
-        count = count + 1
+    for _, pending in pairs(pendingSaves) do
+        if pending and pending > 0 then
+            count = count + 1
+        end
     end
     return count
 end

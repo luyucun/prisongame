@@ -18,6 +18,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 -- 引用配置
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
+local AUTO_SAVE_INTERVAL = 120
+local SHUTDOWN_SAVE_BUDGET = 8
 
 -- 引用核心模块
 local DataManager = require(ServerScriptService.Core.DataManager)
@@ -624,6 +626,22 @@ Players.PlayerRemoving:Connect(function(player)
 	end)
 end)
 
+task.spawn(function()
+	while true do
+		task.wait(AUTO_SAVE_INTERVAL)
+		if DataManager.IsShuttingDown and DataManager.IsShuttingDown() then
+			break
+		end
+		for _, player in ipairs(Players:GetPlayers()) do
+			if DataManager.GetPlayerData(player) then
+				pcall(function()
+					DataManager.SavePlayerDataThrottled(player)
+				end)
+			end
+		end
+	end
+end)
+
 -- ==================== 🔥修复持久化：服务器关闭数据保存 ====================
 
 -- 服务器关闭时保存所有玩家数据（🔥修复数据丢失问题）
@@ -631,6 +649,7 @@ game:BindToClose(function()
 	print(GameConfig.LOG_PREFIX .. " [MainServer] 🔥服务器关闭中，正在保存所有玩家数据...")
 
 	local startTime = tick()
+	local shutdownDeadline = startTime + SHUTDOWN_SAVE_BUDGET
 	local savedCount = 0
 	local errorCount = 0
 
@@ -649,7 +668,17 @@ game:BindToClose(function()
 
 	-- 第一步：保存在线玩家数据（包含地面兵种数据）
 	for _, player in pairs(activePlayersSnapshot) do
+		if tick() >= shutdownDeadline then
+			warn(string.format(
+				"%s [MainServer] ?? 关服保存预算耗尽，跳过剩余在线玩家保存",
+				GameConfig.LOG_PREFIX
+			))
+			break
+		end
 		task.spawn(function()  -- 并行保存提高效率
+			if tick() >= shutdownDeadline then
+				return
+			end
 			local success, error = pcall(function()
 				-- 🔥关键：先保存地面兵种数据到DataManager
 				if PlacementSystem and PlacementSystem.OnPlayerLeaving then
@@ -657,7 +686,7 @@ game:BindToClose(function()
 				end
 
 				-- 然后保存所有数据到DataStore
-				local saved = DataManager.SavePlayerData(player)
+				local saved = DataManager.SavePlayerData(player, 5)
 				if saved then
 					savedCount = savedCount + 1
 					print(string.format(
@@ -688,11 +717,18 @@ game:BindToClose(function()
 	end
 
 	-- 第二步：等待并行保存完成
-	task.wait(2)  -- 给并行任务一些时间
+	local parallelWait = shutdownDeadline - tick()
+	if parallelWait > 0 then
+		task.wait(math.min(2, parallelWait))  -- 给并行任务一些时间
+	end
 
 	-- 第三步：兜底保存缓存中的数据（防止Roblox已删除Player对象）
-	local allPlayerData = DataManager.GetAllPlayerData()
-	for userIdRaw, playerData in pairs(allPlayerData) do
+	if tick() < shutdownDeadline then
+		local allPlayerData = DataManager.GetAllPlayerData()
+		for userIdRaw, playerData in pairs(allPlayerData) do
+			if tick() >= shutdownDeadline then
+				break
+			end
 		-- 修复：确保userId是数字类型
 		local userId = tonumber(userIdRaw)
 		if userId then
@@ -708,6 +744,9 @@ game:BindToClose(function()
 			-- 如果不在在线快照中，需要兜底保存
 			if not isAlreadySaved then
 				task.spawn(function()
+					if tick() >= shutdownDeadline then
+						return
+					end
 					local success = DataManager.SaveCachedPlayerData(userId)
 					if success then
 						savedCount = savedCount + 1
@@ -730,15 +769,29 @@ game:BindToClose(function()
 			warn(string.format("%s [MainServer] ⚠️ 无效的UserId: %s", GameConfig.LOG_PREFIX, tostring(userIdRaw)))
 		end
 	end
+	end
 
 	-- 第四步：等待所有保存操作完成
-	local maxWaitTime = 15  -- 最多等待15秒
-	local waitSuccess = DataManager.WaitForAllSavesToComplete(maxWaitTime)
+	local waitBudget = shutdownDeadline - tick()
+	local waitSuccess = false
+	if waitBudget > 0 then
+		waitSuccess = DataManager.WaitForAllSavesToComplete(waitBudget)
+	end
 
 	local endTime = tick()
 	local duration = endTime - startTime
 
-	if waitSuccess then
+	if waitBudget <= 0 then
+		local pendingCount = DataManager.GetPendingSaveCount()
+		warn(string.format(
+			"%s [MainServer] ?? 关服保存预算已用尽：成功 %d 个，失败 %d 个，仍有 %d 个待保存，耗时 %.2f 秒",
+			GameConfig.LOG_PREFIX,
+			savedCount,
+			errorCount,
+			pendingCount,
+			duration
+		))
+	elseif waitSuccess then
 		print(string.format(
 			"%s [MainServer] 🔥数据保存完成：成功 %d 个，失败 %d 个，耗时 %.2f 秒",
 			GameConfig.LOG_PREFIX,

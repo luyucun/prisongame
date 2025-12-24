@@ -1185,17 +1185,20 @@ function PlacementSystem.OnPlayerLeaving(player)
 		end
 
 		-- 强制保存一次玩家数据（包含所有已放置的单位）
-		local saveSuccess, saveError = pcall(function()
-			DataManager.SavePlayerData(player)
-		end)
+		local isShuttingDown = DataManager.IsShuttingDown and DataManager.IsShuttingDown() or false
+		if not isShuttingDown then
+			local saveSuccess, saveError = pcall(function()
+				DataManager.SavePlayerData(player, 3)
+			end)
 
-		if not saveSuccess then
-			warn(string.format(
-				"%s [PlacementSystem] 🔥 玩家 %s 离开时保存数据失败: %s",
-				GameConfig.LOG_PREFIX,
-				player.Name,
-				tostring(saveError)
-				))
+			if not saveSuccess then
+				warn(string.format(
+					"%s [PlacementSystem] 🔥 玩家 %s 离开时保存数据失败: %s",
+					GameConfig.LOG_PREFIX,
+					player.Name,
+					tostring(saveError)
+					))
+			end
 		end
 	end
 

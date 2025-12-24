@@ -251,7 +251,12 @@ function PlayerManager.OnPlayerAdded(player)
     end
 
     -- 1. 初始化玩家数据
-    DataManager.InitializePlayerData(player)
+    local playerData = DataManager.InitializePlayerData(player)
+    if not playerData then
+        warn(GameConfig.LOG_PREFIX, "Player data load failed, kicking -", player.Name)
+        player:Kick("Data load failed. Please rejoin.")
+        return
+    end
 
     -- 2. 检查是否在Studio Play Here模式下
     local skipHomeAssignment = ShouldSkipHomeAssignment(player)
