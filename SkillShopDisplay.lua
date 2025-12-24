@@ -126,6 +126,18 @@ local function IsNotEnoughCashMessage(message)
 	return message and string.find(message, "金币不足")
 end
 
+local function MergeStockData(stockData)
+	if type(stockData) ~= "table" then
+		return
+	end
+
+	for key, value in pairs(stockData) do
+		if type(value) == "number" then
+			currentStockData[tostring(key)] = value
+		end
+	end
+end
+
 --[[
 初始化UI引用
 @return boolean - 是否成功
@@ -582,6 +594,16 @@ local function OnShopListReceived(shopList)
 		return
 	end
 
+	currentStockData = {}
+	for _, itemData in ipairs(shopList) do
+		if itemData and itemData.SkillId then
+			local stockKey = tostring(itemData.SkillId)
+			local stockValue = tonumber(itemData.Stock) or 0
+			currentStockData[stockKey] = stockValue
+			itemData.Stock = stockValue
+		end
+	end
+
 	shopData = shopList
 	UpdateShopDisplay()
 end
@@ -711,15 +733,24 @@ local function OnSkillStockUpdate(shopId, stockData)
 		print(LOG_PREFIX, "收到技能库存更新:", shopId)
 	end
 
-	currentStockData = stockData or {}
+	MergeStockData(stockData)
+
+	for _, itemData in ipairs(shopData) do
+		if itemData and itemData.SkillId then
+			local stockKey = tostring(itemData.SkillId)
+			local stockValue = currentStockData[stockKey]
+			if stockValue ~= nil then
+				itemData.Stock = stockValue
+			end
+		end
+	end
 
 	-- 更新所有商品卡片的库存显示
 	if itemContainer then
 		for _, card in ipairs(itemContainer:GetChildren()) do
 			if card:IsA("Frame") and string.find(card.Name, "SkillCard_") then
 				local skillIdStr = string.gsub(card.Name, "SkillCard_", "")
-				local skillId = tonumber(skillIdStr)
-				local stock = currentStockData[skillId] or 0
+				local stock = currentStockData[skillIdStr] or 0
 
 				local numberLabel = card:FindFirstChild("Number")
 				if numberLabel and numberLabel:IsA("TextLabel") then
@@ -867,6 +898,7 @@ end
 ]]
 function SkillShopDisplay.Cleanup()
 	shopData = {}
+	currentStockData = {}
 	currentSelectedItem = nil
 
 	for _, connection in ipairs(globalBuyConnections) do

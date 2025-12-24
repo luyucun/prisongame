@@ -190,6 +190,21 @@ end
 
 -- ==================== 库存系统函数 ====================
 
+-- 统一库存表key为字符串（RemoteEvent/DataStore会导致数字key不稳定）
+local function NormalizeSkillStockData(stockData)
+	if not stockData then
+		return
+	end
+
+	for key, value in pairs(stockData) do
+		if key ~= "LastRefreshTime" and type(key) ~= "string" then
+			local stringKey = tostring(key)
+			stockData[stringKey] = value
+			stockData[key] = nil
+		end
+	end
+end
+
 --[[
 初始化玩家技能库存数据
 @param player Player - 玩家实例
@@ -212,8 +227,13 @@ local function InitializePlayerSkillStock(player, shopId)
 
 		-- 恢复保存的库存数据
 		for skillId, stock in pairs(savedStock) do
-			PlayerSkillStockData[player][shopId][skillId] = stock
+			if type(stock) == "number" then
+				local stockKey = tostring(skillId)
+				PlayerSkillStockData[player][shopId][stockKey] = stock
+			end
 		end
+
+		NormalizeSkillStockData(PlayerSkillStockData[player][shopId])
 
 		if DEBUG_MODE then
 			local itemCount = 0
@@ -257,6 +277,13 @@ local function RefreshSkillShopStock(player, shopId)
 		))
 	end
 
+	NormalizeSkillStockData(stockData)
+	for key, _ in pairs(stockData) do
+		if key ~= "LastRefreshTime" then
+			stockData[key] = nil
+		end
+	end
+
 	-- 遍历商店中的所有技能商品并刷新库存
 	local refreshCount = 0
 	for _, itemConfig in ipairs(shopData.Items) do
@@ -270,10 +297,12 @@ local function RefreshSkillShopStock(player, shopId)
 
 				if hasStock then
 					local stock = math.random(stockConfig.StockMin, stockConfig.StockMax)
-					stockData[skillId] = stock
+					local stockKey = tostring(skillId)
+					stockData[stockKey] = stock
 					refreshCount = refreshCount + 1
 				else
-					stockData[skillId] = 0
+					local stockKey = tostring(skillId)
+					stockData[stockKey] = 0
 				end
 			end
 		end
@@ -308,7 +337,7 @@ local function RefreshSkillShopStock(player, shopId)
 		pcall(function()
 			local stockToSend = {}
 			for skillId, stock in pairs(stockData) do
-				if skillId ~= "LastRefreshTime" then
+				if skillId ~= "LastRefreshTime" and type(stock) == "number" then
 					stockToSend[skillId] = stock
 				end
 			end
@@ -330,13 +359,15 @@ local function GetPlayerSkillStock(player, shopId, skillId)
 	InitializePlayerSkillStock(player, shopId)
 
 	local stockData = PlayerSkillStockData[player][shopId]
+	NormalizeSkillStockData(stockData)
 
 	if skillId then
-		return stockData[skillId] or 0
+		local stockKey = tostring(skillId)
+		return stockData[stockKey] or 0
 	else
 		local result = {}
 		for key, value in pairs(stockData) do
-			if key ~= "LastRefreshTime" then
+			if key ~= "LastRefreshTime" and type(value) == "number" then
 				result[key] = value
 			end
 		end
@@ -360,7 +391,8 @@ local function DeductSkillStock(player, shopId, skillId, amount)
 		return false
 	end
 
-	PlayerSkillStockData[player][shopId][skillId] = currentStock - amount
+	local stockKey = tostring(skillId)
+	PlayerSkillStockData[player][shopId][stockKey] = currentStock - amount
 
 	-- 持久化
 	if DataManager then
@@ -574,7 +606,8 @@ local function OnRequestSkillShopList(player)
 
 		-- 将库存信息添加到每个商品
 		for _, item in ipairs(shopItems) do
-			item.Stock = stockData[item.SkillId] or 0
+			local stockKey = tostring(item.SkillId)
+			item.Stock = stockData[stockKey] or 0
 		end
 
 		-- 发送到客户端
