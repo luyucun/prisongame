@@ -32,8 +32,22 @@ StageConfig.Chapters = {
 		ChapterId = 1,
 		ChapterName = "Chapter 1",
 		EnemyChapterRef = 1,  -- V3.10: 引用EnemyConfig.Chapters[1]
-		StagesPerChapter = 10,  -- 🔥修复：显式指定关卡数，防止读取失败时回退到默认值3
+		StagesPerChapter = 4,  -- 🔥修复：显式指定关卡数，防止读取失败时回退到默认值3
 		StageTemplateStyle = "Style01",  -- V3.7: 使用Style01风格的关卡模板
+		Rewards = {
+			[1] = {Coins = 10},
+			[2] = {Coins = 10},
+			[3] = {Coins = 10},
+			[4] = {Coins = 10},
+		}
+	},
+	-- 第二章
+	[2] = {
+		ChapterId = 2,
+		ChapterName = "Chapter 2",
+		EnemyChapterRef = 2,  -- V3.10: 引用EnemyConfig.Chapters[2]
+		StagesPerChapter = 10,  -- 🔥修复：显式指定关卡数，防止读取失败时回退到默认值3
+		StageTemplateStyle = "Style02",  -- V3.7: 使用Style02风格
 		Rewards = {
 			[1] = {Coins = 10},
 			[2] = {Coins = 10},
@@ -47,13 +61,14 @@ StageConfig.Chapters = {
 			[10] = {Coins = 10},
 		}
 	},
-	-- 第二章
-	[2] = {
-		ChapterId = 2,
-		ChapterName = "Chapter 2",
-		EnemyChapterRef = 2,  -- V3.10: 引用EnemyConfig.Chapters[2]
+
+	-- 第三章
+	[3] = {
+		ChapterId = 3,
+		ChapterName = "Chapter 3",
+		EnemyChapterRef = 3,  -- V3.10: 引用EnemyConfig.Chapters[3]
 		StagesPerChapter = 20,  -- 🔥修复：显式指定关卡数，防止读取失败时回退到默认值3
-		StageTemplateStyle = "Style02",  -- V3.7: 使用Style02风格
+		StageTemplateStyle = "Style03",  -- V3.7: 使用Style02风格
 		Rewards = {
 			[1] = {Coins = 10},
 			[2] = {Coins = 10},
@@ -80,7 +95,7 @@ StageConfig.Chapters = {
 }
 
 -- 总章节数
-StageConfig.TotalChapters = 2
+StageConfig.TotalChapters = 3
 
 -- ==================== Style01关卡配置 (保留兼容) ====================
 StageConfig.Style01 = {

@@ -17,21 +17,52 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ProximityPromptService = game:GetService("ProximityPromptService")
+local TweenService = game:GetService("TweenService")
+local MarketplaceService = game:GetService("MarketplaceService")
 local Workspace = game:GetService("Workspace")
 
 -- 引用配置
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
+local FormatHelper = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("FormatHelper"))
 
 -- 获取本地玩家
 local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+local IDLE_COIN_PRODUCT_ID = 3487946200
 
 -- 状态变量
 local currentPrompt = nil
+local promptConnections = {}
 local pendingIdleCoins = 0
 local cachedHomeId = nil  -- 缓存HomeId，避免重复查询
+local autoPopupShown = false
+local hasReceivedInitialSync = false
+local promptOpensPopup = false
+local claim10InProgress = false
 
 -- 事件引用
 local IdleCoinEvents = nil
+local OnCollectCoins = nil
+
+-- UI引用
+local idleEarningGui = nil
+local idleEarningBg = nil
+local idleCloseButton = nil
+local idleTimeLabel = nil
+local idleClaimButton = nil
+local idleClaimCash = nil
+local idleClaim10Button = nil
+local idleClaim10Cash = nil
+local idleScale = nil
+
+-- UI状态
+local idleUiTween = nil
+local idleUiToken = 0
+local idleUiBound = false
+local gradientTween = nil
+
+local ButtonEffectHelper = nil
 
 -- ==================== 私有函数 ====================
 
@@ -57,6 +88,288 @@ local function InitializeEvents()
 	end
 
 	return true
+end
+
+local function LoadButtonEffectHelper()
+	if ButtonEffectHelper then
+		return true
+	end
+
+	local success, result = pcall(function()
+		return require(game:GetService("StarterPlayer").StarterPlayerScripts.Utils.ButtonEffectHelper)
+	end)
+
+	if success then
+		ButtonEffectHelper = result
+		return true
+	end
+
+	warn("[IdleCoinController] ButtonEffectHelper加载失败:", result)
+	return false
+end
+
+local function FormatIdleTime(totalMinutes)
+	local minutes = math.max(0, math.floor(tonumber(totalMinutes) or 0))
+	local hours = math.floor(minutes / 60)
+	local mins = minutes % 60
+	return string.format("%02d:%02d", hours, mins)
+end
+
+local function GetPendingIdleMinutes()
+	local coinsPerMinute = tonumber(GameConfig.IdleCoin.CoinsPerMinute) or 0
+	if coinsPerMinute <= 0 then
+		return 0
+	end
+
+	local minutes = math.floor((pendingIdleCoins or 0) / coinsPerMinute)
+	local maxMinutes = tonumber(GameConfig.IdleCoin.MaxOfflineMinutes)
+	if maxMinutes and maxMinutes > 0 and minutes > maxMinutes then
+		minutes = maxMinutes
+	end
+
+	return minutes
+end
+
+local function UpdateIdleEarningUI()
+	if not idleEarningBg then
+		return
+	end
+
+	local minutes = GetPendingIdleMinutes()
+	if idleTimeLabel and idleTimeLabel:IsA("TextLabel") then
+		idleTimeLabel.Text = FormatIdleTime(minutes)
+	end
+
+	local baseCoins = math.max(0, math.floor(pendingIdleCoins or 0))
+	if idleClaimCash and idleClaimCash:IsA("TextLabel") then
+		idleClaimCash.Text = FormatHelper.FormatCoins(baseCoins)
+	end
+	if idleClaim10Cash and idleClaim10Cash:IsA("TextLabel") then
+		idleClaim10Cash.Text = FormatHelper.FormatCoins(baseCoins * 10)
+	end
+end
+
+local function InitializeIdleEarningUI()
+	if idleEarningGui and idleEarningBg then
+		return true
+	end
+
+	idleEarningGui = playerGui:FindFirstChild("IdleEarningGui") or playerGui:WaitForChild("IdleEarningGui", 5)
+	if not idleEarningGui then
+		return false
+	end
+
+	idleEarningBg = idleEarningGui:FindFirstChild("Bg")
+	if not idleEarningBg then
+		warn("[IdleCoinController] 未找到 IdleEarningGui.Bg")
+		return false
+	end
+
+	local title = idleEarningBg:FindFirstChild("Title")
+	if title then
+		idleCloseButton = title:FindFirstChild("CloseButton")
+	end
+
+	local currentTime = idleEarningBg:FindFirstChild("CurrentTime")
+	if currentTime then
+		idleTimeLabel = currentTime:FindFirstChild("Time")
+	end
+
+	idleClaimButton = idleEarningBg:FindFirstChild("Claim")
+	if idleClaimButton then
+		idleClaimCash = idleClaimButton:FindFirstChild("CashNum")
+	end
+
+	idleClaim10Button = idleEarningBg:FindFirstChild("Claim10")
+	if idleClaim10Button then
+		idleClaim10Cash = idleClaim10Button:FindFirstChild("CashNum")
+	end
+
+	idleScale = idleEarningBg:FindFirstChildOfClass("UIScale")
+	if not idleScale then
+		idleScale = Instance.new("UIScale")
+		idleScale.Parent = idleEarningBg
+	end
+	idleScale.Scale = 1
+
+	return true
+end
+
+local function ShowIdleEarningUI()
+	if not InitializeIdleEarningUI() then
+		return
+	end
+
+	UpdateIdleEarningUI()
+
+	if idleEarningBg.Visible then
+		return
+	end
+
+	idleUiToken = idleUiToken + 1
+	local token = idleUiToken
+
+	if idleUiTween then
+		idleUiTween:Cancel()
+	end
+
+	idleScale.Scale = 0.8
+	idleEarningBg.Visible = true
+	idleUiTween = TweenService:Create(
+		idleScale,
+		TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{Scale = 1}
+	)
+	idleUiTween:Play()
+
+	idleUiTween.Completed:Connect(function()
+		if token ~= idleUiToken then
+			return
+		end
+		idleUiTween = nil
+	end)
+end
+
+local function HideIdleEarningUI()
+	if not idleEarningBg or not idleEarningBg.Visible then
+		return
+	end
+
+	if idleUiTween then
+		idleUiTween:Cancel()
+		idleUiTween = nil
+	end
+
+	if idleScale then
+		idleScale.Scale = 1
+	end
+	idleEarningBg.Visible = false
+end
+
+local function StartClaim10Gradient()
+	if not idleClaim10Button then
+		return
+	end
+
+	local gradient = idleClaim10Button:FindFirstChildOfClass("UIGradient")
+	if not gradient then
+		return
+	end
+
+	if gradientTween then
+		gradientTween:Cancel()
+	end
+
+	gradient.Offset = Vector2.new(-1, 0)
+	gradientTween = TweenService:Create(
+		gradient,
+		TweenInfo.new(2, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, -1, false, 0),
+		{Offset = Vector2.new(1, 0)}
+	)
+	gradientTween:Play()
+end
+
+local function ApplyPromptMode(prompt)
+	if not prompt then
+		return
+	end
+
+	prompt.ActionText = "Click"
+	if promptOpensPopup then
+		prompt.HoldDuration = 0
+	else
+		prompt.HoldDuration = GameConfig.IdleCoin.ProximityHoldDuration
+	end
+end
+
+local function BindIdleEarningUI()
+	if idleUiBound then
+		return
+	end
+
+	if not InitializeIdleEarningUI() then
+		return
+	end
+
+	idleUiBound = true
+
+	if LoadButtonEffectHelper() and ButtonEffectHelper then
+		if idleCloseButton then
+			ButtonEffectHelper.AddClickEffect(idleCloseButton)
+		end
+		if idleClaimButton then
+			ButtonEffectHelper.AddClickEffect(idleClaimButton)
+		end
+		if idleClaim10Button then
+			ButtonEffectHelper.AddClickEffect(idleClaim10Button)
+		end
+	end
+
+	if idleCloseButton then
+		idleCloseButton.MouseButton1Click:Connect(function()
+			promptOpensPopup = true
+			ApplyPromptMode(currentPrompt)
+			HideIdleEarningUI()
+		end)
+	end
+
+	if idleClaimButton then
+		idleClaimButton.MouseButton1Click:Connect(function()
+			if pendingIdleCoins > 0 then
+				OnCollectCoins()
+			end
+			HideIdleEarningUI()
+		end)
+	end
+
+	if idleClaim10Button then
+		idleClaim10Button.MouseButton1Click:Connect(function()
+			if pendingIdleCoins <= 0 then
+				return
+			end
+			if claim10InProgress then
+				return
+			end
+
+			claim10InProgress = true
+			local success, err = pcall(function()
+				MarketplaceService:PromptProductPurchase(player, IDLE_COIN_PRODUCT_ID)
+			end)
+			if not success then
+				claim10InProgress = false
+				warn("[IdleCoinController] PromptProductPurchase失败:", err)
+			end
+		end)
+	end
+
+	StartClaim10Gradient()
+end
+
+local function BindPrompt(prompt)
+	if not prompt or prompt.Name ~= "IdleCoinPrompt" then
+		return
+	end
+
+	currentPrompt = prompt
+	ApplyPromptMode(prompt)
+
+	if promptConnections[prompt] then
+		return
+	end
+
+	promptConnections[prompt] = prompt.Triggered:Connect(function(triggerPlayer)
+		if triggerPlayer ~= player then
+			return
+		end
+
+		if promptOpensPopup then
+			BindIdleEarningUI()
+			ShowIdleEarningUI()
+			return
+		end
+
+		OnCollectCoins()
+	end)
 end
 
 --[[
@@ -198,7 +511,7 @@ local function CreateProximityPrompt_DEPRECATED(parent)
 
 	local prompt = Instance.new("ProximityPrompt")
 	prompt.Name = "IdleCoinPrompt"
-	prompt.ActionText = "Collect"
+	prompt.ActionText = "Click"
 	prompt.ObjectText = "Idle Coins"
 	prompt.KeyboardKeyCode = Enum.KeyCode.E
 	prompt.HoldDuration = GameConfig.IdleCoin.ProximityHoldDuration
@@ -212,7 +525,7 @@ end
 --[[
 处理领取金币
 ]]
-local function OnCollectCoins()
+OnCollectCoins = function()
 	if not InitializeEvents() then
 		return
 	end
@@ -231,7 +544,25 @@ local function UpdateCoinDisplay(coins)
 	-- 仅缓存待领取金币数量，用于本地逻辑判断
 	-- 实际的Mail上TextLabel显示由服务端的UpdateMailDisplay负责更新
 	-- 服务端修改Workspace中的对象会自动同步到所有客户端
-	pendingIdleCoins = coins
+	pendingIdleCoins = math.max(0, tonumber(coins) or 0)
+
+	if InitializeIdleEarningUI() then
+		UpdateIdleEarningUI()
+		BindIdleEarningUI()
+
+		if pendingIdleCoins <= 0 and idleEarningBg and idleEarningBg.Visible then
+			HideIdleEarningUI()
+		end
+	end
+
+	if not hasReceivedInitialSync then
+		hasReceivedInitialSync = true
+		if not autoPopupShown and pendingIdleCoins >= 1 then
+			autoPopupShown = true
+			BindIdleEarningUI()
+			ShowIdleEarningUI()
+		end
+	end
 end
 
 --[[
@@ -263,12 +594,7 @@ local function SetupMailPromptConnection(waitForHomeId)
 
 	currentPrompt = prompt
 
-	-- 连接领取事件（服务端会验证玩家身份，这里只需要发送请求）
-	prompt.Triggered:Connect(function(triggerPlayer)
-		if triggerPlayer == player then
-			OnCollectCoins()
-		end
-	end)
+	BindPrompt(prompt)
 end
 
 -- ==================== 初始化 ====================
@@ -300,6 +626,27 @@ local function Initialize()
 	end
 
 	-- 🔥V2.6.1修复：连接服务端创建的ProximityPrompt事件（首次初始化，需要等待HomeId）
+	ProximityPromptService.PromptShown:Connect(function(prompt)
+		if prompt and prompt.Name == "IdleCoinPrompt" then
+			BindPrompt(prompt)
+		end
+	end)
+
+	-- 监听购买弹窗关闭（成功或取消都重置状态）
+	MarketplaceService.PromptProductPurchaseFinished:Connect(function(userId, productId, wasPurchased)
+		if userId == player.UserId and productId == IDLE_COIN_PRODUCT_ID then
+			claim10InProgress = false
+		end
+	end)
+
+	-- 尝试初始化挂机金币弹框UI
+	task.spawn(function()
+		if InitializeIdleEarningUI() then
+			BindIdleEarningUI()
+			UpdateIdleEarningUI()
+		end
+	end)
+
 	task.spawn(function()
 		SetupMailPromptConnection(true)
 	end)

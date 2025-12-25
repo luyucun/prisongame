@@ -112,6 +112,16 @@ GameConfig.Campaign = {
 			[5] = Vector3.new(-480.316, 0.992, -158.269),
 			[6] = Vector3.new(-600.316, 0.992, -158.269),
 		},
+		
+		-- Style03的坐标（请根据实际模板调整）
+		["Style03"] = {
+			[1] = Vector3.new(-0.316, 0.992, -158.269),
+			[2] = Vector3.new(-120.316, 0.992, -158.269),
+			[3] = Vector3.new(-240.316, 0.992, -158.269),
+			[4] = Vector3.new(-360.316, 0.992, -158.269),
+			[5] = Vector3.new(-480.316, 0.992, -158.269),
+			[6] = Vector3.new(-600.316, 0.992, -158.269),
+		},
 	},
 
 	-- V2.4新增：寻路卡住检测参数（Watchdog机制）
@@ -157,9 +167,9 @@ GameConfig.UI.ButtonScaleDuration = 0.1  -- 按钮缩放动画时长(秒)
 
 -- ==================== 挂机金币配置 (V2.6) ====================
 GameConfig.IdleCoin = {
-	CoinsPerMinute = 10,                  -- 每分钟产出金币数 🔥V3.9.3修改：从20改为10
-	MaxOfflineHours = 18,                 -- 最大离线产出小时数
-	MaxOfflineMinutes = 18 * 60,          -- 最大离线产出分钟数(6小时=360分钟)
+	CoinsPerMinute = 8,                  -- 每分钟产出金币数 🔥V3.9.3修改：从20改为10
+	MaxOfflineHours = 24,                 -- 最大离线产出小时数
+	MaxOfflineMinutes = 24 * 60,          -- 最大离线产出分钟数(6小时=360分钟)
 	ProximityTriggerDistance = 8,         -- 触发交互的距离(studs)
 	ProximityHoldDuration = 0.6,          -- 长按确认时长(秒)
 	ParticleEffectDuration = 1,           -- 粒子特效持续时长(秒)

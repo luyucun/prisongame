@@ -103,6 +103,10 @@ PlayerData = {
         PendingCoins = number,         -- 待领取的挂机金币
         GuideEligibleOnLogin = boolean,-- 是否允许本次登录触发挂机金币引导
     },
+    SoundSettings = {          -- V4.6设置系统：音效开关
+        MusicEnabled = boolean,        -- BGM是否开启
+        SfxEnabled = boolean,          -- SFX是否开启
+    },
     ChapterProgress = {        -- V2.8章节进度系统
         CurrentChapter = number,   -- 当前挑战章节(从1开始)
         CompletedChapters = number, -- 已通关的章节数(0表示未通关任何章节)
@@ -252,6 +256,9 @@ local function LoadFromDataStore(player)
 			if data.TalkData then
 				data.TalkData = RestoreFromDataStore(data.TalkData)  -- V4.5对话数据
 			end
+			if data.SoundSettings then
+				data.SoundSettings = RestoreFromDataStore(data.SoundSettings)  -- V4.6：恢复音效设置
+			end
 
 			return data, "ok"
 		end
@@ -302,6 +309,7 @@ local function SaveToDataStore(player, playerData, userId)
 		PlacedUnits = SanitizeForDataStore(playerData.PlacedUnits),  -- 🔥修复持久化：保存放置数据
 		ShopData = SanitizeForDataStore(playerData.ShopData),  -- V2.1库存系统：保存商店数据
 		IdleCoinData = SanitizeForDataStore(playerData.IdleCoinData),  -- V2.6：保存挂机金币数据
+		SoundSettings = SanitizeForDataStore(playerData.SoundSettings),  -- V4.6：保存音效设置
 		ChapterProgress = SanitizeForDataStore(playerData.ChapterProgress),  -- V2.8：保存章节进度数据
 		SkillInventory = SanitizeForDataStore(playerData.SkillInventory),  -- V3.0：保存技能背包
 		TaskData = SanitizeForDataStore(playerData.TaskData),  -- V3.3：保存任务数据
@@ -363,6 +371,10 @@ local function CreateDefaultData(player)
             LastLogoutTime = 0,
             PendingCoins = 0,
             GuideEligibleOnLogin = false,
+        },
+        SoundSettings = {  -- V4.6设置系统：初始化
+            MusicEnabled = true,
+            SfxEnabled = true,
         },
         ChapterProgress = {  -- V2.8章节进度系统：初始化
             CurrentChapter = 1,       -- 默认从第1章开始
@@ -568,6 +580,21 @@ function DataManager.InitializePlayerData(player)
             playerData.TalkData = {
                 CompletedTalks = {},
             }
+        end
+
+        -- V4.6设置系统：确保SoundSettings字段存在（向后兼容）
+        if not playerData.SoundSettings then
+            playerData.SoundSettings = {
+                MusicEnabled = true,
+                SfxEnabled = true,
+            }
+        else
+            if playerData.SoundSettings.MusicEnabled == nil then
+                playerData.SoundSettings.MusicEnabled = true
+            end
+            if playerData.SoundSettings.SfxEnabled == nil then
+                playerData.SoundSettings.SfxEnabled = true
+            end
         end
 
         -- 🔥V3.9数据迁移：Inventory→Units（向后兼容）
@@ -1298,6 +1325,37 @@ end
 
 -- ==================== V2.6挂机金币系统接口 ====================
 
+-- 计算挂机金币上限（分钟上限 * 每分钟金币）
+local function GetIdleCoinMaxCoins()
+    local idleConfig = GameConfig.IdleCoin
+    if not idleConfig then
+        return nil
+    end
+
+    local maxMinutes = tonumber(idleConfig.MaxOfflineMinutes)
+    local coinsPerMinute = tonumber(idleConfig.CoinsPerMinute)
+    if not maxMinutes or not coinsPerMinute or maxMinutes <= 0 or coinsPerMinute <= 0 then
+        return nil
+    end
+
+    return maxMinutes * coinsPerMinute
+end
+
+-- 钳制挂机金币到上限
+local function ClampPendingIdleCoins(value)
+    local amount = tonumber(value) or 0
+    if amount < 0 then
+        amount = 0
+    end
+
+    local maxCoins = GetIdleCoinMaxCoins()
+    if maxCoins and amount > maxCoins then
+        amount = maxCoins
+    end
+
+    return amount
+end
+
 --[[
 获取玩家挂机金币数据
 @param player Player - 玩家对象
@@ -1322,6 +1380,9 @@ function DataManager.GetIdleCoinData(player)
     elseif playerData.IdleCoinData.GuideEligibleOnLogin == nil then
         playerData.IdleCoinData.GuideEligibleOnLogin = false
     end
+
+    -- 钳制PendingCoins到配置上限，避免超出累积时间上限
+    playerData.IdleCoinData.PendingCoins = ClampPendingIdleCoins(playerData.IdleCoinData.PendingCoins)
 
     return playerData.IdleCoinData
 end
@@ -1349,7 +1410,7 @@ function DataManager.SetPendingIdleCoins(player, coins)
         playerData.IdleCoinData.GuideEligibleOnLogin = false
     end
 
-    playerData.IdleCoinData.PendingCoins = coins
+    playerData.IdleCoinData.PendingCoins = ClampPendingIdleCoins(coins)
     return true
 end
 
@@ -1403,7 +1464,8 @@ function DataManager.AddPendingIdleCoins(player, amount)
         playerData.IdleCoinData.GuideEligibleOnLogin = false
     end
 
-    playerData.IdleCoinData.PendingCoins = (playerData.IdleCoinData.PendingCoins or 0) + amount
+    local newPending = (playerData.IdleCoinData.PendingCoins or 0) + (tonumber(amount) or 0)
+    playerData.IdleCoinData.PendingCoins = ClampPendingIdleCoins(newPending)
     return true, playerData.IdleCoinData.PendingCoins
 end
 
@@ -1434,6 +1496,70 @@ function DataManager.ClearPendingIdleCoins(player)
     playerData.IdleCoinData.PendingCoins = 0
     playerData.IdleCoinData.GuideEligibleOnLogin = false
     return oldAmount
+end
+
+-- ==================== V4.6音效设置接口 ====================
+
+--[[
+获取玩家音效设置
+@param player Player - 玩家对象
+@return table - {MusicEnabled = boolean, SfxEnabled = boolean}
+]]
+function DataManager.GetSoundSettings(player)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData then
+        return {
+            MusicEnabled = true,
+            SfxEnabled = true,
+        }
+    end
+
+    if not playerData.SoundSettings then
+        playerData.SoundSettings = {
+            MusicEnabled = true,
+            SfxEnabled = true,
+        }
+    else
+        if playerData.SoundSettings.MusicEnabled == nil then
+            playerData.SoundSettings.MusicEnabled = true
+        end
+        if playerData.SoundSettings.SfxEnabled == nil then
+            playerData.SoundSettings.SfxEnabled = true
+        end
+    end
+
+    return playerData.SoundSettings
+end
+
+--[[
+设置玩家音效开关
+@param player Player - 玩家对象
+@param musicEnabled boolean|nil - BGM开关
+@param sfxEnabled boolean|nil - SFX开关
+@return boolean - 是否设置成功
+]]
+function DataManager.SetSoundSettings(player, musicEnabled, sfxEnabled)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData then
+        warn(GameConfig.LOG_PREFIX, "SetSoundSettings: 找不到玩家数据")
+        return false
+    end
+
+    if not playerData.SoundSettings then
+        playerData.SoundSettings = {
+            MusicEnabled = true,
+            SfxEnabled = true,
+        }
+    end
+
+    if type(musicEnabled) == "boolean" then
+        playerData.SoundSettings.MusicEnabled = musicEnabled
+    end
+    if type(sfxEnabled) == "boolean" then
+        playerData.SoundSettings.SfxEnabled = sfxEnabled
+    end
+
+    return true
 end
 
 --[[

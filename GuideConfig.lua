@@ -46,7 +46,7 @@ GuideConfig.Guides = {
 		TriggerCondition = "HAS_IDLE_COINS",  -- 触发条件：有挂机金币可领取
 		ArrivalDistance = 10,                 -- 到达判定距离(studs)
 		Sort = 2,                             -- 排序
-		Enabled = true,                       -- 是否启用
+		Enabled = false,                      -- V4.5.1移除：离线登录引导邮箱
 	},
 
 	-- 引导3：前往IdleFloor中心（获得两个兵种后）

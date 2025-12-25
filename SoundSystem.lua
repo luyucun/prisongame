@@ -24,6 +24,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 -- 引用模块（延迟加载避免循环依赖）
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
 local SoundConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("SoundConfig"))
+local DataManager = require(ServerScriptService:WaitForChild("Core"):WaitForChild("DataManager"))
 
 -- 收敛调试print，避免刷屏（仅在DEBUG_MODE开启时输出）
 local _print = print
@@ -36,6 +37,7 @@ local print = DebugPrint
 
 -- 远程事件引用
 local SoundEvents = nil
+local soundSettingsConnection = nil
 
 -- ==================== 私有函数 ====================
 
@@ -80,6 +82,34 @@ local function InitializeEvents()
 		stopSFXEvent.Parent = SoundEvents
 
 		print(GameConfig.LOG_PREFIX, "[SoundSystem] 已创建SoundEvents事件")
+	end
+
+	-- 确保设置同步事件存在（V4.6）
+	local syncSettingsEvent = SoundEvents:FindFirstChild("SyncSoundSettings")
+	if not syncSettingsEvent then
+		syncSettingsEvent = Instance.new("RemoteEvent")
+		syncSettingsEvent.Name = "SyncSoundSettings"
+		syncSettingsEvent.Parent = SoundEvents
+	end
+
+	local updateSettingsEvent = SoundEvents:FindFirstChild("UpdateSoundSettings")
+	if not updateSettingsEvent then
+		updateSettingsEvent = Instance.new("RemoteEvent")
+		updateSettingsEvent.Name = "UpdateSoundSettings"
+		updateSettingsEvent.Parent = SoundEvents
+	end
+
+	-- 绑定客户端设置更新（只绑定一次）
+	if not soundSettingsConnection and updateSettingsEvent then
+		soundSettingsConnection = updateSettingsEvent.OnServerEvent:Connect(function(player, musicEnabled, sfxEnabled)
+			if type(musicEnabled) ~= "boolean" or type(sfxEnabled) ~= "boolean" then
+				return
+			end
+
+			DataManager.SetSoundSettings(player, musicEnabled, sfxEnabled)
+			DataManager.SavePlayerDataThrottled(player)
+			SoundSystem.SyncSoundSettings(player)
+		end)
 	end
 
 	return true
@@ -182,6 +212,26 @@ function SoundSystem.StopSFX(player, sfxKey)
 	end
 end
 
+--[[
+同步玩家音效设置（V4.6）
+@param player Player - 玩家对象
+]]
+function SoundSystem.SyncSoundSettings(player)
+	if not InitializeEvents() then
+		return
+	end
+
+	local syncSettingsEvent = SoundEvents:FindFirstChild("SyncSoundSettings")
+	if syncSettingsEvent then
+		local settings = DataManager.GetSoundSettings(player)
+		syncSettingsEvent:FireClient(
+			player,
+			settings.MusicEnabled ~= false,
+			settings.SfxEnabled ~= false
+		)
+	end
+end
+
 -- ==================== 便捷接口（根据游戏事件触发音效） ====================
 
 --[[
@@ -255,6 +305,7 @@ end
 @param player Player - 玩家对象
 ]]
 function SoundSystem.OnPlayerJoin(player)
+	SoundSystem.SyncSoundSettings(player)
 	-- 延迟一小段时间确保客户端已准备好
 	task.delay(1, function()
 		if player and player.Parent then

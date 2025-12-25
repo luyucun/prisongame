@@ -32,6 +32,12 @@ HouseConfig.Houses = {
 		ModelName = "PrisonLv2",
 		YOffset = 0,  -- 如果模型插入地面，调整这个值（正数向上，负数向下）
 	},
+	-- 通关第2章后解锁
+	{
+		RequiredChapter = 2,
+		ModelName = "PrisonLv3",
+		YOffset = 0,  -- 如果模型插入地面，调整这个值（正数向上，负数向下）
+	},
 }
 
 -- ==================== 工具函数 ====================

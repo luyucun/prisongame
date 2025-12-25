@@ -31,15 +31,34 @@ local playerGui = player:WaitForChild("PlayerGui")
 local mainGui = nil
 local returnToHomeButton = nil
 local unlockMoveButton = nil
+local topRightGui = nil
+local optionsGui = nil
+local optionsBg = nil
+local optionsOpenButton = nil
+local optionsCloseButton = nil
+local musicToggleButton = nil
+local musicToggleText = nil
+local musicToggleGradient = nil
+local sfxToggleButton = nil
+local sfxToggleText = nil
+local sfxToggleGradient = nil
 
 -- 远程事件
 local campaignEvents = nil
 local battleControlEvents = nil
 local returnToHomeEvent = nil
+local soundEvents = nil
+local updateSoundSettingsEvent = nil
+local syncSoundSettingsEvent = nil
 
 -- 状态标记
 local isBattleActive = false
 local isInitialized = false
+local settingsBound = false
+local currentMusicEnabled = true
+local currentSfxEnabled = true
+
+local ButtonEffectHelper = nil
 
 -- ==================== 日志函数 ====================
 
@@ -77,6 +96,261 @@ local function SafeWaitForChild(parent, childName, timeout)
 	end
 
 	return nil
+end
+
+-- ==================== Settings UI (V4.6) ====================
+
+local function LoadButtonEffectHelper()
+	if ButtonEffectHelper then
+		return true
+	end
+
+	local success, result = pcall(function()
+		return require(game:GetService("StarterPlayer").StarterPlayerScripts.Utils.ButtonEffectHelper)
+	end)
+
+	if success then
+		ButtonEffectHelper = result
+		return true
+	end
+
+	warn("[MainGuiController] ButtonEffectHelper加载失败:", result)
+	return false
+end
+
+local function SyncSettingsFromSoundController()
+	local soundController = _G.SoundController
+	if soundController and soundController.GetSoundSettings then
+		local settings = soundController.GetSoundSettings()
+		if settings then
+			if type(settings.MusicEnabled) == "boolean" then
+				currentMusicEnabled = settings.MusicEnabled
+			end
+			if type(settings.SfxEnabled) == "boolean" then
+				currentSfxEnabled = settings.SfxEnabled
+			end
+		end
+	end
+end
+
+local function ApplyToggleVisual(textLabel, gradient, enabled)
+	if textLabel and textLabel:IsA("TextLabel") then
+		textLabel.Text = enabled and "On" or "Off"
+	end
+	if gradient and gradient:IsA("UIGradient") then
+		local startColor
+		local endColor
+		if enabled then
+			startColor = Color3.fromRGB(0x55, 0xFF, 0x00)
+			endColor = Color3.fromRGB(0xFF, 0xFF, 0x00)
+		else
+			startColor = Color3.fromRGB(0xCB, 0x00, 0x0E)
+			endColor = Color3.fromRGB(0xFF, 0x5D, 0x35)
+		end
+		gradient.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, startColor),
+			ColorSequenceKeypoint.new(1, endColor),
+		})
+	end
+end
+
+local function ApplySettingsToUI()
+	if not optionsBg then
+		return
+	end
+
+	ApplyToggleVisual(musicToggleText, musicToggleGradient, currentMusicEnabled)
+	ApplyToggleVisual(sfxToggleText, sfxToggleGradient, currentSfxEnabled)
+end
+
+local function ApplySoundSettingsLocal()
+	local soundController = _G.SoundController
+	if not soundController then
+		return
+	end
+
+	if soundController.SetSoundSettings then
+		soundController.SetSoundSettings(currentMusicEnabled, currentSfxEnabled)
+		return
+	end
+
+	if soundController.SetMusicEnabled then
+		soundController.SetMusicEnabled(currentMusicEnabled)
+	end
+	if soundController.SetSfxEnabled then
+		soundController.SetSfxEnabled(currentSfxEnabled)
+	end
+end
+
+local function SendSettingsUpdate()
+	if updateSoundSettingsEvent then
+		updateSoundSettingsEvent:FireServer(currentMusicEnabled, currentSfxEnabled)
+	end
+end
+
+local function ToggleMusic()
+	currentMusicEnabled = not currentMusicEnabled
+	ApplySettingsToUI()
+	ApplySoundSettingsLocal()
+	SendSettingsUpdate()
+end
+
+local function ToggleSfx()
+	currentSfxEnabled = not currentSfxEnabled
+	ApplySettingsToUI()
+	ApplySoundSettingsLocal()
+	SendSettingsUpdate()
+end
+
+local function OpenOptions()
+	if not optionsBg then
+		return
+	end
+	SyncSettingsFromSoundController()
+	ApplySettingsToUI()
+	optionsBg.Visible = true
+end
+
+local function CloseOptions()
+	if optionsBg then
+		optionsBg.Visible = false
+	end
+end
+
+local function InitializeSettingsEvents()
+	local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
+	if not eventsFolder then
+		eventsFolder = ReplicatedStorage:WaitForChild("Events", 5)
+	end
+	if not eventsFolder then
+		DebugLog("Options: Events未找到")
+		return false
+	end
+
+	soundEvents = eventsFolder:FindFirstChild("SoundEvents")
+	if not soundEvents then
+		soundEvents = eventsFolder:WaitForChild("SoundEvents", 5)
+	end
+	if not soundEvents then
+		DebugLog("Options: SoundEvents未找到")
+		return false
+	end
+
+	updateSoundSettingsEvent = soundEvents:FindFirstChild("UpdateSoundSettings")
+	syncSoundSettingsEvent = soundEvents:FindFirstChild("SyncSoundSettings")
+	if syncSoundSettingsEvent then
+		syncSoundSettingsEvent.OnClientEvent:Connect(function(musicEnabled, sfxEnabled)
+			if type(musicEnabled) == "boolean" then
+				currentMusicEnabled = musicEnabled
+			end
+			if type(sfxEnabled) == "boolean" then
+				currentSfxEnabled = sfxEnabled
+			end
+			ApplySettingsToUI()
+		end)
+	end
+
+	return true
+end
+
+local function InitializeSettingsUI()
+	if optionsBg then
+		return true
+	end
+
+	topRightGui = SafeWaitForChild(playerGui, "TopRightGui", 5)
+	if topRightGui then
+		local topRightBg = topRightGui:FindFirstChild("Bg")
+		local optionsContainer = topRightBg and topRightBg:FindFirstChild("Options")
+		optionsOpenButton = optionsContainer and optionsContainer:FindFirstChild("Button")
+	end
+
+	optionsGui = SafeWaitForChild(playerGui, "Options", 5)
+	if not optionsGui then
+		DebugLog("Options GUI未找到")
+		return false
+	end
+
+	optionsBg = optionsGui:FindFirstChild("Bg")
+	if not optionsBg then
+		DebugLog("Options Bg未找到")
+		return false
+	end
+
+	local title = optionsBg:FindFirstChild("Title")
+	if title then
+		optionsCloseButton = title:FindFirstChild("CloseButton")
+	end
+
+	local musicFrame = optionsBg:FindFirstChild("Music")
+	if musicFrame then
+		musicToggleButton = musicFrame:FindFirstChild("CloseButton")
+	end
+	if musicToggleButton then
+		musicToggleText = musicToggleButton:FindFirstChild("Text")
+		musicToggleGradient = musicToggleButton:FindFirstChildOfClass("UIGradient")
+	end
+
+	local sfxFrame = optionsBg:FindFirstChild("Sfx") or optionsBg:FindFirstChild("SFX")
+	if sfxFrame then
+		sfxToggleButton = sfxFrame:FindFirstChild("CloseButton")
+	end
+	if sfxToggleButton then
+		sfxToggleText = sfxToggleButton:FindFirstChild("Text")
+		sfxToggleGradient = sfxToggleButton:FindFirstChildOfClass("UIGradient")
+	end
+
+	optionsBg.Visible = false
+	return true
+end
+
+local function BindSettingsButtons()
+	if settingsBound then
+		return true
+	end
+
+	if not InitializeSettingsUI() then
+		return false
+	end
+
+	LoadButtonEffectHelper()
+
+	if optionsOpenButton and (optionsOpenButton:IsA("TextButton") or optionsOpenButton:IsA("ImageButton")) then
+		if ButtonEffectHelper then
+			ButtonEffectHelper.AddClickEffect(optionsOpenButton, { OnClick = OpenOptions })
+		else
+			optionsOpenButton.MouseButton1Click:Connect(OpenOptions)
+		end
+	end
+
+	if optionsCloseButton and (optionsCloseButton:IsA("TextButton") or optionsCloseButton:IsA("ImageButton")) then
+		if ButtonEffectHelper then
+			ButtonEffectHelper.AddClickEffect(optionsCloseButton, { OnClick = CloseOptions })
+		else
+			optionsCloseButton.MouseButton1Click:Connect(CloseOptions)
+		end
+	end
+
+	if musicToggleButton and (musicToggleButton:IsA("TextButton") or musicToggleButton:IsA("ImageButton")) then
+		if ButtonEffectHelper then
+			ButtonEffectHelper.AddClickEffect(musicToggleButton, { OnClick = ToggleMusic })
+		else
+			musicToggleButton.MouseButton1Click:Connect(ToggleMusic)
+		end
+	end
+
+	if sfxToggleButton and (sfxToggleButton:IsA("TextButton") or sfxToggleButton:IsA("ImageButton")) then
+		if ButtonEffectHelper then
+			ButtonEffectHelper.AddClickEffect(sfxToggleButton, { OnClick = ToggleSfx })
+		else
+			sfxToggleButton.MouseButton1Click:Connect(ToggleSfx)
+		end
+	end
+
+	settingsBound = true
+	SyncSettingsFromSoundController()
+	ApplySettingsToUI()
+	return true
 end
 
 --[[
@@ -284,6 +558,12 @@ local function Initialize()
 
 	-- 连接按钮事件
 	ConnectButtonEvents()
+
+	-- V4.6 设置系统
+	pcall(function()
+		InitializeSettingsEvents()
+		BindSettingsButtons()
+	end)
 
 	isInitialized = true
 	DebugLog("✅ MainGuiController初始化完成")

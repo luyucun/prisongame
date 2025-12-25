@@ -32,9 +32,14 @@ local ShopConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild
 local SkillConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("SkillConfig"))
 local SkillShopConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("SkillShopConfig"))
 
+-- 挂机金币10倍购买
+local IDLE_COIN_PRODUCT_ID = 3487946200
+local IDLE_COIN_MULTIPLIER = 10
+
 -- 延迟加载系统模块（避免循环依赖）
 local InventorySystem = nil
 local DataManager = nil
+local IdleCoinSystem = nil
 
 -- 私有变量
 local ProcessedReceipts = {}  -- 已处理的收据ID: [receiptId] = true
@@ -68,6 +73,21 @@ local function InitializeDependencies()
 	end
 
 	return true
+end
+
+--[[
+延迟获取IdleCoinSystem
+]]
+local function GetIdleCoinSystem()
+	if not IdleCoinSystem then
+		local idleModule = ServerScriptService.Systems:FindFirstChild("IdleCoinSystem")
+		if idleModule then
+			IdleCoinSystem = require(idleModule)
+		else
+			warn("[MarketplaceHandler] IdleCoinSystem模块未找到")
+		end
+	end
+	return IdleCoinSystem
 end
 
 --[[
@@ -276,6 +296,40 @@ function MarketplaceHandler.ProcessReceipt(receiptInfo)
 		elseif skillId then
 			-- 发放技能
 			grantSuccess, grantMessage = GrantSkillProduct(player, skillId, skillShopId)
+		elseif receiptInfo.ProductId == IDLE_COIN_PRODUCT_ID then
+			-- 挂机金币10倍购买发放
+			local idleSystem = GetIdleCoinSystem()
+			if not idleSystem then
+				warn("[MarketplaceHandler] IdleCoinSystem不可用，稍后重试")
+				return Enum.ProductPurchaseDecision.NotProcessedYet
+			end
+
+			local awarded, awardCoins = idleSystem.ProcessIdleCoinPurchase(player, receiptInfo.ProductId, IDLE_COIN_MULTIPLIER)
+			if awarded then
+				grantSuccess, grantMessage = true, "购买成功"
+				if DEBUG_MODE then
+					print(string.format(
+						"%s [MarketplaceHandler] 挂机金币购买成功 - 玩家:%s 发放:%d",
+						GameConfig.LOG_PREFIX,
+						player.Name,
+						awardCoins
+					))
+				end
+			elseif awardCoins <= 0 then
+				-- 待领取金币为0时也视为已处理，避免重复扣款重试
+				grantSuccess, grantMessage = true, "购买成功"
+				warn(string.format(
+					"[MarketplaceHandler] 挂机金币购买未产生奖励 - 玩家:%s 待领取金币不足",
+					player.Name
+				))
+			else
+				-- 发放失败，稍后重试
+				warn(string.format(
+					"[MarketplaceHandler] 挂机金币购买发放失败 - 玩家:%s",
+					player.Name
+				))
+				return Enum.ProductPurchaseDecision.NotProcessedYet
+			end
 		else
 			-- 未找到对应商品
 			warn(string.format(

@@ -332,6 +332,8 @@ local function CreateProximityPromptForHome(homeId)
 	-- 检查是否已存在
 	local existingPrompt = primaryPart:FindFirstChild("IdleCoinPrompt")
 	if existingPrompt then
+		existingPrompt.ActionText = "Click"
+		existingPrompt.HoldDuration = GameConfig.IdleCoin.ProximityHoldDuration
 		print(GameConfig.LOG_PREFIX, "[IdleCoinSystem] ProximityPrompt已存在, homeId=" .. homeId)
 		return true, "已存在"
 	end
@@ -339,7 +341,7 @@ local function CreateProximityPromptForHome(homeId)
 	-- 创建ProximityPrompt
 	local prompt = Instance.new("ProximityPrompt")
 	prompt.Name = "IdleCoinPrompt"
-	prompt.ActionText = "Collect"
+	prompt.ActionText = "Click"
 	prompt.ObjectText = "Idle Coins"
 	prompt.KeyboardKeyCode = Enum.KeyCode.E
 	prompt.HoldDuration = GameConfig.IdleCoin.ProximityHoldDuration
@@ -347,29 +349,7 @@ local function CreateProximityPromptForHome(homeId)
 	prompt.RequiresLineOfSight = false
 	prompt.Parent = primaryPart
 
-	-- 连接事件
-	local connection = prompt.Triggered:Connect(function(triggerPlayer)
-		-- 检查是否是这个基地的玩家
-		LoadModules()
-		local playerHomeId = PlayerManager.GetPlayerHomeId(triggerPlayer)
-		if playerHomeId == homeId then
-			IdleCoinSystem.OnCollectRequest(triggerPlayer)
-		else
-			-- 玩家尝试领取其他玩家家园的金币，拒绝并给予反馈
-			print(GameConfig.LOG_PREFIX, "[IdleCoinSystem] 玩家 " .. triggerPlayer.Name .. " 尝试领取非自己基地的金币，已拒绝")
-
-			-- 发送错误提示到客户端（通过PlayerEvents RemoteEvent）
-			local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
-			if eventsFolder then
-				local playerEvents = eventsFolder:FindFirstChild("PlayerEvents")
-				if playerEvents and playerEvents:IsA("RemoteEvent") then
-					playerEvents:FireClient(triggerPlayer, "ShowError", "这不是你的邮箱！")
-				end
-			end
-		end
-	end)
-
-	promptConnections[homeId] = connection
+	-- 交互触发由客户端处理（弹框/领取）
 
 	print(GameConfig.LOG_PREFIX, "[IdleCoinSystem] ✅ 已为基地 " .. homeId .. " 在PrimaryPart: " .. primaryPart.Name .. " 上创建ProximityPrompt")
 	return true, "创建成功"
@@ -410,6 +390,105 @@ local function SetupAllProximityPrompts()
 	if #failedHomes > 0 then
 		warn(GameConfig.LOG_PREFIX, "[IdleCoinSystem] ❌ 失败的基地: " .. table.concat(failedHomes, ", "))
 	end
+end
+
+--[[
+统一处理挂机金币领取逻辑（支持倍率）
+@param player Player - 玩家对象
+@param multiplier number - 奖励倍率（默认1）
+@param source string - 来源标记（"Idle"/"Purchase"）
+@param productId number|nil - 购买产品ID（仅Purchase使用）
+@return boolean, number - 是否成功, 发放金币数量
+]]
+local function ProcessIdleCoinCollect(player, multiplier, source, productId)
+	LoadModules()
+
+	-- 获取待领取金币
+	local idleCoinData = DataManager.GetIdleCoinData(player)
+	local pendingCoins = idleCoinData.PendingCoins or 0
+
+	if pendingCoins <= 0 then
+		print(string.format(
+			"%s [IdleCoinSystem] 玩家 %s 没有待领取的金币",
+			GameConfig.LOG_PREFIX,
+			player.Name
+		))
+		return false, 0
+	end
+
+	multiplier = tonumber(multiplier) or 1
+	if multiplier <= 0 then
+		multiplier = 1
+	end
+
+	local awardCoins = math.floor(pendingCoins * multiplier)
+	if awardCoins <= 0 then
+		return false, 0
+	end
+
+	-- 立即播放领取特效
+	local homeId = PlayerManager.GetPlayerHomeId(player)
+	if homeId and homeId > 0 then
+		PlayCollectEffect(homeId)
+	end
+
+	-- 播放领取金币音效
+	pcall(function()
+		SoundSystem.OnCollectIdleCoins(player)
+	end)
+
+	-- 发放金币
+	local success, newAmount
+	if source == "Purchase" then
+		success, newAmount = CurrencySystem.AddCoinsFromPurchase(player, awardCoins, productId)
+	else
+		local coinsPerMinute = GameConfig.IdleCoin.CoinsPerMinute
+		local durationSeconds = 0
+		if coinsPerMinute and coinsPerMinute > 0 then
+			durationSeconds = pendingCoins * 60 / coinsPerMinute
+		end
+		success, newAmount = CurrencySystem.AddCoinsFromIdle(player, awardCoins, durationSeconds)
+	end
+
+	if success then
+		-- 清空待领取金币
+		DataManager.ClearPendingIdleCoins(player)
+
+		-- 更新显示
+		if homeId and homeId > 0 then
+			UpdateMailDisplay(homeId, 0)
+		end
+
+		-- 通知客户端
+		IdleCoinSystem.SyncIdleCoinsToClient(player, 0)
+
+		-- 保存数据
+		DataManager.SavePlayerDataThrottled(player)
+
+		-- V3.3任务系统：通知领取挂机金币
+		local TaskSystem = nil
+		local taskModule = ServerScriptService.Systems:FindFirstChild("TaskSystem")
+		if taskModule then
+			TaskSystem = require(taskModule)
+			TaskSystem.OnCollectIdleCoin(player)
+		end
+
+		print(string.format(
+			"%s [IdleCoinSystem] 玩家 %s 领取了 %d 挂机金币，当前金币 %d",
+			GameConfig.LOG_PREFIX,
+			player.Name,
+			awardCoins,
+			newAmount
+		))
+	else
+		warn(string.format(
+			"%s [IdleCoinSystem] 玩家 %s 领取挂机金币失败",
+			GameConfig.LOG_PREFIX,
+			player.Name
+		))
+	end
+
+	return success, awardCoins
 end
 
 -- ==================== 公共接口 ====================
@@ -527,21 +606,22 @@ function IdleCoinSystem.OnPlayerJoin(player)
 	-- 累加到待领取金币
 	local totalPendingCoins = existingPendingCoins + offlineCoins
 	DataManager.SetPendingIdleCoins(player, totalPendingCoins)
-	idleCoinData.GuideEligibleOnLogin = (totalPendingCoins > 0)
+	local finalPendingCoins = (DataManager.GetIdleCoinData(player).PendingCoins or 0)
+	idleCoinData.GuideEligibleOnLogin = (finalPendingCoins > 0)
 
 	-- 获取玩家基地ID（MainServer已等待HomeSlot设置完成，这里应该能直接获取到）
 	local homeId = PlayerManager.GetPlayerHomeId(player)
 
-	print(GameConfig.LOG_PREFIX, "[IdleCoinSystem] OnPlayerJoin: 玩家=" .. player.Name .. ", homeId=" .. tostring(homeId) .. ", 待领取金币=" .. totalPendingCoins)
+	print(GameConfig.LOG_PREFIX, "[IdleCoinSystem] OnPlayerJoin: 玩家=" .. player.Name .. ", homeId=" .. tostring(homeId) .. ", 待领取金币=" .. finalPendingCoins)
 
 	if homeId and homeId > 0 then
-		UpdateMailDisplay(homeId, totalPendingCoins)
+		UpdateMailDisplay(homeId, finalPendingCoins)
 	else
 		warn(GameConfig.LOG_PREFIX, "[IdleCoinSystem] OnPlayerJoin: HomeId无效，玩家=" .. player.Name)
 	end
 
 	-- 通知客户端当前待领取金币数量
-	IdleCoinSystem.SyncIdleCoinsToClient(player, totalPendingCoins)
+	IdleCoinSystem.SyncIdleCoinsToClient(player, finalPendingCoins)
 
 	if offlineCoins > 0 then
 		print(string.format(
@@ -549,7 +629,7 @@ function IdleCoinSystem.OnPlayerJoin(player)
 			GameConfig.LOG_PREFIX,
 			player.Name,
 			offlineCoins,
-			totalPendingCoins
+			finalPendingCoins
 		))
 	end
 
@@ -665,73 +745,19 @@ end
 @param player Player - 玩家对象
 ]]
 function IdleCoinSystem.OnCollectRequest(player)
-	LoadModules()
+	ProcessIdleCoinCollect(player, 1, "Idle")
+end
 
-	-- 获取待领取金币
-	local idleCoinData = DataManager.GetIdleCoinData(player)
-	local pendingCoins = idleCoinData.PendingCoins or 0
-
-	if pendingCoins <= 0 then
-		print(string.format(
-			"%s [IdleCoinSystem] 玩家 %s 没有待领取的金币",
-			GameConfig.LOG_PREFIX,
-			player.Name
-		))
-		return
-	end
-
-	-- V2.7修复：立即获取玩家基地ID并播放特效，不等待金币发放完成
-	local homeId = PlayerManager.GetPlayerHomeId(player)
-	if homeId and homeId > 0 then
-		-- 立即播放领取特效（在发放金币之前）
-		PlayCollectEffect(homeId)
-	end
-
-	-- V3.8新增：播放领取金币音效
-	pcall(function()
-		SoundSystem.OnCollectIdleCoins(player)
-	end)
-
-	-- 发放金币
-	local success, newAmount = CurrencySystem.AddCoinsFromIdle(player, pendingCoins, pendingCoins * 60 / GameConfig.IdleCoin.CoinsPerMinute)
-
-	if success then
-		-- 清空待领取金币
-		DataManager.ClearPendingIdleCoins(player)
-
-		-- 更新显示
-		if homeId and homeId > 0 then
-			UpdateMailDisplay(homeId, 0)
-		end
-
-		-- 通知客户端
-		IdleCoinSystem.SyncIdleCoinsToClient(player, 0)
-
-		-- 保存数据
-		DataManager.SavePlayerDataThrottled(player)
-
-		-- V3.3任务系统：通知领取挂机金币
-		local TaskSystem = nil
-		local taskModule = ServerScriptService.Systems:FindFirstChild("TaskSystem")
-		if taskModule then
-			TaskSystem = require(taskModule)
-			TaskSystem.OnCollectIdleCoin(player)
-		end
-
-		print(string.format(
-			"%s [IdleCoinSystem] 玩家 %s 领取了 %d 挂机金币，当前金币 %d",
-			GameConfig.LOG_PREFIX,
-			player.Name,
-			pendingCoins,
-			newAmount
-		))
-	else
-		warn(string.format(
-			"%s [IdleCoinSystem] 玩家 %s 领取挂机金币失败",
-			GameConfig.LOG_PREFIX,
-			player.Name
-		))
-	end
+--[[
+处理挂机金币10倍购买发放
+@param player Player - 玩家对象
+@param productId number - 开发者商品ID
+@param multiplier number - 奖励倍率（默认10）
+@return boolean, number - 是否成功, 发放金币数量
+]]
+function IdleCoinSystem.ProcessIdleCoinPurchase(player, productId, multiplier)
+	local rewardMultiplier = tonumber(multiplier) or 10
+	return ProcessIdleCoinCollect(player, rewardMultiplier, "Purchase", productId)
 end
 
 --[[
