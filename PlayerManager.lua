@@ -258,6 +258,14 @@ function PlayerManager.OnPlayerAdded(player)
         return
     end
 
+    -- V4.8七日登录奖励：同步功能解锁状态（通关第一章后解锁）
+    local completedChapters = DataManager.GetCompletedChapters(player) or 0
+    player:SetAttribute("SevenDaysUnlocked", completedChapters >= 1)
+
+    -- V4.9加入群组奖励：同步领取状态
+    local groupRewardData = DataManager.GetGroupRewardData(player)
+    player:SetAttribute("GroupRewardClaimed", groupRewardData and groupRewardData.Claimed == true)
+
     -- 2. 检查是否在Studio Play Here模式下
     local skipHomeAssignment = ShouldSkipHomeAssignment(player)
 

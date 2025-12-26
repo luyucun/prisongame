@@ -53,6 +53,7 @@ local BattleManager = nil     -- 延迟加载，避免循环依赖
 local IdleCoinSystem = nil    -- V2.6新增：延迟加载，避免循环依赖
 local SkillSystem = nil       -- V3.0新增：延迟加载，避免循环依赖
 local GuideSystem = nil       -- V3.5新增：延迟加载，避免循环依赖
+local SevenDaysSystem = nil   -- V4.8新增：延迟加载，避免循环依赖
 
 -- ==================== 配置 ====================
 
@@ -339,6 +340,9 @@ local function CMD_Help(player, args)
 系统调试:
 /iconpreload - 检查图标预加载状态
 
+七日登录(V4.8):
+/unlocknextday - 解锁下一天奖励
+
 其他:
 /help - 显示此帮助
 
@@ -363,6 +367,34 @@ local function CMD_MainProgress(player, args)
     SendMessage(player, string.format("当前挑战章节: %d", currentChapter))
     SendMessage(player, string.format("已通关章节数: %d", completedChapters))
     SendMessage(player, string.format("最大通关进度: 第%d章第%d关", maxClearedChapter, maxClearedStage))
+end
+
+--[[
+命令: /unlocknextday
+解锁七日登录奖励的下一天 (V4.8)
+]]
+local function CMD_UnlockNextDay(player, args)
+    if not SevenDaysSystem then
+        local systemsFolder = ServerScriptService:FindFirstChild("Systems")
+        if systemsFolder then
+            local module = systemsFolder:FindFirstChild("SevenDaysSystem")
+            if module then
+                SevenDaysSystem = require(module)
+            end
+        end
+    end
+
+    if not SevenDaysSystem or not SevenDaysSystem.GMUnlockNextDay then
+        SendMessage(player, "错误: SevenDaysSystem未加载")
+        return
+    end
+
+    local success, message = SevenDaysSystem.GMUnlockNextDay(player)
+    if success then
+        SendMessage(player, message or "解锁成功")
+    else
+        SendMessage(player, message or "解锁失败")
+    end
 end
 
 --[[
@@ -1112,6 +1144,7 @@ local COMMAND_HANDLERS = {
     ["idlecoins"] = CMD_IdleCoins,        -- V2.6新增
     ["resetdata"] = CMD_ResetData,        -- V2.9新增
     ["mainprogress"] = CMD_MainProgress,  -- 主线通关打点
+    ["unlocknextday"] = CMD_UnlockNextDay, -- V4.8新增：解锁七日登录下一天
     ["addskill"] = CMD_AddSkill,          -- V3.0新增
     ["removeskill"] = CMD_RemoveSkill,    -- V3.0新增
     ["clearskills"] = CMD_ClearSkills,    -- V3.0新增

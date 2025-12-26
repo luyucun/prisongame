@@ -2200,6 +2200,12 @@ function CampaignManager.OnVictory(campaignData)
 			-- 保存数据
 			DataManager.SavePlayerDataThrottled(player, true)  -- 强制保存
 
+			-- V4.8七日登录奖励：通关第一章后解锁按钮
+			local completedChaptersNow = tonumber(DataManager.GetCompletedChapters(player)) or newCompletedChapters or 0
+			if completedChaptersNow >= 1 then
+				player:SetAttribute("SevenDaysUnlocked", true)
+			end
+
 			-- V4.4.3: 首次通关章节徽章
 			if newCompletedChapters and newCompletedChapters > completedBefore then
 				if LoadBadgeSystem() then

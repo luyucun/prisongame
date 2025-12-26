@@ -639,6 +639,14 @@ local function UpdateShopDisplay()
         end
     end
 
+    -- Reset selection and hide buy buttons when list refreshes.
+    currentSelectedItem = nil
+    local buyButtonFrame = itemContainer:FindFirstChild("BuyButtonFrame")
+    if buyButtonFrame then
+        buyButtonFrame.Visible = false
+        buyButtonFrame:SetAttribute("CurrentCardId", nil)
+    end
+
     -- 加载UI助手
     LoadUIHelpers()
 

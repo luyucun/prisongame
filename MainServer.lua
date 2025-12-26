@@ -32,6 +32,7 @@ local InventorySystem = require(ServerScriptService.Systems.InventorySystem)
 local PlacementSystem = require(ServerScriptService.Systems.PlacementSystem)
 local MergeSystem = require(ServerScriptService.Systems.MergeSystem)  -- V1.4新增
 local PowerSystem = require(ServerScriptService.Systems.PowerSystem) -- V3.9.2新增 战斗力系统
+local LeaderboardSystem = require(ServerScriptService.Systems.LeaderboardSystem) -- V4.7新增 排行榜系统
 local BadgeSystem = require(ServerScriptService.Systems.BadgeSystem) -- V4.4 badge system
 local PhysicsManager = require(ServerScriptService.Systems.PhysicsManager)
 local GMCommandSystem = require(ServerScriptService.Systems.GMCommandSystem)
@@ -68,6 +69,10 @@ local TaskSystem = require(ServerScriptService.Systems.TaskSystem)
 local GuideSystem = require(ServerScriptService.Systems.GuideSystem)
 -- V4.5新增 - 对话系统
 local TalkSystem = require(ServerScriptService.Systems.TalkSystem)
+-- V4.8新增 - 七日登录奖励
+local SevenDaysSystem = require(ServerScriptService.Systems.SevenDaysSystem)
+-- V4.9新增 - 群组奖励
+local GroupRewardSystem = require(ServerScriptService.Systems.GroupRewardSystem)
 -- V3.8新增 - 音效系统
 local SoundSystem = require(ServerScriptService.Systems.SoundSystem)
 -- Robux购买处理器
@@ -191,7 +196,17 @@ local function InitializeServer()
         warn(GameConfig.LOG_PREFIX, "战斗力系统初始化失败(返回false),战斗力显示将不可用")
     end
 
-    -- 5.56 initialize badge system (V4.4)
+    -- 5.56 初始化排行榜系统 (V4.7新增)
+    success, result = pcall(function()
+        return LeaderboardSystem.Initialize()
+    end)
+    if not success then
+        warn(GameConfig.LOG_PREFIX, "排行榜系统初始化失败(异常):", result)
+    elseif result == false then
+        warn(GameConfig.LOG_PREFIX, "排行榜系统初始化失败(返回false),排行榜功能将不可用")
+    end
+
+    -- 5.57 initialize badge system (V4.4)
     success, result = pcall(function()
         return BadgeSystem.Initialize()
     end)
@@ -392,6 +407,26 @@ local function InitializeServer()
         warn(GameConfig.LOG_PREFIX, "对话系统初始化失败(异常):", result)
     elseif result == false then
         warn(GameConfig.LOG_PREFIX, "对话系统初始化失败(返回false)")
+    end
+
+    -- 13.6 初始化七日登录奖励系统 (V4.8新增)
+    success, result = pcall(function()
+        return SevenDaysSystem.Initialize()
+    end)
+    if not success then
+        warn(GameConfig.LOG_PREFIX, "七日登录奖励系统初始化失败(异常):", result)
+    elseif result == false then
+        warn(GameConfig.LOG_PREFIX, "七日登录奖励系统初始化失败(返回false)")
+    end
+
+    -- 13.7 初始化群组奖励系统 (V4.9新增)
+    success, result = pcall(function()
+        return GroupRewardSystem.Initialize()
+    end)
+    if not success then
+        warn(GameConfig.LOG_PREFIX, "群组奖励系统初始化失败(异常):", result)
+    elseif result == false then
+        warn(GameConfig.LOG_PREFIX, "群组奖励系统初始化失败(返回false)")
     end
 
     -- 14. 初始化音效系统 (V3.8新增)

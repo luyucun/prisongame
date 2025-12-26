@@ -107,6 +107,10 @@ PlayerData = {
         MusicEnabled = boolean,        -- BGM是否开启
         SfxEnabled = boolean,          -- SFX是否开启
     },
+    PowerRankData = {          -- V4.7排行榜：战斗力达成时间
+        Power = number,        -- 当前战斗力
+        Time = number,         -- 达成时间戳
+    },
     ChapterProgress = {        -- V2.8章节进度系统
         CurrentChapter = number,   -- 当前挑战章节(从1开始)
         CompletedChapters = number, -- 已通关的章节数(0表示未通关任何章节)
@@ -123,6 +127,17 @@ PlayerData = {
     },
     GuideData = {              -- V3.5新手引导系统
         CompletedGuides = {},  -- 已完成的引导 {[guideId] = true}
+    },
+    SevenDayData = {           -- V4.8七日登录奖励
+        Round = number,        -- 当前轮次
+        ClaimedDays = {},      -- 已领取天数 {[day] = true}
+        UnlockedDays = number, -- 当前已解锁的最高天数
+        LastClaimTime = number,-- 上次领取时间戳
+        LastUnlockDay = number,-- 上次解锁检查的UTC天数索引
+        PendingReset = boolean,-- 是否待重置新一轮
+    },
+    GroupRewardData = {        -- V4.9加入群组奖励
+        Claimed = boolean,     -- 是否已领取群组奖励
     },
     LastSaveTime = number,     -- 最后保存时间
 }
@@ -256,8 +271,17 @@ local function LoadFromDataStore(player)
 			if data.TalkData then
 				data.TalkData = RestoreFromDataStore(data.TalkData)  -- V4.5对话数据
 			end
+			if data.SevenDayData then
+				data.SevenDayData = RestoreFromDataStore(data.SevenDayData)  -- V4.8七日登录奖励
+			end
+			if data.GroupRewardData then
+				data.GroupRewardData = RestoreFromDataStore(data.GroupRewardData)  -- V4.9加入群组奖励
+			end
 			if data.SoundSettings then
 				data.SoundSettings = RestoreFromDataStore(data.SoundSettings)  -- V4.6：恢复音效设置
+			end
+			if data.PowerRankData then
+				data.PowerRankData = RestoreFromDataStore(data.PowerRankData)  -- V4.7：恢复排行榜数据
 			end
 
 			return data, "ok"
@@ -310,11 +334,14 @@ local function SaveToDataStore(player, playerData, userId)
 		ShopData = SanitizeForDataStore(playerData.ShopData),  -- V2.1库存系统：保存商店数据
 		IdleCoinData = SanitizeForDataStore(playerData.IdleCoinData),  -- V2.6：保存挂机金币数据
 		SoundSettings = SanitizeForDataStore(playerData.SoundSettings),  -- V4.6：保存音效设置
+		PowerRankData = SanitizeForDataStore(playerData.PowerRankData),  -- V4.7：保存排行榜数据
 		ChapterProgress = SanitizeForDataStore(playerData.ChapterProgress),  -- V2.8：保存章节进度数据
 		SkillInventory = SanitizeForDataStore(playerData.SkillInventory),  -- V3.0：保存技能背包
 		TaskData = SanitizeForDataStore(playerData.TaskData),  -- V3.3：保存任务数据
 		GuideData = SanitizeForDataStore(playerData.GuideData),  -- V3.5：保存引导数据
 		TalkData = SanitizeForDataStore(playerData.TalkData),  -- V4.5对话数据
+		SevenDayData = SanitizeForDataStore(playerData.SevenDayData),  -- V4.8七日登录奖励
+		GroupRewardData = SanitizeForDataStore(playerData.GroupRewardData),  -- V4.9加入群组奖励
 		LastSaveTime = os.time(),
 	}
 
@@ -349,6 +376,76 @@ local function SaveToDataStore(player, playerData, userId)
 	end
 end
 
+local function GetUtcDayIndex(timestamp)
+    local ts = tonumber(timestamp) or os.time()
+    return math.floor(ts / 86400)
+end
+
+local function BuildDefaultSevenDayData(now)
+    local utcDay = GetUtcDayIndex(now)
+    return {
+        Round = 1,
+        ClaimedDays = {},
+        UnlockedDays = 1,
+        LastClaimTime = 0,
+        LastUnlockDay = utcDay,
+        PendingReset = false,
+    }
+end
+
+local function NormalizeSevenDayData(data)
+    if type(data) ~= "table" then
+        return BuildDefaultSevenDayData(os.time())
+    end
+
+    data.Round = tonumber(data.Round) or 1
+    if type(data.ClaimedDays) ~= "table" then
+        data.ClaimedDays = {}
+    end
+
+    local unlocked = tonumber(data.UnlockedDays)
+    if unlocked == nil then
+        unlocked = 1
+    end
+    if unlocked < 0 then
+        unlocked = 0
+    elseif unlocked > 7 then
+        unlocked = 7
+    end
+    data.UnlockedDays = unlocked
+
+    data.LastClaimTime = tonumber(data.LastClaimTime) or 0
+    data.LastUnlockDay = tonumber(data.LastUnlockDay) or GetUtcDayIndex(os.time())
+    data.PendingReset = data.PendingReset == true
+
+    local claimedCount = 0
+    for day, claimed in pairs(data.ClaimedDays) do
+        if tonumber(day) and claimed == true then
+            claimedCount = claimedCount + 1
+        end
+    end
+    if data.UnlockedDays < claimedCount then
+        data.UnlockedDays = claimedCount
+    end
+
+    return data
+end
+
+local function BuildDefaultGroupRewardData()
+    return {
+        Claimed = false,
+    }
+end
+
+local function NormalizeGroupRewardData(data)
+    if type(data) ~= "table" then
+        return BuildDefaultGroupRewardData()
+    end
+
+    data.Claimed = data.Claimed == true
+    return data
+end
+
 --[[
 创建默认玩家数据
 @param player Player - 玩家对象
@@ -376,6 +473,10 @@ local function CreateDefaultData(player)
             MusicEnabled = true,
             SfxEnabled = true,
         },
+        PowerRankData = {  -- V4.7排行榜：初始化
+            Power = 0,
+            Time = 0,
+        },
         ChapterProgress = {  -- V2.8章节进度系统：初始化
             CurrentChapter = 1,       -- 默认从第1章开始
             CompletedChapters = 0,    -- 未通关任何章节
@@ -397,8 +498,38 @@ local function CreateDefaultData(player)
         TalkData = {  -- V4.5对话系统：初始化
             CompletedTalks = {},
         },
+        SevenDayData = BuildDefaultSevenDayData(os.time()), -- V4.8七日登录奖励
+        GroupRewardData = BuildDefaultGroupRewardData(), -- V4.9加入群组奖励
         LastSaveTime = os.time(),
     }
+end
+
+-- ==================== V4.9群组奖励接口 ====================
+
+function DataManager.GetGroupRewardData(player)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData then
+        return nil
+    end
+
+    if not playerData.GroupRewardData then
+        playerData.GroupRewardData = BuildDefaultGroupRewardData()
+    else
+        playerData.GroupRewardData = NormalizeGroupRewardData(playerData.GroupRewardData)
+    end
+
+    return playerData.GroupRewardData
+end
+
+function DataManager.SetGroupRewardClaimed(player, claimed)
+    local rewardData = DataManager.GetGroupRewardData(player)
+    if not rewardData then
+        warn(GameConfig.LOG_PREFIX, "SetGroupRewardClaimed: 找不到玩家数据")
+        return false
+    end
+
+    rewardData.Claimed = claimed == true
+    return true
 end
 
 -- ==================== 主线进度工具（最大通关关卡） ====================
@@ -582,6 +713,20 @@ function DataManager.InitializePlayerData(player)
             }
         end
 
+        -- V4.8七日登录奖励：确保SevenDayData字段存在（向后兼容）
+        if not playerData.SevenDayData then
+            playerData.SevenDayData = BuildDefaultSevenDayData(os.time())
+        else
+            playerData.SevenDayData = NormalizeSevenDayData(playerData.SevenDayData)
+        end
+
+        -- V4.9加入群组奖励：确保GroupRewardData字段存在（向后兼容）
+        if not playerData.GroupRewardData then
+            playerData.GroupRewardData = BuildDefaultGroupRewardData()
+        else
+            playerData.GroupRewardData = NormalizeGroupRewardData(playerData.GroupRewardData)
+        end
+
         -- V4.6设置系统：确保SoundSettings字段存在（向后兼容）
         if not playerData.SoundSettings then
             playerData.SoundSettings = {
@@ -594,6 +739,21 @@ function DataManager.InitializePlayerData(player)
             end
             if playerData.SoundSettings.SfxEnabled == nil then
                 playerData.SoundSettings.SfxEnabled = true
+            end
+        end
+
+        -- V4.7排行榜：确保PowerRankData字段存在（向后兼容）
+        if not playerData.PowerRankData then
+            playerData.PowerRankData = {
+                Power = 0,
+                Time = 0,
+            }
+        else
+            if playerData.PowerRankData.Power == nil then
+                playerData.PowerRankData.Power = 0
+            end
+            if playerData.PowerRankData.Time == nil then
+                playerData.PowerRankData.Time = 0
             end
         end
 

@@ -1132,6 +1132,31 @@ function PlacementSystem.GetPlacedUnits(player)
 	return result
 end
 
+function PlacementSystem.CleanupOrphanPlacedUnits(player)
+	local userId = player.UserId
+	if not placedUnits[userId] then
+		return 0
+	end
+
+	local toRemove = {}
+	for instanceId in pairs(placedUnits[userId]) do
+		local unitInstance = InventorySystem.GetUnitByInstanceId(player, instanceId)
+		if not unitInstance then
+			table.insert(toRemove, instanceId)
+		end
+	end
+
+	local removed = 0
+	for _, instanceId in ipairs(toRemove) do
+		local success = PlacementSystem.RemovePlacedUnit(player, instanceId)
+		if success then
+			removed = removed + 1
+		end
+	end
+
+	return removed
+end
+
 --[[
 清除玩家所有已放置的兵种
 @param player Player

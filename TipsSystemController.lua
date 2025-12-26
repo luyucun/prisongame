@@ -30,6 +30,8 @@ if not errorText then
 	return
 end
 
+local defaultTextColor = errorText.TextColor3
+
 local powerFrame = tipsGui:FindFirstChild("Power")
 local powerText = nil
 if powerFrame then
@@ -84,6 +86,36 @@ local function StopPowerTip()
 	end
 end
 
+local function ShowTip(text, color)
+	if not text or text == "" then
+		return
+	end
+
+	showToken = showToken + 1
+	local token = showToken
+
+	StopCurrentTip()
+
+	errorText.Text = text
+	errorText.TextColor3 = color or defaultTextColor
+	frame.Position = startPosition
+	frame.Visible = true
+
+	activeTween = TweenService:Create(
+		frame,
+		TweenInfo.new(tweenDuration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ Position = targetPosition }
+	)
+	activeTween:Play()
+
+	task.delay(showDuration, function()
+		if token ~= showToken then
+			return
+		end
+		frame.Visible = false
+	end)
+end
+
 local function BuildPowerText(basePower, deltaValue, isIncrease)
 	local sign = isIncrease and "+" or "-"
 	local arrow = isIncrease and "↑" or "↓"
@@ -101,32 +133,11 @@ end
 local TipsSystemController = {}
 
 function TipsSystemController.ShowError(text)
-	if not text or text == "" then
-		return
-	end
+	ShowTip(text, defaultTextColor)
+end
 
-	showToken = showToken + 1
-	local token = showToken
-
-	StopCurrentTip()
-
-	errorText.Text = text
-	frame.Position = startPosition
-	frame.Visible = true
-
-	activeTween = TweenService:Create(
-		frame,
-		TweenInfo.new(tweenDuration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-		{ Position = targetPosition }
-	)
-	activeTween:Play()
-
-	task.delay(showDuration, function()
-		if token ~= showToken then
-			return
-		end
-		frame.Visible = false
-	end)
+function TipsSystemController.ShowSuccess(text)
+	ShowTip(text, Color3.fromRGB(0, 255, 0))
 end
 
 function TipsSystemController.ShowPowerChange(oldPower, newPower)

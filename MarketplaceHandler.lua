@@ -35,11 +35,13 @@ local SkillShopConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitFor
 -- 挂机金币10倍购买
 local IDLE_COIN_PRODUCT_ID = 3487946200
 local IDLE_COIN_MULTIPLIER = 10
+local SEVEN_DAYS_UNLOCK_PRODUCT_ID = 3489888670
 
 -- 延迟加载系统模块（避免循环依赖）
 local InventorySystem = nil
 local DataManager = nil
 local IdleCoinSystem = nil
+local SevenDaysSystem = nil
 
 -- 私有变量
 local ProcessedReceipts = {}  -- 已处理的收据ID: [receiptId] = true
@@ -88,6 +90,18 @@ local function GetIdleCoinSystem()
 		end
 	end
 	return IdleCoinSystem
+end
+
+local function GetSevenDaysSystem()
+	if not SevenDaysSystem then
+		local sevenDaysModule = ServerScriptService.Systems:FindFirstChild("SevenDaysSystem")
+		if sevenDaysModule then
+			SevenDaysSystem = require(sevenDaysModule)
+		else
+			warn("[MarketplaceHandler] SevenDaysSystem模块未找到")
+		end
+	end
+	return SevenDaysSystem
 end
 
 --[[
@@ -327,6 +341,28 @@ function MarketplaceHandler.ProcessReceipt(receiptInfo)
 				warn(string.format(
 					"[MarketplaceHandler] 挂机金币购买发放失败 - 玩家:%s",
 					player.Name
+				))
+				return Enum.ProductPurchaseDecision.NotProcessedYet
+			end
+		elseif receiptInfo.ProductId == SEVEN_DAYS_UNLOCK_PRODUCT_ID then
+			-- 七日登录奖励一键解锁
+			local sevenDaysSystem = GetSevenDaysSystem()
+			if not sevenDaysSystem then
+				warn("[MarketplaceHandler] SevenDaysSystem不可用，稍后重试")
+				return Enum.ProductPurchaseDecision.NotProcessedYet
+			end
+
+			local ok, unlockSuccess, unlockMessage = pcall(function()
+				return sevenDaysSystem.UnlockAll(player)
+			end)
+
+			if ok and unlockSuccess then
+				grantSuccess, grantMessage = true, "购买成功"
+			else
+				warn(string.format(
+					"[MarketplaceHandler] 七日奖励解锁失败 - 玩家:%s 原因:%s",
+					player.Name,
+					ok and tostring(unlockMessage) or "异常"
 				))
 				return Enum.ProductPurchaseDecision.NotProcessedYet
 			end

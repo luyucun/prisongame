@@ -181,6 +181,8 @@ end
 @return boolean, string, table|nil - 是否成功, 消息, 新兵种实例数据
 ]]
 function MergeSystem.MergeUnits(player, instanceIdA, instanceIdB)
+    PlacementSystem.CleanupOrphanPlacedUnits(player)
+
     -- 1. 验证是否可以合成
     local canMerge, message = MergeSystem.CanMerge(player, instanceIdA, instanceIdB)
     if not canMerge then
@@ -267,6 +269,7 @@ function MergeSystem.MergeUnits(player, instanceIdA, instanceIdB)
     end
 
     -- 6. 移除两个旧兵种（从背包和场地移除）
+    PlacementSystem.RemovePlacedUnit(player, instanceIdA)
     PlacementSystem.RemovePlacedUnit(player, instanceIdA)
     PlacementSystem.RemovePlacedUnit(player, instanceIdB)
     InventorySystem.RemoveUnit(player, instanceIdA)

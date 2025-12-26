@@ -25,6 +25,8 @@ local DataManager
 local InventorySystem
 local BadgeSystem
 local badgeSystemLoadWarned = false
+local LeaderboardSystem
+local leaderboardSystemLoadWarned = false
 
 -- Lazy-load BadgeSystem to avoid circular dependencies
 local function LoadBadgeSystem()
@@ -49,6 +51,32 @@ local function LoadBadgeSystem()
 	if not badgeSystemLoadWarned then
 		badgeSystemLoadWarned = true
 		warn("[PowerSystem] BadgeSystem module not found.")
+	end
+	return false
+end
+
+local function LoadLeaderboardSystem()
+	if LeaderboardSystem then
+		return true
+	end
+
+	local leaderboardModule = ServerScriptService.Systems:FindFirstChild("LeaderboardSystem")
+	if leaderboardModule then
+		local success, result = pcall(require, leaderboardModule)
+		if success and result then
+			LeaderboardSystem = result
+			return true
+		end
+		if not leaderboardSystemLoadWarned then
+			leaderboardSystemLoadWarned = true
+			warn("[PowerSystem] Failed to load LeaderboardSystem:", result)
+		end
+		return false
+	end
+
+	if not leaderboardSystemLoadWarned then
+		leaderboardSystemLoadWarned = true
+		warn("[PowerSystem] LeaderboardSystem module not found.")
 	end
 	return false
 end
@@ -540,6 +568,12 @@ function PowerSystem.SyncPowerToClient(player, totalPower)
 
 	-- 同步到Roblox内置排行榜系统(单服务器)
 	SyncPowerToLeaderstats(player, totalPower)
+
+	if LoadLeaderboardSystem() then
+		pcall(function()
+			LeaderboardSystem.UpdatePlayerPower(player, totalPower)
+		end)
+	end
 
 	if not PowerUpdateEvent then
 		return

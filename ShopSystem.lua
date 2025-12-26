@@ -784,6 +784,28 @@ local function OnRequestShopList(player)
 			return
 		end
 
+		-- Ensure Robux price is restored after first-open completion.
+		if shopId == "UnitShop" and firstOpenState == FIRST_OPEN_STATE.COMPLETED and not useFallback then
+			local configRobuxPrice = nil
+			local shopConfig = ShopConfig.Shops[shopId]
+			if shopConfig and shopConfig.Items then
+				for _, itemConfig in ipairs(shopConfig.Items) do
+					if itemConfig.ItemType == "Unit" and itemConfig.UnitId == FIRST_OPEN_UNIT_ID then
+						configRobuxPrice = itemConfig.RobuxPrice
+						break
+					end
+				end
+			end
+			if configRobuxPrice and configRobuxPrice > 0 then
+				for _, item in ipairs(shopItems) do
+					if item.UnitId == FIRST_OPEN_UNIT_ID and (not item.RobuxPrice or item.RobuxPrice <= 0) then
+						item.RobuxPrice = configRobuxPrice
+						break
+					end
+				end
+			end
+		end
+
 		if GameConfig.Shop.EnableStockSystem and not useFallback then
 			if not PlayerStockData[player] or not PlayerStockData[player][shopId] then
 				warn(string.format(

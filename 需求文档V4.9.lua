@@ -1587,4 +1587,109 @@ ID	排序	对话选项类型	对话出现条件	出现条件参数	选项文本	
 8.如果关闭音效播放，就是把游戏内默认的警告音/领金币时候的金币音等非BGM的音效播放全部不播放，再开启后再根据触发条件再播放即可
 
 
+需求文档V4.7 排行榜系统
 
+概述：我们需要在游戏内添加一个全局的排行榜，注意区别于当前已经存在的单服务器内的内置排行榜
+
+详细规则：
+
+1.这个排行榜的面向对象是所有的游戏玩家而不是单指本服务器内的玩家
+2.排行对象是玩家当前的总战斗力值
+3.每3分钟系统自动刷新排行榜
+4.当两个玩家的战斗力相同时，谁先达到该战斗力，谁排在更靠前的位置
+5.游戏上线后，到了更新时需要去拉取所有玩家的数据生成一份榜单不论玩家当前是否在线
+
+关于界面规则是：
+
+1.玩家点击StarterGui - TopRightGui - Bg - Learderboard - Button按钮可以打开排行榜界面（也就是把StarterGui - Leaderboard - Bg的visible属性改成true）
+2.玩家点击StarterGui - Leaderboard - Bg - Title - CloseButton这个按钮可以关闭排行榜界面（也就是把StarterGui - Leaderboard - Bg的visible属性改成false）
+3.StarterGui - Leaderboard - Bg - ScrollingFrame是我们的排行榜玩家信息展示列表容器，其子节点中放置排行榜的玩家信息，其中：
+	a.Rank01是个Frame，固定用于展示榜单第一名的信息，其中Rank01下的子节点Avatar是一个imagelabel，用于展示玩家头像，Name是一个textlabel，用于展示玩家的名字，Power是一个textlabel，用于展示玩家的战斗力
+	b.Rank02和Rank03和Rank01结构一样，分别用于固定展示第二名和第三名的信息
+	c.第四名之后的所有玩家的信息走模板复制，在ScrollingFrame下有个叫RankTemplate的Frame,是用于承载第四名之后的玩家的信息的，当生成列表时，比如第四名的玩家就是复制一份RankTemplate，改成玩家的对应信息，第五名同样如此，然后生成对应的信息即可
+	d.注意：RankTemplate的默认Visible是false，当复制出来一份信息时，要把复制出来的信息的visible属性改成true
+	e.RankTemplate下的子节点Avatar是一个imagelabel，用于展示玩家头像，Name是一个textlabel，用于展示玩家的名字，Power是一个textlabel，用于展示玩家的战斗力，Rank是一个textlabel，用于显示玩家的名次
+
+4.Leaderboard - Bg - Player是一个Frame，用于展示玩家自己的排名信息，Player下的子节点Avatar是一个imagelabel，用于展示玩家头像，Name是一个textlabel，用于展示玩家的名字，Power是一个textlabel，用于展示玩家的战斗力，Rank是一个textlabel，用于显示玩家的名次。
+	a.注意，如果玩家的名次在20名开外比如98名，这里就统一都默认显示20+，只有在1到20名才显示当前的名次，比如18名就显示18，20名显示20，32名就显示20+
+
+5.Leaderboard - Bg - CountDownTime是一个textlabel，用于显示排行榜刷新倒计时，格式固定为：Refreshes in: 00:00，显示为分:秒，在打开界面的时候需要实时更新
+
+6.我们的排行榜榜单内只显示前20名玩家即可，超出20名的玩家就不出现在榜单中
+
+7.点击CloseButton关闭按钮时，需要给按钮一个点击效果，游戏内通用的按钮点击效果即可
+
+
+需求文档V4.8  七日登录奖励
+
+概述：我们需要开发一套“七日登录奖励”系统，玩家可以每天登录领取一份奖励
+
+基础逻辑简单来说就是：只要玩家登录，就可以领取一份今日的登录奖励，然后明天再登录就可以领下一天的奖励，如果明天没登录，后天登录了，也是领的第二天的奖励
+
+详细规则是：
+
+1.玩家登录的第一天触发七日奖励的第一天的奖励领取，所以新玩家第一天的时候的奖励是默认解锁可以领取的
+2.每天utc0点是登录奖励刷新的节点，奖励刷新后，只要玩家再次登录，就可以领取这份奖励（当然如果玩家在线并且奖励刷新了不用下线可以直接领），所以只要玩家登录了，就可以领新刷新的这份奖励，哪怕是好几天不登陆，再次登录也是领这份奖励，因为状态已经变成了可领取
+3.具体逻辑我建议做成玩家上线时去判定奖励刷新即可，比如玩家好几天不登陆，突然登录了，判断这个时间点跟上一份奖励领取时的中间是否存在一个utc0点，如果有则认为就是跨天了，就应该能领取最新一份的登录奖励了。
+4.所以极限情况是玩家23点59分登录领了第一天的登录奖励然后过了utc0点，又能立刻领第二天的登录奖励，然后过了好几天才再次登录后，可以领第三天的登录奖励
+5.所以我们这个本质是累计登录奖励，而不是登陆一次过七天再登录就能领全部7天的奖励
+
+奖励类型有：
+1.发放指定Id的兵，发放数量可变化，我会在下面具体写清楚
+2.发放指定Id的技能，发放数量可变化，我也会写清楚
+3，发放指定数量的金币
+
+详细发放奖励需求：
+第一天：10014这个Id的兵，数量是1
+第二天：金币数量10000
+第三天：10014这个id的兵，数量2
+第四天：1002这个技能，数量10
+第五天：10014这个Id的兵，数量3
+第六天：金币30K
+第七天：10024这个id的兵，数量2
+
+具体客户端逻辑是：
+1.玩家点击StarterGui - TopRightGui - Bg - SevenDays - Button这个按钮，可以打开七日登录奖励界面（也就是把StarterGui - SevenDays - Bg的Visible属性改成True，同时把StarterGui - SevenDays - BlackBg的Visible属性改成True）
+2.玩家点击SevenDays - Bg - Title - CloseButton这个按钮可以关闭七日登录奖励界面
+3.SevenDays - Bg - NextReward是一个TextLabel，用于显示下一个奖励的刷新倒计时格式固定就是：Refresh In:XX:YY,XX:YY就是小时：分钟，也就是距离下个UTC0点的倒计时
+4.点击StarterGui - SevenDays - Bg - UnlockAll这个按钮，直接触发对开发者商品：3489888670的购买，购买成功后，立刻解锁本轮7天奖励中的所有奖励，全部变成可领取状态
+    a.这里需要有一些特殊处理：当玩家购买这个商品后，会把当前剩余的未购买的奖励全部变成可领取状态。
+    b.玩家如果把所有奖励都领取了，那么关闭这个界面，再次打开后，会重新刷新一份新的7天奖励，注意这是一份新的7天奖励，其中第一天的奖励是不能领的，要等下一个utc0点刷新才能领第一天的奖励，其实可以视为第8天的奖励，后面都是一样的逻辑
+    c.同样的，玩家通过登录7天领取了所有奖励后，关闭界面，再打开也是会重新刷新一份新的7天奖励出来
+    d.玩家可以通不断购买开发者商品3489888670，来不断解锁当前轮次的7天奖励
+
+5.Bg下有Reward01到Reward07共7个Frame ，每个都是代表某天的奖励，我们以Reward01举例来说明规则，Reward01就是第一天的奖励，Reward02就是第二天的奖励，以此类推
+    a.Reward01 - DayNum是代表当前是第几天的文本，在这种状态下，当一个奖励还未解锁还不能领取时，DayNum的visible属性应该设置为True，也就是显示为第几天，你不用去设定DayNum的文本内容，只需要控制是否显示即可
+    b.Reward01 - Claim是一个按钮，是领取按钮，如果某个奖励已经变成了可领取状态，则把Claim的Visible属性改成True，把上面的DayNum的Visible属性改成False，点击Claim可以领取奖励，注意点击的时候需要有一个点击效果
+    c.Reward01 - Claimed是一个textlabel文本，用于领取完奖励后显示出来代表奖励已经领取了，领完奖励后，需要把Claimed的visible属性改成True，把Claim的Bisible属性改成False
+    d.奖励领取成功后，需要把Reward01 - Bg的Visible属性改成True
+
+    e.注意默认状态下，只有DayNum的Visible属性是默认true的，其他都是false
+    f.当刷新了一轮新的奖励后，需要把所有奖励的状态全部改成默认状态
+
+
+6.当玩家领取奖励成功后，需要弹出文本提示：Reward Claimed!，这里就用我们系统通用的弹出样式即可，类似买商品时没库存的提示，但是这里的Reward Claimed!这个文本要用绿色，动效保持和其他的一致
+
+7.StarterGui - TopRightGui - SevenDays - RedPoint是红点，默认的Visible属性是False，当有可领取但是玩家未领取的七日登录奖励时，需要把红点显示出来，并且红点在显示状态下，需要每2秒给红点一个小动效，左右抖动一下，每2秒播一次，提醒玩家看到
+
+8.SevenDays是系统功能按钮，功能未解锁时是隐藏状态，功能解锁后才能显示出来按钮。
+9.解锁条件是：玩家通关第一章，玩家通关第一章后，将按钮SevenDays显示出来，从此再也不隐藏了，就算这个玩家解锁了这个功能
+
+
+需求文档V4.9  加入群组奖励
+
+概述：玩家加入我们游戏的群组，可以领一份奖励
+
+详细规则是：
+
+1.玩家点击StarterGui - TopRightGui - GroupReward - Button这个按钮，打开奖励领取界面（把StarterGui - GroupReward - Bg的visible属性改成true）
+2.玩家点击StarterGui - GroupReward - Bg - Title - CloseButton按钮，关闭界面
+3.玩家点击StarterGui - GroupReward - Bg - Claim这个按钮，触发领取验证，如果验证成功，则为玩家发放奖励，需要弹出系统飘字提示：Claim Successful!（这个参考七日登录的领取成功飘字提示），同时领取成功后把Claim这个按钮的Visible属性改成false，然后把StarterGui - GroupReward - Bg - Claimed这个textlabel的visible属性改成True
+4.玩家领取成功后，需要把StarterGui - TopRightGui - GroupReward - Button这个按钮的Visible属性改成False，永久改成False不再出现了。
+5.玩家如果点击领取时，不满足领取条件，则无法领取，飘字提示：Join the group for rewards!，然后需要播放一下我们系统的警告音，和购买时库存不足的音效一致
+
+我们的奖励领取条件是：
+1.玩家一定要加入我们游戏的群组，这个应该在roblox有提供的官方验证接口，直接用这个接口判断玩家是否加入了群组
+2.玩家在点击领取奖励的那一刻在群组中，即可领取成功
+
+奖励内容是为玩家发放8个10005这个兵

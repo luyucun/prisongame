@@ -110,6 +110,19 @@ ReplicatedStorage
     └──PowerEvents（Folder）/  【V3.9.2新增 - 战斗力系统】
         ├──PowerUpdate（RemoteEvent） - 服务器→客户端：同步战斗力数值(totalPower)
         └──RequestPower（RemoteEvent） - 客户端→服务器：请求当前战斗力
+    └──LeaderboardEvents（Folder）/  【V4.7新增 - 全局排行榜】
+        ├──RequestLeaderboard（RemoteEvent） - 客户端→服务器：请求排行榜数据
+        └──LeaderboardData（RemoteEvent） - 服务器→客户端：返回排行榜数据(entries, nextRefreshTime, serverTime)
+    └──SevenDaysEvents（Folder）/  【V4.8新增 - 七日登录奖励】
+        ├──RequestSevenDaysData（RemoteEvent） - 客户端→服务器：请求七日奖励数据(allowReset)
+        ├──SevenDaysData（RemoteEvent） - 服务器→客户端：七日奖励数据(unlockedDays, claimedDays, pendingReset, nextRefreshTime, serverTime, round)
+        ├──ClaimSevenDayReward（RemoteEvent） - 客户端→服务器：领取奖励(dayIndex)
+        └──ClaimSevenDayResult（RemoteEvent） - 服务器→客户端：领取结果(success, message, dayIndex)
+    └──GroupRewardEvents（Folder）/  【V4.9新增 - 加入群组奖励】
+        ├──RequestGroupRewardData（RemoteEvent） - 客户端→服务器：请求群组奖励数据
+        ├──GroupRewardData（RemoteEvent） - 服务器→客户端：群组奖励数据(claimed)
+        ├──ClaimGroupReward（RemoteEvent） - 客户端→服务器：领取群组奖励
+        └──ClaimGroupRewardResult（RemoteEvent） - 服务器→客户端：领取结果(success, message, claimed)
 
 
 如果需要补充新的RemoteEvent或者Remotefunction，请在这里列出来，我会自己去创建
@@ -136,6 +149,52 @@ ReplicatedStorage
 12. 保存游戏
 
 注意：TalkSystem.lua 初始化时会自动创建这些事件（如果不存在），但建议手动创建以确保事件在系统初始化前就存在。
+
+【V4.8七日登录奖励RemoteEvent创建说明】
+位置：ReplicatedStorage/Events/SevenDaysEvents/ （新建文件夹）
+🆕 RequestSevenDaysData (RemoteEvent) - 需在Studio中手动创建
+🆕 SevenDaysData (RemoteEvent) - 需在Studio中手动创建
+🆕 ClaimSevenDayReward (RemoteEvent) - 需在Studio中手动创建
+🆕 ClaimSevenDayResult (RemoteEvent) - 需在Studio中手动创建
+
+创建步骤：
+1. 打开Roblox Studio
+2. 导航到 ReplicatedStorage > Events
+3. 右键点击 Events 文件夹
+4. 选择 "Insert Object" > "Folder"
+5. 将新建的 Folder 重命名为 "SevenDaysEvents"
+6. 右键点击 SevenDaysEvents 文件夹
+7. 选择 "Insert Object" > "RemoteEvent"
+8. 将新建的 RemoteEvent 重命名为 "RequestSevenDaysData"
+9. 重复步骤7-8，创建 "SevenDaysData"
+10. 重复步骤7-8，创建 "ClaimSevenDayReward"
+11. 重复步骤7-8，创建 "ClaimSevenDayResult"
+12. 保存游戏
+
+注意：SevenDaysSystem.lua 初始化时会自动创建这些事件（如果不存在），但建议手动创建以确保事件在系统初始化前就存在。
+
+【V4.9群组奖励RemoteEvent创建说明】
+位置：ReplicatedStorage/Events/GroupRewardEvents/ （新建文件夹）
+🆕 RequestGroupRewardData (RemoteEvent) - 需在Studio中手动创建
+🆕 GroupRewardData (RemoteEvent) - 需在Studio中手动创建
+🆕 ClaimGroupReward (RemoteEvent) - 需在Studio中手动创建
+🆕 ClaimGroupRewardResult (RemoteEvent) - 需在Studio中手动创建
+
+创建步骤：
+1. 打开Roblox Studio
+2. 导航到 ReplicatedStorage > Events
+3. 右键点击 Events 文件夹
+4. 选择 "Insert Object" > "Folder"
+5. 将新建的 Folder 重命名为 "GroupRewardEvents"
+6. 右键点击 GroupRewardEvents 文件夹
+7. 选择 "Insert Object" > "RemoteEvent"
+8. 将新建的 RemoteEvent 重命名为 "RequestGroupRewardData"
+9. 重复步骤7-8，创建 "GroupRewardData"
+10. 重复步骤7-8，创建 "ClaimGroupReward"
+11. 重复步骤7-8，创建 "ClaimGroupRewardResult"
+12. 保存游戏
+
+注意：GroupRewardSystem.lua 初始化时会自动创建这些事件（如果不存在），但建议手动创建以确保事件在系统初始化前就存在。
 
 【V2.1库存系统RemoteEvent创建说明】
 位置：ReplicatedStorage/Events/ShopEvents/
@@ -1129,3 +1188,27 @@ CampaignStateUpdate事件变更（V3.6）：
 
 8. 调试模式：
    在PowerSystem.lua中设置 DEBUG = true 可以查看详细日志
+
+
+【V4.7排行榜系统RemoteEvent创建说明】
+位置：ReplicatedStorage/Events/LeaderboardEvents/ （新建文件夹）
+?? RequestLeaderboard (RemoteEvent) - 需在Studio中手动创建
+?? LeaderboardData (RemoteEvent) - 需在Studio中手动创建
+
+创建步骤：
+1. 打开Roblox Studio
+2. 导航到 ReplicatedStorage > Events
+3. 右键点击 Events 文件夹
+4. 选择 "Insert Object" > "Folder"
+5. 将新建的 Folder 重命名为 "LeaderboardEvents"
+6. 右键点击 LeaderboardEvents 文件夹
+7. 选择 "Insert Object" > "RemoteEvent"
+8. 将新建的 RemoteEvent 重命名为 "RequestLeaderboard"
+9. 重复步骤7-8，创建 "LeaderboardData"
+10. 保存游戏
+
+功能说明：
+- RequestLeaderboard：客户端→服务器：请求排行榜数据
+  参数：无
+- LeaderboardData：服务器→客户端：返回排行榜数据
+  参数：(entries, nextRefreshTime, serverTime)
