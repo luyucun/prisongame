@@ -24,6 +24,7 @@ local DEBUG_MODE = GameConfig.DEBUG_MODE
 local Workspace = game:GetService("Workspace")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
 
 -- 玩家引用
 local player = Players.LocalPlayer
@@ -31,11 +32,15 @@ local mouse = player:GetMouse()
 
 -- 远程事件
 local placementEvents = nil
+local inventoryEvents = nil
 
 -- UI引用
 local playerGui = nil
 local mainGui = nil
 local removeButton = nil
+local removeTips = nil
+local removeTipsBreathTween = nil
+local removeTipsDefaults = nil
 
 -- ==================== 回收状态 ====================
 local removalState = {
@@ -63,13 +68,130 @@ local function ShouldShowRemoveButton()
         return false
     end
 
+    if removalState.placedUnitCount <= 0 then
+        return false
+    end
+
     return removalState.isOnIdleFloor
+end
+
+local function IsTextObject(obj)
+    return obj and (obj:IsA("TextLabel") or obj:IsA("TextButton") or obj:IsA("TextBox"))
+end
+
+local function GetRemoveTips()
+    if removeTips and removeTips.Parent then
+        return removeTips
+    end
+    if not mainGui then
+        return nil
+    end
+    removeTips = mainGui:FindFirstChild("RemoveTips")
+    if removeTips and IsTextObject(removeTips) and not removeTipsDefaults then
+        removeTipsDefaults = {
+            TextTransparency = removeTips.TextTransparency,
+            TextStrokeTransparency = removeTips.TextStrokeTransparency,
+        }
+    end
+    return removeTips
+end
+
+local function StopRemoveTipsBreath()
+    if removeTipsBreathTween then
+        removeTipsBreathTween:Cancel()
+        removeTipsBreathTween = nil
+    end
+
+    local tip = GetRemoveTips()
+    if tip and removeTipsDefaults and IsTextObject(tip) then
+        tip.TextTransparency = removeTipsDefaults.TextTransparency or 0
+        tip.TextStrokeTransparency = removeTipsDefaults.TextStrokeTransparency or 0
+    end
+end
+
+local function StartRemoveTipsBreath()
+    local tip = GetRemoveTips()
+    if not tip or not IsTextObject(tip) then
+        return
+    end
+
+    if not removeTipsDefaults then
+        removeTipsDefaults = {
+            TextTransparency = tip.TextTransparency,
+            TextStrokeTransparency = tip.TextStrokeTransparency,
+        }
+    end
+
+    if removeTipsBreathTween then
+        return
+    end
+
+    local baseText = removeTipsDefaults.TextTransparency or 0
+    local baseStroke = removeTipsDefaults.TextStrokeTransparency or 0
+    local targetText = math.clamp(baseText + 0.35, 0, 1)
+    local targetStroke = math.clamp(baseStroke + 0.35, 0, 1)
+
+    removeTipsBreathTween = TweenService:Create(
+        tip,
+        TweenInfo.new(1.2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+        {
+            TextTransparency = targetText,
+            TextStrokeTransparency = targetStroke,
+        }
+    )
+    removeTipsBreathTween:Play()
+end
+
+local function RefreshRemoveTipsVisibility()
+    local tip = GetRemoveTips()
+    if not tip then
+        return
+    end
+
+    if removalState.isRemovalMode then
+        tip.Visible = true
+        StartRemoveTipsBreath()
+        return
+    end
+
+    tip.Visible = false
+    StopRemoveTipsBreath()
 end
 
 local function RefreshRemoveButtonVisibility()
     if removeButton then
         removeButton.Visible = ShouldShowRemoveButton()
     end
+    RefreshRemoveTipsVisibility()
+end
+
+local function CountPlacedUnits(placedUnits)
+    if not placedUnits then
+        return 0
+    end
+
+    local count = 0
+    for _, unitData in pairs(placedUnits) do
+        if unitData and unitData.UnitId then
+            count += 1
+        end
+    end
+
+    return count
+end
+
+local function OnInventoryRefresh(inventory, placedUnits)
+    local newCount = CountPlacedUnits(placedUnits)
+    if newCount ~= removalState.placedUnitCount then
+        removalState.placedUnitCount = newCount
+    end
+
+    if newCount <= 0 and removalState.isRemovalMode then
+        RemovalController.ExitRemovalMode()
+        return
+    end
+
+    RefreshRemoveButtonVisibility()
 end
 
 -- ==================== 初始化 ====================
@@ -111,6 +233,28 @@ function RemovalController.Initialize()
         return false
     end
 
+    -- 连接Inventory刷新事件（用于获取已放置兵种数量）
+    local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
+    if eventsFolder then
+        inventoryEvents = eventsFolder:FindFirstChild("InventoryEvents")
+    end
+
+    if inventoryEvents then
+        local inventoryRefreshEvent = inventoryEvents:FindFirstChild("InventoryRefresh")
+        if inventoryRefreshEvent then
+            inventoryRefreshEvent.OnClientEvent:Connect(OnInventoryRefresh)
+        else
+            warn("[RemovalController] InventoryRefresh未找到!")
+        end
+
+        local requestInventoryEvent = inventoryEvents:FindFirstChild("RequestInventory")
+        if requestInventoryEvent then
+            requestInventoryEvent:FireServer()
+        end
+    else
+        warn("[RemovalController] InventoryEvents未找到!")
+    end
+
     -- 连接服务端响应事件
     local removeResponseEvent = placementEvents:FindFirstChild("RemoveResponse")
     if removeResponseEvent then
@@ -121,9 +265,10 @@ function RemovalController.Initialize()
     local placementResponseEvent = placementEvents:FindFirstChild("PlacementResponse")
     if placementResponseEvent then
         placementResponseEvent.OnClientEvent:Connect(function(success, message, data)
-            if success then
-                -- 放置成功，增加计数
+            if success and data == nil then
+                -- 确认放置成功时增加计数（开始放置会带data）
                 removalState.placedUnitCount = removalState.placedUnitCount + 1
+                RefreshRemoveButtonVisibility()
             end
         end)
     end
@@ -245,11 +390,6 @@ function UpdateUIForRemovalMode(isRemovalMode)
     if isRemovalMode then
         -- 进入回收模式
         -- 显示：RemoveTips, Exit
-        local removeTips = mainGui:FindFirstChild("RemoveTips")
-        if removeTips then
-            removeTips.Visible = true
-        end
-
         local exitButton = mainGui:FindFirstChild("Exit")
         if exitButton then
             exitButton.Visible = true
@@ -286,16 +426,13 @@ function UpdateUIForRemovalMode(isRemovalMode)
         RefreshRemoveButtonVisibility()
 
         -- 隐藏：RemoveTips, Exit
-        local removeTips = mainGui:FindFirstChild("RemoveTips")
-        if removeTips then
-            removeTips.Visible = false
-        end
-
         local exitButton = mainGui:FindFirstChild("Exit")
         if exitButton then
             exitButton.Visible = false
         end
     end
+
+    RefreshRemoveTipsVisibility()
 end
 
 -- ==================== 点击检测 ====================
@@ -497,15 +634,14 @@ function OnRemoveResponse(success, message, instanceId)
         -- Bug修复：减少计数器
         removalState.placedUnitCount = math.max(0, removalState.placedUnitCount - 1)
 
-        -- V2.1修复：移除自动退出逻辑
-        -- 原逻辑：如果 placedUnitCount == 0 则自动调用 ExitRemovalMode()
-        -- 新逻辑：回收模式只能通过用户点击 Exit 按钮退出，即便场上兵种为0也保持回收模式
-        -- 这样用户可以连续回收多个兵种，不会因为暂时清空而被强制退出回收模式
+        if removalState.placedUnitCount <= 0 and removalState.isRemovalMode then
+            RemovalController.ExitRemovalMode()
+            return
+        end
 
-        -- 删除的逻辑：
-        -- if removalState.placedUnitCount == 0 then
-        --     RemovalController.ExitRemovalMode()
-        -- end
+        RefreshRemoveButtonVisibility()
+
+        -- V4.9优化：场上无兵时自动退出回收模式
     else
         if DEBUG_MODE then
             warn("[RemovalController] 回收失败:", message)
