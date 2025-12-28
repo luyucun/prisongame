@@ -38,7 +38,7 @@ local pendingIdleCoins = 0
 local cachedHomeId = nil  -- 缓存HomeId，避免重复查询
 local autoPopupShown = false
 local hasReceivedInitialSync = false
-local promptOpensPopup = false
+local promptOpensPopup = true
 local claim10InProgress = false
 
 -- 事件引用
