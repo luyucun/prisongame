@@ -92,10 +92,51 @@ StageConfig.Chapters = {
 			[20] = {Coins = 10},
 		}
 	},
+
+	-- Chapter 4
+	[4] = {
+		ChapterId = 4,
+		ChapterName = "Chapter 4",
+		EnemyChapterRef = 4,  -- V3.10: reference EnemyConfig.Chapters[4]
+		StagesPerChapter = 30,
+		StageTemplateStyle = "Style04",
+		Rewards = {
+			[1] = {Coins = 10},
+			[2] = {Coins = 10},
+			[3] = {Coins = 10},
+			[4] = {Coins = 10},
+			[5] = {Coins = 10},
+			[6] = {Coins = 10},
+			[7] = {Coins = 10},
+			[8] = {Coins = 10},
+			[9] = {Coins = 10},
+			[10] = {Coins = 10},
+			[11] = {Coins = 10},
+			[12] = {Coins = 10},
+			[13] = {Coins = 10},
+			[14] = {Coins = 10},
+			[15] = {Coins = 10},
+			[16] = {Coins = 10},
+			[17] = {Coins = 10},
+			[18] = {Coins = 10},
+			[19] = {Coins = 10},
+			[20] = {Coins = 10},
+			[21] = {Coins = 10},
+			[22] = {Coins = 10},
+			[23] = {Coins = 10},
+			[24] = {Coins = 10},
+			[25] = {Coins = 10},
+			[26] = {Coins = 10},
+			[27] = {Coins = 10},
+			[28] = {Coins = 10},
+			[29] = {Coins = 10},
+			[30] = {Coins = 10},
+		}
+	},
 }
 
 -- 总章节数
-StageConfig.TotalChapters = 3
+StageConfig.TotalChapters = 4
 
 -- ==================== Style01关卡配置 (保留兼容) ====================
 StageConfig.Style01 = {
