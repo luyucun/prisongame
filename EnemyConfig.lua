@@ -45,8 +45,18 @@ EnemyConfig.Chapters[1] = {
 			{UnitId = "90001", Level = 1, GridPos = {X = 5, Y = 7}},
 			{UnitId = "90001", Level = 1, GridPos = {X = 9, Y = 7}},
 		},
-
 		
+		-- 第3关: 更强的敌人
+		[5] = {
+			{UnitId = "10002", Level = 1, GridPos = {X = 7, Y = 7}},
+			{UnitId = "90001", Level = 1, GridPos = {X = 5, Y = 7}},
+			{UnitId = "90001", Level = 1, GridPos = {X = 9, Y = 7}},
+			{UnitId = "10002", Level = 1, GridPos = {X = 5, Y = 5}},
+			{UnitId = "10002", Level = 1, GridPos = {X = 9, Y = 5}},
+			{UnitId = "10002", Level = 1, GridPos = {X = 7, Y = 5}},
+		},
+
+
 	}
 }
 
@@ -67,14 +77,14 @@ EnemyConfig.Chapters[2] = {
 			{UnitId = "90001", Level = 1, GridPos = {X = 5, Y = 7}},
 			{UnitId = "90001", Level = 1, GridPos = {X = 9, Y = 7}},
 		},
-		
+
 		-- 第3关: 更强的敌人
 		[3] = {
 			{UnitId = "10002", Level = 1, GridPos = {X = 7, Y = 7}},
 			{UnitId = "90001", Level = 1, GridPos = {X = 5, Y = 7}},
 			{UnitId = "90001", Level = 1, GridPos = {X = 9, Y = 7}},
 		},
-		
+
 		-- 第3关: 更强的敌人
 		[4] = {
 			{UnitId = "90001", Level = 1, GridPos = {X = 5, Y = 3}},
@@ -83,7 +93,7 @@ EnemyConfig.Chapters[2] = {
 			{UnitId = "10005", Level = 1, GridPos = {X = 9, Y = 7}},
 			{UnitId = "10005", Level = 1, GridPos = {X = 7, Y = 7}},
 		},
-		
+
 		-- 第3关: 更强的敌人
 		[5] = {
 			{UnitId = "90001", Level = 1, GridPos = {X = 5, Y = 3}},
@@ -148,8 +158,8 @@ EnemyConfig.Chapters[2] = {
 			{UnitId = "90001", Level = 1, GridPos = {X = 8, Y = 1}},
 			{UnitId = "90001", Level = 1, GridPos = {X = 9, Y = 1}},
 		},
-		
-		
+
+
 		-- 第3关: 第2章最终关
 		[10] = {
 			{UnitId = "10010", Level = 1, GridPos = {X = 5, Y = 2}},
@@ -165,8 +175,8 @@ EnemyConfig.Chapters[2] = {
 			{UnitId = "90001", Level = 1, GridPos = {X = 8, Y = 1}},
 			{UnitId = "90001", Level = 1, GridPos = {X = 9, Y = 1}},
 		},
-		
-		
+
+
 	}
 }
 

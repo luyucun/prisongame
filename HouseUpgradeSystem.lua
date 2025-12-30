@@ -89,7 +89,7 @@ local function InitializeEvents()
 		houseUpgradeFolder = Instance.new("Folder")
 		houseUpgradeFolder.Name = "HouseUpgradeEvents"
 		houseUpgradeFolder.Parent = eventsFolder
-		print("[HouseUpgradeSystem] 已创建HouseUpgradeEvents文件夹")
+		print("[HouseUpgradeSystem] Created HouseUpgradeEvents folder")
 	end
 
 	-- 创建StartUpgradeSequence事件（服务端→客户端：开始升级表现）
@@ -117,6 +117,14 @@ local function InitializeEvents()
 		completeEvent.Name = "UpgradeSequenceComplete"
 		completeEvent.Parent = houseUpgradeFolder
 		print("[HouseUpgradeSystem] 已创建UpgradeSequenceComplete事件")
+	end
+
+	local popupClosedEvent = houseUpgradeFolder:FindFirstChild("HouseUpgradePopupClosed")
+	if not popupClosedEvent then
+		popupClosedEvent = Instance.new("RemoteEvent")
+		popupClosedEvent.Name = "HouseUpgradePopupClosed"
+		popupClosedEvent.Parent = houseUpgradeFolder
+		print("[HouseUpgradeSystem] Created HouseUpgradePopupClosed event")
 	end
 
 	HouseUpgradeEvents = houseUpgradeFolder
@@ -173,6 +181,44 @@ local function EnsureInitialized()
 	isInitialized = true
 end
 
+function HouseUpgradeSystem.WaitForPopupClosed(player, timeoutSeconds)
+	EnsureInitialized()
+
+	if not player then
+		return false
+	end
+
+	if not InitializeEvents() then
+		return false
+	end
+
+	local popupClosedEvent = HouseUpgradeEvents and HouseUpgradeEvents:FindFirstChild('HouseUpgradePopupClosed')
+	if not popupClosedEvent then
+		return false
+	end
+
+	local timeout = tonumber(timeoutSeconds) or 12
+	local closed = false
+	local connection = nil
+
+	connection = popupClosedEvent.OnServerEvent:Connect(function(sender)
+		if sender == player then
+			closed = true
+		end
+	end)
+
+	local startTime = tick()
+	while not closed and (tick() - startTime) < timeout do
+		task.wait(0.05)
+	end
+
+	if connection then
+		connection:Disconnect()
+	end
+
+	return closed
+end
+
 --[[
 获取玩家的House文件夹
 @param homeSlot number - 玩家基地编号(1-6)
@@ -187,7 +233,7 @@ local function GetPlayerHouseFolder(homeSlot)
 
 	local playerHome = homeFolder:FindFirstChild("PlayerHome" .. homeSlot)
 	if not playerHome then
-		warn("[HouseUpgradeSystem] PlayerHome" .. homeSlot .. " 不存在")
+		warn("[HouseUpgradeSystem] PlayerHome" .. homeSlot .. " not found")
 		return nil
 	end
 
@@ -231,18 +277,18 @@ function HouseUpgradeSystem.ReplaceHouseModel(player, newModelName)
 	-- 获取玩家基地编号
 	local homeSlot = DataManager.GetPlayerHomeSlot(player)
 	if not homeSlot or homeSlot == 0 then
-		warn("[HouseUpgradeSystem] 玩家未分配基地")
+		warn("[HouseUpgradeSystem] Player home slot not assigned")
 		return false
 	end
 
 	-- 获取House文件夹
 	local houseFolder = GetPlayerHouseFolder(homeSlot)
 	if not houseFolder then
-		warn("[HouseUpgradeSystem] 找不到House文件夹")
+		warn("[HouseUpgradeSystem] House folder not found")
 		return false
 	end
 
-	-- 获取新房屋模板 (ReplicatedStorage/House/模型名称)
+	-- 获取新房屋模型(ReplicatedStorage/House/模型名称)
 	local houseTemplateFolder = ReplicatedStorage:FindFirstChild("House")
 	if not houseTemplateFolder then
 		warn("[HouseUpgradeSystem] ReplicatedStorage/House模板文件夹不存在")
@@ -251,14 +297,14 @@ function HouseUpgradeSystem.ReplaceHouseModel(player, newModelName)
 
 	local newHouseTemplate = houseTemplateFolder:FindFirstChild(newModelName)
 	if not newHouseTemplate then
-		warn("[HouseUpgradeSystem] 找不到房屋模板: " .. newModelName)
+		warn("[HouseUpgradeSystem] 找不到房屋模型 " .. newModelName)
 		return false
 	end
 
 	-- 获取当前House文件夹下的房屋模型
 	local currentHouseModel = GetCurrentHouseModelInFolder(houseFolder)
 	if not currentHouseModel then
-		warn("[HouseUpgradeSystem] House文件夹下找不到房屋模型")
+		warn("[HouseUpgradeSystem] Current house model not found")
 		return false
 	end
 
@@ -274,7 +320,7 @@ function HouseUpgradeSystem.ReplaceHouseModel(player, newModelName)
 	local _, currentYRotation, _ = currentPivot:ToEulerAnglesYXZ()
 
 	DebugLog(string.format(
-		"当前房屋 %s: 底部Y=%.2f, 中心=(%.2f, %.2f), Y旋转=%.2f度",
+		"Current house %s: bottomY=%.2f, center=(%.2f, %.2f), yRotation=%.2f",
 		currentHouseModel.Name,
 		currentBottomY,
 		currentCenterX,
@@ -282,7 +328,7 @@ function HouseUpgradeSystem.ReplaceHouseModel(player, newModelName)
 		math.deg(currentYRotation)
 	))
 
-	-- 克隆新房屋模板
+	-- 克隆新房屋模型
 	local newHouseModel = newHouseTemplate:Clone()
 	newHouseModel.Name = newModelName
 
@@ -300,7 +346,7 @@ function HouseUpgradeSystem.ReplaceHouseModel(player, newModelName)
 	local pivotToCenterZ = newPivot.Position.Z - newBBoxCF.Position.Z
 
 	DebugLog(string.format(
-		"新房屋 %s 模板: 轴点到底部距离=%.2f, 轴点到中心偏移=(%.2f, %.2f)",
+		"新房屋%s 模板: 轴点到底部距离%.2f, 轴点到中心偏移(%.2f, %.2f)",
 		newModelName,
 		pivotToBottomY,
 		pivotToCenterX,
@@ -308,8 +354,8 @@ function HouseUpgradeSystem.ReplaceHouseModel(player, newModelName)
 	))
 
 	-- 计算新房屋轴点应该放置的位置
-	-- 目标：让新房屋的包围盒底部中心 对齐 旧房屋的包围盒底部中心
-	-- 新轴点位置 = 旧底部中心 + 新轴点相对于新底部中心的偏移
+	-- 目标：让新房屋的包围盒底部中心对齐 旧房屋的包围盒底部中心
+	-- 新轴点位置= 旧底部中心+ 新轴点相对于新底部中心的偏移
 	local targetPivotX = currentCenterX + pivotToCenterX
 	local targetPivotY = currentBottomY + pivotToBottomY
 	local targetPivotZ = currentCenterZ + pivotToCenterZ
@@ -326,7 +372,7 @@ function HouseUpgradeSystem.ReplaceHouseModel(player, newModelName)
 	local verifyBottomY = verifyBBoxCF.Position.Y - verifyBBoxSize.Y / 2
 
 	DebugLog(string.format(
-		"新房屋 %s 已放置: 轴点=(%.2f, %.2f, %.2f), 实际底部Y=%.2f, Y旋转=%.2f度",
+		"New house %s placed: pivot=(%.2f, %.2f, %.2f), bottomY=%.2f, yRotation=%.2f",
 		newModelName,
 		targetPivotX,
 		targetPivotY,
@@ -377,7 +423,7 @@ function HouseUpgradeSystem.CheckAndUpgradeHouse(player)
 
 	if shouldUpgrade then
 		DebugLog(string.format(
-			"玩家 %s 满足升级条件: 当前房屋 %s -> 新房屋 %s (通关章节: %d)",
+			"玩家 %s 满足升级条件: 当前房屋 %s -> 新房屋%s (通关章节: %d)",
 			player.Name,
 			currentHouseModel,
 			newModelName,
@@ -407,7 +453,7 @@ function HouseUpgradeSystem.ReplaceHouseModelWithCinematic(player, newModelName)
 	-- 获取玩家基地编号
 	local homeSlot = DataManager.GetPlayerHomeSlot(player)
 	if not homeSlot or homeSlot == 0 then
-		warn("[HouseUpgradeSystem] 玩家未分配基地")
+		warn("[HouseUpgradeSystem] Player home slot not assigned")
 		return false
 	end
 
@@ -415,7 +461,7 @@ function HouseUpgradeSystem.ReplaceHouseModelWithCinematic(player, newModelName)
 	local validHomeSlot = homeSlot :: number
 
 	DebugLog(string.format(
-		"开始房屋升级镜头表现，玩家=%s, HomeSlot=%d, 新房屋=%s",
+		"开始房屋升级镜头表现，玩家=%s, HomeSlot=%d, 新房屋%s",
 		player.Name,
 		validHomeSlot,
 		newModelName
@@ -425,12 +471,12 @@ function HouseUpgradeSystem.ReplaceHouseModelWithCinematic(player, newModelName)
 	if InitializeEvents() then
 		local startEvent = HouseUpgradeEvents:FindFirstChild("StartUpgradeSequence")
 		if startEvent then
-			startEvent:FireClient(player, validHomeSlot)
+			startEvent:FireClient(player, validHomeSlot, DataManager.GetCurrentHouseModel(player), newModelName)
 		end
 	end
 
-	-- 2. 等待镜头移动到位（1秒移动 + 1秒等待）
-	task.wait(2.0)
+	-- 2. Wait for upgrade popup close
+	HouseUpgradeSystem.WaitForPopupClosed(player, 12)
 
 	-- 3. 执行房屋替换
 	local success = HouseUpgradeSystem.ReplaceHouseModel(player, newModelName)
@@ -456,7 +502,7 @@ function HouseUpgradeSystem.OnChapterCompleted(player, chapterId, useCinematic)
 	end
 
 	DebugLog(string.format(
-		"玩家 %s 通关章节 %d，检查房屋升级... (镜头表现=%s)",
+		"玩家 %s 通关章节 %d，检查房屋升级.. (镜头表现=%s)",
 		player.Name,
 		chapterId,
 		tostring(useCinematic)
@@ -475,7 +521,7 @@ function HouseUpgradeSystem.OnChapterCompleted(player, chapterId, useCinematic)
 
 		if shouldUpgrade then
 			DebugLog(string.format(
-				"玩家 %s 满足升级条件: 当前房屋 %s -> 新房屋 %s (通关章节: %d)",
+				"玩家 %s 满足升级条件: 当前房屋 %s -> 新房屋%s (通关章节: %d)",
 				player.Name,
 				currentHouseModel,
 				newModelName,
@@ -497,7 +543,7 @@ function HouseUpgradeSystem.OnChapterCompleted(player, chapterId, useCinematic)
 end
 
 --[[
-玩家登录时初始化房屋 (V2.8.2修改：同步执行，无延迟)
+玩家登录时初始化房屋（V2.8.2修改：同步执行，无延迟）
 注意：此函数现在主要由HomeSystem.InitializePlayerHome调用
 @param player Player - 玩家对象
 @param homeSlot number - 分配的基地编号
@@ -522,7 +568,7 @@ function HouseUpgradeSystem.InitializePlayerHouse(player, homeSlot)
 	local actualModelName = currentHouseModel and currentHouseModel.Name or "PrisonLv1"
 
 	DebugLog(string.format(
-		"玩家 %s 登录，通关章节: %d, 目标房屋: %s, 存档房屋: %s, 场景中房屋: %s",
+		"玩家 %s 登录，通关章节: %d, 目标房屋: %s, 存档房屋: %s, 场景中房屋 %s",
 		player.Name,
 		completedChapters,
 		targetModelName,
@@ -533,7 +579,7 @@ function HouseUpgradeSystem.InitializePlayerHouse(player, homeSlot)
 	-- V2.8.2修改：如果场景中的房屋模型与目标不一致，立即替换（无延迟）
 	if actualModelName ~= targetModelName then
 		DebugLog(string.format(
-			"玩家 %s 需要替换房屋: %s -> %s",
+			"玩家 %s 需要替换房屋 %s -> %s",
 			player.Name,
 			actualModelName,
 			targetModelName
@@ -549,7 +595,7 @@ function HouseUpgradeSystem.InitializePlayerHouse(player, homeSlot)
 	if savedModelName ~= targetModelName then
 		DataManager.SetCurrentHouseModel(player, targetModelName)
 		DebugLog(string.format(
-			"玩家 %s 存档房屋模型已更新: %s -> %s",
+			"玩家 %s 存档房屋模型已更新 %s -> %s",
 			player.Name,
 			savedModelName,
 			targetModelName

@@ -261,6 +261,10 @@ function PlayerManager.OnPlayerAdded(player)
     -- V4.8七日登录奖励：同步功能解锁状态（通关第一章后解锁）
     local completedChapters = DataManager.GetCompletedChapters(player) or 0
     player:SetAttribute("SevenDaysUnlocked", completedChapters >= 1)
+    player:SetAttribute("CompletedChapters", completedChapters)
+
+    local currentHouseModel = DataManager.GetCurrentHouseModel(player)
+    player:SetAttribute("CurrentHouseModel", currentHouseModel)
 
     -- V4.9加入群组奖励：同步领取状态
     local groupRewardData = DataManager.GetGroupRewardData(player)

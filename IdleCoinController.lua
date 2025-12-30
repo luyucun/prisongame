@@ -23,6 +23,7 @@ local Workspace = game:GetService("Workspace")
 
 -- 引用配置
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
+local HouseConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("HouseConfig"))
 local FormatHelper = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("FormatHelper"))
 
 -- 获取本地玩家
@@ -50,6 +51,7 @@ local idleEarningGui = nil
 local idleEarningBg = nil
 local idleCloseButton = nil
 local idleTimeLabel = nil
+local idleTimeTitle = nil
 local idleClaimButton = nil
 local idleClaimCash = nil
 local idleClaim10Button = nil
@@ -115,14 +117,50 @@ local function FormatIdleTime(totalMinutes)
 	return string.format("%02d:%02d", hours, mins)
 end
 
+local function GetCompletedChapters()
+	local completed = player:GetAttribute("CompletedChapters")
+	if type(completed) == "number" then
+		return completed
+	end
+	return 0
+end
+
+local function GetIdleConfigForPlayer()
+	local completedChapters = GetCompletedChapters()
+	local houseConfig = HouseConfig.GetIdleConfigByCompletedChapters(completedChapters)
+
+	local coinsPerMinute = houseConfig and tonumber(houseConfig.CoinsPerMinute) or 0
+	local maxMinutes = houseConfig and tonumber(houseConfig.MaxMinutes) or 0
+	local maxHours = houseConfig and tonumber(houseConfig.MaxHours) or 0
+
+	if coinsPerMinute <= 0 then
+		coinsPerMinute = tonumber(GameConfig.IdleCoin.CoinsPerMinute) or 0
+	end
+
+	if maxMinutes <= 0 then
+		maxMinutes = tonumber(GameConfig.IdleCoin.MaxOfflineMinutes) or 0
+	end
+
+	if maxHours <= 0 then
+		maxHours = math.floor(maxMinutes / 60)
+	end
+
+	return {
+		CoinsPerMinute = coinsPerMinute,
+		MaxMinutes = maxMinutes,
+		MaxHours = maxHours,
+	}
+end
+
 local function GetPendingIdleMinutes()
-	local coinsPerMinute = tonumber(GameConfig.IdleCoin.CoinsPerMinute) or 0
+	local idleConfig = GetIdleConfigForPlayer()
+	local coinsPerMinute = idleConfig.CoinsPerMinute or 0
 	if coinsPerMinute <= 0 then
 		return 0
 	end
 
 	local minutes = math.floor((pendingIdleCoins or 0) / coinsPerMinute)
-	local maxMinutes = tonumber(GameConfig.IdleCoin.MaxOfflineMinutes)
+	local maxMinutes = tonumber(idleConfig.MaxMinutes)
 	if maxMinutes and maxMinutes > 0 and minutes > maxMinutes then
 		minutes = maxMinutes
 	end
@@ -138,6 +176,11 @@ local function UpdateIdleEarningUI()
 	local minutes = GetPendingIdleMinutes()
 	if idleTimeLabel and idleTimeLabel:IsA("TextLabel") then
 		idleTimeLabel.Text = FormatIdleTime(minutes)
+	end
+	if idleTimeTitle and idleTimeTitle:IsA("TextLabel") then
+		local idleConfig = GetIdleConfigForPlayer()
+		local maxHours = tonumber(idleConfig.MaxHours) or 0
+		idleTimeTitle.Text = string.format("MAX %dH", maxHours)
 	end
 
 	local baseCoins = math.max(0, math.floor(pendingIdleCoins or 0))
@@ -173,6 +216,7 @@ local function InitializeIdleEarningUI()
 	local currentTime = idleEarningBg:FindFirstChild("CurrentTime")
 	if currentTime then
 		idleTimeLabel = currentTime:FindFirstChild("Time")
+		idleTimeTitle = currentTime:FindFirstChild("Title")
 	end
 
 	idleClaimButton = idleEarningBg:FindFirstChild("Claim")

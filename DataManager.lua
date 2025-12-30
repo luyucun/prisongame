@@ -22,6 +22,7 @@ local RunService = game:GetService("RunService")  -- Studio检测服务
 local HttpService = game:GetService("HttpService")  -- V3.9：用于生成InstanceId
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
 local StageConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("StageConfig"))  -- V3.7.1：章节配置
+local HouseConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("HouseConfig"))
 
 -- DataStore实例（V2.1库存系统：添加真正的持久化）
 -- Studio与线上数据隔离：根据环境和配置决定DataStore名称
@@ -1485,14 +1486,42 @@ end
 
 -- ==================== V2.6挂机金币系统接口 ====================
 
+-- 获取玩家挂机配置（根据最高解锁房屋）
+local function GetIdleConfigForPlayer(player)
+    local completedChapters = DataManager.GetCompletedChapters(player) or 0
+    local houseConfig = HouseConfig.GetIdleConfigByCompletedChapters(completedChapters)
+
+    local coinsPerMinute = houseConfig and tonumber(houseConfig.CoinsPerMinute) or 0
+    local maxMinutes = houseConfig and tonumber(houseConfig.MaxMinutes) or 0
+    local maxHours = houseConfig and tonumber(houseConfig.MaxHours) or 0
+
+    if coinsPerMinute <= 0 then
+        coinsPerMinute = tonumber(GameConfig.IdleCoin.CoinsPerMinute) or 0
+    end
+
+    if maxMinutes <= 0 then
+        maxMinutes = tonumber(GameConfig.IdleCoin.MaxOfflineMinutes) or 0
+    end
+
+    if maxHours <= 0 then
+        maxHours = math.floor(maxMinutes / 60)
+    end
+
+    return {
+        CoinsPerMinute = coinsPerMinute,
+        MaxMinutes = maxMinutes,
+        MaxHours = maxHours,
+    }
+end
+
 -- 计算挂机金币上限（分钟上限 * 每分钟金币）
-local function GetIdleCoinMaxCoins()
-    local idleConfig = GameConfig.IdleCoin
+local function GetIdleCoinMaxCoins(player)
+    local idleConfig = GetIdleConfigForPlayer(player)
     if not idleConfig then
         return nil
     end
 
-    local maxMinutes = tonumber(idleConfig.MaxOfflineMinutes)
+    local maxMinutes = tonumber(idleConfig.MaxMinutes)
     local coinsPerMinute = tonumber(idleConfig.CoinsPerMinute)
     if not maxMinutes or not coinsPerMinute or maxMinutes <= 0 or coinsPerMinute <= 0 then
         return nil
@@ -1502,13 +1531,13 @@ local function GetIdleCoinMaxCoins()
 end
 
 -- 钳制挂机金币到上限
-local function ClampPendingIdleCoins(value)
+local function ClampPendingIdleCoins(player, value)
     local amount = tonumber(value) or 0
     if amount < 0 then
         amount = 0
     end
 
-    local maxCoins = GetIdleCoinMaxCoins()
+    local maxCoins = GetIdleCoinMaxCoins(player)
     if maxCoins and amount > maxCoins then
         amount = maxCoins
     end
@@ -1542,7 +1571,7 @@ function DataManager.GetIdleCoinData(player)
     end
 
     -- 钳制PendingCoins到配置上限，避免超出累积时间上限
-    playerData.IdleCoinData.PendingCoins = ClampPendingIdleCoins(playerData.IdleCoinData.PendingCoins)
+    playerData.IdleCoinData.PendingCoins = ClampPendingIdleCoins(player, playerData.IdleCoinData.PendingCoins)
 
     return playerData.IdleCoinData
 end
@@ -1570,7 +1599,7 @@ function DataManager.SetPendingIdleCoins(player, coins)
         playerData.IdleCoinData.GuideEligibleOnLogin = false
     end
 
-    playerData.IdleCoinData.PendingCoins = ClampPendingIdleCoins(coins)
+    playerData.IdleCoinData.PendingCoins = ClampPendingIdleCoins(player, coins)
     return true
 end
 
@@ -1625,7 +1654,7 @@ function DataManager.AddPendingIdleCoins(player, amount)
     end
 
     local newPending = (playerData.IdleCoinData.PendingCoins or 0) + (tonumber(amount) or 0)
-    playerData.IdleCoinData.PendingCoins = ClampPendingIdleCoins(newPending)
+    playerData.IdleCoinData.PendingCoins = ClampPendingIdleCoins(player, newPending)
     return true, playerData.IdleCoinData.PendingCoins
 end
 
@@ -1742,6 +1771,12 @@ function DataManager.ResetAllPlayerData(player)
     -- 更新缓存
     playerDataCache[userId] = newData
 
+    if player and player:IsA("Player") then
+        local chapterProgress = newData.ChapterProgress or {}
+        player:SetAttribute("CompletedChapters", chapterProgress.CompletedChapters or 0)
+        player:SetAttribute("CurrentHouseModel", chapterProgress.CurrentHouseModel or "PrisonLv1")
+    end
+
     -- 立即保存到DataStore
     local saveSuccess = SaveToDataStore(player, newData)
 
@@ -1848,6 +1883,10 @@ function DataManager.CompleteChapter(player, chapterId)
         -- 更新已通关章节数
         if chapterId > playerData.ChapterProgress.CompletedChapters then
             playerData.ChapterProgress.CompletedChapters = chapterId
+        end
+
+        if player and player:IsA("Player") then
+            player:SetAttribute("CompletedChapters", playerData.ChapterProgress.CompletedChapters)
         end
 
         -- 同步更新“主线最大通关关卡”（只增不减）
@@ -1963,6 +2002,10 @@ function DataManager.SetCurrentHouseModel(player, modelName)
     EnsureChapterProgress(playerData)
 
     playerData.ChapterProgress.CurrentHouseModel = modelName
+
+    if player and player:IsA("Player") then
+        player:SetAttribute("CurrentHouseModel", modelName)
+    end
     return true
 end
 

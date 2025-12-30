@@ -1698,3 +1698,86 @@ ID	排序	对话选项类型	对话出现条件	出现条件参数	选项文本	
 需求文档V4.9.1  邀请玩家按钮
 
 1.玩家点击StarterGui - TopRightGui - Bg - Invite - Button这个按钮，触发系统的邀请玩家加入的页面，注意是系统内置的那个邀请玩家加入的页面
+
+
+需求文档V4.9.2 关于distance界面的信息补充、
+
+1.当我们玩家在挑战时会有当前的进度条显示，用于表达玩家当前逃离这个监狱的进度（其实就是这个关卡的挑战进度）
+2.现在我们新加了StarterGui - Distance - Bg - ProgressBg - Tips这个Textlabel，这是一个文本，内容是：New Prison，用于在玩家挑战时告诉玩家如果通关会有新的监狱house解锁
+3.所以现在的需求是：
+    a.Tips的visible属性默认是false，当挑战这个章节时，需要判断如果战胜了这个章节会解锁一个新的house，那么在distance显示出来的时候同步把Tips的Visible属性改成True
+    b.如果挑战关卡时判断这个章节通关后没有新的house解锁，那么这个tips的visible属性就保持默认的false就行
+    c.Tips显示出来时，需要给Tips做一个左右摆动的小动效，注意这个小动效不是中心点发生左右偏移那种动效，而是中心点不变，左边下右边上然后左边上右边下那种摆动小动效，每2秒摆动一下
+
+
+需求文档 V5.0 挂机奖励相关与监狱house绑定
+
+概述：当前的挂机金币速度与时间上限两个都是死的，不会变化，我打算把挂机速度和挂机时间上限修改为跟解锁的house挂钩，房子等级越高，可获得的挂机金币就越多
+
+详细规则：
+
+关于挂机的规则修改：
+当前：挂机速度/挂机时间上限都是在数据表中进行配置，每个玩家都一样
+修改为：根据玩家当前解锁的最高等级的监狱房子来决定，共2个参数可控制，挂机速度和挂机时间上限，监狱房子等级越高，挂机速度越快，累计时间上限就越高
+
+补充个规则：我会给每个监狱取个名字，这里在监狱House表中要配置，还要加一个描述文本字段，是对这个监狱的描述
+
+具体规则为：
+房子等级	房子模型	房子名称	挂机速度/分钟	挂机时间上限（小时）	描述文本	图标资源
+1	PrisonLv1	Name01	8	14	This is a Prison	rbxassetid://123586009142390
+2	PrisonLv2	Name02	10	16	This is a Prison	rbxassetid://127176612735348
+3	PrisonLv3	Name03	12	18	This is a Prison	rbxassetid://102214435450404
+
+
+
+
+按以上这个配置来
+也就是说挂机速度和挂机累计时间上限根据玩家当前解锁的最高等级的房子来，如果玩家的房子已经是当前版本最高等级的房子，那就默认按这个房子的挂机参数来
+
+对应的客户端规则修改有：
+
+1.挂机奖励领取界面，StarterGui - IdleEarningGui - Bg - CurrentTime - Time是当前已经累计的挂机时间，这里的上限要根据当前装备的房子的等级来判断，比如当前是2级房子，那这里最多就是到16:00
+2.StarterGui - IdleEarningGui - Bg - CurrentTime - Title是当前的挂机时间上限说明，格式固定为MAX XXH，比如是1级房子时这里的格式就是MAX 14H，如果是3级房子这里就是 MAX18H
+3.这个信息每次打开挂机界面时都要及时更新
+
+
+新增监狱详情界面
+
+1.玩家点击StarterGui - MainGui - Target按钮，可以打开监狱详情界面（即把StarterGui - Prisons - Bg的Visible属性改成True）
+2.玩家点击StarterGui - Prisons - Bg - Title - CloseButton按钮关闭监狱详情界面（即把StarterGui - Prisons - Bg的Visible属性改成False）
+3.注意以上两个按钮点击时都要有一个统一的按钮点击反馈，这个规则帮我补充进架构文档中，后面做的时候所有按钮都要统一有一个点击效果
+
+4.StarterGui - Prisons - Bg - ScrollingFrame下有多个按钮节点，点击按钮可以查看该按钮对应的House的详情，以StarterGui - Prisons - Bg - ScrollingFrame - House1举例（这是个Frame但是我需要能点击），点击后显示的是House1相关的信息，点击House2可以切换显示House2相关的信息也就是PrisonLv2
+5.StarterGui - Prisons - Bg - ScrollingFrame下分别有House1/House2/House3，三个选项，后面还会继续增加，打开界面默认选中当前生效中的那个监狱的页签，可以在多个页签之间进行切换
+
+6.StarterGui - Prisons - Bg - HouseInfomation是用来展示监狱房子信息的，下面是具体规则：
+    a.HouseInfomation - DescribeBg - HouseDes是这个监狱的描述文本，取表中读取对应的监狱描述文本字段即可
+    b.HouseInfomation - HouseIcon是这个监狱房子对应的图片资源Icon，监狱房子表中会进行相应资源id配置
+    c.HouseInfomation - HouseIcon - HouseName是这个监狱的名字（Name），在表中也会进行配置
+    d.HouseInfomation - HouseIdleSpeed是一个textlabel，用于显示这个监狱对应的挂机速度，格式固定为$XX/min，XX是速度数值
+    e.HouseInfomation - HouseIdleTime是一个Textlabel，用于显示这个监狱对应的挂机时间上限，格式固定为XXH，XX是小时时间上限数值
+    f.HouseInfomation - HouseStatus是一个TextLabel，用于显示当前这个house 的状态，共分三种状态：已解锁：UNLOCKED、生效中:ACTIVE、未解锁:LOCKED，需要根据当前这个House 的状态来切换显示文本内容，如果是已经解锁了但是更高级的也解锁了，比如我解锁到了Lv3的房子，那1级和2级都显示是UNLOCKED，我当前正在生效的房子就是ACTIVE，我未解锁的就是LOCKED
+    g.已解锁用白色字体。未解锁用红色字体，生效中用绿色字体
+
+
+需求文档V5.1 关于房子升级弹框
+
+概述
+在我们的房子发生升级的时候，需要做一个弹框弹出，告诉玩家房子升级了，需要一个配套的表现
+
+具体规则：
+1.现在通关关卡后的流程是：弹出胜利界面→点击确认→走复生流程→镜头对准房子，房子发生变化的替换→解除锁定
+2.需要修改为：弹出胜利界面→点击确认→走复生流程→镜头对准房子，先不替换，同时弹出房子升级弹框→弹框出现至少1秒→玩家点击任意区域关闭升级弹框→镜头对准房子，房子发生变化
+
+相关界面逻辑是：
+1.StarterGui - HouseUpgradeGui - Bg - OldPrison是原来房子的图标，StarterGui - HouseUpgradeGui - Bg - NewPrison是升级后的房子的图标
+2.StarterGui - HouseUpgradeGui - Bg - OldSpeed是原来房子的挂机速度，StarterGui - HouseUpgradeGui - Bg - OldTimeLimit是原来房子的挂机时间上限，StarterGui - HouseUpgradeGui - Bg - NewSpeed是升级后房子的挂机速度，StarterGui - HouseUpgradeGui - Bg - NewTimeLimit是升级后房子的挂机时间上限
+3.StarterGui - HouseUpgradeGui - Bg - Arrow是一个箭头图标，位于两个房子图标中间，代表房子的变化
+4.StarterGui - HouseUpgradeGui - Bg - Title是一个textlabel，是整个弹框的标题
+5.StarterGui - HouseUpgradeGui - LightBg - Light是一个imagelabel，是一个光环，在弹框弹出后，光环需要不停自转，类似一个界面特效，其实只是一个发散光的自转
+
+整个弹框弹出后，需要锁定1秒，1秒内玩家点击任何区域都不关闭弹框，1秒后，玩家点击任意区域关闭弹框
+需要为我设计一个弹框弹出时的动效，比如整体全部是从左边滑动到右边，依次快速划出来，光环是原地出现出现后就不断自转
+
+"D:\RobloxGame\Prison\prisongame\房子升级弹框ui.jpg"，这是我的房子升级弹框的ui，你可以理解下我的ui设计然后为我做出现动效
+

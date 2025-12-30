@@ -15,6 +15,7 @@ local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local camera = Workspace.CurrentCamera
 
+local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
 local UnitConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("UnitConfig"))
 
 local tipsGui = playerGui:WaitForChild("TipsRole", 10)
@@ -44,16 +45,6 @@ local levelLabel = tipsBg:FindFirstChild("Level")
 
 tipsBg.Visible = false
 
-local QUALITY_COLORS = {
-	Common = Color3.fromRGB(225, 225, 225),
-	Rare = Color3.fromRGB(0, 255, 255),
-	Elite = Color3.fromRGB(0, 255, 0),
-	Epic = Color3.fromRGB(170, 0, 255),
-	Legendary = Color3.fromRGB(255, 80, 0),
-	Mythic = Color3.fromRGB(255, 0, 0),
-	Godly = Color3.fromRGB(255, 255, 255),
-}
-
 local CLICK_MOVE_PX_MOUSE = 8
 local CLICK_MOVE_PX_TOUCH = 18
 
@@ -75,7 +66,8 @@ local function IsRemovalMode()
 end
 
 local function GetQualityColor(quality)
-	return QUALITY_COLORS[quality] or QUALITY_COLORS.Common
+	local colors = (GameConfig.UI and GameConfig.UI.QualityColors) or {}
+	return colors[quality] or colors.Common or Color3.fromRGB(225, 225, 225)
 end
 
 local function FindUnitModelFromInstance(instance)

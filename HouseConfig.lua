@@ -24,18 +24,33 @@ HouseConfig.Houses = {
 	{
 		RequiredChapter = 0,
 		ModelName = "PrisonLv1",
+		Name = "The Stone Vault",
+		IdleCoinsPerMinute = 8,
+		IdleMaxHours = 14,
+		Description = "Simple stone vault to start your wealth. Solid walls protect early gains.",
+		Icon = "rbxassetid://123586009142390",
 		YOffset = 0,  -- 基准房屋，不需要偏移
 	},
 	-- 通关第1章后解锁
 	{
 		RequiredChapter = 1,
 		ModelName = "PrisonLv2",
+		Name = "The Elite Ward",
+		IdleCoinsPerMinute = 10,
+		IdleMaxHours = 16,
+		Description = "Reinforced steel with better security. Boosts AFK speed and capacity.",
+		Icon = "rbxassetid://127176612735348",
 		YOffset = 0,  -- 如果模型插入地面，调整这个值（正数向上，负数向下）
 	},
 	-- 通关第2章后解锁
 	{
 		RequiredChapter = 2,
 		ModelName = "PrisonLv3",
+		Name = "The Elite Ward",
+		IdleCoinsPerMinute = 12,
+		IdleMaxHours = 18,
+		Description = "Advanced facilities with major boost. Faster coins and longer AFK.",
+		Icon = "rbxassetid://102214435450404",
 		YOffset = 0,  -- 如果模型插入地面，调整这个值（正数向上，负数向下）
 	},
 }
@@ -48,21 +63,8 @@ HouseConfig.Houses = {
 @return string - 房屋模型名称
 ]]
 function HouseConfig.GetHouseModelByChapter(completedChapters)
-	completedChapters = completedChapters or 0
-
-	-- 从高到低遍历，找到第一个满足条件的房屋
-	local bestHouse = HouseConfig.Houses[1]  -- 默认初始房屋
-
-	for _, house in ipairs(HouseConfig.Houses) do
-		if completedChapters >= house.RequiredChapter then
-			-- 找到更高级别的满足条件的房屋
-			if house.RequiredChapter >= bestHouse.RequiredChapter then
-				bestHouse = house
-			end
-		end
-	end
-
-	return bestHouse.ModelName
+	local houseConfig = HouseConfig.GetHouseByChapter(completedChapters)
+	return houseConfig and houseConfig.ModelName or "PrisonLv1"
 end
 
 --[[
@@ -110,6 +112,62 @@ function HouseConfig.GetYOffset(modelName)
 		end
 	end
 	return 0
+end
+
+--[[
+根据模型名称获取房屋配置
+@param modelName string - 模型名称
+@return table|nil - 房屋配置
+]]
+function HouseConfig.GetHouseByModel(modelName)
+	for _, house in ipairs(HouseConfig.Houses) do
+		if house.ModelName == modelName then
+			return house
+		end
+	end
+	return nil
+end
+
+--[[
+根据通关章节数获取对应房屋配置（最高解锁）
+@param completedChapters number - 已通关的章节数
+@return table - 房屋配置
+]]
+function HouseConfig.GetHouseByChapter(completedChapters)
+	completedChapters = completedChapters or 0
+
+	local bestHouse = HouseConfig.Houses[1]
+	for _, house in ipairs(HouseConfig.Houses) do
+		if completedChapters >= house.RequiredChapter then
+			if house.RequiredChapter >= bestHouse.RequiredChapter then
+				bestHouse = house
+			end
+		end
+	end
+
+	return bestHouse
+end
+
+--[[
+根据通关章节数获取挂机配置
+@param completedChapters number - 已通关的章节数
+@return table - {CoinsPerMinute, MaxHours, MaxMinutes, House}
+]]
+function HouseConfig.GetIdleConfigByCompletedChapters(completedChapters)
+	local house = HouseConfig.GetHouseByChapter(completedChapters)
+	if not house then
+		return nil
+	end
+
+	local maxHours = tonumber(house.IdleMaxHours) or 0
+	local maxMinutes = maxHours > 0 and (maxHours * 60) or 0
+
+	return {
+		CoinsPerMinute = tonumber(house.IdleCoinsPerMinute) or 0,
+		MaxHours = maxHours,
+		MaxMinutes = maxMinutes,
+		House = house,
+	}
 end
 
 return HouseConfig

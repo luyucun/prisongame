@@ -6,7 +6,7 @@
 ]]
 
 --[[
-房屋升级镜头控制器
+房屋升级镜头控制�?
 职责:
 1. 接收服务端房屋升级通知
 2. 控制镜头拉高看向房屋
@@ -14,13 +14,13 @@
 4. 恢复镜头控制
 
 流程:
-1. 玩家通关章节后点击胜利弹窗确认
-2. 玩家重生在基地
-3. 服务端通知客户端开始房屋升级表现
-4. 客户端镜头拉高看向房屋
-5. 等待1秒
+1. 玩家通关章节后点击胜利弹窗确�?
+2. 玩家重生在基�?
+3. 服务端通知客户端开始房屋升级表�?
+4. 客户端镜头拉高看向房�?
+5. 等待1�?
 6. 旧房屋消失，新房屋出现（服务端处理）
-7. 等待1秒
+7. 等待1�?
 8. 恢复镜头控制
 ]]
 
@@ -32,30 +32,62 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 
 -- 本地玩家
 local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
 local camera = Workspace.CurrentCamera
 
--- 状态标记
+local HouseConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("HouseConfig"))
+
+-- 状态标�?
 local isUpgrading = false
 local originalCameraType = nil
 local originalCameraSubject = nil
 
--- 配置参数
-local CAMERA_HEIGHT = 30  -- 镜头高度
-local CAMERA_DISTANCE = 40  -- 镜头距离房屋的距离
-local CAMERA_ANGLE = math.rad(30)  -- 镜头俯视角度（30度）
-local TWEEN_DURATION = 1.0  -- 镜头移动时长
-local WAIT_BEFORE_REPLACE = 0.8  -- 房屋替换前等待时间
-local WAIT_AFTER_REPLACE = 1.8  -- 房屋替换后等待时间（V3.9.1修改：1秒→3秒）
+-- ���ò���
+local CAMERA_HEIGHT = 30  -- ��ͷ�߶�
+local CAMERA_DISTANCE = 40  -- ��ͷ���뷿�ݵľ���
+local CAMERA_ANGLE = math.rad(30)  -- ��ͷ���ӽǶ�(30��)
+local TWEEN_DURATION = 1.0  -- ��ͷ�ƶ�ʱ��
+local WAIT_BEFORE_REPLACE = 0.8  -- �����滻ǰ�ȴ�ʱ��
+local WAIT_AFTER_REPLACE = 1.8  -- �����滻��ȴ�ʱ��(ԭV3.9����)
 
--- RemoteEvent引用
+local POPUP_MIN_DURATION = 1.0
+local POPUP_BG_TWEEN_DURATION = 0.25
+local POPUP_ITEM_TWEEN_DURATION = 0.12
+local POPUP_ITEM_DELAY = 0.05
+local POPUP_ITEM_OFFSET_X = -30
+local POPUP_BG_OFFSET_SCALE = -1
+local LIGHT_ROTATE_SPEED = 60
+local POPUP_FORCE_CLOSE_SECONDS = 12
+
+-- RemoteEvent����
 local HouseUpgradeEvents = nil
 
---[[
-初始化RemoteEvent
-]]
+local houseUpgradeGui = nil
+local upgradeBg = nil
+local upgradeLightBg = nil
+local upgradeLight = nil
+local upgradeOldPrison = nil
+local upgradeNewPrison = nil
+local upgradeOldSpeed = nil
+local upgradeOldTime = nil
+local upgradeNewSpeed = nil
+local upgradeNewTime = nil
+local upgradeArrow = nil
+local upgradeTitle = nil
+
+local popupVisible = false
+local popupAllowClose = false
+popupClosedFired = false
+local popupToken = 0
+local popupCloseSignal = nil
+local popupInputConnection = nil
+local lightRotateConnection = nil
+local popupOriginalPositions = {}
+local popupElements = {}
 local function InitializeEvents()
 	if HouseUpgradeEvents then
 		return true
@@ -77,10 +109,340 @@ local function InitializeEvents()
 	return true
 end
 
+local function SafeWaitForChild(parent, childName, timeout)
+	timeout = timeout or 3
+	if not parent then
+		return nil
+	end
+
+	local child = parent:FindFirstChild(childName)
+	if child then
+		return child
+	end
+
+	local startTime = tick()
+	while tick() - startTime < timeout do
+		child = parent:FindFirstChild(childName)
+		if child then
+			return child
+		end
+		task.wait(0.1)
+	end
+
+	return nil
+end
+
+local function OffsetPosition(position, xOffset, yOffset)
+	return UDim2.new(
+		position.X.Scale,
+		position.X.Offset + xOffset,
+		position.Y.Scale,
+		position.Y.Offset + yOffset
+	)
+end
+
+local function InitializePopupUI()
+	if houseUpgradeGui and houseUpgradeGui.Parent == playerGui and upgradeBg then
+		return true
+	end
+
+	houseUpgradeGui = playerGui:FindFirstChild("HouseUpgradeGui") or playerGui:WaitForChild("HouseUpgradeGui", 5)
+	if not houseUpgradeGui then
+		warn("[HouseUpgradeCameraController] HouseUpgradeGui not found")
+		return false
+	end
+
+	upgradeBg = SafeWaitForChild(houseUpgradeGui, "Bg", 3)
+	upgradeLightBg = SafeWaitForChild(houseUpgradeGui, "LightBg", 3)
+	upgradeLight = upgradeLightBg and upgradeLightBg:FindFirstChild("Light")
+
+	upgradeOldPrison = upgradeBg and upgradeBg:FindFirstChild("OldPrison")
+	upgradeNewPrison = upgradeBg and upgradeBg:FindFirstChild("NewPrison")
+	upgradeOldSpeed = upgradeBg and upgradeBg:FindFirstChild("OldSpeed")
+	upgradeOldTime = upgradeBg and upgradeBg:FindFirstChild("OldTimeLimit")
+	upgradeNewSpeed = upgradeBg and upgradeBg:FindFirstChild("NewSpeed")
+	upgradeNewTime = upgradeBg and upgradeBg:FindFirstChild("NewTimeLimit")
+	upgradeArrow = upgradeBg and upgradeBg:FindFirstChild("Arrow")
+	upgradeTitle = upgradeBg and upgradeBg:FindFirstChild("Title")
+
+	popupElements = {
+		upgradeOldPrison,
+		upgradeNewPrison,
+		upgradeOldSpeed,
+		upgradeOldTime,
+		upgradeNewSpeed,
+		upgradeNewTime,
+		upgradeArrow,
+		upgradeTitle,
+	}
+
+	popupOriginalPositions = {}
+	if upgradeBg and upgradeBg:IsA("GuiObject") then
+		popupOriginalPositions[upgradeBg] = upgradeBg.Position
+	end
+	for _, element in ipairs(popupElements) do
+		if element and element:IsA("GuiObject") then
+			popupOriginalPositions[element] = element.Position
+		end
+	end
+
+	return upgradeBg ~= nil
+end
+
+local function GetCompletedChapters()
+	local completed = player:GetAttribute("CompletedChapters")
+	if type(completed) == "number" then
+		return completed
+	end
+	return 0
+end
+
+local function ResolvePopupData(oldModelName, newModelName)
+	local currentModel = oldModelName
+	if type(currentModel) ~= "string" or currentModel == "" then
+		currentModel = player:GetAttribute("CurrentHouseModel")
+	end
+
+	local completedChapters = GetCompletedChapters()
+	if type(currentModel) ~= "string" or currentModel == "" then
+		local fallback = HouseConfig.GetHouseByChapter(completedChapters)
+		currentModel = fallback and fallback.ModelName or nil
+	end
+
+	local shouldUpgrade, targetModel = HouseConfig.ShouldUpgradeHouse(currentModel or "PrisonLv1", completedChapters)
+	local resolvedNew = newModelName
+	if type(resolvedNew) ~= "string" or resolvedNew == "" then
+		resolvedNew = shouldUpgrade and targetModel or currentModel
+	end
+
+	local oldHouse = HouseConfig.GetHouseByModel(currentModel or "") or HouseConfig.GetHouseByChapter(completedChapters)
+	local newHouse = HouseConfig.GetHouseByModel(resolvedNew or "")
+	return oldHouse, newHouse
+end
+
+local function ApplyPopupContent(oldModelName, newModelName)
+	local oldHouse, newHouse = ResolvePopupData(oldModelName, newModelName)
+
+	if upgradeOldPrison and upgradeOldPrison:IsA("ImageLabel") then
+		upgradeOldPrison.Image = oldHouse and tostring(oldHouse.Icon or "") or ""
+	end
+	if upgradeNewPrison and upgradeNewPrison:IsA("ImageLabel") then
+		upgradeNewPrison.Image = newHouse and tostring(newHouse.Icon or "") or ""
+	end
+
+	if upgradeOldSpeed and upgradeOldSpeed:IsA("TextLabel") then
+		local speed = oldHouse and tonumber(oldHouse.IdleCoinsPerMinute) or 0
+		upgradeOldSpeed.Text = string.format("$%d/min", speed)
+	end
+	if upgradeOldTime and upgradeOldTime:IsA("TextLabel") then
+		local hours = oldHouse and tonumber(oldHouse.IdleMaxHours) or 0
+		upgradeOldTime.Text = string.format("%dH", hours)
+	end
+	if upgradeNewSpeed and upgradeNewSpeed:IsA("TextLabel") then
+		local speed = newHouse and tonumber(newHouse.IdleCoinsPerMinute) or 0
+		upgradeNewSpeed.Text = string.format("$%d/min", speed)
+	end
+	if upgradeNewTime and upgradeNewTime:IsA("TextLabel") then
+		local hours = newHouse and tonumber(newHouse.IdleMaxHours) or 0
+		upgradeNewTime.Text = string.format("%dH", hours)
+	end
+end
+
+local function ResetPopupPositions()
+	for element, position in pairs(popupOriginalPositions) do
+		if element and element.Parent then
+			element.Position = position
+		end
+	end
+end
+
+local function AnimatePopup()
+	if not upgradeBg or not popupOriginalPositions[upgradeBg] then
+		return
+	end
+
+	ResetPopupPositions()
+
+	local bgOriginal = popupOriginalPositions[upgradeBg]
+	upgradeBg.Position = UDim2.new(
+		bgOriginal.X.Scale + POPUP_BG_OFFSET_SCALE,
+		bgOriginal.X.Offset,
+		bgOriginal.Y.Scale,
+		bgOriginal.Y.Offset
+	)
+
+	local bgTween = TweenService:Create(
+		upgradeBg,
+		TweenInfo.new(POPUP_BG_TWEEN_DURATION, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ Position = bgOriginal }
+	)
+	bgTween:Play()
+
+	for index, element in ipairs(popupElements) do
+		local original = popupOriginalPositions[element]
+		if element and original and element:IsA("GuiObject") then
+			element.Position = OffsetPosition(original, POPUP_ITEM_OFFSET_X, 0)
+			task.delay((index - 1) * POPUP_ITEM_DELAY, function()
+				if element and element.Parent then
+					TweenService:Create(
+						element,
+						TweenInfo.new(POPUP_ITEM_TWEEN_DURATION, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+						{ Position = original }
+					):Play()
+				end
+			end)
+		end
+	end
+end
+
+local function StartLightRotation()
+	if lightRotateConnection then
+		lightRotateConnection:Disconnect()
+		lightRotateConnection = nil
+	end
+
+	if not upgradeLight then
+		return
+	end
+
+	upgradeLight.Rotation = 0
+	lightRotateConnection = RunService.RenderStepped:Connect(function(deltaTime)
+		if upgradeLight then
+			upgradeLight.Rotation = (upgradeLight.Rotation + (LIGHT_ROTATE_SPEED * deltaTime)) % 360
+		end
+	end)
+end
+
+local function StopLightRotation()
+	if lightRotateConnection then
+		lightRotateConnection:Disconnect()
+		lightRotateConnection = nil
+	end
+end
+
+local function NotifyPopupClosed()
+	if popupClosedFired then
+		return
+	end
+	popupClosedFired = true
+
+	if InitializeEvents() then
+		local popupClosedEvent = HouseUpgradeEvents:FindFirstChild("HouseUpgradePopupClosed")
+		if popupClosedEvent then
+			popupClosedEvent:FireServer()
+		end
+
+		local readyEvent = HouseUpgradeEvents:FindFirstChild("ClientCameraReady")
+		if readyEvent then
+			readyEvent:FireServer()
+		end
+	end
+end
+
+local function CloseUpgradePopup(force)
+	if not popupVisible then
+		return
+	end
+	if not force and not popupAllowClose then
+		return
+	end
+
+	popupVisible = false
+	popupAllowClose = false
+
+	if upgradeBg then
+		upgradeBg.Visible = false
+	end
+	if upgradeLightBg then
+		upgradeLightBg.Visible = false
+	end
+	if houseUpgradeGui and houseUpgradeGui:IsA("ScreenGui") then
+		houseUpgradeGui.Enabled = false
+	end
+
+	if popupInputConnection then
+		popupInputConnection:Disconnect()
+		popupInputConnection = nil
+	end
+
+	StopLightRotation()
+	ResetPopupPositions()
+	NotifyPopupClosed()
+
+	if popupCloseSignal then
+		popupCloseSignal:Fire()
+		popupCloseSignal:Destroy()
+		popupCloseSignal = nil
+	end
+end
+
+local function BindPopupInput()
+	if popupInputConnection then
+		popupInputConnection:Disconnect()
+		popupInputConnection = nil
+	end
+
+	popupInputConnection = UserInputService.InputBegan:Connect(function(input)
+		if not popupVisible or not popupAllowClose then
+			return
+		end
+
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			CloseUpgradePopup()
+		end
+	end)
+end
+
+local function ShowUpgradePopup(oldModelName, newModelName)
+	if not InitializePopupUI() then
+		return nil
+	end
+
+	popupToken = popupToken + 1
+	local token = popupToken
+	popupVisible = true
+	popupAllowClose = false
+	popupClosedFired = false
+
+	if houseUpgradeGui and houseUpgradeGui:IsA("ScreenGui") then
+		houseUpgradeGui.Enabled = true
+	end
+	if upgradeBg then
+		upgradeBg.Visible = true
+	end
+	if upgradeLightBg then
+		upgradeLightBg.Visible = true
+	end
+
+	ApplyPopupContent(oldModelName, newModelName)
+	AnimatePopup()
+	StartLightRotation()
+	BindPopupInput()
+
+	if popupCloseSignal then
+		popupCloseSignal:Destroy()
+	end
+	popupCloseSignal = Instance.new("BindableEvent")
+
+	task.delay(POPUP_MIN_DURATION, function()
+		if popupToken == token then
+			popupAllowClose = true
+		end
+	end)
+
+	task.delay(POPUP_FORCE_CLOSE_SECONDS, function()
+		if popupToken == token and popupVisible then
+			CloseUpgradePopup(true)
+		end
+	end)
+
+	return popupCloseSignal
+end
+
 --[[
-获取玩家的House文件夹
+获取玩家的House文件�?
 @param homeSlot number - 玩家基地编号(1-6)
-@return Folder|nil - House文件夹
+@return Folder|nil - House文件�?
 ]]
 local function GetPlayerHouseFolder(homeSlot)
 	local homeFolder = Workspace:FindFirstChild("Home")
@@ -91,7 +453,7 @@ local function GetPlayerHouseFolder(homeSlot)
 
 	local playerHome = homeFolder:FindFirstChild("PlayerHome" .. homeSlot)
 	if not playerHome then
-		warn("[HouseUpgradeCameraController] PlayerHome" .. homeSlot .. " 不存在")
+		warn("[HouseUpgradeCameraController] PlayerHome" .. homeSlot .. " not found")
 		return nil
 	end
 
@@ -100,8 +462,8 @@ local function GetPlayerHouseFolder(homeSlot)
 end
 
 --[[
-获取House文件夹下的当前房屋模型
-@param houseFolder Folder - House文件夹
+获取House文件夹下的当前房屋模�?
+@param houseFolder Folder - House文件�?
 @return Model|nil - 当前房屋模型
 ]]
 local function GetCurrentHouseModel(houseFolder)
@@ -117,7 +479,7 @@ local function GetCurrentHouseModel(houseFolder)
 end
 
 --[[
-计算房屋的中心位置
+计算房屋的中心位�?
 @param houseModel Model - 房屋模型
 @return Vector3 - 房屋中心位置
 ]]
@@ -131,7 +493,7 @@ local function GetHouseCenter(houseModel)
 end
 
 --[[
-保存当前镜头状态
+保存当前镜头状�?
 ]]
 local function SaveCameraState()
 	originalCameraType = camera.CameraType
@@ -139,7 +501,7 @@ local function SaveCameraState()
 end
 
 --[[
-恢复镜头状态
+恢复镜头状�?
 ]]
 local function RestoreCameraState()
 	if originalCameraType then
@@ -162,11 +524,11 @@ end
 local function MoveCameraToHouse(houseCenter, duration)
 	return Promise.new(function(resolve, reject)
 		-- 计算镜头目标位置（房屋后方上方）
-		-- 注意：战场在房屋前方（+Z），所以镜头应该在房屋后方（-Z）才能看到房屋
+		-- 注意：战场在房屋前方�?Z），所以镜头应该在房屋后方�?Z）才能看到房�?
 		local cameraPosition = houseCenter + Vector3.new(0, CAMERA_HEIGHT, -CAMERA_DISTANCE)
 
 		-- 计算镜头朝向（看向房屋中心）
-		local lookAtPosition = houseCenter + Vector3.new(0, 5, 0)  -- 稍微往上看一点
+		local lookAtPosition = houseCenter + Vector3.new(0, 5, 0)  -- 稍微往上看一�?
 		local targetCFrame = CFrame.new(cameraPosition, lookAtPosition)
 
 		-- 使用Tween平滑移动镜头
@@ -189,27 +551,27 @@ local function MoveCameraToHouse(houseCenter, duration)
 end
 
 --[[
-开始房屋升级镜头表现
+开始房屋升级镜头表�?
 @param homeSlot number - 玩家基地编号
 ]]
-function HouseUpgradeCameraController.StartUpgradeSequence(homeSlot)
+function HouseUpgradeCameraController.StartUpgradeSequence(homeSlot, oldModelName, newModelName)
 	if isUpgrading then
-		warn("[HouseUpgradeCameraController] 已经在升级中，跳过")
+		warn("[HouseUpgradeCameraController] Upgrade sequence already running")
 		return
 	end
 
 	isUpgrading = true
 
-	-- 保存当前镜头状态
+	-- 保存当前镜头状�?
 	SaveCameraState()
 
 	-- 设置镜头为Scriptable模式
 	camera.CameraType = Enum.CameraType.Scriptable
 
-	-- 获取房屋文件夹
+	-- 获取房屋文件�?
 	local houseFolder = GetPlayerHouseFolder(homeSlot)
 	if not houseFolder then
-		warn("[HouseUpgradeCameraController] 找不到House文件夹")
+		warn("[HouseUpgradeCameraController] House folder not found")
 		RestoreCameraState()
 		isUpgrading = false
 		return
@@ -218,7 +580,7 @@ function HouseUpgradeCameraController.StartUpgradeSequence(homeSlot)
 	-- 获取当前房屋模型
 	local currentHouse = GetCurrentHouseModel(houseFolder)
 	if not currentHouse then
-		warn("[HouseUpgradeCameraController] 找不到房屋模型")
+		warn("[HouseUpgradeCameraController] Current house model not found")
 		RestoreCameraState()
 		isUpgrading = false
 		return
@@ -237,7 +599,7 @@ function HouseUpgradeCameraController.StartUpgradeSequence(homeSlot)
 			local lookAtPosition = houseCenter + Vector3.new(0, 5, 0)
 			local targetCFrame = CFrame.new(cameraPosition, lookAtPosition)
 
-			-- 立即设置镜头位置（不使用Tween）
+			-- 立即设置镜头位置（不使用Tween�?
 			camera.CFrame = targetCFrame
 		end)
 
@@ -248,22 +610,16 @@ function HouseUpgradeCameraController.StartUpgradeSequence(homeSlot)
 			return
 		end
 
-		-- 2. 等待1秒（让玩家看清楚房屋）
-		task.wait(WAIT_BEFORE_REPLACE)
-
-		-- 3. 通知服务端可以替换房屋了
-		if InitializeEvents() then
-			local readyEvent = HouseUpgradeEvents:FindFirstChild("ClientCameraReady")
-			if readyEvent then
-				readyEvent:FireServer()
-			end
+		-- 2. Show upgrade popup (min 1s, click to close)
+		popupClosedFired = false
+		local closeSignal = ShowUpgradePopup(oldModelName, newModelName)
+		if closeSignal then
+			closeSignal.Event:Wait()
+		else
+			task.wait(POPUP_MIN_DURATION)
+			NotifyPopupClosed()
 		end
 
-		-- 4. 等待房屋替换完成（服务端会发送ReplaceComplete事件）
-		-- 这里我们等待一个信号或者固定时间
-		task.wait(WAIT_AFTER_REPLACE + 0.5)  -- 等待房屋替换 + 额外0.5秒
-
-		-- 5. 再等待1秒（让玩家看清楚新房屋）
 		task.wait(WAIT_AFTER_REPLACE)
 
 		-- 6. 恢复镜头控制
@@ -291,11 +647,11 @@ function HouseUpgradeCameraController.Initialize()
 		return
 	end
 
-	-- 监听服务端的房屋升级开始事件
+	-- 监听服务端的房屋升级开始事�?
 	local startUpgradeEvent = HouseUpgradeEvents:FindFirstChild("StartUpgradeSequence")
 	if startUpgradeEvent then
-		startUpgradeEvent.OnClientEvent:Connect(function(homeSlot)
-			HouseUpgradeCameraController.StartUpgradeSequence(homeSlot)
+		startUpgradeEvent.OnClientEvent:Connect(function(homeSlot, oldModelName, newModelName)
+			HouseUpgradeCameraController.StartUpgradeSequence(homeSlot, oldModelName, newModelName)
 		end)
 	else
 		warn("[HouseUpgradeCameraController] 找不到StartUpgradeSequence事件")
@@ -359,7 +715,7 @@ function Promise:await()
 	return result
 end
 
--- 自动初始化
+-- 自动初始�?
 task.defer(function()
 	HouseUpgradeCameraController.Initialize()
 end)

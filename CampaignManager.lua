@@ -2213,7 +2213,7 @@ function CampaignManager.OnVictory(campaignData)
 				end
 			end
 
-			-- V3.9修改+修复: 判断是否真正需要房屋升级并且不是最后一章
+			-- V5.1: show upgrade popup before replacing house
 			-- 只有真的要换房子且不是最后一章才设置pending标记，避免触发镜头效果
 			local HouseConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("HouseConfig"))
 			local currentHouseModel = DataManager.GetCurrentHouseModel(player)
@@ -2449,7 +2449,7 @@ function CampaignManager.CompleteCampaignEnd(campaignData)
 
 	-- =================================================================
 
-	-- V3.9修改+修复: 如果需要房屋升级，先启动镜头表现，再传送玩家
+	-- V5.1: show upgrade popup before replacing house
 	-- 加入二次校验：确保真的需要升级且不是最后一章
 	local player = campaignData.Player
 	local pendingUpgrade = campaignData.PendingHouseUpgrade
@@ -2478,36 +2478,6 @@ function CampaignManager.CompleteCampaignEnd(campaignData)
 
 	if shouldUpgradeHouse then
 		DebugLog(string.format("✅ 检测到待处理的房屋升级，立即启动镜头表现..."))
-
-		-- 立即通知客户端锁定镜头（在传送之前）
-		local HouseUpgradeSystem = nil
-		pcall(function()
-			HouseUpgradeSystem = require(SystemsFolder:WaitForChild("HouseUpgradeSystem"))
-		end)
-
-		if HouseUpgradeSystem then
-			local homeSlot = DataManager.GetPlayerHomeSlot(player)
-			if homeSlot and homeSlot > 0 then
-				-- 类型断言：此时homeSlot一定不为nil且不为0
-				local validHomeSlot = homeSlot :: number
-
-				-- 立即通知客户端开始镜头表现（不等待）
-				local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
-				if eventsFolder then
-					local houseUpgradeEvents = eventsFolder:FindFirstChild("HouseUpgradeEvents")
-					if houseUpgradeEvents then
-						local startEvent = houseUpgradeEvents:FindFirstChild("StartUpgradeSequence")
-						if startEvent then
-							startEvent:FireClient(player, validHomeSlot)
-							DebugLog(string.format("✅ 已通知客户端立即锁定镜头，HomeSlot=%d", validHomeSlot))
-						end
-					end
-				end
-			end
-		end
-
-		-- 等待一小段时间让客户端锁定镜头
-		task.wait(0.1)
 	end
 
 	-- 传送玩家回出生点
@@ -2523,10 +2493,9 @@ function CampaignManager.CompleteCampaignEnd(campaignData)
 		end
 	end
 
-	-- V3.9新增: 如果需要房屋升级，等待镜头移动完成后再替换房屋
+	-- V5.1: show upgrade popup before replacing house
 	if shouldUpgradeHouse then
 		-- 等待镜头移动到位（1秒移动 + 1秒观看）
-		task.wait(2.0)
 
 		-- 执行房屋替换
 		local HouseUpgradeSystem = nil
@@ -2544,6 +2513,22 @@ function CampaignManager.CompleteCampaignEnd(campaignData)
 			local shouldUpgrade, newModelName = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("HouseConfig")).ShouldUpgradeHouse(currentHouseModel, completedChapters)
 
 			if shouldUpgrade then
+				local homeSlot = DataManager.GetPlayerHomeSlot(player)
+				if homeSlot and homeSlot > 0 then
+					local validHomeSlot = homeSlot :: number
+					local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
+					if eventsFolder then
+						local houseUpgradeEvents = eventsFolder:FindFirstChild("HouseUpgradeEvents")
+						if houseUpgradeEvents then
+							local startEvent = houseUpgradeEvents:FindFirstChild("StartUpgradeSequence")
+							if startEvent then
+								startEvent:FireClient(player, validHomeSlot, currentHouseModel, newModelName)
+							end
+						end
+					end
+				end
+
+				HouseUpgradeSystem.WaitForPopupClosed(player, 12)
 				HouseUpgradeSystem.ReplaceHouseModel(player, newModelName)
 				DebugLog(string.format("✅ 房屋替换完成: %s", newModelName))
 			end

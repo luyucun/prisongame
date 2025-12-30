@@ -25,6 +25,7 @@ local Workspace = game:GetService("Workspace")
 
 -- 引用模块（延迟加载避免循环依赖）
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
+local HouseConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("HouseConfig"))
 local DataManager = nil
 local CurrencySystem = nil
 local PlayerManager = nil
@@ -67,6 +68,35 @@ local function LoadModules()
 	if not SoundSystem then
 		SoundSystem = require(ServerScriptService.Systems.SoundSystem)
 	end
+end
+
+local function GetIdleConfigForPlayer(player)
+	LoadModules()
+
+	local completedChapters = DataManager.GetCompletedChapters(player) or 0
+	local houseConfig = HouseConfig.GetIdleConfigByCompletedChapters(completedChapters)
+
+	local coinsPerMinute = houseConfig and tonumber(houseConfig.CoinsPerMinute) or 0
+	local maxMinutes = houseConfig and tonumber(houseConfig.MaxMinutes) or 0
+	local maxHours = houseConfig and tonumber(houseConfig.MaxHours) or 0
+
+	if coinsPerMinute <= 0 then
+		coinsPerMinute = tonumber(GameConfig.IdleCoin.CoinsPerMinute) or 0
+	end
+
+	if maxMinutes <= 0 then
+		maxMinutes = tonumber(GameConfig.IdleCoin.MaxOfflineMinutes) or 0
+	end
+
+	if maxHours <= 0 then
+		maxHours = math.floor(maxMinutes / 60)
+	end
+
+	return {
+		CoinsPerMinute = coinsPerMinute,
+		MaxMinutes = maxMinutes,
+		MaxHours = maxHours,
+	}
 end
 
 --[[
@@ -243,7 +273,7 @@ end
 @param lastLogoutTime number - 上次登出时间戳
 @return number - 产生的金币数量
 ]]
-local function CalculateOfflineCoins(lastLogoutTime)
+local function CalculateOfflineCoins(player, lastLogoutTime)
 	if lastLogoutTime <= 0 then
 		return 0
 	end
@@ -255,13 +285,14 @@ local function CalculateOfflineCoins(lastLogoutTime)
 	local offlineMinutes = math.floor(offlineSeconds / 60)
 
 	-- 限制最大离线时间
-	local maxMinutes = GameConfig.IdleCoin.MaxOfflineMinutes
+	local idleConfig = GetIdleConfigForPlayer(player)
+	local maxMinutes = idleConfig.MaxMinutes or 0
 	if offlineMinutes > maxMinutes then
 		offlineMinutes = maxMinutes
 	end
 
 	-- 计算金币
-	local coinsPerMinute = GameConfig.IdleCoin.CoinsPerMinute
+	local coinsPerMinute = idleConfig.CoinsPerMinute or 0
 	local coins = offlineMinutes * coinsPerMinute
 
 	return coins
@@ -442,7 +473,8 @@ local function ProcessIdleCoinCollect(player, multiplier, source, productId)
 	if source == "Purchase" then
 		success, newAmount = CurrencySystem.AddCoinsFromPurchase(player, awardCoins, productId)
 	else
-		local coinsPerMinute = GameConfig.IdleCoin.CoinsPerMinute
+		local idleConfig = GetIdleConfigForPlayer(player)
+		local coinsPerMinute = idleConfig.CoinsPerMinute or 0
 		local durationSeconds = 0
 		if coinsPerMinute and coinsPerMinute > 0 then
 			durationSeconds = pendingCoins * 60 / coinsPerMinute
@@ -601,7 +633,7 @@ function IdleCoinSystem.OnPlayerJoin(player)
 	local existingPendingCoins = idleCoinData.PendingCoins or 0
 
 	-- 计算离线产生的金币
-	local offlineCoins = CalculateOfflineCoins(lastLogoutTime)
+	local offlineCoins = CalculateOfflineCoins(player, lastLogoutTime)
 
 	-- 累加到待领取金币
 	local totalPendingCoins = existingPendingCoins + offlineCoins
@@ -670,7 +702,6 @@ function IdleCoinSystem.StartOnlineAccumulation(player)
 	end
 
 	local interval = GameConfig.IdleCoin.OnlineAccumulateInterval or 60  -- 默认60秒
-	local coinsPerMinute = GameConfig.IdleCoin.CoinsPerMinute or 10
 
 	-- 创建定时器协程
 	onlineTimers[player] = true  -- 标记定时器已启动
@@ -684,6 +715,8 @@ function IdleCoinSystem.StartOnlineAccumulation(player)
 				break
 			end
 
+			local idleConfig = GetIdleConfigForPlayer(player)
+			local coinsPerMinute = idleConfig.CoinsPerMinute or 0
 			-- 计算这个间隔产生的金币
 			local coinsToAdd = math.floor(coinsPerMinute * (interval / 60))
 			if coinsToAdd > 0 then
@@ -716,12 +749,14 @@ function IdleCoinSystem.StartOnlineAccumulation(player)
 		end
 	end)
 
+	local initialConfig = GetIdleConfigForPlayer(player)
+	local initialCoinsPerMinute = initialConfig.CoinsPerMinute or 0
 	print(string.format(
 		"%s [IdleCoinSystem] 玩家 %s 在线累计定时器已启动 (间隔: %d秒, 每分钟: %d金币)",
 		GameConfig.LOG_PREFIX,
 		player.Name,
 		interval,
-		coinsPerMinute
+		initialCoinsPerMinute
 	))
 end
 
@@ -785,7 +820,8 @@ GM命令：添加挂机金币（测试用）
 function IdleCoinSystem.GMAddIdleCoins(player, minutes)
 	LoadModules()
 
-	local coinsPerMinute = GameConfig.IdleCoin.CoinsPerMinute
+	local idleConfig = GetIdleConfigForPlayer(player)
+	local coinsPerMinute = idleConfig.CoinsPerMinute or 0
 	local coins = minutes * coinsPerMinute
 
 	-- 添加到待领取金币

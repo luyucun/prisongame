@@ -227,16 +227,8 @@ end
 @return Color3 - 对应颜色
 ]]
 local function GetQualityColor(quality)
-    local colors = {
-        ["Common"] = Color3.fromRGB(225, 225, 225),      -- 灰色
-        ["Rare"] = Color3.fromRGB(0, 255, 255),          -- 青色
-        ["Elite"] = Color3.fromRGB(0, 255, 0),           -- 绿色
-        ["Epic"] = Color3.fromRGB(170, 0, 255),          -- 紫色
-        ["Legendary"] = Color3.fromRGB(255, 80, 0),      -- 橙色
-        ["Mythic"] = Color3.fromRGB(255, 0, 0),          -- 红色
-        ["Godly"] = Color3.fromRGB(255, 255, 255),       -- 白色
-    }
-    return colors[quality] or colors["Common"]
+    local colors = (GameConfig.UI and GameConfig.UI.QualityColors) or {}
+    return colors[quality] or colors.Common or Color3.fromRGB(225, 225, 225)
 end
 
 --[[

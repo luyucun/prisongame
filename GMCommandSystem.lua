@@ -40,6 +40,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 -- 引用模块
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
+local HouseConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("HouseConfig"))
 local UnitConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("UnitConfig"))
 local BattleConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("BattleConfig"))
 local SkillConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("SkillConfig"))  -- V3.0新增
@@ -677,8 +678,13 @@ local function CMD_IdleCoins(player, args)
         SendMessage(player, "上次登出时间: 无记录")
     end
 
-    SendMessage(player, string.format("金币产出速度: %d/分钟", GameConfig.IdleCoin.CoinsPerMinute))
-    SendMessage(player, string.format("最大离线时长: %d 小时", GameConfig.IdleCoin.MaxOfflineHours))
+    local completedChapters = DataManager.GetCompletedChapters(player) or 0
+    local idleConfig = HouseConfig.GetIdleConfigByCompletedChapters(completedChapters)
+    local coinsPerMinute = idleConfig and tonumber(idleConfig.CoinsPerMinute) or tonumber(GameConfig.IdleCoin.CoinsPerMinute) or 0
+    local maxHours = idleConfig and tonumber(idleConfig.MaxHours) or tonumber(GameConfig.IdleCoin.MaxOfflineHours) or 0
+
+    SendMessage(player, string.format("金币产出速度: %d/分钟", coinsPerMinute))
+    SendMessage(player, string.format("最大离线时长: %d 小时", maxHours))
 end
 
 --[[

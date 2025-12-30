@@ -174,6 +174,15 @@ GameConfig.UI = GameConfig.UI or {}
 GameConfig.UI.CoinRollDuration = 0.8     -- 金币滚动动画时长(秒)
 GameConfig.UI.ButtonScaleDown = 0.9      -- 按钮按下缩放比例
 GameConfig.UI.ButtonScaleDuration = 0.1  -- 按钮缩放动画时长(秒)
+GameConfig.UI.QualityColors = {
+	Common = Color3.fromRGB(0, 255, 0),      -- 灰色
+	Rare = Color3.fromRGB(0, 255, 255),          -- 青色
+	Elite = Color3.fromRGB(170, 0, 255),           -- 绿色
+	Epic = Color3.fromRGB(255, 80, 0),          -- 紫色
+	Legendary = Color3.fromRGB(255, 0, 0),      -- 橙色
+	Mythic = Color3.fromRGB(255, 255, 255),          -- 红色
+	Godly = Color3.fromRGB(255, 255, 255),       -- 白色
+}
 
 -- ==================== 挂机金币配置 (V2.6) ====================
 GameConfig.IdleCoin = {

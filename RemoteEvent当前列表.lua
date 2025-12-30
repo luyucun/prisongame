@@ -94,8 +94,9 @@ ReplicatedStorage
         ├──PlaySFX（RemoteEvent） - 服务器→客户端：播放一次性音效(sfxKey)
         └──StopSFX（RemoteEvent） - 服务器→客户端：停止一次性音效(sfxKey)
     └──HouseUpgradeEvents（Folder）/  【V3.9新增】
-        ├──StartUpgradeSequence（RemoteEvent） - 服务器→客户端：开始房屋升级镜头表现(homeSlot)
+        ├──StartUpgradeSequence（RemoteEvent） - 服务器→客户端：开始房屋升级镜头表现(homeSlot, oldModelName, newModelName)
         ├──ClientCameraReady（RemoteEvent） - 客户端→服务器：镜头就位通知
+        ├──HouseUpgradePopupClosed（RemoteEvent）- 客户端→服务器：房屋升级弹框关闭
         └──UpgradeSequenceComplete（RemoteEvent） - 客户端→服务器：镜头表现完成
     └──ClientAIEvents（Folder）/  【V4.0新增 - 客户端AI迁移】
         ├──InitializeBattle（RemoteEvent） - 服务器→客户端：初始化战斗(battleId, attackUnits, defenseUnits, battleField)
@@ -1016,6 +1017,7 @@ CampaignStateUpdate事件变更（V3.6）：
 位置：ReplicatedStorage/Events/HouseUpgradeEvents/ （新建文件夹）
 🆕 StartUpgradeSequence (RemoteEvent) - 需在Studio中手动创建（或由服务端自动创建）
 🆕 ClientCameraReady (RemoteEvent) - 需在Studio中手动创建（或由服务端自动创建）
+🆕 HouseUpgradePopupClosed (RemoteEvent) - 需在Studio中手动创建（或由服务端自动创建）
 🆕 UpgradeSequenceComplete (RemoteEvent) - 需在Studio中手动创建（或由服务端自动创建）
 
 创建步骤：
@@ -1028,17 +1030,22 @@ CampaignStateUpdate事件变更（V3.6）：
 7. 选择 "Insert Object" > "RemoteEvent"
 8. 将新建的 RemoteEvent 重命名为 "StartUpgradeSequence"
 9. 重复步骤7-8，创建 "ClientCameraReady"
-10. 重复步骤7-8，创建 "UpgradeSequenceComplete"
-11. 保存游戏
+10. 重复步骤7-8，创建 "HouseUpgradePopupClosed"
+11. 重复步骤7-8，创建 "UpgradeSequenceComplete"
+12. 保存游戏
 
 功能说明：
 - StartUpgradeSequence：服务器→客户端：开始房屋升级镜头表现
-  参数：(homeSlot: number) 玩家基地编号(1-6)
+  参数：(homeSlot: number, oldModelName: string, newModelName: string) 玩家基地编号(1-6)
   触发时机：玩家通关章节后点击胜利弹窗确认，重生在基地时
 
 - ClientCameraReady：客户端→服务器：镜头就位通知
   参数：无（服务器根据玩家身份处理）
   触发时机：客户端镜头移动到位后通知服务端可以替换房屋
+
+- HouseUpgradePopupClosed：客户端→服务器：房屋升级弹框关闭通知
+  参数：无（服务端根据玩家身份处理）
+  触发时机：玩家点击任意区域关闭升级弹框后
 
 - UpgradeSequenceComplete：客户端→服务器：镜头表现完成
   参数：无（服务器根据玩家身份处理）

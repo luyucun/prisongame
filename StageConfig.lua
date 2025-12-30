@@ -32,13 +32,14 @@ StageConfig.Chapters = {
 		ChapterId = 1,
 		ChapterName = "Chapter 1",
 		EnemyChapterRef = 1,  -- V3.10: 引用EnemyConfig.Chapters[1]
-		StagesPerChapter = 4,  -- 🔥修复：显式指定关卡数，防止读取失败时回退到默认值3
+		StagesPerChapter = 5,  -- 🔥修复：显式指定关卡数，防止读取失败时回退到默认值3
 		StageTemplateStyle = "Style01",  -- V3.7: 使用Style01风格的关卡模板
 		Rewards = {
 			[1] = {Coins = 10},
 			[2] = {Coins = 10},
 			[3] = {Coins = 10},
 			[4] = {Coins = 10},
+			[5] = {Coins = 10},
 		}
 	},
 	-- 第二章
