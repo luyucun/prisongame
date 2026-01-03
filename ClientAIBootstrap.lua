@@ -35,6 +35,18 @@ local LocalPlayer = Players.LocalPlayer
 
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
 local BattleConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("BattleConfig"))
+local EVENT_WAIT_TIMEOUT = 10
+
+local function WaitForChildWithTimeout(parent, childName, timeout)
+	if not parent then
+		return nil
+	end
+	local existing = parent:FindFirstChild(childName)
+	if existing then
+		return existing
+	end
+	return parent:WaitForChild(childName, timeout)
+end
 
 -- ==================== 加载客户端AI模块 ====================
 
@@ -47,16 +59,42 @@ local ClientMarchService = require(ClientAIFolder:WaitForChild("ClientMarchServi
 
 -- ==================== RemoteEvent引用 ====================
 
-local ClientAIEvents = ReplicatedStorage:WaitForChild("Events"):WaitForChild("ClientAIEvents")
-local InitializeBattle = ClientAIEvents:WaitForChild("InitializeBattle")
-local TerminateBattle = ClientAIEvents:WaitForChild("TerminateBattle")
-local ServerUnitDeath = ClientAIEvents:WaitForChild("ServerUnitDeath")
-local SyncUnitPosition = ClientAIEvents:WaitForChild("SyncUnitPosition")
-local ClientBattleReady = ClientAIEvents:WaitForChild("ClientBattleReady")
+local eventsFolder = WaitForChildWithTimeout(ReplicatedStorage, "Events", EVENT_WAIT_TIMEOUT)
+if not eventsFolder then
+	warn(GameConfig.LOG_PREFIX, "[ClientAIBootstrap] Events folder missing, ClientAI disabled")
+	return
+end
+
+local ClientAIEvents = WaitForChildWithTimeout(eventsFolder, "ClientAIEvents", EVENT_WAIT_TIMEOUT)
+if not ClientAIEvents then
+	warn(GameConfig.LOG_PREFIX, "[ClientAIBootstrap] ClientAIEvents missing, ClientAI disabled")
+	return
+end
+
+local InitializeBattle = WaitForChildWithTimeout(ClientAIEvents, "InitializeBattle", EVENT_WAIT_TIMEOUT)
+local TerminateBattle = WaitForChildWithTimeout(ClientAIEvents, "TerminateBattle", EVENT_WAIT_TIMEOUT)
+local ServerUnitDeath = WaitForChildWithTimeout(ClientAIEvents, "ServerUnitDeath", EVENT_WAIT_TIMEOUT)
+local SyncUnitPosition = WaitForChildWithTimeout(ClientAIEvents, "SyncUnitPosition", EVENT_WAIT_TIMEOUT)
+local ClientBattleReady = WaitForChildWithTimeout(ClientAIEvents, "ClientBattleReady", EVENT_WAIT_TIMEOUT)
 
 -- V5.0新增：行军相关RemoteEvent
-local StartMarch = ClientAIEvents:WaitForChild("StartMarch")
-local MarchComplete = ClientAIEvents:WaitForChild("MarchComplete")
+local StartMarch = WaitForChildWithTimeout(ClientAIEvents, "StartMarch", EVENT_WAIT_TIMEOUT)
+local MarchComplete = WaitForChildWithTimeout(ClientAIEvents, "MarchComplete", EVENT_WAIT_TIMEOUT)
+
+do
+	local missing = {}
+	if not InitializeBattle then table.insert(missing, "InitializeBattle") end
+	if not TerminateBattle then table.insert(missing, "TerminateBattle") end
+	if not ServerUnitDeath then table.insert(missing, "ServerUnitDeath") end
+	if not SyncUnitPosition then table.insert(missing, "SyncUnitPosition") end
+	if not ClientBattleReady then table.insert(missing, "ClientBattleReady") end
+	if not StartMarch then table.insert(missing, "StartMarch") end
+	if not MarchComplete then table.insert(missing, "MarchComplete") end
+	if #missing > 0 then
+		warn(GameConfig.LOG_PREFIX, "[ClientAIBootstrap] ClientAIEvents incomplete, ClientAI disabled:", table.concat(missing, ", "))
+		return
+	end
+end
 
 -- ==================== 私有变量 ====================
 

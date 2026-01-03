@@ -1,4 +1,4 @@
---[[
+﻿--[[
 =====================================================
 脚本名称: MainGuiController
 脚本类型: LocalScript (客户端UI控制器)
@@ -47,6 +47,7 @@ local sfxToggleGradient = nil
 local campaignEvents = nil
 local battleControlEvents = nil
 local returnToHomeEvent = nil
+local unlockMoveEvent = nil
 local soundEvents = nil
 local updateSoundSettingsEvent = nil
 local syncSoundSettingsEvent = nil
@@ -421,6 +422,9 @@ local function OnUnlockMoveClick()
 		local success = _G.BattleCameraController.UnlockToPlayer()
 		if success then
 			DebugLog("✅ 镜头已解锁，恢复玩家视角")
+			if unlockMoveEvent then
+				unlockMoveEvent:FireServer()
+			end
 		else
 			DebugLog("⚠ 镜头解锁失败")
 		end
@@ -507,6 +511,10 @@ local function InitializeEvents()
 		returnToHomeEvent = battleControlEvents:FindFirstChild("ReturnToHome")
 		if returnToHomeEvent then
 			DebugLog("✅ 找到ReturnToHome远程事件")
+		end
+		unlockMoveEvent = battleControlEvents:FindFirstChild("UnlockMove")
+		if unlockMoveEvent then
+			DebugLog("? 找到UnlockMove远程事件")
 		end
 	else
 		DebugLog("⚠ BattleControlEvents文件夹不存在，需要在Studio中创建")

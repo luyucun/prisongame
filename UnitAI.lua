@@ -65,6 +65,7 @@ local RunService = game:GetService("RunService")
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
 local UnitConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("UnitConfig"))
 local BattleConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("BattleConfig"))
+local UNIT_DEATH_WAIT_TIMEOUT = 5
 
 -------------------------------------------------------
 -- Lazy-loaded systems
@@ -1524,11 +1525,42 @@ end
 -------------------------------------------------------
 
 if not deathEventConnection then
-	-- 延迟绑定死亡事件，因为UnitDeath是BindableEvent
-	local eventsFolder = ReplicatedStorage:WaitForChild("Events")
-	local battleEventsFolder = eventsFolder:WaitForChild("BattleEvents")
-	local unitDeathEvent = battleEventsFolder:WaitForChild("UnitDeath")
+	local function GetOrCreateUnitDeathEvent()
+		local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
+		if not eventsFolder then
+			eventsFolder = ReplicatedStorage:WaitForChild("Events", UNIT_DEATH_WAIT_TIMEOUT)
+		end
+		if not eventsFolder then
+			warn(GameConfig.LOG_PREFIX, "[UnitAI] Events folder missing; skip UnitDeath bind")
+			return nil
+		end
 
+		local battleEventsFolder = eventsFolder:FindFirstChild("BattleEvents")
+		if not battleEventsFolder then
+			battleEventsFolder = eventsFolder:WaitForChild("BattleEvents", UNIT_DEATH_WAIT_TIMEOUT)
+		end
+		if not battleEventsFolder then
+			warn(GameConfig.LOG_PREFIX, "[UnitAI] BattleEvents folder missing; skip UnitDeath bind")
+			return nil
+		end
+
+		local unitDeathEvent = battleEventsFolder:FindFirstChild("UnitDeath")
+		if not unitDeathEvent then
+			unitDeathEvent = Instance.new("BindableEvent")
+			unitDeathEvent.Name = "UnitDeath"
+			unitDeathEvent.Parent = battleEventsFolder
+			warn(GameConfig.LOG_PREFIX, "[UnitAI] UnitDeath missing; created BindableEvent")
+		end
+		if not unitDeathEvent:IsA("BindableEvent") then
+			warn(GameConfig.LOG_PREFIX, "[UnitAI] UnitDeath is not BindableEvent; skip bind")
+			return nil
+		end
+
+		return unitDeathEvent
+	end
+
+	-- 延迟绑定死亡事件，因为UnitDeath是BindableEvent
+	local unitDeathEvent = GetOrCreateUnitDeathEvent()
 	if unitDeathEvent then
 		deathEventConnection = unitDeathEvent.Event:Connect(function(model, killer, battleId)
 			UnitAI.StopAI(model)

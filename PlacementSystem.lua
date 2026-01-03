@@ -234,6 +234,40 @@ local function UpdateLevelDisplay(model, level)
 	end
 end
 
+local function NormalizeUnitHealth(unitInstance, unitId, level)
+	if not unitInstance or not unitId or not level then
+		return nil, nil
+	end
+
+	local expectedMax = UnitConfig.CalculateHealth(unitId, level)
+	if expectedMax <= 0 then
+		return unitInstance.Health, unitInstance.MaxHealth
+	end
+
+	local currentMax = tonumber(unitInstance.MaxHealth) or 0
+	local currentHealth = tonumber(unitInstance.Health)
+
+	if currentMax <= 0 or math.abs(currentMax - expectedMax) > 0.01 then
+		local ratio = 1
+		if currentMax > 0 and currentHealth ~= nil then
+			ratio = math.clamp(currentHealth / currentMax, 0, 1)
+		end
+		currentMax = expectedMax
+		if currentHealth ~= nil then
+			currentHealth = math.clamp(currentMax * ratio, 0, currentMax)
+		else
+			currentHealth = currentMax
+		end
+		unitInstance.MaxHealth = currentMax
+		unitInstance.Health = currentHealth
+	elseif currentHealth == nil or currentHealth > currentMax then
+		currentHealth = currentMax
+		unitInstance.Health = currentHealth
+	end
+
+	return currentHealth, currentMax
+end
+
 --[[
 播放展示动画 (V1.5.2新增, V2.8修复: 支持重复调用, V2.9修复: 禁用默认Animate脚本)
 @param model Model - 兵种模型
@@ -740,9 +774,12 @@ function PlacementSystem.PlaceUnit(player, instanceId, position)
 	-- 确保model.Humanoid的血量与unitInstance一致（防止首战时读取错误血量）
 	local humanoid = model:FindFirstChild("Humanoid")
 	if humanoid then
-		-- 使用unitInstance的血量，如果没有则使用配置表的默认值
-		local health = unitInstance.Health or UnitConfig.CalculateHealth(unitInstance.UnitId, unitInstance.Level)
-		local maxHealth = unitInstance.MaxHealth or UnitConfig.CalculateHealth(unitInstance.UnitId, unitInstance.Level)
+		local health, maxHealth = NormalizeUnitHealth(unitInstance, unitInstance.UnitId, unitInstance.Level)
+		if not health or not maxHealth then
+			-- 使用unitInstance的血量，如果没有则使用配置表的默认值
+			health = unitInstance.Health or UnitConfig.CalculateHealth(unitInstance.UnitId, unitInstance.Level)
+			maxHealth = unitInstance.MaxHealth or UnitConfig.CalculateHealth(unitInstance.UnitId, unitInstance.Level)
+		end
 		humanoid.MaxHealth = maxHealth
 		humanoid.Health = math.clamp(health, 0, maxHealth)
 		-- print(GameConfig.LOG_PREFIX, "[PlacementSystem.PlaceUnit] 同步血量到Humanoid:", unitInstance.UnitId, "HP:", humanoid.Health, "/", humanoid.MaxHealth)
@@ -1329,6 +1366,11 @@ function PlacementSystem.RestorePlacedUnits(player)
 			end
 
 			-- 占地尺寸：优先使用保存的宽/深，向后兼容GridSize/配置表
+			-- Prefer inventory level to avoid stale placed data overriding upgrades.
+			local level = unitInstance.Level or savedData.Level or 1
+			if unitInstance.Level == nil then
+				unitInstance.Level = level
+			end
 			local gridWidth = UnitConfig.GetGridWidth(unitInstance.UnitId)
 			local gridDepth = UnitConfig.GetGridDepth(unitInstance.UnitId)
 			-- 回写实例占地，保持与当前配置一致
@@ -1388,7 +1430,7 @@ function PlacementSystem.RestorePlacedUnits(player)
 				savedData.UnitId,
 				worldPosition,
 				instanceId,
-				savedData.Level or 1,
+				level,
 				gridWidth,
 				gridDepth,
 				homeSlot
@@ -1427,9 +1469,12 @@ function PlacementSystem.RestorePlacedUnits(player)
 			-- 导致首战开战时BattleManager读取错误的血量，造成"瞬间半血"
 			local humanoid = model:FindFirstChild("Humanoid")
 			if humanoid then
-				-- 使用存档的血量，如果没有则使用配置表的默认值
-				local health = savedData.Health or UnitConfig.CalculateHealth(savedData.UnitId, savedData.Level or 1)
-				local maxHealth = savedData.MaxHealth or UnitConfig.CalculateHealth(savedData.UnitId, savedData.Level or 1)
+				local health, maxHealth = NormalizeUnitHealth(unitInstance, unitInstance.UnitId, level)
+				if not health or not maxHealth then
+					-- 使用存档的血量，如果没有则使用配置表的默认值
+					health = savedData.Health or UnitConfig.CalculateHealth(savedData.UnitId, level)
+					maxHealth = savedData.MaxHealth or UnitConfig.CalculateHealth(savedData.UnitId, level)
+				end
 				humanoid.MaxHealth = maxHealth
 				humanoid.Health = math.clamp(health, 0, maxHealth)  -- 确保血量不超过最大值
 				-- print(GameConfig.LOG_PREFIX, "[PlacementSystem] 同步血量到Humanoid:", savedData.UnitId, "HP:", humanoid.Health, "/", humanoid.MaxHealth)
@@ -1442,6 +1487,7 @@ function PlacementSystem.RestorePlacedUnits(player)
 			placedUnits[userId][instanceId] = {
 				InstanceId = instanceId,
 				UnitId = savedData.UnitId,
+				Level = level,
 				Position = actualPosition,  -- V2.7修复：使用校准后的实际位置
 				GridX = savedData.GridX,
 				GridZ = savedData.GridZ,
@@ -1470,7 +1516,7 @@ function PlacementSystem.RestorePlacedUnits(player)
 			-- 4.11 播放展示动画
 			PlayShowAnimation(model, savedData.UnitId)
 			-- 4.11.1 确保等级显示立即刷新
-			UpdateLevelDisplay(model, unitInstance.Level or savedData.Level or 1)
+			UpdateLevelDisplay(model, level)
 
 			-- print(string.format(
 			-- 	"%s [PlacementSystem] 🔥 已恢复单位: %s (%s) 位置 (%d,%d)",

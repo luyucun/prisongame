@@ -171,12 +171,12 @@ end
 local function OpenSkillShop()
 	if not InitializeUI() then
 		warn(LOG_PREFIX, "UI未初始化，无法打开商店")
-		return
+		return false
 	end
 
 	if not InitializeEvents() then
 		warn(LOG_PREFIX, "事件未初始化，无法打开商店")
-		return
+		return false
 	end
 
 	-- 显示商店UI
@@ -188,6 +188,7 @@ local function OpenSkillShop()
 	if DEBUG_MODE then
 		print(LOG_PREFIX, "打开技能商店，已请求商店列表")
 	end
+	return true
 end
 
 --[[
@@ -233,8 +234,10 @@ local function CheckProximity()
 	-- 状态变化处理
 	if isInRange and not isNearShop then
 		-- 进入范围
-		isNearShop = true
-		OpenSkillShop()
+		local opened = OpenSkillShop()
+		if opened then
+			isNearShop = true
+		end
 
 		if DEBUG_MODE then
 			print(LOG_PREFIX, "进入技能商店范围, 距离:", string.format("%.2f", distance))

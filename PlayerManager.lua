@@ -129,6 +129,28 @@ local function GetHomeSpawnLocation(homeSlot)
     return spawnLocation
 end
 
+-- Bind player's RespawnLocation to the assigned home spawn when possible.
+local function BindPlayerRespawnLocation(player, homeSlot)
+    if not player or not homeSlot then
+        return false
+    end
+
+    local spawnLocation = GetHomeSpawnLocation(homeSlot)
+    if not spawnLocation then
+        return false
+    end
+
+    if not spawnLocation:IsA("SpawnLocation") then
+        if GameConfig.DEBUG_MODE then
+            warn(GameConfig.LOG_PREFIX, "RespawnLocation expects SpawnLocation:", homeSlot)
+        end
+        return false
+    end
+
+    player.RespawnLocation = spawnLocation
+    return true
+end
+
 --[[
 根据位置选择最近的可用基地
 用于Studio Play Here模式,确保分配的基地与玩家实际位置一致
@@ -167,7 +189,7 @@ end
 @param homeSlot number - 基地编号
 @return boolean - 是否传送成功
 ]]
-local function TeleportPlayerToHome(player, homeSlot)
+local function TeleportPlayerToHome(player, homeSlot, characterOverride)
     -- 检查玩家和基地编号的有效性
     if not player or not homeSlot then
         warn(GameConfig.LOG_PREFIX, "TeleportPlayerToHome: 参数无效")
@@ -175,14 +197,18 @@ local function TeleportPlayerToHome(player, homeSlot)
     end
 
     -- 检查角色是否存在
-    local character = player.Character
+    local character = characterOverride or player.Character
     if not character then
         warn(GameConfig.LOG_PREFIX, "TeleportPlayerToHome: 角色不存在", player.Name)
         return false
     end
 
+    if characterOverride and player.Character ~= characterOverride then
+        return false
+    end
+
     -- 等待HumanoidRootPart加载(最多等待15秒)
-    local humanoidRootPart = character:WaitForChild("HumanoidRootPart", 15)
+    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart") or character:WaitForChild("HumanoidRootPart", 15)
     if not humanoidRootPart then
         warn(GameConfig.LOG_PREFIX, "找不到玩家的HumanoidRootPart:", player.Name)
         return false
@@ -318,6 +344,7 @@ function PlayerManager.OnPlayerAdded(player)
 
     -- 5.1 同步HomeSlot到客户端（用于客户端确定正确的IdleFloor）
     player:SetAttribute("HomeSlot", homeSlot)
+    BindPlayerRespawnLocation(player, homeSlot)
 
     -- 6. 初始化玩家基地(HomeSystem)
     local homeModule = ServerScriptService:WaitForChild("Systems"):FindFirstChild("HomeSystem")
@@ -423,7 +450,7 @@ function PlayerManager.OnPlayerAdded(player)
             -- 等待一小段时间确保角色完全加载
             task.wait(0.1)
 
-            local success = TeleportPlayerToHome(player, homeSlot)
+            local success = TeleportPlayerToHome(player, homeSlot, character)
             if not success then
                 warn(GameConfig.LOG_PREFIX, "传送失败,将在角色重生时重试:", player.Name)
             end

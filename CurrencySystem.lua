@@ -379,11 +379,11 @@ local function OnClientRequestCurrency(player)
                 "%s [CurrencySystem] ⚠️ 玩家 %s 货币数据未就绪，使用默认值 %d",
                 GameConfig.LOG_PREFIX,
                 player.Name,
-                GameConfig.InitialCoins
+                GameConfig.INITIAL_COINS
             ))
 
             -- 发送默认金币值，避免客户端界面显示为0
-            NotifyClient(player, GameConfig.CurrencyType.COINS, GameConfig.InitialCoins)
+            NotifyClient(player, GameConfig.CurrencyType.COINS, GameConfig.INITIAL_COINS)
         end
     end)
 end
@@ -449,12 +449,12 @@ function CurrencySystem.PushInitialCurrency(player)
             end
         else
             -- 如果数据加载失败，推送默认值
-            NotifyClient(player, GameConfig.CurrencyType.COINS, GameConfig.InitialCoins)
+            NotifyClient(player, GameConfig.CurrencyType.COINS, GameConfig.INITIAL_COINS)
             warn(string.format(
                 "%s [CurrencySystem] 📤 推送默认金币：玩家 %s 金币 %d (数据未就绪)",
                 GameConfig.LOG_PREFIX,
                 player.Name,
-                GameConfig.InitialCoins
+                GameConfig.INITIAL_COINS
             ))
         end
     end)

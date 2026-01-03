@@ -1,4 +1,4 @@
---[[
+﻿--[[
 =====================================================
 脚本名称: CampaignManager
 脚本类型: ModuleScript (服务端核心)
@@ -361,6 +361,91 @@ local function SetUnitAnchored(unitModel, anchored, displayMode)
 	end
 end
 
+-- 开战前对敌人展示模型做一次落地校正，避免解除锚定时抖动/倒地
+local function SnapUnitToFloor(unitModel, floorPart)
+	if not unitModel or not floorPart or not floorPart:IsA("BasePart") then
+		return
+	end
+
+	local floorTopY = floorPart.Position.Y + floorPart.Size.Y / 2
+	local padding = 0.05
+
+	local bodyParts = {}
+	local excludeNames = {"Handle", "Sword", "Spear", "Weapon", "Gun", "Bow", "Staff", "Axe", "Knife", "Shield"}
+
+	for _, part in ipairs(unitModel:GetDescendants()) do
+		if part:IsA("BasePart") then
+			local parent = part.Parent
+			local isAccessoryOrTool = false
+
+			while parent and parent ~= unitModel do
+				if parent:IsA("Tool") or parent:IsA("Accoutrement") or parent:IsA("Accessory") then
+					isAccessoryOrTool = true
+					break
+				end
+				parent = parent.Parent
+			end
+
+			local isWeaponPart = false
+			for _, excludeName in ipairs(excludeNames) do
+				if string.find(string.lower(part.Name), string.lower(excludeName)) then
+					isWeaponPart = true
+					break
+				end
+			end
+
+			if not isAccessoryOrTool and not isWeaponPart then
+				table.insert(bodyParts, part)
+			end
+		end
+	end
+
+	local lowestY = math.huge
+	if #bodyParts > 0 then
+		for _, part in ipairs(bodyParts) do
+			local partBottomY = part.Position.Y - part.Size.Y / 2
+			if partBottomY < lowestY then
+				lowestY = partBottomY
+			end
+		end
+	else
+		local hrp = unitModel:FindFirstChild("HumanoidRootPart")
+		if hrp then
+			lowestY = hrp.Position.Y - 3
+		else
+			local bboxCf, bboxSize = unitModel:GetBoundingBox()
+			lowestY = bboxCf.Position.Y - bboxSize.Y / 2
+		end
+	end
+
+	local deltaY = (floorTopY + padding) - lowestY
+	if math.abs(deltaY) > 1e-3 then
+		unitModel:PivotTo(unitModel:GetPivot() * CFrame.new(0, deltaY, 0))
+	end
+end
+
+local function StopUnitAnimations(unitModel)
+	if not unitModel then
+		return
+	end
+
+	local humanoid = unitModel:FindFirstChildOfClass("Humanoid")
+	if not humanoid then
+		return
+	end
+
+	local animator = humanoid:FindFirstChildOfClass("Animator")
+	if not animator then
+		return
+	end
+
+	for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+		pcall(function()
+			track:Stop(0)
+		end)
+	end
+end
+
 --[[
 初始化远程事件
 @return boolean - 是否初始化成功
@@ -566,6 +651,25 @@ local function RestorePlayerMovement(campaignData)
 	end
 
 	campaignData.PlayerMoveBackup = nil
+end
+
+--[[
+解锁玩家移动能力（用于战斗中解除跟随）
+@param player Player
+@return boolean - 是否处理成功
+]]
+function CampaignManager.UnlockPlayerMovement(player)
+	if not player then
+		return false
+	end
+
+	local campaignData = CampaignManager.ActiveCampaigns[player.UserId]
+	if not campaignData then
+		return false
+	end
+
+	RestorePlayerMovement(campaignData)
+	return true
 end
 
 --[[
@@ -1808,6 +1912,9 @@ function CampaignManager.BeginBattlePrep(campaignData, stageNum, arrivedList, ti
 				-- V2.9修复：强制重置激活状态，确保Restart后敌人能被正确激活
 				child:SetAttribute("IsActivated", false)
 
+				StopUnitAnimations(child)
+				SnapUnitToFloor(child, idleFloorEnemy)
+
 				-- 激活敌军单位,指定类型为"enemy"
 				local activated = CampaignUnitHelper.ActivateUnit(child, "enemy")
 				if activated then
@@ -1833,6 +1940,8 @@ function CampaignManager.BeginBattlePrep(campaignData, stageNum, arrivedList, ti
 		if idleFloorEnemy then
 			for _, child in ipairs(idleFloorEnemy:GetChildren()) do
 				if child:IsA("Model") and child:FindFirstChild("Humanoid") then
+					StopUnitAnimations(child)
+					SnapUnitToFloor(child, idleFloorEnemy)
 					local activated = CampaignUnitHelper.ActivateUnit(child, "enemy")
 					if activated then
 						table.insert(preparedEnemies, child)
@@ -3392,6 +3501,21 @@ function CampaignManager.Initialize()
 			else
 				DebugLog("⚠ BattleControlEvents中未找到ReturnToHome事件")
 			end
+			local unlockMoveEvent = battleControlEvents:FindFirstChild("UnlockMove")
+			if not unlockMoveEvent then
+				unlockMoveEvent = Instance.new("RemoteEvent")
+				unlockMoveEvent.Name = "UnlockMove"
+				unlockMoveEvent.Parent = battleControlEvents
+			end
+			unlockMoveEvent.OnServerEvent:Connect(function(player)
+				local success, err = pcall(function()
+					CampaignManager.UnlockPlayerMovement(player)
+				end)
+				if not success then
+					warn("[CampaignManager] UnlockMove处理失败:", err)
+				end
+			end)
+			DebugLog("? 已监听UnlockMove远程事件")
 		else
 			DebugLog("⚠ Events中未找到BattleControlEvents文件夹")
 		end

@@ -182,8 +182,13 @@ local function EnablePlayerControls()
 	if character then
 		local humanoid = character:FindFirstChildOfClass("Humanoid")
 		if humanoid then
-			humanoid.WalkSpeed = originalWalkSpeed
-			humanoid.JumpPower = originalJumpPower
+			-- Only restore when loading actually locked movement.
+			if humanoid.WalkSpeed == 0 then
+				humanoid.WalkSpeed = originalWalkSpeed
+			end
+			if humanoid.JumpPower == 0 then
+				humanoid.JumpPower = originalJumpPower
+			end
 		end
 	end
 

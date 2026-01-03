@@ -335,7 +335,7 @@ local function CMD_Help(player, args)
 /listguides - 查看所有引导状态
 
 数据管理(V2.9):
-/resetdata - 重置所有玩家数据(需二次确认)
+/resetdata - 重置当前玩家数据(需二次确认)
 /mainprogress - 查看主线通关打点(第几章第几关)
 
 系统调试:
