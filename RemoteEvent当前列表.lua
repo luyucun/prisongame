@@ -16,6 +16,7 @@ ReplicatedStorage
     │   ├──CancelPlacement（RemoteEvent） - 客户端取消放置兵种
     │   ├──PlacementResponse（RemoteEvent） - 服务端返回放置结果
     │   ├──RemoveUnit（RemoteEvent） 【V1.3新增】 - 客户端请求回收兵种
+    │   ├──RemoveAllUnits（RemoteEvent） 【V5.2新增】 - 客户端请求一键回收所有已放置兵种
     │   ├──RemoveResponse（RemoteEvent） 【V1.3新增】 - 服务端返回回收结果
     │   ├──UpdatePosition（RemoteEvent） 【V1.4.1新增】 - 客户端请求更新兵种位置（拖动换位）
     │   └──UpdateResponse（RemoteEvent） 【V1.4.1新增】 - 服务端返回位置更新结果

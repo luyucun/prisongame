@@ -14,6 +14,11 @@
 版本: V1.5
 ]]
 
+local RunService = game:GetService("RunService")
+if not RunService:IsStudio() then
+    return
+end
+
 -- 引用服务
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")

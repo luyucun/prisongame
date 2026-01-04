@@ -1215,6 +1215,37 @@ function PlacementSystem.ClearAllPlacedUnits(player)
 end
 
 --[[
+一键回收所有已放置的兵种（V5.2新增）
+@param player Player
+@return number - 回收的数量
+]]
+function PlacementSystem.RemoveAllUnits(player)
+	local userId = player.UserId
+	if not placedUnits[userId] then
+		InventorySystem.RefreshClientInventory(player)
+		return 0
+	end
+
+	-- 先收集instanceId，避免遍历过程中修改表导致遗漏
+	local instanceIds = {}
+	for instanceId in pairs(placedUnits[userId]) do
+		table.insert(instanceIds, instanceId)
+	end
+
+	local removed = 0
+	for _, instanceId in ipairs(instanceIds) do
+		local success = PlacementSystem.RemovePlacedUnit(player, instanceId)
+		if success then
+			removed = removed + 1
+		end
+	end
+
+	-- 统一刷新背包显示
+	InventorySystem.RefreshClientInventory(player)
+
+	return removed
+end
+--[[
 玩家离开时清理数据
 @param player Player
 ]]
@@ -1717,6 +1748,19 @@ local function OnRemoveUnit(player, instanceId)
 end
 
 --[[
+处理一键回收请求 (V5.2新增)
+@param player Player
+]]
+local function OnRemoveAllUnits(player)
+	-- V2.0: 战役期间禁止基地操作
+	if IsPlayerInCampaign(player) then
+		return
+	end
+
+	PlacementSystem.RemoveAllUnits(player)
+end
+
+--[[
 处理更新兵种位置请求 (V1.4.1 / V2.0扩展：战役期间禁止)
 @param player Player
 @param instanceId string
@@ -1777,6 +1821,12 @@ function PlacementSystem.Initialize()
 	local removeEvent = PlacementEvents:FindFirstChild("RemoveUnit")
 	if removeEvent then
 		removeEvent.OnServerEvent:Connect(OnRemoveUnit)
+	end
+
+	-- V5.2: 连接一键回收事件
+	local removeAllEvent = PlacementEvents:FindFirstChild("RemoveAllUnits")
+	if removeAllEvent then
+		removeAllEvent.OnServerEvent:Connect(OnRemoveAllUnits)
 	end
 
 	-- V1.4.1: 连接位置更新事件

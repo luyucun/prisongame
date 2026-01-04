@@ -38,9 +38,11 @@ local inventoryEvents = nil
 local playerGui = nil
 local mainGui = nil
 local removeButton = nil
+local removeAllButton = nil
 local removeTips = nil
 local removeTipsBreathTween = nil
 local removeTipsDefaults = nil
+local ButtonEffectHelper = nil
 
 -- ==================== 回收状态 ====================
 local removalState = {
@@ -158,10 +160,17 @@ local function RefreshRemoveTipsVisibility()
     StopRemoveTipsBreath()
 end
 
+local function RefreshRemoveAllVisibility()
+    if removeAllButton then
+        removeAllButton.Visible = removalState.isRemovalMode
+    end
+end
+
 local function RefreshRemoveButtonVisibility()
     if removeButton then
         removeButton.Visible = ShouldShowRemoveButton()
     end
+    RefreshRemoveAllVisibility()
     RefreshRemoveTipsVisibility()
 end
 
@@ -285,6 +294,36 @@ function RemovalController.Initialize()
     return true
 end
 
+local function LoadButtonEffectHelper()
+    if ButtonEffectHelper then
+        return true
+    end
+
+    local success, result = pcall(function()
+        return require(game:GetService("StarterPlayer").StarterPlayerScripts.Utils.ButtonEffectHelper)
+    end)
+
+    if success then
+        ButtonEffectHelper = result
+        return true
+    end
+
+    warn("[RemovalController] ButtonEffectHelper加载失败:", result)
+    return false
+end
+
+local function BindButtonClick(button, onClick)
+    if not button then
+        return
+    end
+
+    if LoadButtonEffectHelper() and ButtonEffectHelper then
+        ButtonEffectHelper.AddClickEffect(button, { OnClick = onClick })
+    else
+        button.MouseButton1Click:Connect(onClick)
+    end
+end
+
 -- ==================== UI按钮连接 ====================
 
 --[[
@@ -294,7 +333,7 @@ function ConnectUIButtons()
     -- 连接Remove按钮
     removeButton = mainGui:FindFirstChild("Remove")
     if removeButton then
-        removeButton.MouseButton1Click:Connect(function()
+        BindButtonClick(removeButton, function()
             RemovalController.EnterRemovalMode()
         end)
     else
@@ -304,12 +343,37 @@ function ConnectUIButtons()
     -- 连接Exit按钮
     local exitButton = mainGui:FindFirstChild("Exit")
     if exitButton then
-        exitButton.MouseButton1Click:Connect(function()
+        BindButtonClick(exitButton, function()
             RemovalController.ExitRemovalMode()
         end)
     else
         warn("[RemovalController] 找不到Exit按钮!")
     end
+
+    -- 连接RemoveAll按钮
+    removeAllButton = mainGui:FindFirstChild("RemoveAll")
+    if removeAllButton then
+        BindButtonClick(removeAllButton, function()
+            if not removalState.isRemovalMode or not removalState.isEnabled then
+                return
+            end
+
+            if placementEvents then
+                local removeAllEvent = placementEvents:FindFirstChild("RemoveAllUnits")
+                if removeAllEvent then
+                    removeAllEvent:FireServer()
+                else
+                    warn("[RemovalController] 找不到RemoveAllUnits事件!")
+                end
+            end
+
+            RemovalController.ExitRemovalMode()
+        end)
+    else
+        warn("[RemovalController] 找不到RemoveAll按钮!")
+    end
+
+    RefreshRemoveAllVisibility()
 end
 
 -- ==================== 回收模式管理 ====================
@@ -432,6 +496,7 @@ function UpdateUIForRemovalMode(isRemovalMode)
         end
     end
 
+    RefreshRemoveAllVisibility()
     RefreshRemoveTipsVisibility()
 end
 
