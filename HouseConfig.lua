@@ -35,7 +35,7 @@ HouseConfig.Houses = {
 	{
 		RequiredChapter = 1,
 		ModelName = "PrisonLv2",
-		Name = "The Elite Ward",
+		Name = "The Steel Perimeter",
 		IdleCoinsPerMinute = 10,
 		IdleMaxHours = 16,
 		Description = "Reinforced steel with better security. Boosts AFK speed and capacity.",
