@@ -1792,3 +1792,38 @@ ID	排序	对话选项类型	对话出现条件	出现条件参数	选项文本	
 2.点击RemoveAll按钮，把自己场中的所有兵收回背包中，注意只是自己的兵，不要影响到其他玩家
 3.点击后，立刻退出回收模式，或者进入回收状态，点击Exit按钮也退出回收模式
 4.退出回收模式后，需要立刻把StarterGui - MainGui - RemoveAll的Visible属性改成False
+
+
+需求文档V5.3 每日免费奖励功能
+
+概述：玩家每日登录时，可以免费在页面中领取一份奖励，每天只能领一次
+
+详细规则：
+
+1.玩家点击StarterGui - MainGui - Shop按钮，可以打开商店界面（我们免费奖励在商店里买），也就是把StarterGui - Shop - ShopBg的Visible属性改成True
+2.玩家点击StarterGui - Shop - ShopBg - Title - CloseButton按钮关闭商店界面，也就是把StarterGui - Shop - ShopBg的Visible属性改成False
+3.当玩家有可领取但是未领取的每日免费奖励时，需要把StarterGui - MainGui - Shop - FreeIcon的Visible属性改成True，并且需要有抖动效果提醒，效果和七日登录奖励的红点的抖动效果一致即可，当奖励领完后，再把FreeIcon的visible属性改成False
+
+奖励刷新与领取规则：
+1.每日UTC0点刷新今日的免费奖励
+2.每个玩家每天只能领取一次，当领取完成后，需要把StarterGui - Shop - ShopBg - ScrollingFrame - DailyGift - Claim这个按钮置灰，并且变成不可点击的状态，同时把StarterGui - Shop - ShopBg - ScrollingFrame - DailyGift - Claim - Text这个textlabel的文本修改为Claimed
+3.当玩家在线时，跨过了刷新时间的节点，需要立刻刷新按钮的领取状态与Shop按钮的FreeIcon的显示状态
+4.当玩家新上线时，需要判定一下上次领取与本次领取之间是否跨过了一个新的utc0点，也就是是否触发过一次刷新，如果触发了，就刷新可领取状态，如果没跨过，就保持当前的可领取状态，如果可领取但是一直没领取也要一直保持Shop按钮上的FreeIcon显示状态
+
+奖励内容：
+
+1.奖励本质上是从多个奖励内容中发放一个，每次领取时，根据概率，决定本次发放的奖励内容是什么
+2.奖励内容是：
+    a.兵种10002，数量1，概率48%
+    b.兵种10004，数量1，概率40%
+    c.兵种10008，数量1，概率9%
+    d.兵种10013，数量1，概率3%
+4.每次领取，根据概率决定本次奖励发放发放的兵种是哪一个，并为玩家进行发放
+
+
+客户端规则：
+1.StarterGui - Shop - ShopBg - ScrollingFrame - DailyGift - Refresh是一个textlabel，用来显示奖励刷新倒计时，格式固定为：Refreshes in XX:YY，xx:YY为小时:分钟，注意：xx：YY 需要显示为绿色，其他的部分用白色
+2.玩家领取奖励后，需要立刻弹出奖励领取弹框，也就是StarterGui - ClaimTipsGui - ClaimSuccessful的Visible属性改成True，同时把StarterGui - ClaimTipsGui - LightBg的Visible属性也改成True
+3.StarterGui - ClaimTipsGui - ClaimSuccessful - Bg - ItemListFrame - ItemTemplate是奖励模板，其中ItemTemplate - Icon是奖励图标，ItemTemplate - Number是奖励数量，ItemTemplate默认是隐藏，当弹框打开时，需要根据奖励发放的内容去复制模板生成奖励信息，修改对应的图标和数量内容，然后把生成的奖励内容的Visible属性改成True
+4.当LightBg的Visible属性被改成True时，需要让LightBg - Light这个imagelabel保持自动自转，具体效果参考新监狱解锁时的弹框的表现效果，二者保持一致
+5.当弹框打开时，也需要有对应的滑出的动态，这里做个设计，但是也不要与监狱解锁那的划出效果相差太远

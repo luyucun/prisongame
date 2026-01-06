@@ -29,6 +29,7 @@ GM命令系统模块
 - /resetguide <guideId> : 重置指定引导 (V3.5)
 - /resetallguides : 重置所有引导 (V3.5)
 - /listguides : 列出所有引导状态 (V3.5)
+- /resetdailyreward : 重置今日免费奖励领取状态 (V5.3)
 ]]
 
 local GMCommandSystem = {}
@@ -55,6 +56,7 @@ local IdleCoinSystem = nil    -- V2.6新增：延迟加载，避免循环依赖
 local SkillSystem = nil       -- V3.0新增：延迟加载，避免循环依赖
 local GuideSystem = nil       -- V3.5新增：延迟加载，避免循环依赖
 local SevenDaysSystem = nil   -- V4.8新增：延迟加载，避免循环依赖
+local DailyRewardSystem = nil -- V5.3新增：延迟加载，避免循环依赖
 
 -- ==================== 配置 ====================
 
@@ -344,6 +346,9 @@ local function CMD_Help(player, args)
 七日登录(V4.8):
 /unlocknextday - 解锁下一天奖励
 
+每日免费奖励(V5.3):
+/resetdailyreward - 重置今日免费奖励领取状态
+
 其他:
 /help - 显示此帮助
 
@@ -395,6 +400,34 @@ local function CMD_UnlockNextDay(player, args)
         SendMessage(player, message or "解锁成功")
     else
         SendMessage(player, message or "解锁失败")
+    end
+end
+
+--[[
+命令: /resetdailyreward
+重置今日每日免费奖励领取状态 (V5.3)
+]]
+local function CMD_ResetDailyReward(player, args)
+    if not DailyRewardSystem then
+        local systemsFolder = ServerScriptService:FindFirstChild("Systems")
+        if systemsFolder then
+            local module = systemsFolder:FindFirstChild("DailyRewardSystem")
+            if module then
+                DailyRewardSystem = require(module)
+            end
+        end
+    end
+
+    if not DailyRewardSystem or not DailyRewardSystem.GMResetDailyReward then
+        SendMessage(player, "错误: DailyRewardSystem未加载")
+        return
+    end
+
+    local success, message = DailyRewardSystem.GMResetDailyReward(player)
+    if success then
+        SendMessage(player, message or "重置成功")
+    else
+        SendMessage(player, message or "重置失败")
     end
 end
 
@@ -1151,6 +1184,7 @@ local COMMAND_HANDLERS = {
     ["resetdata"] = CMD_ResetData,        -- V2.9新增
     ["mainprogress"] = CMD_MainProgress,  -- 主线通关打点
     ["unlocknextday"] = CMD_UnlockNextDay, -- V4.8新增：解锁七日登录下一天
+    ["resetdailyreward"] = CMD_ResetDailyReward, -- V5.3新增：重置每日免费奖励
     ["addskill"] = CMD_AddSkill,          -- V3.0新增
     ["removeskill"] = CMD_RemoveSkill,    -- V3.0新增
     ["clearskills"] = CMD_ClearSkills,    -- V3.0新增

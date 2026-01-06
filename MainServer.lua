@@ -71,6 +71,8 @@ local GuideSystem = require(ServerScriptService.Systems.GuideSystem)
 local TalkSystem = require(ServerScriptService.Systems.TalkSystem)
 -- V4.8新增 - 七日登录奖励
 local SevenDaysSystem = require(ServerScriptService.Systems.SevenDaysSystem)
+-- V5.3新增 - 每日免费奖励
+local DailyRewardSystem = require(ServerScriptService.Systems.DailyRewardSystem)
 -- V4.9新增 - 群组奖励
 local GroupRewardSystem = require(ServerScriptService.Systems.GroupRewardSystem)
 -- V3.8新增 - 音效系统
@@ -419,7 +421,17 @@ local function InitializeServer()
         warn(GameConfig.LOG_PREFIX, "七日登录奖励系统初始化失败(返回false)")
     end
 
-    -- 13.7 初始化群组奖励系统 (V4.9新增)
+    -- 13.7 初始化每日免费奖励系统 (V5.3新增)
+    success, result = pcall(function()
+        return DailyRewardSystem.Initialize()
+    end)
+    if not success then
+        warn(GameConfig.LOG_PREFIX, "每日免费奖励系统初始化失败(异常):", result)
+    elseif result == false then
+        warn(GameConfig.LOG_PREFIX, "每日免费奖励系统初始化失败(返回false)")
+    end
+
+    -- 13.8 初始化群组奖励系统 (V4.9新增)
     success, result = pcall(function()
         return GroupRewardSystem.Initialize()
     end)

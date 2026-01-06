@@ -137,6 +137,10 @@ PlayerData = {
         LastUnlockDay = number,-- 上次解锁检查的UTC天数索引
         PendingReset = boolean,-- 是否待重置新一轮
     },
+    DailyRewardData = {        -- V5.3每日免费奖励
+        LastClaimDay = number, -- 上次领取UTC日索引
+        LastClaimTime = number,-- 上次领取时间戳
+    },
     GroupRewardData = {        -- V4.9加入群组奖励
         Claimed = boolean,     -- 是否已领取群组奖励
     },
@@ -275,6 +279,9 @@ local function LoadFromDataStore(player)
 			if data.SevenDayData then
 				data.SevenDayData = RestoreFromDataStore(data.SevenDayData)  -- V4.8七日登录奖励
 			end
+			if data.DailyRewardData then
+				data.DailyRewardData = RestoreFromDataStore(data.DailyRewardData)  -- V5.3每日免费奖励
+			end
 			if data.GroupRewardData then
 				data.GroupRewardData = RestoreFromDataStore(data.GroupRewardData)  -- V4.9加入群组奖励
 			end
@@ -342,6 +349,7 @@ local function SaveToDataStore(player, playerData, userId)
 		GuideData = SanitizeForDataStore(playerData.GuideData),  -- V3.5：保存引导数据
 		TalkData = SanitizeForDataStore(playerData.TalkData),  -- V4.5对话数据
 		SevenDayData = SanitizeForDataStore(playerData.SevenDayData),  -- V4.8七日登录奖励
+		DailyRewardData = SanitizeForDataStore(playerData.DailyRewardData),  -- V5.3每日免费奖励
 		GroupRewardData = SanitizeForDataStore(playerData.GroupRewardData),  -- V4.9加入群组奖励
 		LastSaveTime = os.time(),
 	}
@@ -432,6 +440,31 @@ local function NormalizeSevenDayData(data)
     return data
 end
 
+local function BuildDefaultDailyRewardData(now)
+    return {
+        LastClaimDay = 0,
+        LastClaimTime = 0,
+    }
+end
+
+local function NormalizeDailyRewardData(data)
+    if type(data) ~= "table" then
+        return BuildDefaultDailyRewardData(os.time())
+    end
+
+    data.LastClaimDay = tonumber(data.LastClaimDay) or 0
+    data.LastClaimTime = tonumber(data.LastClaimTime) or 0
+
+    if data.LastClaimDay < 0 then
+        data.LastClaimDay = 0
+    end
+    if data.LastClaimTime < 0 then
+        data.LastClaimTime = 0
+    end
+
+    return data
+end
+
 local function BuildDefaultGroupRewardData()
     return {
         Claimed = false,
@@ -500,9 +533,51 @@ local function CreateDefaultData(player)
             CompletedTalks = {},
         },
         SevenDayData = BuildDefaultSevenDayData(os.time()), -- V4.8七日登录奖励
+        DailyRewardData = BuildDefaultDailyRewardData(os.time()), -- V5.3每日免费奖励
         GroupRewardData = BuildDefaultGroupRewardData(), -- V4.9加入群组奖励
         LastSaveTime = os.time(),
     }
+end
+
+-- ==================== V5.3每日免费奖励接口 ====================
+
+function DataManager.GetDailyRewardData(player)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData then
+        return nil
+    end
+
+    if not playerData.DailyRewardData then
+        playerData.DailyRewardData = BuildDefaultDailyRewardData(os.time())
+    else
+        playerData.DailyRewardData = NormalizeDailyRewardData(playerData.DailyRewardData)
+    end
+
+    return playerData.DailyRewardData
+end
+
+function DataManager.SetDailyRewardClaim(player, claimDay, claimTime)
+    local rewardData = DataManager.GetDailyRewardData(player)
+    if not rewardData then
+        warn(GameConfig.LOG_PREFIX, "SetDailyRewardClaim: 找不到玩家数据")
+        return false
+    end
+
+    rewardData.LastClaimDay = tonumber(claimDay) or rewardData.LastClaimDay or 0
+    rewardData.LastClaimTime = tonumber(claimTime) or rewardData.LastClaimTime or 0
+    return true
+end
+
+function DataManager.ResetDailyReward(player)
+    local rewardData = DataManager.GetDailyRewardData(player)
+    if not rewardData then
+        warn(GameConfig.LOG_PREFIX, "ResetDailyReward: 找不到玩家数据")
+        return false
+    end
+
+    rewardData.LastClaimDay = 0
+    rewardData.LastClaimTime = 0
+    return true
 end
 
 -- ==================== V4.9群组奖励接口 ====================
@@ -719,6 +794,13 @@ function DataManager.InitializePlayerData(player)
             playerData.SevenDayData = BuildDefaultSevenDayData(os.time())
         else
             playerData.SevenDayData = NormalizeSevenDayData(playerData.SevenDayData)
+        end
+
+        -- V5.3每日免费奖励：确保DailyRewardData字段存在（向后兼容）
+        if not playerData.DailyRewardData then
+            playerData.DailyRewardData = BuildDefaultDailyRewardData(os.time())
+        else
+            playerData.DailyRewardData = NormalizeDailyRewardData(playerData.DailyRewardData)
         end
 
         -- V4.9加入群组奖励：确保GroupRewardData字段存在（向后兼容）
