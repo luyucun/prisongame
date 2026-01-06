@@ -73,6 +73,8 @@ local TalkSystem = require(ServerScriptService.Systems.TalkSystem)
 local SevenDaysSystem = require(ServerScriptService.Systems.SevenDaysSystem)
 -- V5.3新增 - 每日免费奖励
 local DailyRewardSystem = require(ServerScriptService.Systems.DailyRewardSystem)
+-- V5.4新增 - 新手礼包
+local StarterPackSystem = require(ServerScriptService.Systems.StarterPackSystem)
 -- V4.9新增 - 群组奖励
 local GroupRewardSystem = require(ServerScriptService.Systems.GroupRewardSystem)
 -- V3.8新增 - 音效系统
@@ -429,6 +431,16 @@ local function InitializeServer()
         warn(GameConfig.LOG_PREFIX, "每日免费奖励系统初始化失败(异常):", result)
     elseif result == false then
         warn(GameConfig.LOG_PREFIX, "每日免费奖励系统初始化失败(返回false)")
+    end
+
+    -- 13.75 初始化新手礼包系统 (V5.4新增)
+    success, result = pcall(function()
+        return StarterPackSystem.Initialize()
+    end)
+    if not success then
+        warn(GameConfig.LOG_PREFIX, "新手礼包系统初始化失败(异常):", result)
+    elseif result == false then
+        warn(GameConfig.LOG_PREFIX, "新手礼包系统初始化失败(返回false)")
     end
 
     -- 13.8 初始化群组奖励系统 (V4.9新增)

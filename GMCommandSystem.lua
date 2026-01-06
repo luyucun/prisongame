@@ -30,6 +30,7 @@ GM命令系统模块
 - /resetallguides : 重置所有引导 (V3.5)
 - /listguides : 列出所有引导状态 (V3.5)
 - /resetdailyreward : 重置今日免费奖励领取状态 (V5.3)
+- /resetstarterpack : 重置新手礼包购买状态 (V5.4)
 ]]
 
 local GMCommandSystem = {}
@@ -57,6 +58,7 @@ local SkillSystem = nil       -- V3.0新增：延迟加载，避免循环依赖
 local GuideSystem = nil       -- V3.5新增：延迟加载，避免循环依赖
 local SevenDaysSystem = nil   -- V4.8新增：延迟加载，避免循环依赖
 local DailyRewardSystem = nil -- V5.3新增：延迟加载，避免循环依赖
+local StarterPackSystem = nil -- V5.4新增：延迟加载，避免循环依赖
 
 -- ==================== 配置 ====================
 
@@ -349,6 +351,9 @@ local function CMD_Help(player, args)
 每日免费奖励(V5.3):
 /resetdailyreward - 重置今日免费奖励领取状态
 
+新手礼包(V5.4):
+/resetstarterpack - 重置新手礼包购买状态
+
 其他:
 /help - 显示此帮助
 
@@ -424,6 +429,34 @@ local function CMD_ResetDailyReward(player, args)
     end
 
     local success, message = DailyRewardSystem.GMResetDailyReward(player)
+    if success then
+        SendMessage(player, message or "重置成功")
+    else
+        SendMessage(player, message or "重置失败")
+    end
+end
+
+--[[
+命令: /resetstarterpack
+重置新手礼包购买状态 (V5.4)
+]]
+local function CMD_ResetStarterPack(player, args)
+    if not StarterPackSystem then
+        local systemsFolder = ServerScriptService:FindFirstChild("Systems")
+        if systemsFolder then
+            local module = systemsFolder:FindFirstChild("StarterPackSystem")
+            if module then
+                StarterPackSystem = require(module)
+            end
+        end
+    end
+
+    if not StarterPackSystem or not StarterPackSystem.GMResetStarterPack then
+        SendMessage(player, "错误: StarterPackSystem未加载")
+        return
+    end
+
+    local success, message = StarterPackSystem.GMResetStarterPack(player)
     if success then
         SendMessage(player, message or "重置成功")
     else
@@ -1185,6 +1218,7 @@ local COMMAND_HANDLERS = {
     ["mainprogress"] = CMD_MainProgress,  -- 主线通关打点
     ["unlocknextday"] = CMD_UnlockNextDay, -- V4.8新增：解锁七日登录下一天
     ["resetdailyreward"] = CMD_ResetDailyReward, -- V5.3新增：重置每日免费奖励
+    ["resetstarterpack"] = CMD_ResetStarterPack, -- V5.4新增：重置新手礼包
     ["addskill"] = CMD_AddSkill,          -- V3.0新增
     ["removeskill"] = CMD_RemoveSkill,    -- V3.0新增
     ["clearskills"] = CMD_ClearSkills,    -- V3.0新增

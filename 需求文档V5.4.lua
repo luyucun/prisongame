@@ -1827,3 +1827,26 @@ ID	排序	对话选项类型	对话出现条件	出现条件参数	选项文本	
 3.StarterGui - ClaimTipsGui - ClaimSuccessful - Bg - ItemListFrame - ItemTemplate是奖励模板，其中ItemTemplate - Icon是奖励图标，ItemTemplate - Number是奖励数量，ItemTemplate默认是隐藏，当弹框打开时，需要根据奖励发放的内容去复制模板生成奖励信息，修改对应的图标和数量内容，然后把生成的奖励内容的Visible属性改成True
 4.当LightBg的Visible属性被改成True时，需要让LightBg - Light这个imagelabel保持自动自转，具体效果参考新监狱解锁时的弹框的表现效果，二者保持一致
 5.当弹框打开时，也需要有对应的滑出的动态，这里做个设计，但是也不要与监狱解锁那的划出效果相差太远
+
+
+需求文档V5.4 新手礼包
+
+1.玩家可以购买一次性新手礼包，这个礼包是通行证，玩家只能购买一次
+2.通行证ID是：1658798778
+3.玩家点击StarterGui - MainGui - StarterPack这个按钮，打开商店界面，即：把StarterGui - Shop - ShopBg的Visible属性改成True
+4.玩家点击StarterGui - Shop - ShopBg - Title - CloseButton按钮关闭商店界面，也就是把StarterGui - Shop - ShopBg的Visible属性改成False
+5.玩家购买过新手礼包这个通行证后，就永久隐藏StarterGui - MainGui - StarterPack这个按钮
+
+6.玩家点击StarterGui - Shop - ShopBg - NewPlayer - BuyButton这个按钮，触发对新手礼包的购买，购买成功后，为玩家发放道具。
+7.玩家购买成功后，像V5.3中领取奖励的逻辑一样，需要弹出对应的弹框，逻辑是一样的，动效也是一样的，打开关闭动效等逻辑都保持一致
+8.唯一不同的是，在购买新手礼包后，弹出弹框时，需要把ClaimSuccessful - Title的文本修改成Purchase Successful！注意每日奖励的保持不变，新手礼包购买时才改Title的文本
+
+9.奖励内容是：
+    a.兵种10006：5个
+    b.兵种10009：5个
+    c.技能10003：5个
+    d.金币：5000，需要注意的是，金币道具的图标使用资源：rbxassetid://92295649647469
+
+10.玩家购买了新手礼包后，需要永久隐藏：StarterGui - Shop - ShopBg - ScrollingFrame - NewPlayer，将Visible属性改成false,同步需要永久隐藏的是：StarterGui - Shop - ShopBg - TabList - NewPlayer这个按钮
+
+11.在开发过程中，需要有gm重置我的购买状态，也就是我使用gm后，需要立刻重置为我没购买过这个通行证

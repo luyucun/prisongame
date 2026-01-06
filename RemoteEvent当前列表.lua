@@ -130,6 +130,11 @@ ReplicatedStorage
         ├──DailyRewardData（RemoteEvent） - 服务器→客户端：每日奖励数据(canClaim, nextRefreshTime, serverTime, lastClaimDay)
         ├──ClaimDailyReward（RemoteEvent） - 客户端→服务器：领取每日奖励
         └──ClaimDailyRewardResult（RemoteEvent） - 服务器→客户端：领取结果(success, message, rewardInfo)
+    └──StarterPackEvents（Folder）/  【V5.4新增 - 新手礼包】
+        ├──RequestStarterPackData（RemoteEvent） - 客户端→服务器：请求新手礼包数据
+        ├──StarterPackData（RemoteEvent） - 服务器→客户端：新手礼包数据(purchased)
+        ├──PurchaseStarterPack（RemoteEvent） - 客户端→服务器：请求购买新手礼包
+        └──PurchaseStarterPackResult（RemoteEvent） - 服务器→客户端：购买结果(success, message, rewards)
 
 
 如果需要补充新的RemoteEvent或者Remotefunction，请在这里列出来，我会自己去创建
@@ -225,6 +230,29 @@ ReplicatedStorage
 12. 保存游戏
 
 注意：DailyRewardSystem.lua 初始化时会自动创建这些事件（如果不存在），但建议手动创建以确保事件在系统初始化前就存在。
+
+【V5.4新手礼包RemoteEvent创建说明】
+位置：ReplicatedStorage/Events/StarterPackEvents/ （新建文件夹）
+?? RequestStarterPackData (RemoteEvent) - 需在Studio中手动创建
+?? StarterPackData (RemoteEvent) - 需在Studio中手动创建
+?? PurchaseStarterPack (RemoteEvent) - 需在Studio中手动创建
+?? PurchaseStarterPackResult (RemoteEvent) - 需在Studio中手动创建
+
+创建步骤：
+1. 打开Roblox Studio
+2. 导航到 ReplicatedStorage > Events
+3. 右键点击 Events 文件夹
+4. 选择 "Insert Object" > "Folder"
+5. 将新建的 Folder 重命名为 "StarterPackEvents"
+6. 右键点击 StarterPackEvents 文件夹
+7. 选择 "Insert Object" > "RemoteEvent"
+8. 将新建的 RemoteEvent 重命名为 "RequestStarterPackData"
+9. 重复步骤7-8，创建 "StarterPackData"
+10. 重复步骤7-8，创建 "PurchaseStarterPack"
+11. 重复步骤7-8，创建 "PurchaseStarterPackResult"
+12. 保存游戏
+
+注意：StarterPackSystem.lua 初始化时会自动创建这些事件（如果不存在），但建议手动创建以确保事件在系统初始化前就存在。
 
 【V2.1库存系统RemoteEvent创建说明】
 位置：ReplicatedStorage/Events/ShopEvents/

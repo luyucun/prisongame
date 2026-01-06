@@ -141,6 +141,9 @@ PlayerData = {
         LastClaimDay = number, -- 上次领取UTC日索引
         LastClaimTime = number,-- 上次领取时间戳
     },
+    StarterPackData = {        -- V5.4新手礼包
+        Purchased = boolean,   -- 是否已购买/领取
+    },
     GroupRewardData = {        -- V4.9加入群组奖励
         Claimed = boolean,     -- 是否已领取群组奖励
     },
@@ -282,6 +285,9 @@ local function LoadFromDataStore(player)
 			if data.DailyRewardData then
 				data.DailyRewardData = RestoreFromDataStore(data.DailyRewardData)  -- V5.3每日免费奖励
 			end
+			if data.StarterPackData then
+				data.StarterPackData = RestoreFromDataStore(data.StarterPackData)  -- V5.4新手礼包
+			end
 			if data.GroupRewardData then
 				data.GroupRewardData = RestoreFromDataStore(data.GroupRewardData)  -- V4.9加入群组奖励
 			end
@@ -350,6 +356,7 @@ local function SaveToDataStore(player, playerData, userId)
 		TalkData = SanitizeForDataStore(playerData.TalkData),  -- V4.5对话数据
 		SevenDayData = SanitizeForDataStore(playerData.SevenDayData),  -- V4.8七日登录奖励
 		DailyRewardData = SanitizeForDataStore(playerData.DailyRewardData),  -- V5.3每日免费奖励
+		StarterPackData = SanitizeForDataStore(playerData.StarterPackData),  -- V5.4新手礼包
 		GroupRewardData = SanitizeForDataStore(playerData.GroupRewardData),  -- V4.9加入群组奖励
 		LastSaveTime = os.time(),
 	}
@@ -465,6 +472,21 @@ local function NormalizeDailyRewardData(data)
     return data
 end
 
+local function BuildDefaultStarterPackData()
+    return {
+        Purchased = false,
+    }
+end
+
+local function NormalizeStarterPackData(data)
+    if type(data) ~= "table" then
+        return BuildDefaultStarterPackData()
+    end
+
+    data.Purchased = data.Purchased == true
+    return data
+end
+
 local function BuildDefaultGroupRewardData()
     return {
         Claimed = false,
@@ -534,6 +556,7 @@ local function CreateDefaultData(player)
         },
         SevenDayData = BuildDefaultSevenDayData(os.time()), -- V4.8七日登录奖励
         DailyRewardData = BuildDefaultDailyRewardData(os.time()), -- V5.3每日免费奖励
+        StarterPackData = BuildDefaultStarterPackData(), -- V5.4新手礼包
         GroupRewardData = BuildDefaultGroupRewardData(), -- V4.9加入群组奖励
         LastSaveTime = os.time(),
     }
@@ -577,6 +600,45 @@ function DataManager.ResetDailyReward(player)
 
     rewardData.LastClaimDay = 0
     rewardData.LastClaimTime = 0
+    return true
+end
+
+-- ==================== V5.4新手礼包接口 ====================
+
+function DataManager.GetStarterPackData(player)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData then
+        return nil
+    end
+
+    if not playerData.StarterPackData then
+        playerData.StarterPackData = BuildDefaultStarterPackData()
+    else
+        playerData.StarterPackData = NormalizeStarterPackData(playerData.StarterPackData)
+    end
+
+    return playerData.StarterPackData
+end
+
+function DataManager.SetStarterPackPurchased(player, purchased)
+    local packData = DataManager.GetStarterPackData(player)
+    if not packData then
+        warn(GameConfig.LOG_PREFIX, "SetStarterPackPurchased: 找不到玩家数据")
+        return false
+    end
+
+    packData.Purchased = purchased == true
+    return true
+end
+
+function DataManager.ResetStarterPack(player)
+    local packData = DataManager.GetStarterPackData(player)
+    if not packData then
+        warn(GameConfig.LOG_PREFIX, "ResetStarterPack: 找不到玩家数据")
+        return false
+    end
+
+    packData.Purchased = false
     return true
 end
 
@@ -801,6 +863,13 @@ function DataManager.InitializePlayerData(player)
             playerData.DailyRewardData = BuildDefaultDailyRewardData(os.time())
         else
             playerData.DailyRewardData = NormalizeDailyRewardData(playerData.DailyRewardData)
+        end
+
+        -- V5.4新手礼包：确保StarterPackData字段存在（向后兼容）
+        if not playerData.StarterPackData then
+            playerData.StarterPackData = BuildDefaultStarterPackData()
+        else
+            playerData.StarterPackData = NormalizeStarterPackData(playerData.StarterPackData)
         end
 
         -- V4.9加入群组奖励：确保GroupRewardData字段存在（向后兼容）
