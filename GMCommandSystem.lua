@@ -31,6 +31,7 @@ GM命令系统模块
 - /listguides : 列出所有引导状态 (V3.5)
 - /resetdailyreward : 重置今日免费奖励领取状态 (V5.3)
 - /resetstarterpack : 重置新手礼包购买状态 (V5.4)
+- /resetvip : 重置VIP礼包购买状态 (V5.5)
 ]]
 
 local GMCommandSystem = {}
@@ -59,6 +60,7 @@ local GuideSystem = nil       -- V3.5新增：延迟加载，避免循环依赖
 local SevenDaysSystem = nil   -- V4.8新增：延迟加载，避免循环依赖
 local DailyRewardSystem = nil -- V5.3新增：延迟加载，避免循环依赖
 local StarterPackSystem = nil -- V5.4新增：延迟加载，避免循环依赖
+local VipSystem = nil         -- V5.5新增：延迟加载，避免循环依赖
 
 -- ==================== 配置 ====================
 
@@ -354,6 +356,9 @@ local function CMD_Help(player, args)
 新手礼包(V5.4):
 /resetstarterpack - 重置新手礼包购买状态
 
+VIP礼包(V5.5):
+/resetvip - 重置VIP礼包购买状态
+
 其他:
 /help - 显示此帮助
 
@@ -457,6 +462,34 @@ local function CMD_ResetStarterPack(player, args)
     end
 
     local success, message = StarterPackSystem.GMResetStarterPack(player)
+    if success then
+        SendMessage(player, message or "重置成功")
+    else
+        SendMessage(player, message or "重置失败")
+    end
+end
+
+--[[
+命令: /resetvip
+重置VIP礼包购买状态 (V5.5)
+]]
+local function CMD_ResetVip(player, args)
+    if not VipSystem then
+        local systemsFolder = ServerScriptService:FindFirstChild("Systems")
+        if systemsFolder then
+            local module = systemsFolder:FindFirstChild("VipSystem")
+            if module then
+                VipSystem = require(module)
+            end
+        end
+    end
+
+    if not VipSystem or not VipSystem.GMResetVip then
+        SendMessage(player, "错误: VipSystem未加载")
+        return
+    end
+
+    local success, message = VipSystem.GMResetVip(player)
     if success then
         SendMessage(player, message or "重置成功")
     else
@@ -1219,6 +1252,7 @@ local COMMAND_HANDLERS = {
     ["unlocknextday"] = CMD_UnlockNextDay, -- V4.8新增：解锁七日登录下一天
     ["resetdailyreward"] = CMD_ResetDailyReward, -- V5.3新增：重置每日免费奖励
     ["resetstarterpack"] = CMD_ResetStarterPack, -- V5.4新增：重置新手礼包
+    ["resetvip"] = CMD_ResetVip, -- V5.5新增：重置VIP礼包
     ["addskill"] = CMD_AddSkill,          -- V3.0新增
     ["removeskill"] = CMD_RemoveSkill,    -- V3.0新增
     ["clearskills"] = CMD_ClearSkills,    -- V3.0新增

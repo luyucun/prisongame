@@ -144,6 +144,9 @@ PlayerData = {
     StarterPackData = {        -- V5.4新手礼包
         Purchased = boolean,   -- 是否已购买/领取
     },
+    VipData = {                -- V5.5 VIP礼包
+        Purchased = boolean,   -- 是否已购买/激活
+    },
     GroupRewardData = {        -- V4.9加入群组奖励
         Claimed = boolean,     -- 是否已领取群组奖励
     },
@@ -288,6 +291,9 @@ local function LoadFromDataStore(player)
 			if data.StarterPackData then
 				data.StarterPackData = RestoreFromDataStore(data.StarterPackData)  -- V5.4新手礼包
 			end
+			if data.VipData then
+				data.VipData = RestoreFromDataStore(data.VipData)  -- V5.5 VIP礼包
+			end
 			if data.GroupRewardData then
 				data.GroupRewardData = RestoreFromDataStore(data.GroupRewardData)  -- V4.9加入群组奖励
 			end
@@ -357,6 +363,7 @@ local function SaveToDataStore(player, playerData, userId)
 		SevenDayData = SanitizeForDataStore(playerData.SevenDayData),  -- V4.8七日登录奖励
 		DailyRewardData = SanitizeForDataStore(playerData.DailyRewardData),  -- V5.3每日免费奖励
 		StarterPackData = SanitizeForDataStore(playerData.StarterPackData),  -- V5.4新手礼包
+		VipData = SanitizeForDataStore(playerData.VipData),  -- V5.5 VIP礼包
 		GroupRewardData = SanitizeForDataStore(playerData.GroupRewardData),  -- V4.9加入群组奖励
 		LastSaveTime = os.time(),
 	}
@@ -502,6 +509,21 @@ local function NormalizeGroupRewardData(data)
     return data
 end
 
+local function BuildDefaultVipData()
+    return {
+        Purchased = false,
+    }
+end
+
+local function NormalizeVipData(data)
+    if type(data) ~= "table" then
+        return BuildDefaultVipData()
+    end
+
+    data.Purchased = data.Purchased == true
+    return data
+end
+
 --[[
 创建默认玩家数据
 @param player Player - 玩家对象
@@ -557,6 +579,7 @@ local function CreateDefaultData(player)
         SevenDayData = BuildDefaultSevenDayData(os.time()), -- V4.8七日登录奖励
         DailyRewardData = BuildDefaultDailyRewardData(os.time()), -- V5.3每日免费奖励
         StarterPackData = BuildDefaultStarterPackData(), -- V5.4新手礼包
+        VipData = BuildDefaultVipData(), -- V5.5 VIP礼包
         GroupRewardData = BuildDefaultGroupRewardData(), -- V4.9加入群组奖励
         LastSaveTime = os.time(),
     }
@@ -639,6 +662,45 @@ function DataManager.ResetStarterPack(player)
     end
 
     packData.Purchased = false
+    return true
+end
+
+-- ==================== V5.5 VIP礼包接口 ====================
+
+function DataManager.GetVipData(player)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData then
+        return nil
+    end
+
+    if not playerData.VipData then
+        playerData.VipData = BuildDefaultVipData()
+    else
+        playerData.VipData = NormalizeVipData(playerData.VipData)
+    end
+
+    return playerData.VipData
+end
+
+function DataManager.SetVipPurchased(player, purchased)
+    local vipData = DataManager.GetVipData(player)
+    if not vipData then
+        warn(GameConfig.LOG_PREFIX, "SetVipPurchased: 找不到玩家数据")
+        return false
+    end
+
+    vipData.Purchased = purchased == true
+    return true
+end
+
+function DataManager.ResetVip(player)
+    local vipData = DataManager.GetVipData(player)
+    if not vipData then
+        warn(GameConfig.LOG_PREFIX, "ResetVip: 找不到玩家数据")
+        return false
+    end
+
+    vipData.Purchased = false
     return true
 end
 
@@ -870,6 +932,13 @@ function DataManager.InitializePlayerData(player)
             playerData.StarterPackData = BuildDefaultStarterPackData()
         else
             playerData.StarterPackData = NormalizeStarterPackData(playerData.StarterPackData)
+        end
+
+        -- V5.5 VIP礼包：确保VipData字段存在（向后兼容）
+        if not playerData.VipData then
+            playerData.VipData = BuildDefaultVipData()
+        else
+            playerData.VipData = NormalizeVipData(playerData.VipData)
         end
 
         -- V4.9加入群组奖励：确保GroupRewardData字段存在（向后兼容）

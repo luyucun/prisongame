@@ -1850,3 +1850,44 @@ ID	排序	对话选项类型	对话出现条件	出现条件参数	选项文本	
 10.玩家购买了新手礼包后，需要永久隐藏：StarterGui - Shop - ShopBg - ScrollingFrame - NewPlayer，将Visible属性改成false,同步需要永久隐藏的是：StarterGui - Shop - ShopBg - TabList - NewPlayer这个按钮
 
 11.在开发过程中，需要有gm重置我的购买状态，也就是我使用gm后，需要立刻重置为我没购买过这个通行证
+
+需求文档V5.5  VIP礼包
+
+概述：VIP礼包本质是通行证，VIP对应的通行证Id是:1661725726
+
+详细规则：
+1.玩家点击StarterGui - MainGui - Shop按钮，可以打开商店界面（我们VIP在商店里买），也就是把StarterGui - Shop - ShopBg的Visible属性改成True
+2.玩家点击StarterGui - Shop - ShopBg - Title - CloseButton按钮关闭商店界面，也就是把StarterGui - Shop - ShopBg的Visible属性改成False
+3.玩家点击StarterGui - Shop - ShopBg - Vip - BuyButton这个按钮，触发对VIP这个通行证的购买流程，玩家购买成功后，成功获取VIP的相关权益
+
+VIP相关权益是：
+1.开启自动挑战功能，具体逻辑是：
+    a.如果玩家拥有了VIP通行证，那么玩家在MainGui - BattleControl - Play按钮出现时，MainGui - BattleControl - Auto也要同步显示，Play按钮消失时，也要同步消失，注意这里是有了VIP通行证的情况下才这样，没有VIP时Auto按钮是始终不显示的
+    b.玩家点击Auto按钮后，可以开启自动挑战功能，自动挑战状态下：
+        1）.MainGui - BattleControl - Auto - Icon这个图标需要开始不断自转
+        2）.MainGui - AutoBattleTips这个textlabel需要显示出来，以及AutoBattleTips的文本默认是Auto-Rioting，在显示出来后，需要在文本后面一个点两个点三个点依次出来，然后三个点都消失，然后再一个点两个点三个点出现，循环往复这样有一个动态效果
+        3）在基地时开启自动挑战，系统默认在开启自动挑战后默认时点击了Play按钮，然后开始战斗，此时是显示出来Retreat，隐藏Play和Auto，在战斗结束出现结算弹框后，Confirm按钮出现后，倒计时3秒，3秒后自动帮玩家点击确认按钮，然后返回基地走复生流程
+        4）.回到基地后，等Play按钮显示出来后，倒计时2秒，再继续点击Play按钮，自动开始下一轮战斗
+
+    c.关于解除自动挑战的逻辑是：
+        1）自动挑战过程中玩家点击restart按钮或者ReturnToHome或者UnlockMove按钮，都立刻退出自动挑战逻辑（注意只是接下来不自动帮玩家点确认按钮和开始按钮了，不是说直接退出战斗）
+        2）解除自动挑战后，MainGui - BattleControl - Auto - Icon不再自转，以及MainGui - AutoBattleTips这个textlabel也要隐藏，回到常规状态
+
+    
+2.头顶VIP标识以及聊天框发言时，在名字前有VIP标识，具体逻辑是：
+    1）在聊天框聊天时，系统默认格式是：玩家名字:说话内容。成为VIP后玩家发言时，名字前需要带[VIP],也就是[VIP]玩家名字：说话内容
+    2）[VIP]的文本使用金色
+    3）在玩家头顶需要有VIP标识，也就是：当玩家是VIP标识时，需要去复制一份ReplicatedStorage - VipIcon，放到玩家的头顶，放在玩家的名字上方一点的位置
+    4）注意：头顶VIP标识是要其他玩家也能看到的，所以这个是服务器逻辑，不要做成只有玩家自己能看到
+
+3.金币获取+50%
+    1）当玩家购买VIP后，后续所有的金币获取都+50%，包括现在战斗中每前进一定距离获得的金币/杀死兵种后获得的金币/挂机每分钟产出的金币/登录奖励里面的金币奖励领取/以及我们后续还会开发的其他涉及到金币奖励的内容，都要加50%
+    2）注意：如果+50%后，是小数，那向上取整，比如算出来是181.2，那也取整为182
+    3）在关卡挑战胜利界面，Victory - Information - CashNum，本来是固定显示金币获取的，如果玩家购买了VIP，那么每次弹出时，目前格式就是+$xxxx,VIP 的格式需要是：+$xxxx(Vip+yyy)，xxxx还是本次获得的总额，但是yyy需要是本次通过vip额外获得的数值，比如本来应该获得100，实际获得了150，那么出来的格式就是+$150(Vip+50)
+    4）同步地，在IdleEarningGui - Bg - Claim - CashNum这个是用来显示挂机金币收益地，如果玩家是VIP，那么这里就要显示为$xxxx(Vip+50%)
+    
+
+需求文档V5.5.1 补充关于VIP的细节
+1.玩家如果已经购买了VIP，那么打开商店界面时，需要：
+    a.Shop - ShopBg - ScrollingFrame - Vip - BuyButton需要隐藏
+    b.Shop - ShopBg - ScrollingFrame - Vip - Purchased需要显示出来

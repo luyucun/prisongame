@@ -62,6 +62,8 @@ local isVictoryShowing = false
 local uiInitialized = false
 local campaignCoinTotal = 0
 local battleCoinTotal = 0
+local campaignVipBonusTotal = 0
+local battleVipBonusTotal = 0
 local isCampaignActive = false
 local isBattleActive = false
 local lastCampaignChapter = nil
@@ -117,9 +119,16 @@ local function GetPercentColor(percent)
     return Color3.fromRGB(255, 0, 0)
 end
 
-local function FormatCashAmount(amount)
+local function FormatCashAmount(amount, vipBonus)
     local numberAmount = tonumber(amount) or 0
-    return "+$" .. FormatHelper.FormatNumberWithCommas(numberAmount)
+    local baseText = "+$" .. FormatHelper.FormatNumberWithCommas(numberAmount)
+
+    local bonusAmount = tonumber(vipBonus) or 0
+    if bonusAmount > 0 and player:GetAttribute("VipPurchased") == true then
+        return string.format("%s(Vip+%s)", baseText, FormatHelper.FormatNumberWithCommas(bonusAmount))
+    end
+
+    return baseText
 end
 
 local function SetPlayerIconImage(imageLabel)
@@ -190,23 +199,27 @@ local function UpdateDistanceText(progress)
     )
 end
 
-local function AddBattleCoins(amount)
+local function AddBattleCoins(amount, vipBonus)
     if type(amount) ~= "number" or amount <= 0 then
         return
     end
 
+    local bonus = tonumber(vipBonus) or 0
+
     if isCampaignActive then
         campaignCoinTotal = campaignCoinTotal + amount
+        campaignVipBonusTotal = campaignVipBonusTotal + bonus
     elseif isBattleActive then
         battleCoinTotal = battleCoinTotal + amount
+        battleVipBonusTotal = battleVipBonusTotal + bonus
     end
 end
 
 local function GetCurrentCoinTotal(isCampaignBattle)
     if isCampaignBattle then
-        return campaignCoinTotal
+        return campaignCoinTotal, campaignVipBonusTotal
     end
-    return battleCoinTotal
+    return battleCoinTotal, battleVipBonusTotal
 end
 
 --[[
@@ -556,7 +569,8 @@ local function ShowVictoryUI(battleId, result, stageNum, extraRewards)
     end
 
     if cashNumLabel then
-        cashNumLabel.Text = FormatCashAmount(GetCurrentCoinTotal(isCampaign))
+        local totalAmount, vipBonus = GetCurrentCoinTotal(isCampaign)
+        cashNumLabel.Text = FormatCashAmount(totalAmount, vipBonus)
     end
 
     if distanceTextLabel then
@@ -703,8 +717,10 @@ local function OnConfirmButtonClick()
 
         if isCampaign then
             campaignCoinTotal = 0
+            campaignVipBonusTotal = 0
         else
             battleCoinTotal = 0
+            battleVipBonusTotal = 0
         end
 
         -- 立即隐藏UI（无延迟）
@@ -759,10 +775,12 @@ local function Initialize()
 
                 if state == "Preparing" then
                     campaignCoinTotal = 0
+                    campaignVipBonusTotal = 0
                     isCampaignActive = true
                 elseif state == "Idle" or state == "Cleanup" then
                     isCampaignActive = false
                     campaignCoinTotal = 0
+                    campaignVipBonusTotal = 0
                 else
                     isCampaignActive = true
                 end
@@ -779,6 +797,7 @@ local function Initialize()
 
             if state == "Fighting" then
                 battleCoinTotal = 0
+                battleVipBonusTotal = 0
                 isBattleActive = true
             elseif state == "Finished" then
                 isBattleActive = false
@@ -792,8 +811,8 @@ local function Initialize()
             return
         end
 
-        event.OnClientEvent:Connect(function(amount)
-            AddBattleCoins(amount)
+        event.OnClientEvent:Connect(function(amount, vipBonus)
+            AddBattleCoins(amount, vipBonus)
         end)
     end
 
@@ -880,6 +899,16 @@ task.spawn(function()
         DebugLog("VictoryUIController初始化出现异常:", err)
     end
 end)
+
+_G.VictoryUIController = _G.VictoryUIController or {}
+_G.VictoryUIController.ConfirmCurrent = function()
+    local ok, err = pcall(function()
+        OnConfirmButtonClick()
+    end)
+    if not ok then
+        DebugLog("VictoryUIController自动确认失败:", err)
+    end
+end
 
 DebugLog("VictoryUIController脚本加载完成")
 

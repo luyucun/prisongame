@@ -75,6 +75,8 @@ local SevenDaysSystem = require(ServerScriptService.Systems.SevenDaysSystem)
 local DailyRewardSystem = require(ServerScriptService.Systems.DailyRewardSystem)
 -- V5.4新增 - 新手礼包
 local StarterPackSystem = require(ServerScriptService.Systems.StarterPackSystem)
+-- V5.5新增 - VIP礼包
+local VipSystem = require(ServerScriptService.Systems.VipSystem)
 -- V4.9新增 - 群组奖励
 local GroupRewardSystem = require(ServerScriptService.Systems.GroupRewardSystem)
 -- V3.8新增 - 音效系统
@@ -441,6 +443,16 @@ local function InitializeServer()
         warn(GameConfig.LOG_PREFIX, "新手礼包系统初始化失败(异常):", result)
     elseif result == false then
         warn(GameConfig.LOG_PREFIX, "新手礼包系统初始化失败(返回false)")
+    end
+
+    -- 13.76 初始化VIP礼包系统 (V5.5新增)
+    success, result = pcall(function()
+        return VipSystem.Initialize()
+    end)
+    if not success then
+        warn(GameConfig.LOG_PREFIX, "VIP礼包系统初始化失败(异常):", result)
+    elseif result == false then
+        warn(GameConfig.LOG_PREFIX, "VIP礼包系统初始化失败(返回false)")
     end
 
     -- 13.8 初始化群组奖励系统 (V4.9新增)

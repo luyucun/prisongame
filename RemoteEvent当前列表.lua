@@ -34,7 +34,7 @@ ReplicatedStorage
         ├──DetachHealthBars（RemoteEvent） 【V2.3新增】 - 服务器→客户端：移除血条(unitModels)
         ├──VictoryPopup（RemoteEvent） 【V2.4新增】 - 服务器→客户端：显示战斗结算弹窗(battleId, result, stageNum, extraRewards)
         ├──VictoryConfirm（RemoteEvent） 【V2.4新增】 - 客户端→服务器：确认战斗结算(battleId)
-        └──CoinEarnedEffect（RemoteEvent） 【V3.4.1新增】 - 服务器→客户端：战斗金币获取表现通知(amount)
+        └──CoinEarnedEffect（RemoteEvent） 【V3.4.1新增】 - 服务器→客户端：战斗金币获取表现通知(amount, vipBonus)
     └──CampaignEvents（Folder）/  【V2.0新增】
         ├──RequestStartCampaign（RemoteEvent） - 客户端→服务器：请求开始战役
         ├──RequestRetreat（RemoteEvent） - 客户端→服务器：请求撤退
@@ -135,6 +135,11 @@ ReplicatedStorage
         ├──StarterPackData（RemoteEvent） - 服务器→客户端：新手礼包数据(purchased)
         ├──PurchaseStarterPack（RemoteEvent） - 客户端→服务器：请求购买新手礼包
         └──PurchaseStarterPackResult（RemoteEvent） - 服务器→客户端：购买结果(success, message, rewards)
+    └──VipEvents（Folder）/  【V5.5新增 - VIP礼包】
+        ├──RequestVipData（RemoteEvent） - 客户端→服务器：请求VIP数据
+        ├──VipData（RemoteEvent） - 服务器→客户端：VIP数据(purchased)
+        ├──PurchaseVip（RemoteEvent） - 客户端→服务器：请求购买VIP
+        └──VipPurchaseResult（RemoteEvent） - 服务器→客户端：购买结果(success, message)
 
 
 如果需要补充新的RemoteEvent或者Remotefunction，请在这里列出来，我会自己去创建
@@ -253,6 +258,29 @@ ReplicatedStorage
 12. 保存游戏
 
 注意：StarterPackSystem.lua 初始化时会自动创建这些事件（如果不存在），但建议手动创建以确保事件在系统初始化前就存在。
+
+【V5.5 VIP礼包RemoteEvent创建说明】
+位置：ReplicatedStorage/Events/VipEvents/ （新建文件夹）
+?? RequestVipData (RemoteEvent) - 需在Studio中手动创建
+?? VipData (RemoteEvent) - 需在Studio中手动创建
+?? PurchaseVip (RemoteEvent) - 需在Studio中手动创建
+?? VipPurchaseResult (RemoteEvent) - 需在Studio中手动创建
+
+创建步骤：
+1. 打开Roblox Studio
+2. 导航到 ReplicatedStorage > Events
+3. 右键点击 Events 文件夹
+4. 选择 "Insert Object" > "Folder"
+5. 将新建的 Folder 重命名为 "VipEvents"
+6. 右键点击 VipEvents 文件夹
+7. 选择 "Insert Object" > "RemoteEvent"
+8. 将新建的 RemoteEvent 重命名为 "RequestVipData"
+9. 重复步骤7-8，创建 "VipData"
+10. 重复步骤7-8，创建 "PurchaseVip"
+11. 重复步骤7-8，创建 "VipPurchaseResult"
+12. 保存游戏
+
+注意：VipSystem.lua 初始化时会自动创建这些事件（如果不存在），但建议手动创建以确保事件在系统初始化前就存在。
 
 【V2.1库存系统RemoteEvent创建说明】
 位置：ReplicatedStorage/Events/ShopEvents/
@@ -670,7 +698,7 @@ UI配置说明（MainGui）：
 
 功能说明：
 - CoinEarnedEffect：服务器→客户端：战斗金币获取表现通知
-  参数：(amount: number) 获得的金币数量
+  参数：(amount: number, vipBonus: number) 获得的金币数量 / VIP额外加成
   触发时机：玩家在战斗中获得金币时（击杀敌人/前进奖励）
 
 客户端效果：

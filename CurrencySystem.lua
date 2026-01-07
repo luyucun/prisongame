@@ -24,6 +24,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 -- 引用模块
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
 local DataManager = require(ServerScriptService.Core.DataManager)
+local VipSystem = nil
 
 -- 远程事件(延迟获取,避免循环依赖)
 local CurrencyEvents = nil
@@ -126,6 +127,54 @@ local function ValidateOperation(player, amount)
     end
 
     return true, ""
+end
+
+local function LoadVipSystem()
+    if VipSystem then
+        return true
+    end
+
+    local module = ServerScriptService.Systems:FindFirstChild("VipSystem")
+    if module and module:IsA("ModuleScript") then
+        VipSystem = require(module)
+    end
+
+    return VipSystem ~= nil
+end
+
+local function ShouldApplyVipBonus(player, options)
+    if options and (options.ApplyVipBonus == false or options.NoVipBonus == true) then
+        return false
+    end
+    if not player then
+        return false
+    end
+    if player:GetAttribute("VipPurchased") == true then
+        return true
+    end
+    if LoadVipSystem() and VipSystem.IsVip then
+        return VipSystem.IsVip(player) == true
+    end
+    return false
+end
+
+local function ApplyVipBonus(player, amount, options)
+    if not ShouldApplyVipBonus(player, options) then
+        return amount, 0
+    end
+
+    if LoadVipSystem() and VipSystem.ApplyCoinBonus then
+        return VipSystem.ApplyCoinBonus(player, amount, options)
+    end
+
+    local baseAmount = tonumber(amount) or 0
+    if baseAmount <= 0 then
+        return baseAmount, 0
+    end
+
+    local total = math.ceil(baseAmount * 1.5)
+    local bonus = math.max(0, total - baseAmount)
+    return total, bonus
 end
 
 -- ==================== 公共接口 ====================
@@ -251,8 +300,15 @@ end
 @param reason string - 原因
 @return boolean, number - 是否成功, 新的金币数量
 ]]
-function CurrencySystem.AddCoins(player, amount, reason)
-    return CurrencySystem.AddCurrency(player, GameConfig.CurrencyType.COINS, amount, reason)
+function CurrencySystem.AddCoins(player, amount, reason, options)
+    local finalAmount = amount
+    local vipBonus = 0
+    if type(amount) == "number" and amount > 0 then
+        finalAmount, vipBonus = ApplyVipBonus(player, amount, options)
+    end
+
+    local success, newAmount = CurrencySystem.AddCurrency(player, GameConfig.CurrencyType.COINS, finalAmount, reason)
+    return success, newAmount, finalAmount, vipBonus
 end
 
 --[[
@@ -310,11 +366,11 @@ V3.4.1更新：添加战斗金币获取表现效果
 ]]
 function CurrencySystem.AddCoinsFromBattle(player, amount, stageId)
     local reason = string.format("战斗获得(关卡:%s)", tostring(stageId or "未知"))
-    local success, newAmount = CurrencySystem.AddCoins(player, amount, reason)
+    local success, newAmount, appliedAmount, vipBonus = CurrencySystem.AddCoins(player, amount, reason)
 
     -- V3.4.1新增：战斗中获得金币时触发客户端表现效果
-    if success and amount > 0 then
-        CurrencySystem.NotifyBattleCoinEffect(player, amount)
+    if success and appliedAmount and appliedAmount > 0 then
+        CurrencySystem.NotifyBattleCoinEffect(player, appliedAmount, vipBonus or 0)
     end
 
     return success, newAmount
@@ -506,7 +562,7 @@ V3.4.1新增：通知客户端战斗金币获取表现效果
 @param amount number - 获得的金币数量
 @return boolean - 是否成功发送通知
 ]]
-function CurrencySystem.NotifyBattleCoinEffect(player: Player, amount: number): boolean
+function CurrencySystem.NotifyBattleCoinEffect(player: Player, amount: number, vipBonus: number?): boolean
     if not player or not player.Parent then
         return false
     end
@@ -527,7 +583,7 @@ function CurrencySystem.NotifyBattleCoinEffect(player: Player, amount: number): 
 
     -- 发送金币获取表现事件给客户端
     local success, errorMsg = pcall(function()
-        CoinEarnedEffectEvent:FireClient(player, amount)
+        CoinEarnedEffectEvent:FireClient(player, amount, vipBonus or 0)
     end)
 
     if success then

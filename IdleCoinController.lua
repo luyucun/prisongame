@@ -168,6 +168,15 @@ local function GetPendingIdleMinutes()
 	return minutes
 end
 
+local function GetVipDisplayAmount(baseCoins)
+	local baseAmount = math.max(0, math.floor(tonumber(baseCoins) or 0))
+	if player:GetAttribute("VipPurchased") == true then
+		local total = math.ceil(baseAmount * 1.5)
+		return total, true
+	end
+	return baseAmount, false
+end
+
 local function UpdateIdleEarningUI()
 	if not idleEarningBg then
 		return
@@ -185,7 +194,12 @@ local function UpdateIdleEarningUI()
 
 	local baseCoins = math.max(0, math.floor(pendingIdleCoins or 0))
 	if idleClaimCash and idleClaimCash:IsA("TextLabel") then
-		idleClaimCash.Text = FormatHelper.FormatCoins(baseCoins)
+		local displayAmount, isVip = GetVipDisplayAmount(baseCoins)
+		if isVip then
+			idleClaimCash.Text = FormatHelper.FormatCoins(displayAmount) .. "(Vip+50%)"
+		else
+			idleClaimCash.Text = FormatHelper.FormatCoins(baseCoins)
+		end
 	end
 	if idleClaim10Cash and idleClaim10Cash:IsA("TextLabel") then
 		idleClaim10Cash.Text = FormatHelper.FormatCoins(baseCoins * 10)
@@ -699,6 +713,12 @@ local function Initialize()
 	player.CharacterAdded:Connect(function()
 		task.wait(1)
 		SetupMailPromptConnection(false)
+	end)
+
+	player:GetAttributeChangedSignal("VipPurchased"):Connect(function()
+		if InitializeIdleEarningUI() then
+			UpdateIdleEarningUI()
+		end
 	end)
 end
 
