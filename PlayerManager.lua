@@ -28,6 +28,9 @@ local DataManager = require(ServerScriptService:WaitForChild("Core"):WaitForChil
 -- 基地占用状态表 [homeSlot] = player 或 nil
 local homeOccupancy = {}
 
+-- 家园归属标记属性名（写在PlayerHome上）
+local HOME_OWNER_ATTR = "HomeOwnerUserId"
+
 -- 玩家角色事件连接 [UserId] = Connection (用于清理)
 local playerCharacterConnections = {}
 
@@ -102,11 +105,11 @@ local function ReleaseHome(homeSlot)
 end
 
 --[[
-获取基地的出生点
+获取基地文件夹
 @param homeSlot number - 基地编号
-@return BasePart|nil - 出生点对象
+@return Instance|nil - 基地文件夹
 ]]
-local function GetHomeSpawnLocation(homeSlot)
+local function GetHomeFolder(homeSlot)
     local homeFolder = workspace:FindFirstChild(GameConfig.HOME_FOLDER_NAME)
     if not homeFolder then
         warn(GameConfig.LOG_PREFIX, "找不到Home文件夹!")
@@ -120,9 +123,50 @@ local function GetHomeSpawnLocation(homeSlot)
         return nil
     end
 
+    return playerHome
+end
+
+local function SetHomeOwner(homeSlot, player)
+    if not homeSlot or not player then
+        return
+    end
+
+    local playerHome = GetHomeFolder(homeSlot)
+    if playerHome then
+        playerHome:SetAttribute(HOME_OWNER_ATTR, player.UserId)
+    end
+end
+
+local function ClearHomeOwner(homeSlot, player)
+    if not homeSlot or not player then
+        return
+    end
+
+    local playerHome = GetHomeFolder(homeSlot)
+    if not playerHome then
+        return
+    end
+
+    local ownerId = playerHome:GetAttribute(HOME_OWNER_ATTR)
+    if ownerId == player.UserId then
+        playerHome:SetAttribute(HOME_OWNER_ATTR, nil)
+    end
+end
+
+--[[
+获取基地的出生点
+@param homeSlot number - 基地编号
+@return BasePart|nil - 出生点对象
+]]
+local function GetHomeSpawnLocation(homeSlot)
+    local playerHome = GetHomeFolder(homeSlot)
+    if not playerHome then
+        return nil
+    end
+
     local spawnLocation = playerHome:FindFirstChild(GameConfig.SPAWN_LOCATION_NAME)
     if not spawnLocation then
-        warn(GameConfig.LOG_PREFIX, "找不到出生点:", playerHomeName .. "/" .. GameConfig.SPAWN_LOCATION_NAME)
+        warn(GameConfig.LOG_PREFIX, "找不到出生点:", playerHome.Name .. "/" .. GameConfig.SPAWN_LOCATION_NAME)
         return nil
     end
 
@@ -346,6 +390,9 @@ function PlayerManager.OnPlayerAdded(player)
     player:SetAttribute("HomeSlot", homeSlot)
     BindPlayerRespawnLocation(player, homeSlot)
 
+    -- 5.2 标记家园归属（用于防止旧玩家异步流程误操作）
+    SetHomeOwner(homeSlot, player)
+
     -- 6. 初始化玩家基地(HomeSystem)
     local homeModule = ServerScriptService:WaitForChild("Systems"):FindFirstChild("HomeSystem")
     if homeModule then
@@ -500,24 +547,25 @@ function PlayerManager.OnPlayerRemoving(player)
     -- 1. 获取玩家的基地编号
     local homeSlot = DataManager.GetPlayerHomeSlot(player)
 
-    -- 2. 释放基地
-    if homeSlot and homeSlot > 0 then
-        ReleaseHome(homeSlot)
-    end
-
-    -- 3. 断开CharacterAdded连接
+    -- 2. 断开CharacterAdded连接
     if playerCharacterConnections[player.UserId] then
         playerCharacterConnections[player.UserId]:Disconnect()
         playerCharacterConnections[player.UserId] = nil
     end
 
-    -- 4. 清除基地系统数据
+    -- 3. 清除基地系统数据
     local homeModule = ServerScriptService:WaitForChild("Systems"):FindFirstChild("HomeSystem")
     if homeModule then
         local HomeSystem = require(homeModule :: ModuleScript)
         if homeSlot and homeSlot > 0 then
             HomeSystem.CleanupPlayerHome(homeSlot, player)  -- V2.0.1修复：调用正确的方法并传入homeId
         end
+    end
+
+    -- 4. 清除家园归属标记并释放基地（避免复用时旧流程误操作）
+    if homeSlot and homeSlot > 0 then
+        ClearHomeOwner(homeSlot, player)
+        ReleaseHome(homeSlot)
     end
 
     -- 🔥修复服务器关闭时数据保存：检查是否正在关机

@@ -571,6 +571,10 @@ Players.PlayerAdded:Connect(function(player)
 		-- V3.2: 通知数据加载完成
 		LoadingSystem.NotifyDataLoadComplete(player)
 
+		if not player or not player:IsDescendantOf(Players) then
+			return
+		end
+
 		-- 🔥等待HomeSlot被设置（最多等待15秒）
 		-- V3.2: 通知基地设置阶段开始
 		LoadingSystem.NotifyHomeSetup(player, 0)
@@ -578,6 +582,9 @@ Players.PlayerAdded:Connect(function(player)
 		local maxWaitTime = 15
 		local startTime = tick()
 		while tick() - startTime < maxWaitTime do
+			if not player or not player:IsDescendantOf(Players) then
+				return
+			end
 			homeId = PlayerManager.GetPlayerHomeId(player)
 			if homeId and homeId > 0 then
 				break
@@ -591,17 +598,16 @@ Players.PlayerAdded:Connect(function(player)
 			warn(GameConfig.LOG_PREFIX, "等待HomeId超时，跳过部分初始化 -", player.Name)
 		end
 
-		if homeId and homeId > 0 then
-			-- 初始化玩家基地（确保门关闭）
-			pcall(function()
-				HomeSystem.InitializePlayerHome(homeId, player)
-			end)
-		end
+		-- HomeSystem 初始化由 PlayerManager 统一处理，避免重复调用导致竞态
 		-- V3.2: 通知基地设置完成
 		LoadingSystem.NotifyHomeSetupComplete(player)
 
 		-- V3.2: 通知场景设置阶段开始
 		LoadingSystem.NotifySceneSetup(player, 0)
+
+		if not player or not player:IsDescendantOf(Players) then
+			return
+		end
 
 		-- V2.1修复：初始化玩家商店库存系统
 		pcall(function()
@@ -664,7 +670,6 @@ end)
 -- 玩家离开时清理
 Players.PlayerRemoving:Connect(function(player)
 	local playerId = player.UserId
-	local homeId = PlayerManager.GetPlayerHomeId(player)
 
 	-- V3.2新增：清理玩家加载状态
 	pcall(function()
@@ -679,14 +684,7 @@ Players.PlayerRemoving:Connect(function(player)
 		end)
 	end
 
-	-- 2. 清理基地（关闭门）
-	if homeId then
-		pcall(function()
-			HomeSystem.CleanupPlayerHome(homeId, player)
-		end)
-	end
-
-	-- 3. V2.6新增：记录玩家登出时间（用于挂机金币计算）
+	-- 2. V2.6新增：记录玩家登出时间（用于挂机金币计算）
 	pcall(function()
 		IdleCoinSystem.OnPlayerLeave(player)
 	end)

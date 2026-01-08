@@ -29,6 +29,9 @@ local DoorControlService = require(ServerScriptService.Systems.DoorControlServic
 local HouseConfig
 local HouseUpgradeSystem
 
+-- 家园归属标记属性名（写在PlayerHome上）
+local HOME_OWNER_ATTR = "HomeOwnerUserId"
+
 local function EnsureHouseModulesLoaded()
 	if not HouseConfig then
 		HouseConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("HouseConfig"))
@@ -117,6 +120,19 @@ local function GetHomeFolder(homeSlot)
     end
 
     return playerHome
+end
+
+local function IsHomeOwnedByPlayer(homeFolder, player)
+	if not homeFolder or not player then
+		return false
+	end
+
+	local ownerId = homeFolder:GetAttribute(HOME_OWNER_ATTR)
+	if ownerId == nil then
+		return true
+	end
+
+	return ownerId == player.UserId
 end
 
 -- 重置家园信息面板显示（玩家名/战斗力）
@@ -301,6 +317,11 @@ function HomeSystem.InitializePlayerHome(homeId, player)
         return false
     end
 
+    if not IsHomeOwnedByPlayer(homeFolder, player) then
+        warn(GameConfig.LOG_PREFIX, "HomeSystem.InitializePlayerHome: 基地归属不匹配，跳过初始化", homeId)
+        return false
+    end
+
     -- 获取出生点
     local spawnLocation = homeFolder:FindFirstChild(GameConfig.SPAWN_LOCATION_NAME)
     if not spawnLocation then
@@ -427,6 +448,18 @@ function HomeSystem.CleanupPlayerHome(homeId, player)
         return
     end
 
+    local homeFolder = GetHomeFolder(homeId)
+    if not homeFolder then
+        HomeSystem.ClearPlayerHome(player)
+        return
+    end
+
+    if not IsHomeOwnedByPlayer(homeFolder, player) then
+        warn(GameConfig.LOG_PREFIX, "HomeSystem.CleanupPlayerHome: 基地归属不匹配，跳过清理", homeId)
+        HomeSystem.ClearPlayerHome(player)
+        return
+    end
+
     -- V2.0.1新增：关闭基地门
     pcall(function()
         DoorControlService.CloseDoor(homeId)
@@ -436,7 +469,6 @@ function HomeSystem.CleanupPlayerHome(homeId, player)
     end)
 
     -- 调用原有清理逻辑
-    local homeFolder = GetHomeFolder(homeId)
     if homeFolder then
         ResetInformationDisplay(homeFolder)
         ResetMailDisplay(homeFolder)

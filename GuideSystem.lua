@@ -25,6 +25,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 -- 引用模块
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
 local GuideConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GuideConfig"))
+local TARGET_WAIT_TIMEOUT = 10
+local TARGET_WAIT_INTERVAL = 0.25
 
 -- 收敛调试print，避免刷屏（仅在DEBUG_MODE开启时输出）
 local _print = print
@@ -44,6 +46,7 @@ local guideEvents = nil
 
 -- 玩家引导状态缓存 [UserId] = {activeGuideId, isPending...}
 local playerGuideStates = {}
+local pendingTargetWaits = {}
 
 -- ==================== 私有函数 ====================
 
@@ -369,6 +372,31 @@ local function GetTargetInPlayerHome(player, targetName)
 	return playerHome:FindFirstChild(targetName)
 end
 
+local function WaitForTargetInPlayerHome(player, targetName, guideId)
+	if not player or not targetName then
+		return nil
+	end
+
+	local startTime = tick()
+	while tick() - startTime < TARGET_WAIT_TIMEOUT do
+		if not player or not player:IsDescendantOf(Players) then
+			return nil
+		end
+		if guideId and IsGuideCompleted(player, guideId) then
+			return nil
+		end
+
+		local target = GetTargetInPlayerHome(player, targetName)
+		if target then
+			return target
+		end
+
+		task.wait(TARGET_WAIT_INTERVAL)
+	end
+
+	return nil
+end
+
 --[[
 发送引导开始事件到客户端
 @param player Player - 玩家对象
@@ -569,8 +597,19 @@ function GuideSystem.TriggerGuide(player, guideId)
 	-- 获取目标对象
 	local target = GetTargetInPlayerHome(player, guideConfig.TargetName)
 	if not target then
+		local userId = player.UserId
+		if pendingTargetWaits[userId] then
+			return false
+		end
+		pendingTargetWaits[userId] = guideId
+		target = WaitForTargetInPlayerHome(player, guideConfig.TargetName, guideId)
+		if pendingTargetWaits[userId] == guideId then
+			pendingTargetWaits[userId] = nil
+		end
+		if not target then
 		warn(string.format("[GuideSystem] 找不到目标对象: %s", guideConfig.TargetName))
-		return false
+			return false
+		end
 	end
 
 	-- 获取目标位置
@@ -644,6 +683,7 @@ end
 ]]
 function GuideSystem.CleanupPlayer(player)
 	playerGuideStates[player.UserId] = nil
+	pendingTargetWaits[player.UserId] = nil
 end
 
 --[[
