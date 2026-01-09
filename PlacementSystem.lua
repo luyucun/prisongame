@@ -20,6 +20,7 @@ local PlacementSystem = {}
 local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
+local Players = game:GetService("Players")
 
 -- 引用模块
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
@@ -30,6 +31,7 @@ local InventorySystem = require(ServerScriptService.Systems.InventorySystem)
 local PhysicsManager = require(ServerScriptService.Systems.PhysicsManager)
 -- V2.2新增：等级显示辅助工具
 local LevelDisplayHelper = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("LevelDisplayHelper"))
+local HOME_OWNER_ATTR = "HomeOwnerUserId"
 
 -- 远程事件(延迟获取)
 local PlacementEvents = nil
@@ -123,6 +125,25 @@ local function GetPlayerIdleFloor(player)
 	end
 
 	return playerHome:FindFirstChild(GameConfig.IDLE_FLOOR_NAME)
+end
+
+local function IsHomeOwnedByPlayer(homeSlot, player)
+	if not homeSlot or not player then
+		return false
+	end
+
+	local homeFolder = Workspace:FindFirstChild(GameConfig.HOME_FOLDER_NAME)
+	if not homeFolder then
+		return false
+	end
+
+	local playerHome = homeFolder:FindFirstChild(GameConfig.HOME_PREFIX .. homeSlot)
+	if not playerHome then
+		return false
+	end
+
+	local ownerId = playerHome:GetAttribute(HOME_OWNER_ATTR)
+	return ownerId == player.UserId
 end
 
 --[[
@@ -1325,9 +1346,22 @@ end
 @return boolean, string - 是否成功, 恢复的单位数量或错误信息
 ]]
 function PlacementSystem.RestorePlacedUnits(player)
+	if not player or not player:IsDescendantOf(Players) then
+		return false, "player not in game"
+	end
+
 	local userId = player.UserId
 	local playerData = DataManager.GetPlayerData(player)
-	local homeSlot = playerData and playerData.HomeSlot
+	if not playerData then
+		return false, "player data not loaded"
+	end
+	local homeSlot = playerData.HomeSlot
+	if not homeSlot or homeSlot == 0 then
+		return false, "home slot not assigned"
+	end
+	if not IsHomeOwnedByPlayer(homeSlot, player) then
+		return false, "home owner mismatch"
+	end
 
 	-- 1. 获取玩家的IdleFloor
 	local idleFloor = GetPlayerIdleFloor(player)

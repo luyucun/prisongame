@@ -43,9 +43,23 @@ local isBackpackVisible = false  -- 当前背包是否已显示
 local idleFloor = nil  -- 玩家的IdleFloor引用
 local lastCheckTime = 0  -- 上次检测时间
 local idleFloorListeners = {} -- 监听IdleFloor状态变化的回调列表
+local heartbeatConnection = nil
+local idleFloorResolveInProgress = false
+local IDLE_FLOOR_RETRY_INTERVAL = 0.5
+local IDLE_FLOOR_WARN_INTERVAL = 10
+local lastIdleFloorWarnTime = 0
 
 -- 调试模式
 local DEBUG_MODE = false
+
+local function WarnIdleFloorIssue(message)
+	local now = tick()
+	if now - lastIdleFloorWarnTime < IDLE_FLOOR_WARN_INTERVAL then
+		return
+	end
+	lastIdleFloorWarnTime = now
+	warn(message)
+end
 
 --[[
 查找玩家的IdleFloor
@@ -63,19 +77,19 @@ local function FindPlayerIdleFloor()
 
 	local homeFolder = workspace:FindFirstChild("Home")
 	if not homeFolder then
-		warn("[BackpackTrigger] Home文件夹不存在")
+		WarnIdleFloorIssue("[BackpackTrigger] Home文件夹不存在")
 		return nil
 	end
 
 	local playerHome = homeFolder:FindFirstChild("PlayerHome" .. homeSlot)
 	if not playerHome then
-		warn("[BackpackTrigger] 找不到基地: PlayerHome" .. homeSlot)
+		WarnIdleFloorIssue("[BackpackTrigger] 找不到基地: PlayerHome" .. homeSlot)
 		return nil
 	end
 
 	local floor = playerHome:FindFirstChild("IdleFloor")
 	if not floor then
-		warn("[BackpackTrigger] 找不到IdleFloor")
+		WarnIdleFloorIssue("[BackpackTrigger] 找不到IdleFloor")
 		return nil
 	end
 
@@ -202,28 +216,12 @@ end
 --[[
 初始化
 ]]
-local function Initialize()
-	-- 等待角色完全加载
-	task.wait(1)
-
-	-- 查找IdleFloor（带重试）
-	local maxRetries = 10
-	local retryCount = 0
-	while not idleFloor and retryCount < maxRetries do
-		idleFloor = FindPlayerIdleFloor()
-		if not idleFloor then
-			task.wait(0.5)
-			retryCount = retryCount + 1
-		end
-	end
-
-	if not idleFloor then
-		warn("[BackpackTrigger] 无法找到IdleFloor，背包触发器将不可用")
+local function StartHeartbeat()
+	if heartbeatConnection then
 		return
 	end
 
-	-- 启动定时检测
-	RunService.Heartbeat:Connect(function()
+	heartbeatConnection = RunService.Heartbeat:Connect(function()
 		local currentTime = tick()
 		if currentTime - lastCheckTime >= CHECK_INTERVAL then
 			lastCheckTime = currentTime
@@ -232,6 +230,34 @@ local function Initialize()
 	end)
 end
 
+local function ResolveIdleFloor()
+	if idleFloorResolveInProgress then
+		return
+	end
+	if idleFloor then
+		StartHeartbeat()
+		return
+	end
+	idleFloorResolveInProgress = true
+
+	task.spawn(function()
+		while not idleFloor do
+			idleFloor = FindPlayerIdleFloor()
+			if idleFloor then
+				StartHeartbeat()
+				break
+			end
+			task.wait(IDLE_FLOOR_RETRY_INTERVAL)
+		end
+		idleFloorResolveInProgress = false
+	end)
+end
+
+local function Initialize()
+	-- 等待角色完全加载
+	task.wait(1)
+	ResolveIdleFloor()
+end
 -- 监听角色重生
 player.CharacterAdded:Connect(function(newCharacter)
 	character = newCharacter
@@ -241,7 +267,8 @@ player.CharacterAdded:Connect(function(newCharacter)
 
 	-- 重新查找IdleFloor
 	task.wait(1)
-	idleFloor = FindPlayerIdleFloor()
+	idleFloor = nil
+	ResolveIdleFloor()
 
 	if DEBUG_MODE then
 		print("[BackpackTrigger] 角色重生，IdleFloor已重新定位")
@@ -250,6 +277,13 @@ end)
 
 -- ==================== 全局接口注册（提前注册，确保其他模块能立即访问） ====================
 -- 修复：将接口注册移到初始化之前，避免RemovalController等模块找不到接口
+player:GetAttributeChangedSignal("HomeSlot"):Connect(function()
+	local homeSlot = player:GetAttribute("HomeSlot")
+	if homeSlot and homeSlot > 0 then
+		ResolveIdleFloor()
+	end
+end)
+
 _G.BackpackTrigger = _G.BackpackTrigger or {}
 _G.BackpackTrigger.RefreshVisibility = UpdateBackpackVisibility
 _G.BackpackTrigger.IsOnIdleFloor = function()

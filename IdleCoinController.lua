@@ -35,6 +35,8 @@ local IDLE_COIN_PRODUCT_ID = 3487946200
 -- 状态变量
 local currentPrompt = nil
 local promptConnections = {}
+local mailPromptResolveInProgress = false
+local mailPromptReady = false
 local pendingIdleCoins = 0
 local cachedHomeId = nil  -- 缓存HomeId，避免重复查询
 local autoPopupShown = false
@@ -435,6 +437,10 @@ end
 @param waitForAttribute boolean - 是否等待属性被设置
 @return number|nil - 基地ID
 ]]
+local function HasValidPrompt()
+	return currentPrompt and currentPrompt.Parent ~= nil
+end
+
 local function GetPlayerHomeId(waitForAttribute)
 	-- 如果已有缓存，直接返回
 	if cachedHomeId and cachedHomeId > 0 then
@@ -629,10 +635,19 @@ end
 @param waitForHomeId boolean - 是否等待HomeId被设置（首次初始化时为true，重生时为false）
 ]]
 local function SetupMailPromptConnection(waitForHomeId)
+	if mailPromptResolveInProgress then
+		return
+	end
+	if HasValidPrompt() then
+		mailPromptReady = true
+		return
+	end
+	mailPromptResolveInProgress = true
 	-- 根据参数决定是否等待HomeSlot属性被设置
 	local mailModel = GetMailModel(waitForHomeId)
 	if not mailModel then
 		warn("[IdleCoinController] 未找到Mail模型")
+		mailPromptResolveInProgress = false
 		return
 	end
 
@@ -640,6 +655,7 @@ local function SetupMailPromptConnection(waitForHomeId)
 	local primaryPart = GetMailPrimaryPart(mailModel)
 	if not primaryPart then
 		warn("[IdleCoinController] Mail模型未设置PrimaryPart，且未找到名为'PrimaryPart'的子Part")
+		mailPromptResolveInProgress = false
 		return
 	end
 
@@ -647,12 +663,15 @@ local function SetupMailPromptConnection(waitForHomeId)
 	local prompt = primaryPart:WaitForChild("IdleCoinPrompt", 10)
 	if not prompt then
 		warn("[IdleCoinController] 服务端未创建ProximityPrompt，等待超时")
+		mailPromptResolveInProgress = false
 		return
 	end
 
 	currentPrompt = prompt
 
 	BindPrompt(prompt)
+	mailPromptReady = true
+	mailPromptResolveInProgress = false
 end
 
 -- ==================== 初始化 ====================
@@ -709,7 +728,19 @@ local function Initialize()
 		SetupMailPromptConnection(true)
 	end)
 
+	-- HomeSlot就绪后尝试绑定Mail Prompt
+	player:GetAttributeChangedSignal("HomeSlot"):Connect(function()
+		local homeSlot = player:GetAttribute("HomeSlot")
+		if homeSlot and type(homeSlot) == "number" and homeSlot > 0 then
+			cachedHomeId = homeSlot
+			task.spawn(function()
+				SetupMailPromptConnection(false)
+			end)
+		end
+	end)
+
 	-- 🔥V2.6.1修复：角色重生时重新连接事件（不需要等待HomeId，因为已经分配过了）
+
 	player.CharacterAdded:Connect(function()
 		task.wait(1)
 		SetupMailPromptConnection(false)

@@ -353,9 +353,9 @@ local function GetNPCCenterPart(npc)
 	if not npc then
 		return nil
 	end
-	return npc:FindFirstChild("HumanoidRootPart")
+	return npc:FindFirstChild("HumanoidRootPart", true)
 		or npc.PrimaryPart
-		or npc:FindFirstChildWhichIsA("BasePart")
+		or npc:FindFirstChildWhichIsA("BasePart", true)
 end
 
 SetupPrompt = function(npc)
@@ -364,11 +364,14 @@ SetupPrompt = function(npc)
 		return
 	end
 	local part = GetNPCCenterPart(npc)
-	if not part then
-		BindPrompt(nil)
-		return
+	local prompt = nil
+	if part then
+		prompt = part:FindFirstChildWhichIsA("ProximityPrompt")
 	end
-	BindPrompt(part:FindFirstChildWhichIsA("ProximityPrompt"))
+	if not prompt then
+		prompt = npc:FindFirstChildWhichIsA("ProximityPrompt", true)
+	end
+	BindPrompt(prompt)
 end
 
 -- ==================== 列表生成 ====================
