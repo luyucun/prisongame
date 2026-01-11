@@ -143,6 +143,14 @@ local function IsHomeOwnedByPlayer(homeSlot, player)
 	end
 
 	local ownerId = playerHome:GetAttribute(HOME_OWNER_ATTR)
+	if ownerId == nil then
+		local playerData = DataManager.GetPlayerData(player)
+		if playerData and playerData.HomeSlot == homeSlot then
+			playerHome:SetAttribute(HOME_OWNER_ATTR, player.UserId)
+			return true
+		end
+		return false
+	end
 	return ownerId == player.UserId
 end
 

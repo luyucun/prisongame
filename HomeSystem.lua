@@ -47,6 +47,12 @@ end
 -- 存储每个玩家的基地信息 [UserId] = HomeData
 local playerHomes = {}
 
+-- Cache house placement relative to SpawnLocation for fallback alignment.
+local houseBottomOffsetByHome = {}
+local houseYRotationByHome = {}
+local defaultHouseBottomOffset = nil
+local defaultHouseYRotation = nil
+
 --[[
 基地数据结构:
 HomeData = {
@@ -190,8 +196,54 @@ local function ResetMailDisplay(homeFolder)
     end
 end
 
+local function FindHouseModelInFolder(houseFolder)
+	if not houseFolder then
+		return nil
+	end
+
+	for _, child in ipairs(houseFolder:GetChildren()) do
+		if child:IsA("Model") then
+			return child
+		end
+	end
+
+	return nil
+end
+
+local function CacheHousePlacement(homeId, spawnLocation, houseModel)
+	if not homeId or not spawnLocation or not houseModel then
+		return
+	end
+
+	local bboxCF, bboxSize = houseModel:GetBoundingBox()
+	local bottomCenter = Vector3.new(
+		bboxCF.Position.X,
+		bboxCF.Position.Y - bboxSize.Y / 2,
+		bboxCF.Position.Z
+	)
+
+	houseBottomOffsetByHome[homeId] = bottomCenter - spawnLocation.Position
+	defaultHouseBottomOffset = defaultHouseBottomOffset or houseBottomOffsetByHome[homeId]
+
+	local pivot = houseModel:GetPivot()
+	local _, yRotation, _ = pivot:ToEulerAnglesYXZ()
+	houseYRotationByHome[homeId] = yRotation
+	if defaultHouseYRotation == nil then
+		defaultHouseYRotation = yRotation
+	end
+end
+
+local function GetCachedHousePlacement(homeId)
+	local offset = houseBottomOffsetByHome[homeId] or defaultHouseBottomOffset
+	local yRotation = houseYRotationByHome[homeId]
+	if yRotation == nil then
+		yRotation = defaultHouseYRotation or 0
+	end
+	return offset, yRotation
+end
+
 -- 重置房屋到默认模型（不改玩家存档，仅清理场景）
-local function ResetHouseModelToDefault(homeFolder)
+local function ResetHouseModelToDefault(homeFolder, homeId, spawnLocation)
 	if not homeFolder then
 		return
 	end
@@ -211,15 +263,12 @@ local function ResetHouseModelToDefault(homeFolder)
 		return
 	end
 
-	local currentHouseModel = nil
-	for _, child in ipairs(houseFolder:GetChildren()) do
-		if child:IsA("Model") then
-			currentHouseModel = child
-			break
-		end
-	end
+	local currentHouseModel = FindHouseModelInFolder(houseFolder)
 
 	if currentHouseModel and currentHouseModel.Name == defaultModelName then
+		if spawnLocation and spawnLocation:IsA("BasePart") then
+			CacheHousePlacement(homeId, spawnLocation, currentHouseModel)
+		end
 		return
 	end
 
@@ -262,11 +311,42 @@ local function ResetHouseModelToDefault(homeFolder)
 
 		local targetCFrame = CFrame.new(targetPivotX, targetPivotY, targetPivotZ) * CFrame.Angles(0, currentYRotation, 0)
 		newHouseModel:PivotTo(targetCFrame)
+	else
+		local anchor = spawnLocation
+		if not anchor then
+			anchor = homeFolder:FindFirstChild(GameConfig.SPAWN_LOCATION_NAME)
+		end
+		if not anchor or not anchor:IsA("BasePart") then
+			anchor = homeFolder:FindFirstChild(GameConfig.IDLE_FLOOR_NAME)
+		end
+
+		if anchor and anchor:IsA("BasePart") then
+			local offset, yRotation = GetCachedHousePlacement(homeId)
+			local bottomCenter = anchor.Position + (offset or Vector3.new(0, 0, 0))
+
+			local newBBoxCF, newBBoxSize = newHouseModel:GetBoundingBox()
+			local newPivot = newHouseModel:GetPivot()
+			local newBBoxBottomY = newBBoxCF.Position.Y - newBBoxSize.Y / 2
+			local pivotY = newPivot.Position.Y
+			local pivotToBottomY = pivotY - newBBoxBottomY
+			local pivotToCenterX = newPivot.Position.X - newBBoxCF.Position.X
+			local pivotToCenterZ = newPivot.Position.Z - newBBoxCF.Position.Z
+
+			local targetPivotX = bottomCenter.X + pivotToCenterX
+			local targetPivotY = bottomCenter.Y + pivotToBottomY
+			local targetPivotZ = bottomCenter.Z + pivotToCenterZ
+			local targetCFrame = CFrame.new(targetPivotX, targetPivotY, targetPivotZ) * CFrame.Angles(0, yRotation, 0)
+			newHouseModel:PivotTo(targetCFrame)
+		end
 	end
 
 	newHouseModel.Parent = houseFolder
 	if currentHouseModel then
 		currentHouseModel:Destroy()
+	end
+
+	if spawnLocation and spawnLocation:IsA("BasePart") then
+		CacheHousePlacement(homeId, spawnLocation, newHouseModel)
 	end
 end
 
@@ -343,17 +423,19 @@ function HomeSystem.InitializePlayerHome(homeId, player)
 
         -- 获取场景中当前的房屋模型
         local houseFolder = homeFolder:FindFirstChild("House")
-        local currentHouseModel = nil
-        if houseFolder then
-            for _, child in ipairs(houseFolder:GetChildren()) do
-                if child:IsA("Model") then
-                    currentHouseModel = child
-                    break
-                end
+        local currentHouseModel = FindHouseModelInFolder(houseFolder)
+        if not currentHouseModel then
+            ResetHouseModelToDefault(homeFolder, homeId, spawnLocation)
+            currentHouseModel = FindHouseModelInFolder(houseFolder)
+            if not currentHouseModel then
+                warn(GameConfig.LOG_PREFIX, "HomeSystem.InitializePlayerHome: 房屋模型缺失，重置失败", homeId)
+                return false
             end
         end
 
-        local actualModelName = currentHouseModel and currentHouseModel.Name or "PrisonLv1"
+        CacheHousePlacement(homeId, spawnLocation, currentHouseModel)
+
+        local actualModelName = currentHouseModel.Name
 
         -- 如果当前房屋不是目标房屋，立即替换
         if actualModelName ~= targetModelName then
@@ -369,6 +451,10 @@ function HomeSystem.InitializePlayerHome(homeId, player)
             -- 立即执行替换，不使用延迟
             local success = HouseUpgradeSystem.ReplaceHouseModel(player, targetModelName)
             if success then
+                local refreshedHouseModel = FindHouseModelInFolder(houseFolder)
+                if refreshedHouseModel then
+                    CacheHousePlacement(homeId, spawnLocation, refreshedHouseModel)
+                end
                 print(string.format(
                     "%s [HomeSystem] V2.8.2 房屋替换成功: %s",
                     GameConfig.LOG_PREFIX,
@@ -472,7 +558,8 @@ function HomeSystem.CleanupPlayerHome(homeId, player)
     if homeFolder then
         ResetInformationDisplay(homeFolder)
         ResetMailDisplay(homeFolder)
-		ResetHouseModelToDefault(homeFolder)
+		local spawnLocation = homeFolder:FindFirstChild(GameConfig.SPAWN_LOCATION_NAME)
+		ResetHouseModelToDefault(homeFolder, homeId, spawnLocation)
     end
 
     DestroyUnitModelsByHomeSlot(homeId)
@@ -570,6 +657,12 @@ function HomeSystem.Initialize()
                 local spawnLocation = playerHome:FindFirstChild(GameConfig.SPAWN_LOCATION_NAME)
                 if not spawnLocation then
                     warn(GameConfig.LOG_PREFIX, "警告:", playerHomeName, "缺少SpawnLocation")
+                end
+
+                local houseFolder = playerHome:FindFirstChild("House")
+                local currentHouseModel = FindHouseModelInFolder(houseFolder)
+                if spawnLocation and spawnLocation:IsA("BasePart") and currentHouseModel then
+                    CacheHousePlacement(i, spawnLocation, currentHouseModel)
                 end
             end
         end

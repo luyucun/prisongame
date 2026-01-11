@@ -41,6 +41,19 @@ end
 
 -- ==================== 私有函数 ====================
 
+-- 检查某个HomeSlot是否已被其他在线玩家占用（兜底防止重复分配）
+local function IsHomeSlotUsedByActivePlayer(homeSlot, excludePlayer)
+	for _, other in ipairs(Players:GetPlayers()) do
+		if other ~= excludePlayer then
+			local slot = DataManager.GetPlayerHomeSlot(other)
+			if slot == homeSlot then
+				return true
+			end
+		end
+	end
+	return false
+end
+
 --[[
 获取所有可用的基地编号
 @return table - 可用基地编号列表
@@ -49,7 +62,7 @@ local function GetAvailableHomes()
 	local available = {}
 
 	for homeSlot = GameConfig.MIN_HOME_SLOT, GameConfig.MAX_HOME_SLOT do
-		if homeOccupancy[homeSlot] == nil then
+		if homeOccupancy[homeSlot] == nil and not IsHomeSlotUsedByActivePlayer(homeSlot) then
 			table.insert(available, homeSlot)
 		end
 	end
@@ -100,7 +113,7 @@ local function SelectAndOccupyRandomHome(player)
 	-- 遍历尝试占用，直到成功或全部失败
 	for _, homeSlot in ipairs(availableHomes) do
 		-- 原子检查并占用（在单线程Lua中，这个检查和赋值之间不会被打断）
-		if homeOccupancy[homeSlot] == nil then
+		if homeOccupancy[homeSlot] == nil and not IsHomeSlotUsedByActivePlayer(homeSlot, player) then
 			homeOccupancy[homeSlot] = player
 			return homeSlot
 		end
@@ -135,6 +148,35 @@ end
 local function ReleaseHome(homeSlot)
 	if homeOccupancy[homeSlot] then
 		homeOccupancy[homeSlot] = nil
+	end
+end
+
+local function CleanupStaleHomeAssignments()
+	-- 清理离线玩家占用（避免幽灵占用导致无可用基地）
+	for homeSlot, occupant in pairs(homeOccupancy) do
+		if occupant and not occupant:IsDescendantOf(Players) then
+			homeOccupancy[homeSlot] = nil
+		end
+	end
+
+	local homeFolder = workspace:FindFirstChild(GameConfig.HOME_FOLDER_NAME)
+	if not homeFolder then
+		return
+	end
+
+	local activeUserIds = {}
+	for _, player in ipairs(Players:GetPlayers()) do
+		activeUserIds[player.UserId] = true
+	end
+
+	for homeSlot = GameConfig.MIN_HOME_SLOT, GameConfig.MAX_HOME_SLOT do
+		local playerHome = homeFolder:FindFirstChild(GameConfig.HOME_PREFIX .. homeSlot)
+		if playerHome then
+			local ownerId = playerHome:GetAttribute(HOME_OWNER_ATTR)
+			if ownerId ~= nil and not activeUserIds[ownerId] then
+				playerHome:SetAttribute(HOME_OWNER_ATTR, nil)
+			end
+		end
 	end
 end
 
@@ -201,6 +243,62 @@ local function IsHomeOwnedByPlayer(homeSlot, player)
 	return ownerId == player.UserId
 end
 
+-- Repair missing/stale HomeOwner markers to keep respawns stable.
+local function EnsureHomeOwner(homeSlot, player, context)
+	if not homeSlot or not player then
+		return false
+	end
+
+	local playerHome = GetHomeFolder(homeSlot)
+	if not playerHome then
+		return false
+	end
+
+	local ownerId = playerHome:GetAttribute(HOME_OWNER_ATTR)
+	if ownerId == player.UserId then
+		return true
+	end
+
+	if ownerId ~= nil and ownerId ~= player.UserId then
+		warn(GameConfig.LOG_PREFIX, string.format(
+			"HomeOwner conflict (%s): PlayerHome%s owner=%s player=%s",
+			context or "unknown",
+			tostring(homeSlot),
+			tostring(ownerId),
+			tostring(player.UserId)
+		))
+		return false
+	end
+
+	local occupant = homeOccupancy[homeSlot]
+	if occupant and occupant ~= player then
+		warn(GameConfig.LOG_PREFIX, string.format(
+			"HomeOwner mismatch (%s): PlayerHome%s occupant=%s player=%s",
+			context or "unknown",
+			tostring(homeSlot),
+			occupant and occupant.UserId or "nil",
+			tostring(player.UserId)
+		))
+		return false
+	end
+
+	if IsHomeSlotUsedByActivePlayer(homeSlot, player) then
+		warn(GameConfig.LOG_PREFIX, string.format(
+			"HomeOwner occupied (%s): PlayerHome%s already used by another player",
+			context or "unknown",
+			tostring(homeSlot)
+		))
+		return false
+	end
+
+	playerHome:SetAttribute(HOME_OWNER_ATTR, player.UserId)
+	if GameConfig.DEBUG_MODE then
+		print(GameConfig.LOG_PREFIX, "Repaired HomeOwner:", player.Name, "HomeSlot", homeSlot, context or "unknown")
+	end
+
+	return true
+end
+
 local function IsPlayerActiveInHome(player, homeSlot)
 	if not player or not player:IsDescendantOf(Players) then
 		return false
@@ -236,6 +334,25 @@ local function GetHomeSpawnLocation(homeSlot)
 	end
 
 	return spawnLocation
+end
+
+local function IsCharacterNearHomeSpawn(character, homeSlot, maxDistance)
+	if not character or not homeSlot then
+		return false
+	end
+
+	local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+	if not humanoidRootPart then
+		return false
+	end
+
+	local spawnLocation = GetHomeSpawnLocation(homeSlot)
+	if not spawnLocation then
+		return false
+	end
+
+	local distance = (humanoidRootPart.Position - spawnLocation.Position).Magnitude
+	return distance <= (maxDistance or 20)
 end
 
 -- Bind player's RespawnLocation to the assigned home spawn when possible.
@@ -327,7 +444,7 @@ local function FindClosestAvailableHomeAndOccupy(position, player)
 	for _, data in ipairs(homesWithDistance) do
 		local homeSlot = data.homeSlot
 		-- 原子检查并占用（在单线程Lua中，这个检查和赋值之间不会被打断）
-		if homeOccupancy[homeSlot] == nil then
+		if homeOccupancy[homeSlot] == nil and not IsHomeSlotUsedByActivePlayer(homeSlot, player) then
 			homeOccupancy[homeSlot] = player
 			return homeSlot
 		end
@@ -430,11 +547,17 @@ function PlayerManager.OnPlayerAdded(player)
 		print(GameConfig.LOG_PREFIX, "玩家加入:", player.Name)
 	end
 
+	CleanupStaleHomeAssignments()
+
 	-- 1. 初始化玩家数据
 	local playerData = DataManager.InitializePlayerData(player)
 	if not playerData then
 		warn(GameConfig.LOG_PREFIX, "Player data load failed, kicking -", player.Name)
 		player:Kick("Data load failed. Please rejoin.")
+		return
+	end
+
+	if not player or not player:IsDescendantOf(Players) then
 		return
 	end
 
@@ -452,6 +575,10 @@ function PlayerManager.OnPlayerAdded(player)
 
 	-- 2. 检查是否在Studio Play Here模式下
 	local skipHomeAssignment = ShouldSkipHomeAssignment(player)
+
+	if not player or not player:IsDescendantOf(Players) then
+		return
+	end
 
 	-- 3. 选择并占用基地（使用原子操作，解决竞态条件）
 	local homeSlot = nil
@@ -483,11 +610,16 @@ function PlayerManager.OnPlayerAdded(player)
 
 	if not homeSlot then
 		warn(GameConfig.LOG_PREFIX, "无法为玩家分配基地,服务器已满!", player.Name)
-		-- TODO: 后续可以考虑踢出玩家或显示等待界面
+		player:Kick("服务器已满，请稍后重试")
 		return
 	end
 
 	-- 注意：基地已在上面的原子操作中被占用，无需再调用OccupyHome
+
+	if not player or not player:IsDescendantOf(Players) then
+		ReleaseHome(homeSlot)
+		return
+	end
 
 	-- 5. 设置玩家数据中的基地编号
 	DataManager.SetPlayerHomeSlot(player, homeSlot)
@@ -503,7 +635,16 @@ function PlayerManager.OnPlayerAdded(player)
 	local homeModule = ServerScriptService:WaitForChild("Systems"):FindFirstChild("HomeSystem")
 	if homeModule then
 		local HomeSystem = require(homeModule :: ModuleScript)
-		HomeSystem.InitializePlayerHome(homeSlot, player)  -- V2.0.1修复：传入正确的参数 (homeId, player)
+		local initSuccess = HomeSystem.InitializePlayerHome(homeSlot, player)  -- V2.0.1修复：传入正确的参数 (homeId, player)
+		if not initSuccess then
+			warn(GameConfig.LOG_PREFIX, "基地初始化失败，释放资源:", player.Name, "HomeSlot:", homeSlot)
+			ClearHomeOwner(homeSlot, player)
+			ReleaseHome(homeSlot)
+			if player and player:IsDescendantOf(Players) then
+				player:Kick("基地初始化失败，请重新加入")
+			end
+			return
+		end
 	end
 
 	-- 6.5 V2.0.1新增：生成Stage001（如果不存在）
@@ -604,15 +745,31 @@ function PlayerManager.OnPlayerAdded(player)
 			-- 检查是否应跳过首次传送（Studio Play Here模式）
 			if shouldSkipFirstTeleport then
 				shouldSkipFirstTeleport = false  -- 只跳过第一次，后续重生正常传送
-				hasProcessedInitialCharacter = true  -- 标记已处理初始角色
-				return
+				if IsCharacterNearHomeSpawn(character, homeSlot) then
+					hasProcessedInitialCharacter = true  -- 标记已处理初始角色
+					return
+				end
 			end
 
 			-- 等待一小段时间确保角色完全加载
 			task.wait(0.1)
 
+			-- 兜底：确保HomeSlot在服务端与客户端一致
+			local currentHomeSlot = DataManager.GetPlayerHomeSlot(player)
+			if currentHomeSlot ~= homeSlot then
+				DataManager.SetPlayerHomeSlot(player, homeSlot)
+				if GameConfig.DEBUG_MODE then
+					print(GameConfig.LOG_PREFIX, "Resynced HomeSlot:", player.Name, currentHomeSlot, "->", homeSlot)
+				end
+			end
+			player:SetAttribute("HomeSlot", homeSlot)
+
 			if not IsPlayerActiveInHome(player, homeSlot) then
-				return
+				-- Repair missing/stale owner markers to avoid skipping teleport on respawn.
+				local repaired = EnsureHomeOwner(homeSlot, player, "CharacterSpawn")
+				if not repaired then
+					return
+				end
 			end
 
 			local success = TeleportPlayerToHome(player, homeSlot, character)
