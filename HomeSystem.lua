@@ -52,6 +52,8 @@ local houseBottomOffsetByHome = {}
 local houseYRotationByHome = {}
 local defaultHouseBottomOffset = nil
 local defaultHouseYRotation = nil
+local GetCachedHousePlacement
+local cachedValidHouseModelNames = nil
 
 --[[
 基地数据结构:
@@ -68,6 +70,169 @@ HomeData = {
 
 -- Information面板的默认文本缓存（来自Studio初始值）
 local informationDefaultTexts = nil -- { [SurfaceGuiName] = { NameText = string, PowerText = string } }
+
+local function GetValidHouseModelNameSet()
+	if cachedValidHouseModelNames then
+		return cachedValidHouseModelNames
+	end
+
+	EnsureHouseModulesLoaded()
+	if not HouseConfig or not HouseConfig.GetAllHouses then
+		return nil
+	end
+
+	local set = {}
+	for _, house in ipairs(HouseConfig.GetAllHouses()) do
+		if house and house.ModelName then
+			set[house.ModelName] = true
+		end
+	end
+
+	cachedValidHouseModelNames = set
+	return set
+end
+
+local function GetPlacementAttributes(homeFolder)
+	if not homeFolder then
+		return nil, nil
+	end
+
+	local offset = homeFolder:GetAttribute("HouseBottomOffset")
+	if typeof(offset) ~= "Vector3" then
+		offset = nil
+	end
+
+	local yRotation = homeFolder:GetAttribute("HouseYRotation")
+	if type(yRotation) ~= "number" then
+		yRotation = nil
+	end
+
+	return offset, yRotation
+end
+
+local function HasCachedHousePlacement(homeId, homeFolder)
+	if houseBottomOffsetByHome[homeId] ~= nil or houseYRotationByHome[homeId] ~= nil then
+		return true
+	end
+
+	local offset, yRotation = GetPlacementAttributes(homeFolder)
+	return offset ~= nil or yRotation ~= nil
+end
+
+local function GetHouseBottomCenter(houseModel)
+	if not houseModel then
+		return nil
+	end
+
+	local bboxCF, bboxSize = houseModel:GetBoundingBox()
+	return Vector3.new(
+		bboxCF.Position.X,
+		bboxCF.Position.Y - bboxSize.Y / 2,
+		bboxCF.Position.Z
+	)
+end
+
+local function PivotHouseModelToBottomCenter(houseModel, bottomCenter, yRotation)
+	if not houseModel or not bottomCenter then
+		return false
+	end
+
+	local bboxCF, bboxSize = houseModel:GetBoundingBox()
+	local pivot = houseModel:GetPivot()
+	local bboxBottomY = bboxCF.Position.Y - bboxSize.Y / 2
+	local pivotY = pivot.Position.Y
+	local pivotToBottomY = pivotY - bboxBottomY
+	local pivotToCenterX = pivot.Position.X - bboxCF.Position.X
+	local pivotToCenterZ = pivot.Position.Z - bboxCF.Position.Z
+
+	local targetPivotX = bottomCenter.X + pivotToCenterX
+	local targetPivotY = bottomCenter.Y + pivotToBottomY
+	local targetPivotZ = bottomCenter.Z + pivotToCenterZ
+
+	local targetCFrame = CFrame.new(targetPivotX, targetPivotY, targetPivotZ) * CFrame.Angles(0, yRotation or 0, 0)
+	houseModel:PivotTo(targetCFrame)
+	return true
+end
+
+local function AlignHouseModelToExisting(currentHouseModel, newHouseModel)
+	if not currentHouseModel or not newHouseModel then
+		return false
+	end
+
+	local bottomCenter = GetHouseBottomCenter(currentHouseModel)
+	if not bottomCenter then
+		return false
+	end
+
+	local _, currentYRotation, _ = currentHouseModel:GetPivot():ToEulerAnglesYXZ()
+	return PivotHouseModelToBottomCenter(newHouseModel, bottomCenter, currentYRotation)
+end
+
+local function AlignHouseModelToCachedPlacement(homeId, homeFolder, spawnLocation, houseModel)
+	if not spawnLocation or not spawnLocation:IsA("BasePart") then
+		return false
+	end
+
+	if not HasCachedHousePlacement(homeId, homeFolder) then
+		return false
+	end
+
+	local offset, yRotation = GetCachedHousePlacement(homeId, homeFolder)
+	if not offset then
+		return false
+	end
+
+	local bottomCenter = spawnLocation.Position + offset
+	return PivotHouseModelToBottomCenter(houseModel, bottomCenter, yRotation)
+end
+
+local function IsHouseModelMisaligned(homeId, homeFolder, spawnLocation, houseModel)
+	if not spawnLocation or not spawnLocation:IsA("BasePart") then
+		return false
+	end
+
+	if not HasCachedHousePlacement(homeId, homeFolder) then
+		return false
+	end
+
+	local offset, yRotation = GetCachedHousePlacement(homeId, homeFolder)
+	if not offset then
+		return false
+	end
+
+	local expectedBottomCenter = spawnLocation.Position + offset
+	local actualBottomCenter = GetHouseBottomCenter(houseModel)
+	if not actualBottomCenter then
+		return false
+	end
+
+	local distance = (actualBottomCenter - expectedBottomCenter).Magnitude
+	if distance > 0.5 then
+		return true
+	end
+
+	if yRotation ~= nil then
+		local _, currentYRotation, _ = houseModel:GetPivot():ToEulerAnglesYXZ()
+		local rotationDiff = math.abs(math.atan2(math.sin(currentYRotation - yRotation), math.cos(currentYRotation - yRotation)))
+		if rotationDiff > math.rad(1) then
+			return true
+		end
+	end
+
+	return false
+end
+
+local function CleanupExtraHouseModels(houseFolder, keepModel, validModelNames)
+	if not houseFolder or not validModelNames then
+		return
+	end
+
+	for _, child in ipairs(houseFolder:GetChildren()) do
+		if child:IsA("Model") and child ~= keepModel and validModelNames[child.Name] then
+			child:Destroy()
+		end
+	end
+end
 
 local function CacheInformationDefaultTexts(informationModel)
     if informationDefaultTexts then
@@ -196,46 +361,112 @@ local function ResetMailDisplay(homeFolder)
     end
 end
 
-local function FindHouseModelInFolder(houseFolder)
+local function FindHouseModelInFolder(houseFolder, preferredModelName, validModelNames)
 	if not houseFolder then
 		return nil
 	end
 
+	local firstModel = nil
+	local firstValidModel = nil
+
 	for _, child in ipairs(houseFolder:GetChildren()) do
 		if child:IsA("Model") then
-			return child
+			firstModel = firstModel or child
+
+			if preferredModelName and child.Name == preferredModelName then
+				return child
+			end
+
+			if validModelNames and validModelNames[child.Name] then
+				firstValidModel = firstValidModel or child
+			end
 		end
 	end
 
-	return nil
+	if validModelNames then
+		return firstValidModel
+	end
+
+	return firstModel
 end
 
-local function CacheHousePlacement(homeId, spawnLocation, houseModel)
+local function CacheHousePlacement(homeId, spawnLocation, houseModel, options)
 	if not homeId or not spawnLocation or not houseModel then
+		return false
+	end
+
+	if not spawnLocation:IsA("BasePart") then
+		return false
+	end
+
+	options = options or {}
+	local allowOverwrite = options.force == true
+	local shouldWriteOffset = allowOverwrite or houseBottomOffsetByHome[homeId] == nil
+	local shouldWriteRotation = allowOverwrite or houseYRotationByHome[homeId] == nil
+
+	if not shouldWriteOffset and not shouldWriteRotation then
+		return false
+	end
+
+	local bottomCenter = GetHouseBottomCenter(houseModel)
+	if not bottomCenter then
 		return
 	end
 
-	local bboxCF, bboxSize = houseModel:GetBoundingBox()
-	local bottomCenter = Vector3.new(
-		bboxCF.Position.X,
-		bboxCF.Position.Y - bboxSize.Y / 2,
-		bboxCF.Position.Z
-	)
-
-	houseBottomOffsetByHome[homeId] = bottomCenter - spawnLocation.Position
-	defaultHouseBottomOffset = defaultHouseBottomOffset or houseBottomOffsetByHome[homeId]
-
 	local pivot = houseModel:GetPivot()
 	local _, yRotation, _ = pivot:ToEulerAnglesYXZ()
-	houseYRotationByHome[homeId] = yRotation
-	if defaultHouseYRotation == nil then
-		defaultHouseYRotation = yRotation
+
+	local offset = bottomCenter - spawnLocation.Position
+
+	if shouldWriteOffset then
+		houseBottomOffsetByHome[homeId] = offset
+		if defaultHouseBottomOffset == nil then
+			defaultHouseBottomOffset = offset
+		end
 	end
+
+	if shouldWriteRotation then
+		houseYRotationByHome[homeId] = yRotation
+		if defaultHouseYRotation == nil then
+			defaultHouseYRotation = yRotation
+		end
+	end
+
+	local homeFolder = options.homeFolder
+	if not homeFolder then
+		local houseFolder = houseModel.Parent
+		if houseFolder then
+			homeFolder = houseFolder.Parent
+		end
+	end
+
+	if homeFolder then
+		if shouldWriteOffset then
+			homeFolder:SetAttribute("HouseBottomOffset", offset)
+		end
+		if shouldWriteRotation then
+			homeFolder:SetAttribute("HouseYRotation", yRotation)
+		end
+	end
+
+	return true
 end
 
-local function GetCachedHousePlacement(homeId)
-	local offset = houseBottomOffsetByHome[homeId] or defaultHouseBottomOffset
+GetCachedHousePlacement = function(homeId, homeFolder)
+	local offset = houseBottomOffsetByHome[homeId]
 	local yRotation = houseYRotationByHome[homeId]
+
+	if (offset == nil or yRotation == nil) and homeFolder then
+		local attrOffset, attrRotation = GetPlacementAttributes(homeFolder)
+		if offset == nil and attrOffset then
+			offset = attrOffset
+		end
+		if yRotation == nil and attrRotation ~= nil then
+			yRotation = attrRotation
+		end
+	end
+
+	offset = offset or defaultHouseBottomOffset
 	if yRotation == nil then
 		yRotation = defaultHouseYRotation or 0
 	end
@@ -263,12 +494,17 @@ local function ResetHouseModelToDefault(homeFolder, homeId, spawnLocation)
 		return
 	end
 
-	local currentHouseModel = FindHouseModelInFolder(houseFolder)
+	local validHouseModelNames = GetValidHouseModelNameSet()
+	local currentHouseModel = FindHouseModelInFolder(houseFolder, defaultModelName, validHouseModelNames)
 
 	if currentHouseModel and currentHouseModel.Name == defaultModelName then
 		if spawnLocation and spawnLocation:IsA("BasePart") then
-			CacheHousePlacement(homeId, spawnLocation, currentHouseModel)
+			if HasCachedHousePlacement(homeId, homeFolder) and IsHouseModelMisaligned(homeId, homeFolder, spawnLocation, currentHouseModel) then
+				AlignHouseModelToCachedPlacement(homeId, homeFolder, spawnLocation, currentHouseModel)
+			end
+			CacheHousePlacement(homeId, spawnLocation, currentHouseModel, {homeFolder = homeFolder})
 		end
+		CleanupExtraHouseModels(houseFolder, currentHouseModel, validHouseModelNames)
 		return
 	end
 
@@ -287,56 +523,28 @@ local function ResetHouseModelToDefault(homeFolder, homeId, spawnLocation)
 	local newHouseModel = template:Clone()
 	newHouseModel.Name = defaultModelName
 
-	if currentHouseModel then
-		-- 对齐旧房屋的底部中心与朝向，避免偏移
-		local currentBBoxCF, currentBBoxSize = currentHouseModel:GetBoundingBox()
-		local currentBottomY = currentBBoxCF.Position.Y - currentBBoxSize.Y / 2
-		local currentCenterX = currentBBoxCF.Position.X
-		local currentCenterZ = currentBBoxCF.Position.Z
+	local alignedToCache = false
+	if spawnLocation and spawnLocation:IsA("BasePart") then
+		alignedToCache = AlignHouseModelToCachedPlacement(homeId, homeFolder, spawnLocation, newHouseModel)
+	end
 
-		local currentPivot = currentHouseModel:GetPivot()
-		local _, currentYRotation, _ = currentPivot:ToEulerAnglesYXZ()
+	if not alignedToCache then
+		if currentHouseModel then
+			AlignHouseModelToExisting(currentHouseModel, newHouseModel)
+		else
+			local anchor = spawnLocation
+			if not anchor then
+				anchor = homeFolder:FindFirstChild(GameConfig.SPAWN_LOCATION_NAME)
+			end
+			if not anchor or not anchor:IsA("BasePart") then
+				anchor = homeFolder:FindFirstChild(GameConfig.IDLE_FLOOR_NAME)
+			end
 
-		local newBBoxCF, newBBoxSize = newHouseModel:GetBoundingBox()
-		local newPivot = newHouseModel:GetPivot()
-		local newBBoxBottomY = newBBoxCF.Position.Y - newBBoxSize.Y / 2
-		local pivotY = newPivot.Position.Y
-		local pivotToBottomY = pivotY - newBBoxBottomY
-		local pivotToCenterX = newPivot.Position.X - newBBoxCF.Position.X
-		local pivotToCenterZ = newPivot.Position.Z - newBBoxCF.Position.Z
-
-		local targetPivotX = currentCenterX + pivotToCenterX
-		local targetPivotY = currentBottomY + pivotToBottomY
-		local targetPivotZ = currentCenterZ + pivotToCenterZ
-
-		local targetCFrame = CFrame.new(targetPivotX, targetPivotY, targetPivotZ) * CFrame.Angles(0, currentYRotation, 0)
-		newHouseModel:PivotTo(targetCFrame)
-	else
-		local anchor = spawnLocation
-		if not anchor then
-			anchor = homeFolder:FindFirstChild(GameConfig.SPAWN_LOCATION_NAME)
-		end
-		if not anchor or not anchor:IsA("BasePart") then
-			anchor = homeFolder:FindFirstChild(GameConfig.IDLE_FLOOR_NAME)
-		end
-
-		if anchor and anchor:IsA("BasePart") then
-			local offset, yRotation = GetCachedHousePlacement(homeId)
-			local bottomCenter = anchor.Position + (offset or Vector3.new(0, 0, 0))
-
-			local newBBoxCF, newBBoxSize = newHouseModel:GetBoundingBox()
-			local newPivot = newHouseModel:GetPivot()
-			local newBBoxBottomY = newBBoxCF.Position.Y - newBBoxSize.Y / 2
-			local pivotY = newPivot.Position.Y
-			local pivotToBottomY = pivotY - newBBoxBottomY
-			local pivotToCenterX = newPivot.Position.X - newBBoxCF.Position.X
-			local pivotToCenterZ = newPivot.Position.Z - newBBoxCF.Position.Z
-
-			local targetPivotX = bottomCenter.X + pivotToCenterX
-			local targetPivotY = bottomCenter.Y + pivotToBottomY
-			local targetPivotZ = bottomCenter.Z + pivotToCenterZ
-			local targetCFrame = CFrame.new(targetPivotX, targetPivotY, targetPivotZ) * CFrame.Angles(0, yRotation, 0)
-			newHouseModel:PivotTo(targetCFrame)
+			if anchor and anchor:IsA("BasePart") then
+				local offset, yRotation = GetCachedHousePlacement(homeId, homeFolder)
+				local bottomCenter = anchor.Position + (offset or Vector3.new(0, 0, 0))
+				PivotHouseModelToBottomCenter(newHouseModel, bottomCenter, yRotation)
+			end
 		end
 	end
 
@@ -344,9 +552,10 @@ local function ResetHouseModelToDefault(homeFolder, homeId, spawnLocation)
 	if currentHouseModel then
 		currentHouseModel:Destroy()
 	end
+	CleanupExtraHouseModels(houseFolder, newHouseModel, validHouseModelNames)
 
 	if spawnLocation and spawnLocation:IsA("BasePart") then
-		CacheHousePlacement(homeId, spawnLocation, newHouseModel)
+		CacheHousePlacement(homeId, spawnLocation, newHouseModel, {homeFolder = homeFolder})
 	end
 end
 
@@ -423,17 +632,24 @@ function HomeSystem.InitializePlayerHome(homeId, player)
 
         -- 获取场景中当前的房屋模型
         local houseFolder = homeFolder:FindFirstChild("House")
-        local currentHouseModel = FindHouseModelInFolder(houseFolder)
+        local validHouseModelNames = GetValidHouseModelNameSet()
+        local currentHouseModel = FindHouseModelInFolder(houseFolder, targetModelName, validHouseModelNames)
         if not currentHouseModel then
             ResetHouseModelToDefault(homeFolder, homeId, spawnLocation)
-            currentHouseModel = FindHouseModelInFolder(houseFolder)
+            currentHouseModel = FindHouseModelInFolder(houseFolder, targetModelName, validHouseModelNames)
             if not currentHouseModel then
                 warn(GameConfig.LOG_PREFIX, "HomeSystem.InitializePlayerHome: 房屋模型缺失，重置失败", homeId)
                 return false
             end
         end
 
-        CacheHousePlacement(homeId, spawnLocation, currentHouseModel)
+        if spawnLocation and spawnLocation:IsA("BasePart") then
+            if HasCachedHousePlacement(homeId, homeFolder) and IsHouseModelMisaligned(homeId, homeFolder, spawnLocation, currentHouseModel) then
+                AlignHouseModelToCachedPlacement(homeId, homeFolder, spawnLocation, currentHouseModel)
+            end
+            CacheHousePlacement(homeId, spawnLocation, currentHouseModel, {homeFolder = homeFolder})
+        end
+        CleanupExtraHouseModels(houseFolder, currentHouseModel, validHouseModelNames)
 
         local actualModelName = currentHouseModel.Name
 
@@ -451,9 +667,15 @@ function HomeSystem.InitializePlayerHome(homeId, player)
             -- 立即执行替换，不使用延迟
             local success = HouseUpgradeSystem.ReplaceHouseModel(player, targetModelName)
             if success then
-                local refreshedHouseModel = FindHouseModelInFolder(houseFolder)
+                local refreshedHouseModel = FindHouseModelInFolder(houseFolder, targetModelName, validHouseModelNames)
                 if refreshedHouseModel then
-                    CacheHousePlacement(homeId, spawnLocation, refreshedHouseModel)
+                    if spawnLocation and spawnLocation:IsA("BasePart") then
+                        if HasCachedHousePlacement(homeId, homeFolder) and IsHouseModelMisaligned(homeId, homeFolder, spawnLocation, refreshedHouseModel) then
+                            AlignHouseModelToCachedPlacement(homeId, homeFolder, spawnLocation, refreshedHouseModel)
+                        end
+                        CacheHousePlacement(homeId, spawnLocation, refreshedHouseModel, {homeFolder = homeFolder})
+                    end
+                    CleanupExtraHouseModels(houseFolder, refreshedHouseModel, validHouseModelNames)
                 end
                 print(string.format(
                     "%s [HomeSystem] V2.8.2 房屋替换成功: %s",
@@ -646,6 +868,9 @@ function HomeSystem.Initialize()
         warn(GameConfig.LOG_PREFIX, "警告: workspace中找不到Home文件夹!")
         warn(GameConfig.LOG_PREFIX, "请确保workspace中存在Home文件夹,包含PlayerHome1到PlayerHome6")
     else
+        EnsureHouseModulesLoaded()
+        local validHouseModelNames = GetValidHouseModelNameSet()
+        local defaultModelName = HouseConfig and HouseConfig.GetHouseModelByChapter(0) or nil
         -- 检查所有基地是否存在
         for i = GameConfig.MIN_HOME_SLOT, GameConfig.MAX_HOME_SLOT do
             local playerHomeName = GameConfig.HOME_PREFIX .. i
@@ -660,9 +885,10 @@ function HomeSystem.Initialize()
                 end
 
                 local houseFolder = playerHome:FindFirstChild("House")
-                local currentHouseModel = FindHouseModelInFolder(houseFolder)
+                local currentHouseModel = FindHouseModelInFolder(houseFolder, defaultModelName, validHouseModelNames)
                 if spawnLocation and spawnLocation:IsA("BasePart") and currentHouseModel then
-                    CacheHousePlacement(i, spawnLocation, currentHouseModel)
+                    CacheHousePlacement(i, spawnLocation, currentHouseModel, {homeFolder = playerHome, force = true})
+                    CleanupExtraHouseModels(houseFolder, currentHouseModel, validHouseModelNames)
                 end
             end
         end

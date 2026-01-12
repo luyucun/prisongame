@@ -52,6 +52,7 @@ local HouseUpgradeEvents = nil
 local upgradeEventsConnected = false
 local pendingShopGuideAfterUpgrade = {}
 local GuideSystem = nil
+local cachedValidHouseModelNames = nil
 
 --[[
 延迟加载GuideSystem（避免循环依赖）
@@ -133,6 +134,7 @@ end
 
 -- 调试日志开关
 local DEBUG_LOGS = false
+local EnsureInitialized
 
 
 --[[
@@ -145,10 +147,101 @@ local function DebugLog(...)
 	end
 end
 
+local function GetValidHouseModelNameSet()
+	if cachedValidHouseModelNames then
+		return cachedValidHouseModelNames
+	end
+
+	EnsureInitialized()
+	if not HouseConfig or not HouseConfig.GetAllHouses then
+		return nil
+	end
+
+	local set = {}
+	for _, house in ipairs(HouseConfig.GetAllHouses()) do
+		if house and house.ModelName then
+			set[house.ModelName] = true
+		end
+	end
+
+	cachedValidHouseModelNames = set
+	return set
+end
+
+local function GetPlacementAttributes(homeFolder)
+	if not homeFolder then
+		return nil, nil
+	end
+
+	local offset = homeFolder:GetAttribute("HouseBottomOffset")
+	if typeof(offset) ~= "Vector3" then
+		offset = nil
+	end
+
+	local yRotation = homeFolder:GetAttribute("HouseYRotation")
+	if type(yRotation) ~= "number" then
+		yRotation = nil
+	end
+
+	return offset, yRotation
+end
+
+local function PivotHouseModelToBottomCenter(houseModel, bottomCenter, yRotation)
+	if not houseModel or not bottomCenter then
+		return false
+	end
+
+	local bboxCF, bboxSize = houseModel:GetBoundingBox()
+	local pivot = houseModel:GetPivot()
+	local bboxBottomY = bboxCF.Position.Y - bboxSize.Y / 2
+	local pivotY = pivot.Position.Y
+	local pivotToBottomY = pivotY - bboxBottomY
+	local pivotToCenterX = pivot.Position.X - bboxCF.Position.X
+	local pivotToCenterZ = pivot.Position.Z - bboxCF.Position.Z
+
+	local targetPivotX = bottomCenter.X + pivotToCenterX
+	local targetPivotY = bottomCenter.Y + pivotToBottomY
+	local targetPivotZ = bottomCenter.Z + pivotToCenterZ
+	local targetCFrame = CFrame.new(targetPivotX, targetPivotY, targetPivotZ) * CFrame.Angles(0, yRotation or 0, 0)
+	houseModel:PivotTo(targetCFrame)
+	return true
+end
+
+local function AlignHouseModelToCachedPlacement(homeFolder, spawnLocation, houseModel, fallbackYRotation)
+	if not spawnLocation or not spawnLocation:IsA("BasePart") then
+		return false
+	end
+
+	local offset, yRotation = GetPlacementAttributes(homeFolder)
+	if not offset then
+		return false
+	end
+
+	local finalYRotation = yRotation
+	if finalYRotation == nil then
+		finalYRotation = fallbackYRotation or 0
+	end
+
+	local bottomCenter = spawnLocation.Position + offset
+	return PivotHouseModelToBottomCenter(houseModel, bottomCenter, finalYRotation)
+end
+
+local function CleanupExtraHouseModels(houseFolder, keepModel, validModelNames)
+	if not houseFolder or not validModelNames then
+		return
+	end
+
+	for _, child in ipairs(houseFolder:GetChildren()) do
+		if child:IsA("Model") and child ~= keepModel and validModelNames[child.Name] then
+			child:Destroy()
+		end
+	end
+end
+
 --[[
 初始化系统（延迟加载依赖模块）
 ]]
-local function EnsureInitialized()
+EnsureInitialized = function()
 	if isInitialized then return end
 
 	DataManager = require(ServerScriptService:WaitForChild("Core"):WaitForChild("DataManager"))
@@ -247,17 +340,34 @@ end
 @param houseFolder Folder - House文件夹
 @return Model|nil - 当前房屋模型
 ]]
-local function GetCurrentHouseModelInFolder(houseFolder)
-	if not houseFolder then return nil end
+local function GetCurrentHouseModelInFolder(houseFolder, preferredModelName, validModelNames)
+	if not houseFolder then
+		return nil
+	end
+
+	local firstModel = nil
+	local firstValidModel = nil
 
 	-- 遍历House文件夹下的子对象，找到Model类型的房屋
 	for _, child in ipairs(houseFolder:GetChildren()) do
 		if child:IsA("Model") then
-			return child
+			firstModel = firstModel or child
+
+			if preferredModelName and child.Name == preferredModelName then
+				return child
+			end
+
+			if validModelNames and validModelNames[child.Name] then
+				firstValidModel = firstValidModel or child
+			end
 		end
 	end
 
-	return nil
+	if validModelNames then
+		return firstValidModel
+	end
+
+	return firstModel
 end
 
 --[[
@@ -302,10 +412,18 @@ function HouseUpgradeSystem.ReplaceHouseModel(player, newModelName)
 	end
 
 	-- 获取当前House文件夹下的房屋模型
-	local currentHouseModel = GetCurrentHouseModelInFolder(houseFolder)
+	local validHouseModelNames = GetValidHouseModelNameSet()
+	local preferredModelName = DataManager.GetCurrentHouseModel(player)
+	local currentHouseModel = GetCurrentHouseModelInFolder(houseFolder, preferredModelName, validHouseModelNames)
 	if not currentHouseModel then
 		warn("[HouseUpgradeSystem] Current house model not found")
 		return false
+	end
+
+	local homeFolder = houseFolder.Parent
+	local spawnLocation = homeFolder and homeFolder:FindFirstChild(GameConfig.SPAWN_LOCATION_NAME)
+	if spawnLocation and not spawnLocation:IsA("BasePart") then
+		spawnLocation = nil
 	end
 
 	-- V2.8.2修复：获取当前房屋的底部中心位置
@@ -344,6 +462,7 @@ function HouseUpgradeSystem.ReplaceHouseModel(player, newModelName)
 	-- 轴点到包围盒中心的XZ偏移
 	local pivotToCenterX = newPivot.Position.X - newBBoxCF.Position.X
 	local pivotToCenterZ = newPivot.Position.Z - newBBoxCF.Position.Z
+	local alignedToCache = AlignHouseModelToCachedPlacement(homeFolder, spawnLocation, newHouseModel, currentYRotation)
 
 	DebugLog(string.format(
 		"新房屋%s 模板: 轴点到底部距离%.2f, 轴点到中心偏移(%.2f, %.2f)",
@@ -356,29 +475,33 @@ function HouseUpgradeSystem.ReplaceHouseModel(player, newModelName)
 	-- 计算新房屋轴点应该放置的位置
 	-- 目标：让新房屋的包围盒底部中心对齐 旧房屋的包围盒底部中心
 	-- 新轴点位置= 旧底部中心+ 新轴点相对于新底部中心的偏移
-	local targetPivotX = currentCenterX + pivotToCenterX
-	local targetPivotY = currentBottomY + pivotToBottomY
-	local targetPivotZ = currentCenterZ + pivotToCenterZ
+	if not alignedToCache then
+		local targetPivotX = currentCenterX + pivotToCenterX
+		local targetPivotY = currentBottomY + pivotToBottomY
+		local targetPivotZ = currentCenterZ + pivotToCenterZ
 
 	-- V2.8.2修复：只保留Y轴旋转，不旋转新房屋（除非旧房屋本身有旋转）
 	-- 重要：新房屋应该保持与旧房屋相同的朝向
-	local targetCFrame = CFrame.new(targetPivotX, targetPivotY, targetPivotZ) * CFrame.Angles(0, currentYRotation, 0)
+		local targetCFrame = CFrame.new(targetPivotX, targetPivotY, targetPivotZ) * CFrame.Angles(0, currentYRotation, 0)
 
 	-- 放置新房屋
-	newHouseModel:PivotTo(targetCFrame)
+		newHouseModel:PivotTo(targetCFrame)
+	end
 
 	-- 验证放置后的位置
 	local verifyBBoxCF, verifyBBoxSize = newHouseModel:GetBoundingBox()
 	local verifyBottomY = verifyBBoxCF.Position.Y - verifyBBoxSize.Y / 2
+	local verifyPivot = newHouseModel:GetPivot()
 
 	DebugLog(string.format(
-		"New house %s placed: pivot=(%.2f, %.2f, %.2f), bottomY=%.2f, yRotation=%.2f",
+		"New house %s placed: pivot=(%.2f, %.2f, %.2f), bottomY=%.2f, yRotation=%.2f, cached=%s",
 		newModelName,
-		targetPivotX,
-		targetPivotY,
-		targetPivotZ,
+		verifyPivot.Position.X,
+		verifyPivot.Position.Y,
+		verifyPivot.Position.Z,
 		verifyBottomY,
-		math.deg(currentYRotation)
+		math.deg(currentYRotation),
+		tostring(alignedToCache)
 	))
 
 	-- 先放入新模型到House文件夹
@@ -386,6 +509,7 @@ function HouseUpgradeSystem.ReplaceHouseModel(player, newModelName)
 
 	-- 再销毁旧房屋模型
 	currentHouseModel:Destroy()
+	CleanupExtraHouseModels(houseFolder, newHouseModel, validHouseModelNames)
 
 	-- 更新DataManager中的房屋模型名称
 	DataManager.SetCurrentHouseModel(player, newModelName)
@@ -564,7 +688,11 @@ function HouseUpgradeSystem.InitializePlayerHouse(player, homeSlot)
 
 	-- 获取场景中实际的房屋模型名称
 	local houseFolder = GetPlayerHouseFolder(homeSlot)
-	local currentHouseModel = houseFolder and GetCurrentHouseModelInFolder(houseFolder)
+	local validHouseModelNames = GetValidHouseModelNameSet()
+	local currentHouseModel = houseFolder and GetCurrentHouseModelInFolder(houseFolder, targetModelName, validHouseModelNames)
+	if currentHouseModel then
+		CleanupExtraHouseModels(houseFolder, currentHouseModel, validHouseModelNames)
+	end
 	local actualModelName = currentHouseModel and currentHouseModel.Name or "PrisonLv1"
 
 	DebugLog(string.format(
