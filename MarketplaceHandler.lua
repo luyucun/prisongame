@@ -36,12 +36,27 @@ local SkillShopConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitFor
 local IDLE_COIN_PRODUCT_ID = 3487946200
 local IDLE_COIN_MULTIPLIER = 10
 local SEVEN_DAYS_UNLOCK_PRODUCT_ID = 3489888670
+local ARMY_PACK_PRODUCTS = {
+	[3511148249] = {
+		{ Type = "Unit", UnitId = "10016", Count = 2 },
+		{ Type = "Unit", UnitId = "10017", Count = 2 },
+		{ Type = "Unit", UnitId = "10012", Count = 2 },
+		{ Type = "Unit", UnitId = "10014", Count = 2 },
+	},
+	[3511148622] = {
+		{ Type = "Unit", UnitId = "10010", Count = 2 },
+		{ Type = "Unit", UnitId = "10011", Count = 2 },
+		{ Type = "Unit", UnitId = "10018", Count = 2 },
+	},
+}
 
 -- 延迟加载系统模块（避免循环依赖）
 local InventorySystem = nil
 local DataManager = nil
 local IdleCoinSystem = nil
 local SevenDaysSystem = nil
+local armyPackEvents = nil
+local armyPackPurchaseResultEvent = nil
 
 -- 私有变量
 local ProcessedReceipts = {}  -- 已处理的收据ID: [receiptId] = true
@@ -102,6 +117,48 @@ local function GetSevenDaysSystem()
 		end
 	end
 	return SevenDaysSystem
+end
+
+local function EnsureArmyPackEvents()
+	if armyPackPurchaseResultEvent then
+		return true
+	end
+
+	local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
+	if not eventsFolder then
+		eventsFolder = Instance.new("Folder")
+		eventsFolder.Name = "Events"
+		eventsFolder.Parent = ReplicatedStorage
+	end
+
+	armyPackEvents = eventsFolder:FindFirstChild("ArmyPackEvents")
+	if not armyPackEvents then
+		armyPackEvents = Instance.new("Folder")
+		armyPackEvents.Name = "ArmyPackEvents"
+		armyPackEvents.Parent = eventsFolder
+	end
+
+	local event = armyPackEvents:FindFirstChild("ArmyPackPurchaseResult")
+	if not event then
+		event = Instance.new("RemoteEvent")
+		event.Name = "ArmyPackPurchaseResult"
+		event.Parent = armyPackEvents
+	end
+
+	armyPackPurchaseResultEvent = event
+	return true
+end
+
+local function SendArmyPackPurchaseResult(player, success, message, productId, rewards)
+	if not player or not player.Parent then
+		return
+	end
+	if not EnsureArmyPackEvents() then
+		return
+	end
+	if armyPackPurchaseResultEvent then
+		armyPackPurchaseResultEvent:FireClient(player, success, message or "", productId, rewards)
+	end
 end
 
 --[[
@@ -245,6 +302,47 @@ local function GrantSkillProduct(player, skillId, shopId)
 	return true, "购买成功"
 end
 
+local function RollbackArmyPackUnits(player, grantedUnits)
+	for _, instance in ipairs(grantedUnits) do
+		if instance and instance.InstanceId then
+			InventorySystem.RemoveUnit(player, instance.InstanceId)
+		end
+	end
+end
+
+local function GrantArmyPackProduct(player, rewards)
+	local grantedUnits = {}
+	local rewardPayload = {}
+
+	for _, reward in ipairs(rewards) do
+		local unitId = tostring(reward.UnitId or "")
+		local count = tonumber(reward.Count) or 0
+		if unitId == "" or count <= 0 then
+			RollbackArmyPackUnits(player, grantedUnits)
+			return false, "Invalid reward config"
+		end
+
+		for i = 1, count do
+			local success, result = InventorySystem.AddUnit(player, unitId)
+			if not success then
+				RollbackArmyPackUnits(player, grantedUnits)
+				return false, tostring(result or "Unit grant failed")
+			end
+			if type(result) == "table" and result.InstanceId then
+				table.insert(grantedUnits, result)
+			end
+		end
+
+		table.insert(rewardPayload, {
+			Type = "Unit",
+			UnitId = unitId,
+			Count = count,
+		})
+	end
+
+	return true, "Purchase Successful!", rewardPayload
+end
+
 -- ==================== 公共接口 ====================
 
 --[[
@@ -300,6 +398,7 @@ function MarketplaceHandler.ProcessReceipt(receiptInfo)
 		-- 5. 查找商品类型（兵种或技能）
 		local unitId, unitShopId = FindUnitByDevProductId(productIdStr)
 		local skillId, skillShopId = FindSkillByDevProductId(receiptInfo.ProductId)
+		local armyPackRewards = ARMY_PACK_PRODUCTS[receiptInfo.ProductId]
 
 		local grantSuccess = false
 		local grantMessage = ""
@@ -310,6 +409,12 @@ function MarketplaceHandler.ProcessReceipt(receiptInfo)
 		elseif skillId then
 			-- 发放技能
 			grantSuccess, grantMessage = GrantSkillProduct(player, skillId, skillShopId)
+		elseif armyPackRewards then
+			local rewardPayload
+			grantSuccess, grantMessage, rewardPayload = GrantArmyPackProduct(player, armyPackRewards)
+			if grantSuccess then
+				SendArmyPackPurchaseResult(player, true, grantMessage, receiptInfo.ProductId, rewardPayload)
+			end
 		elseif receiptInfo.ProductId == IDLE_COIN_PRODUCT_ID then
 			-- 挂机金币10倍购买发放
 			local idleSystem = GetIdleCoinSystem()
@@ -537,6 +642,8 @@ function MarketplaceHandler.Initialize()
 
 	-- 2. 设置ProcessReceipt回调
 	MarketplaceService.ProcessReceipt = MarketplaceHandler.ProcessReceipt
+
+	EnsureArmyPackEvents()
 
 	-- 3. 绑定玩家离开事件（清理购买历史）
 	Players.PlayerRemoving:Connect(function(player)

@@ -35,6 +35,7 @@ local houseStatus = nil
 local houseEntries = {}
 local initialized = false
 local boundButtons = {}
+local BindHouseEntry
 
 local function SafeWaitForChild(parent, childName, timeout)
 	timeout = timeout or 3
@@ -174,12 +175,20 @@ local function BuildHouseEntries()
 	end
 end
 
+local function RefreshHouseEntries()
+	BuildHouseEntries()
+	for _, entry in ipairs(houseEntries) do
+		BindHouseEntry(entry)
+	end
+end
+
 local function OpenPrisons()
 	if not prisonsBg then
 		return
 	end
 
 	prisonsBg.Visible = true
+	RefreshHouseEntries()
 
 	local currentModel = GetCurrentHouseModel()
 	local completedChapters = GetCompletedChapters()
@@ -197,7 +206,7 @@ local function ClosePrisons()
 	end
 end
 
-local function BindHouseEntry(entry)
+BindHouseEntry = function(entry)
 	if not entry then
 		return
 	end
@@ -259,9 +268,7 @@ local function BindButtons()
 		end
 	end
 
-	for _, entry in ipairs(houseEntries) do
-		BindHouseEntry(entry)
-	end
+	RefreshHouseEntries()
 end
 
 local function InitializeUI()

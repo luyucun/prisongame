@@ -140,6 +140,8 @@ ReplicatedStorage
         ├──VipData（RemoteEvent） - 服务器→客户端：VIP数据(purchased)
         ├──PurchaseVip（RemoteEvent） - 客户端→服务器：请求购买VIP
         └──VipPurchaseResult（RemoteEvent） - 服务器→客户端：购买结果(success, message)
+    └──ArmyPackEvents（Folder）/  【V5.6新增 - 兵种礼包开发者商品】
+        └──ArmyPackPurchaseResult（RemoteEvent） - 服务器→客户端：购买结果(success, message, productId, rewards)
 
 
 如果需要补充新的RemoteEvent或者Remotefunction，请在这里列出来，我会自己去创建
@@ -281,6 +283,23 @@ ReplicatedStorage
 12. 保存游戏
 
 注意：VipSystem.lua 初始化时会自动创建这些事件（如果不存在），但建议手动创建以确保事件在系统初始化前就存在。
+
+【V5.6 兵种礼包开发者商品RemoteEvent创建说明】
+位置：ReplicatedStorage/Events/ArmyPackEvents/ （新建文件夹）
+?? ArmyPackPurchaseResult (RemoteEvent) - 需在Studio中手动创建
+
+创建步骤：
+1. 打开Roblox Studio
+2. 导航到 ReplicatedStorage > Events
+3. 右键点击 Events 文件夹
+4. 选择 "Insert Object" > "Folder"
+5. 将新建的 Folder 重命名为 "ArmyPackEvents"
+6. 右键点击 ArmyPackEvents 文件夹
+7. 选择 "Insert Object" > "RemoteEvent"
+8. 将新建的 RemoteEvent 重命名为 "ArmyPackPurchaseResult"
+9. 保存游戏
+
+注意：MarketplaceHandler.lua 初始化时会自动创建这些事件（如果不存在），但建议手动创建以确保事件在系统初始化前就存在。
 
 【V2.1库存系统RemoteEvent创建说明】
 位置：ReplicatedStorage/Events/ShopEvents/

@@ -53,6 +53,17 @@ HouseConfig.Houses = {
 		Icon = "rbxassetid://102214435450404",
 		YOffset = 0,  -- 如果模型插入地面，调整这个值（正数向上，负数向下）
 	},
+	-- 通关第3章后解锁
+	{
+		RequiredChapter = 3,
+		ModelName = "PrisonLv4",
+		Name = "Underground Arena",
+		IdleCoinsPerMinute = 14,
+		IdleMaxHours = 20,
+		Description = "A secret zone away from surveillance. Assemble your elite squad here for rapid wealth growth.",
+		Icon = "rbxassetid://132826621373366",
+		YOffset = 0,  -- 如果模型插入地面，调整这个值（正数向上，负数向下）
+	},
 }
 
 -- ==================== 工具函数 ====================

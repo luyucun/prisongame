@@ -321,7 +321,7 @@ V1.5 战斗系统构建
 简易UI需要有个快捷打开与关闭的方式，使用键盘V键，打开简易战斗调试UI
 
 注意我们的战斗逻辑：一个服务器有多个玩家，每个玩家都有自己的兵种，每个玩家都可以让自己的兵种去进行战斗。所以极限情况下多个玩家都在同时进行自己的战斗
-我们的服务器最多同时承载8个玩家
+我们的服务器最多同时承载6个玩家
 
 补充一些当前字段的说明：
  WeaponName 字段的作用
@@ -1891,3 +1891,40 @@ VIP相关权益是：
 1.玩家如果已经购买了VIP，那么打开商店界面时，需要：
     a.Shop - ShopBg - ScrollingFrame - Vip - BuyButton需要隐藏
     b.Shop - ShopBg - ScrollingFrame - Vip - Purchased需要显示出来
+
+
+需求文档V5.6  新增两个开发者道具
+
+我们需要新增两个开发者商品：
+
+1.开发者道具：3511148249。
+    a.玩家点击StarterGui - Shop - ShopBg - ScrollingFrame - ArmyPack01 - BuyButton，触发对该开发者商品的购买
+    b.玩家付款成功后，为玩家发放兵种如下：10016兵2个，10017兵2个，10012兵2个，10014兵2个
+    c.购买完成后，弹出弹框，也就是StarterGui - ClaimTipsGui - PurchaseSuccessful的visible属性改成true，其他的和新手礼包购买弹出逻辑一致，在PurchaseSuccessful下有Bg - ItemListFrame - ItemTemplate，这是商品模板，取替换其中的信息并显示出来
+    d.注意:购买成功的弹框，弹出动效要和新手礼包购买完后的弹出效果一致
+
+2.开发者道具：3511148622
+    a.玩家点击StarterGui - Shop - ShopBg - ScrollingFrame - ArmyPack02 - BuyButton，触发对该开发者商品的购买
+    b.玩家付款成功后，为玩家发放兵种如下：10010兵2个，10011兵2个，10018兵2个
+    c.购买表现逻辑和上面的购买表现逻辑一致
+
+需求文档V5.7 关于商店系统的一些补充规则
+
+在玩家未购买新手礼包的情况下：
+1.玩家点击StarterGui - Shop - ShopBg - TabList - NewPlayer按钮，将StarterGui - Shop - ShopBg - ScrollingFrame的CanvasPosition设定为0，0
+2.玩家点击StarterGui - Shop - ShopBg - TabList - DailyGift按钮，将StarterGui - Shop - ShopBg - ScrollingFrame的CanvasPosition设定为0，0
+3.玩家点击StarterGui - Shop - ShopBg - TabList - Vip按钮，将StarterGui - Shop - ShopBg - ScrollingFrame的CanvasPosition设定为0，280
+4.玩家点击StarterGui - Shop - ShopBg - TabList - HeroPack按钮，将StarterGui - Shop - ShopBg - ScrollingFrame的CanvasPosition设定为0，550
+
+在玩家购买了新手礼包，也就是StarterGui - Shop - ShopBg - ScrollingFrame - NewPlayer已经被隐藏的情况下：
+1.玩家点击StarterGui - Shop - ShopBg - TabList - DailyGift按钮，将StarterGui - Shop - ShopBg - ScrollingFrame的CanvasPosition设定为0，0
+2.玩家点击StarterGui - Shop - ShopBg - TabList - Vip按钮，将StarterGui - Shop - ShopBg - ScrollingFrame的CanvasPosition设定为0，130
+3.玩家点击StarterGui - Shop - ShopBg - TabList - HeroPack按钮，将StarterGui - Shop - ShopBg - ScrollingFrame的CanvasPosition设定为0，410
+
+同时还有个关于新手礼包和商店入口的显示规则：
+
+1.玩家未通关第一章之前，不显示新手礼包按钮和商店入口按钮，也就是StarterGui - MainGui - Shop和StarterGui - MainGui - StarterPack默认的Visible属性是false，只有通关了第一章才显示出来，也就是和七日奖励是同时显示出来的
+2.其他相关规则暂时不变，比如买了新手礼包后新手礼包按钮就消失
+
+3.新手礼包按钮StarterGui - MainGui - StarterPack，在显示出来的情况下，StarterGui - MainGui - StarterPack - Light，需要时刻保持自转，直到礼包被购买
+4.在玩家挑战过程中，需要隐藏新手礼包按钮和商店入口按钮，也就是StarterGui - MainGui - Shop和StarterGui - MainGui - StarterPack需要在战斗过程中保持false，等非战斗状态下（结算界面也算战斗状态），才根据当前的通关情况和购买情况修改这俩按钮的显示状态

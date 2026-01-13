@@ -204,7 +204,13 @@ local function UpdateIdleEarningUI()
 		end
 	end
 	if idleClaim10Cash and idleClaim10Cash:IsA("TextLabel") then
-		idleClaim10Cash.Text = FormatHelper.FormatCoins(baseCoins * 10)
+		local claim10Base = baseCoins * 10
+		local displayAmount, isVip = GetVipDisplayAmount(claim10Base)
+		if isVip then
+			idleClaim10Cash.Text = FormatHelper.FormatCoins(displayAmount) .. "(Vip+50%)"
+		else
+			idleClaim10Cash.Text = FormatHelper.FormatCoins(claim10Base)
+		end
 	end
 end
 

@@ -134,10 +134,70 @@ StageConfig.Chapters = {
 			[30] = {Coins = 10},
 		}
 	},
+
+	[5] = {
+		ChapterId = 5,
+		ChapterName = "Chapter 5",
+		EnemyChapterRef = 5,
+		StagesPerChapter = 50,
+		StageTemplateStyle = "Style05",
+		Rewards = {
+			[1] = {Coins = 10},
+			[2] = {Coins = 10},
+			[3] = {Coins = 10},
+			[4] = {Coins = 10},
+			[5] = {Coins = 10},
+			[6] = {Coins = 10},
+			[7] = {Coins = 10},
+			[8] = {Coins = 10},
+			[9] = {Coins = 10},
+			[10] = {Coins = 10},
+			[11] = {Coins = 10},
+			[12] = {Coins = 10},
+			[13] = {Coins = 10},
+			[14] = {Coins = 10},
+			[15] = {Coins = 10},
+			[16] = {Coins = 10},
+			[17] = {Coins = 10},
+			[18] = {Coins = 10},
+			[19] = {Coins = 10},
+			[20] = {Coins = 10},
+			[21] = {Coins = 10},
+			[22] = {Coins = 10},
+			[23] = {Coins = 10},
+			[24] = {Coins = 10},
+			[25] = {Coins = 10},
+			[26] = {Coins = 10},
+			[27] = {Coins = 10},
+			[28] = {Coins = 10},
+			[29] = {Coins = 10},
+			[30] = {Coins = 10},
+			[31] = {Coins = 10},
+			[32] = {Coins = 10},
+			[33] = {Coins = 10},
+			[34] = {Coins = 10},
+			[35] = {Coins = 10},
+			[36] = {Coins = 10},
+			[37] = {Coins = 10},
+			[38] = {Coins = 10},
+			[39] = {Coins = 10},
+			[40] = {Coins = 10},
+			[41] = {Coins = 10},
+			[42] = {Coins = 10},
+			[43] = {Coins = 10},
+			[44] = {Coins = 10},
+			[45] = {Coins = 10},
+			[46] = {Coins = 10},
+			[47] = {Coins = 10},
+			[48] = {Coins = 10},
+			[49] = {Coins = 10},
+			[50] = {Coins = 10},
+		}
+	},
 }
 
 -- 总章节数
-StageConfig.TotalChapters = 4
+StageConfig.TotalChapters = 5
 
 -- ==================== Style01关卡配置 (保留兼容) ====================
 StageConfig.Style01 = {
