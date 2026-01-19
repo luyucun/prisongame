@@ -71,6 +71,9 @@ local shopVisibleConn = nil
 local popupVisible = false
 local popupAllowClose = false
 local popupInputConnection = nil
+local campaignEventsBound = false
+local isBattleBlocked = false
+local CloseShop = nil
 
 local POPUP_BG_OFFSET = 0.08
 local POPUP_TWEEN_DURATION = 0.3
@@ -122,6 +125,22 @@ end
 
 local function IsDescendantOfPlayerGui(instance)
 	return instance ~= nil and instance:IsDescendantOf(playerGui)
+end
+
+local function GetCompletedChapters()
+	local completed = player:GetAttribute("CompletedChapters")
+	if type(completed) == "number" then
+		return completed
+	end
+	return 0
+end
+
+local function IsShopUnlocked()
+	return GetCompletedChapters() >= 1
+end
+
+local function IsShopEntryVisible()
+	return IsShopUnlocked() and (not isBattleBlocked)
 end
 
 -- ==================== UI初始化 ====================
@@ -294,11 +313,35 @@ local function UpdateFreeIcon(canClaim)
 		return
 	end
 
-	freeIcon.Visible = canClaim == true
+	local entryVisible = IsShopEntryVisible()
+	freeIcon.Visible = entryVisible and (canClaim == true)
 	if freeIcon.Visible then
 		StartFreeIconShake()
 	else
 		StopFreeIconShake()
+	end
+end
+
+local function UpdateEntryVisibility()
+	local entryVisible = IsShopEntryVisible()
+
+	if shopContainer then
+		shopContainer.Visible = entryVisible
+	end
+	if shopButton and shopButton ~= shopContainer then
+		shopButton.Visible = entryVisible
+	end
+
+	if not entryVisible then
+		UpdateFreeIcon(false)
+		if shopBg and shopBg.Visible then
+			CloseShop()
+		end
+		return
+	end
+
+	if cachedData then
+		UpdateFreeIcon(cachedData.CanClaim == true)
 	end
 end
 
@@ -584,9 +627,50 @@ local function OnClaimResult(success, message, rewardInfo)
 	end
 end
 
+local function OnCampaignStateUpdate(state)
+	local battle = state ~= "Idle"
+	if isBattleBlocked == battle then
+		return
+	end
+
+	isBattleBlocked = battle
+	if isBattleBlocked then
+		CloseShop()
+	end
+	UpdateEntryVisibility()
+end
+
+local function BindCampaignEvents()
+	if campaignEventsBound then
+		return
+	end
+
+	local eventsFolder = ReplicatedStorage:WaitForChild("Events", 5)
+	if not eventsFolder then
+		return
+	end
+
+	local campaignEvents = eventsFolder:FindFirstChild("CampaignEvents")
+	if not campaignEvents then
+		campaignEvents = eventsFolder:WaitForChild("CampaignEvents", 5)
+	end
+	if not campaignEvents then
+		return
+	end
+
+	local stateUpdate = campaignEvents:FindFirstChild("CampaignStateUpdate")
+	if stateUpdate then
+		stateUpdate.OnClientEvent:Connect(OnCampaignStateUpdate)
+		campaignEventsBound = true
+	end
+end
+
 -- ==================== 按钮交互 ====================
 
 local function OpenShop()
+	if not IsShopUnlocked() or isBattleBlocked then
+		return
+	end
 	if shopBg then
 		shopBg.Visible = true
 	end
@@ -600,7 +684,7 @@ local function OpenShop()
 	StartCountdown()
 end
 
-local function CloseShop()
+CloseShop = function()
 	if shopBg then
 		shopBg.Visible = false
 	end
@@ -688,6 +772,7 @@ local function TryInitialize()
 			UpdateFreeIcon(cachedData.CanClaim == true)
 			UpdateRefreshLabel()
 		end
+		UpdateEntryVisibility()
 		if shopBg then
 			if shopVisibleConn then
 				shopVisibleConn:Disconnect()
@@ -707,6 +792,7 @@ local function TryInitialize()
 	end
 
 	if eventsReady then
+		BindCampaignEvents()
 		BindData()
 		if requestDataEvent then
 			requestDataEvent:FireServer()
@@ -729,6 +815,8 @@ function DailyRewardDisplay.Initialize()
 		end
 	end)
 
+	player:GetAttributeChangedSignal("CompletedChapters"):Connect(UpdateEntryVisibility)
+
 	playerGui.ChildAdded:Connect(function(child)
 		if not child then
 			return
@@ -740,6 +828,7 @@ function DailyRewardDisplay.Initialize()
 		task.spawn(function()
 			task.wait()
 			TryInitialize()
+			UpdateEntryVisibility()
 			if cachedData then
 				SetClaimButtonState(cachedData.CanClaim == true)
 				UpdateFreeIcon(cachedData.CanClaim == true)

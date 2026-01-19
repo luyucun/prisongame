@@ -38,15 +38,15 @@ local IDLE_COIN_MULTIPLIER = 10
 local SEVEN_DAYS_UNLOCK_PRODUCT_ID = 3489888670
 local ARMY_PACK_PRODUCTS = {
 	[3511148249] = {
-		{ Type = "Unit", UnitId = "10016", Count = 2 },
-		{ Type = "Unit", UnitId = "10017", Count = 2 },
-		{ Type = "Unit", UnitId = "10012", Count = 2 },
-		{ Type = "Unit", UnitId = "10014", Count = 2 },
+		{ Type = "Unit", UnitId = "10016", Count = 4 },
+		{ Type = "Unit", UnitId = "10017", Count = 4 },
+		{ Type = "Unit", UnitId = "10012", Count = 4 },
+		{ Type = "Unit", UnitId = "10014", Count = 4 },
 	},
 	[3511148622] = {
-		{ Type = "Unit", UnitId = "10010", Count = 2 },
-		{ Type = "Unit", UnitId = "10011", Count = 2 },
-		{ Type = "Unit", UnitId = "10018", Count = 2 },
+		{ Type = "Unit", UnitId = "10010", Count = 4 },
+		{ Type = "Unit", UnitId = "10011", Count = 4 },
+		{ Type = "Unit", UnitId = "10018", Count = 4 },
 	},
 }
 

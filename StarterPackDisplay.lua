@@ -33,6 +33,7 @@ local purchaseResultEvent = nil
 local mainGui = nil
 local starterPackContainer = nil
 local starterPackButton = nil
+local starterPackLight = nil
 
 local shopGui = nil
 local shopBg = nil
@@ -58,6 +59,9 @@ local purchaseLock = false
 local dataBound = false
 local boundButtons = {}
 local shopVisibleConn = nil
+local campaignEventsBound = false
+local isBattleBlocked = false
+local CloseShop = nil
 
 -- Popup state
 local lightRotateConnection = nil
@@ -70,7 +74,10 @@ local POPUP_BG_OFFSET = 0.08
 local POPUP_TWEEN_DURATION = 0.3
 local POPUP_ALLOW_CLOSE_SECONDS = 1
 local LIGHT_ROTATE_SPEED = 60
+local ENTRY_LIGHT_ROTATE_SPEED = 60
 local COIN_ICON = "rbxassetid://92295649647469"
+
+local starterPackLightRotateConnection = nil
 
 -- ==================== Helpers ====================
 
@@ -117,6 +124,18 @@ end
 
 local function IsDescendantOfPlayerGui(instance)
 	return instance ~= nil and instance:IsDescendantOf(playerGui)
+end
+
+local function GetCompletedChapters()
+	local completed = player:GetAttribute("CompletedChapters")
+	if type(completed) == "number" then
+		return completed
+	end
+	return 0
+end
+
+local function IsShopUnlocked()
+	return GetCompletedChapters() >= 1
 end
 
 -- ==================== Initialization ====================
@@ -169,6 +188,7 @@ local function InitializeUI()
 			starterPackButton = innerButton
 		end
 	end
+	starterPackLight = starterPackContainer and starterPackContainer:FindFirstChild("Light", true)
 
 	shopGui = SafeWaitForChild(playerGui, "Shop", 5)
 	shopBg = shopGui and shopGui:FindFirstChild("ShopBg")
@@ -240,11 +260,13 @@ local function UpdateVisibility()
 	if cachedPurchased ~= nil then
 		purchased = cachedPurchased
 	end
+	local entryVisible = (not purchased) and IsShopUnlocked() and (not isBattleBlocked)
 
 	if starterPackContainer then
-		starterPackContainer.Visible = not purchased
-	elseif starterPackButton then
-		starterPackButton.Visible = not purchased
+		starterPackContainer.Visible = entryVisible
+	end
+	if starterPackButton and starterPackButton ~= starterPackContainer then
+		starterPackButton.Visible = entryVisible
 	end
 
 	if newPlayerFrame then
@@ -261,6 +283,25 @@ local function UpdateVisibility()
 		end
 		if tabNewPlayerButton then
 			tabNewPlayerButton.Visible = false
+		end
+	end
+
+	if entryVisible then
+		if starterPackLight and not starterPackLightRotateConnection then
+			starterPackLight.Rotation = 0
+			starterPackLightRotateConnection = RunService.RenderStepped:Connect(function(deltaTime)
+				if starterPackLight then
+					starterPackLight.Rotation = (starterPackLight.Rotation + (ENTRY_LIGHT_ROTATE_SPEED * deltaTime)) % 360
+				end
+			end)
+		end
+	else
+		if starterPackLightRotateConnection then
+			starterPackLightRotateConnection:Disconnect()
+			starterPackLightRotateConnection = nil
+		end
+		if starterPackLight then
+			starterPackLight.Rotation = 0
 		end
 	end
 end
@@ -476,9 +517,53 @@ local function OnPurchaseResult(success, message, rewards)
 	end
 end
 
+local function OnCampaignStateUpdate(state)
+	local battle = state ~= "Idle"
+	if isBattleBlocked == battle then
+		return
+	end
+
+	isBattleBlocked = battle
+	if isBattleBlocked then
+		CloseShop()
+	end
+	UpdateVisibility()
+end
+
+local function BindCampaignEvents()
+	if campaignEventsBound then
+		return
+	end
+
+	local eventsFolder = ReplicatedStorage:WaitForChild("Events", 5)
+	if not eventsFolder then
+		return
+	end
+
+	local campaignEvents = eventsFolder:FindFirstChild("CampaignEvents")
+	if not campaignEvents then
+		campaignEvents = eventsFolder:WaitForChild("CampaignEvents", 5)
+	end
+	if not campaignEvents then
+		return
+	end
+
+	local stateUpdate = campaignEvents:FindFirstChild("CampaignStateUpdate")
+	if stateUpdate then
+		stateUpdate.OnClientEvent:Connect(OnCampaignStateUpdate)
+		campaignEventsBound = true
+	end
+end
+
 -- ==================== Button Actions ====================
 
 local function OpenShop()
+	if not IsShopUnlocked() or isBattleBlocked then
+		return
+	end
+	if cachedPurchased == true or player:GetAttribute("StarterPackPurchased") == true then
+		return
+	end
 	if shopBg then
 		shopBg.Visible = true
 	end
@@ -488,7 +573,7 @@ local function OpenShop()
 	UpdateVisibility()
 end
 
-local function CloseShop()
+CloseShop = function()
 	if shopBg then
 		shopBg.Visible = false
 	end
@@ -587,6 +672,7 @@ local function TryInitialize()
 	end
 
 	if eventsReady then
+		BindCampaignEvents()
 		BindData()
 		if requestDataEvent then
 			requestDataEvent:FireServer()
@@ -610,6 +696,7 @@ function StarterPackDisplay.Initialize()
 	end)
 
 	player:GetAttributeChangedSignal("StarterPackPurchased"):Connect(UpdateVisibility)
+	player:GetAttributeChangedSignal("CompletedChapters"):Connect(UpdateVisibility)
 
 	playerGui.ChildAdded:Connect(function(child)
 		if not child then
