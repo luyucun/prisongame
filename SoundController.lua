@@ -225,7 +225,6 @@ local function PlaySFX(sfxKey)
 	if sound.IsPlaying then
 		sound:Stop()
 	end
-
 	sound:Play()
 	sfxInstances[sfxKey] = sound
 end

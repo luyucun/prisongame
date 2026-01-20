@@ -57,6 +57,7 @@ end
 local MainGui = nil
 local CoinNumLabel = nil
 local CoinEarnLabel = nil  -- V3.5新增：战斗金币累计显示
+local CoinBuffLabel = nil  -- V5.8新增：好友金币加成显示
 
 -- 当前金币数量(用于客户端缓存)
 local currentCoins = 0
@@ -66,6 +67,8 @@ local isInBattle = false           -- 是否在战斗中
 local battleEarnedCoins = 0        -- 本场战斗累计获得金币
 local isAnimatingScale = false     -- 是否正在播放放大缩小动画
 local currentScaleTween = nil      -- 当前的缩放Tween
+
+local FRIEND_BONUS_ATTR = "FriendCoinBonusPercent"
 
 -- ==================== 私有函数 ====================
 
@@ -138,7 +141,27 @@ local function RefreshUIReferences()
         end
     end
 
+    if not CoinBuffLabel or not CoinBuffLabel.Parent then
+        CoinBuffLabel = MainGui:FindFirstChild("CoinBuff")
+        if CoinBuffLabel and DEBUG_MODE then
+            print(LOG_PREFIX, "CoinBuffLabel引用已刷新")
+        end
+    end
+
     return true
+end
+
+local function FormatFriendBonusText(percent)
+    local safePercent = math.max(0, math.floor(tonumber(percent) or 0))
+    return string.format("Friends Bonus: <font color=\"rgb(255,255,0)\">+%d%%</font>", safePercent)
+end
+
+local function UpdateFriendBonusDisplay(percent)
+    if not CoinBuffLabel or not CoinBuffLabel.Parent then
+        return
+    end
+    CoinBuffLabel.RichText = true
+    CoinBuffLabel.Text = FormatFriendBonusText(percent)
 end
 
 --[[
@@ -202,6 +225,10 @@ local function OnCurrencyChanged(currencyType, newAmount)
     if currencyType == "Coins" then
         UpdateCoinDisplay(newAmount, true) -- V2.1：默认使用动画
     end
+end
+
+local function OnFriendBonusChanged()
+    UpdateFriendBonusDisplay(LocalPlayer:GetAttribute(FRIEND_BONUS_ATTR) or 0)
 end
 
 -- ==================== V3.5新增：战斗金币累计显示 ====================
@@ -410,6 +437,7 @@ local function Initialize()
     else
         -- 仅在UI就绪时设置初始显示（不使用动画）
         UpdateCoinDisplay(0, false)
+        UpdateFriendBonusDisplay(LocalPlayer:GetAttribute(FRIEND_BONUS_ATTR) or 0)
     end
 
     if not CurrencyEvents then
@@ -429,6 +457,7 @@ local function Initialize()
             MainGui = nil
             CoinNumLabel = nil
             CoinEarnLabel = nil  -- V3.5新增
+            CoinBuffLabel = nil  -- V5.8新增
 
             -- 等待一帧确保GUI完全加载
             task.wait()
@@ -436,6 +465,7 @@ local function Initialize()
             -- 刷新引用并更新显示（不使用动画）
             if RefreshUIReferences() then
                 UpdateCoinDisplay(currentCoins, false)
+                UpdateFriendBonusDisplay(LocalPlayer:GetAttribute(FRIEND_BONUS_ATTR) or 0)
 
                 -- V3.5新增：如果当前在战斗中，恢复战斗模式显示
                 if isInBattle then
@@ -460,6 +490,9 @@ local function Initialize()
         warn(LOG_PREFIX, "连接货币变化事件失败:", connectionError)
         return false
     end
+
+    LocalPlayer:GetAttributeChangedSignal(FRIEND_BONUS_ATTR):Connect(OnFriendBonusChanged)
+    OnFriendBonusChanged()
 
     -- 🔥修复金币显示延迟：优化请求逻辑，添加重试机制
     task.spawn(function()

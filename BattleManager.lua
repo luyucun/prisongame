@@ -114,8 +114,22 @@ local function CleanupTimeoutBattles()
 		local shouldClean = false
 
 		if battle.State == BattleConfig.BattleState.FINISHED then
+			local skipCleanup = false
+			if battle.BattleType == "Campaign" then
+				local campaignManager = nil
+				local ok = pcall(function()
+					campaignManager = require(ServerScriptService:WaitForChild("Systems"):WaitForChild("CampaignManager") :: ModuleScript)
+				end)
+				if ok and campaignManager then
+					local campaignData = campaignManager.ActiveCampaigns[battle.PlayerId]
+					if campaignData and campaignData.IsWaitingForConfirm then
+						skipCleanup = true
+						DebugLog(string.format("Skip cleanup for waiting campaign battle: BattleId=%d", battleId))
+					end
+				end
+			end
 			-- 已结束的战斗，超过清理延迟就清理
-			if battleAge > BattleConfig.CLEANUP_DELAY then
+			if not skipCleanup and battleAge > BattleConfig.CLEANUP_DELAY then
 				shouldClean = true
 				DebugLog(string.format("清理已结束战斗: BattleId=%d (存在时间%.1f秒)", battleId, battleAge))
 			end
@@ -577,7 +591,12 @@ function BattleManager.StartBattle(battleId)
 		-- 2. 初始化CombatSystem状态
 		local unitId = unit:GetAttribute("UnitId") or unit.Name
 		local level = unit:GetAttribute("Level") or 1
-		local success = CombatSystem.InitializeUnit(unit, unitId, level, BattleConfig.Team.DEFENSE, battleId)
+		local currentHealth = nil
+		local humanoid = unit:FindFirstChild("Humanoid")
+		if humanoid and humanoid.Health > 0 then
+			currentHealth = humanoid.Health
+		end
+		local success = CombatSystem.InitializeUnit(unit, unitId, level, BattleConfig.Team.DEFENSE, battleId, currentHealth)
 
 		if success then
 			PhysicsManager.ConfigureUnitPhysics(unit, "enemy")
@@ -942,6 +961,46 @@ function BattleManager.CleanupBattle(battleId)
 	battles[battleId] = nil
 
 	DebugLog(string.format("战场清理完成: BattleId=%d", battleId))
+end
+
+--[[
+丢弃战斗实例（保留模型，不销毁单位）
+@param battleId number - 战斗ID
+@param keepUnits boolean - 是否保留单位模型
+@return boolean - 是否成功
+]]
+function BattleManager.DiscardBattle(battleId, keepUnits)
+	local battle = battles[battleId]
+	if not battle then
+		return false
+	end
+
+	if not keepUnits then
+		BattleManager.CleanupBattle(battleId)
+		return true
+	end
+
+	-- 清理战斗状态与索引，但不销毁模型
+	UnitAI.ClearBattleAIs(battleId)
+	CombatSystem.ClearBattleUnits(battleId)
+	UnitManager.ClearBattle(battleId)
+
+	-- 清理命中记录，避免污染新战斗
+	for _, unit in ipairs(battle.AttackUnits) do
+		if unit then
+			HitboxService.ClearAttackerHitRecords(unit)
+		end
+	end
+
+	for _, unit in ipairs(battle.DefenseUnits) do
+		if unit then
+			HitboxService.ClearAttackerHitRecords(unit)
+		end
+	end
+
+	battles[battleId] = nil
+	DebugLog(string.format("丢弃战斗实例完成(保留模型): BattleId=%d", battleId))
+	return true
 end
 
 --[[

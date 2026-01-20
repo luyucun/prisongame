@@ -29,7 +29,9 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local SoundService = game:GetService("SoundService")
+local MarketplaceService = game:GetService("MarketplaceService")
 local FormatHelper = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("FormatHelper"))
+local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
 local StageConfig = nil
 pcall(function()
     StageConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("StageConfig"))
@@ -43,6 +45,9 @@ local victoryGui = playerGui:FindFirstChild("Victory")
 local effectFrame = nil
 local informationFrame = nil
 local confirmButton = nil
+local reviveFrame = nil
+local reviveButton = nil
+local revivePriceLabel = nil
 local bgFrame = nil
 local progressBg = nil
 local progressPlayerIcon = nil
@@ -55,6 +60,7 @@ local battleEvents = events:WaitForChild("BattleEvents")
 local victoryPopupEvent = battleEvents:WaitForChild("VictoryPopup")
 local victoryConfirmEvent = battleEvents:WaitForChild("VictoryConfirm")
 local battleStateUpdateEvent = battleEvents:WaitForChild("BattleStateUpdate", 5)
+local reviveResultEvent = battleEvents:FindFirstChild("ReviveResult")
 
 -- 本地变量
 local currentBattleId = nil
@@ -69,6 +75,11 @@ local isBattleActive = false
 local lastCampaignChapter = nil
 local lastCampaignTotalStages = nil
 local lastCampaignStage = nil
+local currentReviveProductId = nil
+local currentRevivePrice = nil
+local reviveAvailable = false
+local revivePromptInProgress = false
+local reviveResultConnected = false
 
 -- 调试日志（已禁用）
 local function DebugLog(...)
@@ -129,6 +140,32 @@ local function FormatCashAmount(amount, vipBonus)
     end
 
     return baseText
+end
+
+local function GetReviveConfig()
+    local reviveConfig = GameConfig.Revive
+    if not reviveConfig then
+        return nil
+    end
+
+    local chapter = tonumber(lastCampaignChapter) or tonumber(player:GetAttribute("CurrentChapter")) or 0
+    local maxChapter = tonumber(reviveConfig.MaxChapter) or 0
+
+    if chapter <= 0 then
+        return nil
+    end
+
+    if maxChapter > 0 and chapter > maxChapter then
+        return nil
+    end
+
+    local productId = reviveConfig.ProductIdsByChapter and reviveConfig.ProductIdsByChapter[chapter]
+    local price = reviveConfig.PricesByChapter and reviveConfig.PricesByChapter[chapter]
+    if not productId or not price then
+        return nil
+    end
+
+    return chapter, productId, price
 end
 
 local function SetPlayerIconImage(imageLabel)
@@ -277,6 +314,19 @@ local function InitializeUI()
         distanceTextLabel = SafeWaitForChild(informationFrame, "DistanceText", 2)
         if distanceTextLabel then
             distanceTextLabel.RichText = true
+        end
+
+        reviveFrame = SafeWaitForChild(informationFrame, "Revive", 2)
+        if reviveFrame then
+            if reviveFrame:IsA("GuiButton") then
+                reviveButton = reviveFrame
+                revivePriceLabel = reviveFrame:FindFirstChild("Price", true)
+            else
+                reviveButton = SafeWaitForChild(reviveFrame, "Confirm", 2)
+                if reviveButton then
+                    revivePriceLabel = SafeWaitForChild(reviveButton, "Price", 2)
+                end
+            end
         end
     end
 
@@ -538,9 +588,26 @@ local function ShowVictoryUI(battleId, result, stageNum, extraRewards)
 
     isVictoryShowing = true
     currentBattleId = battleId
+    reviveAvailable = false
+    revivePromptInProgress = false
+    currentReviveProductId = nil
+    currentRevivePrice = nil
 
     DebugLog(string.format("显示结算界面 - BattleId: %d, Result: %s, Stage: %d",
         battleId, tostring(result), stageNum))
+
+    if battleId == 0 and tostring(result) == "Defense" then
+        local _, productId, price = GetReviveConfig()
+        if productId and price and (reviveButton or reviveFrame) then
+            reviveAvailable = true
+            currentReviveProductId = productId
+            currentRevivePrice = price
+        end
+    end
+
+    if revivePriceLabel and currentRevivePrice then
+        revivePriceLabel.Text = tostring(currentRevivePrice)
+    end
 
     -- 更新信息显示（如果有相关UI元素）
     -- 这里可以根据实际UI结构来设置结果文本、关卡信息等
@@ -595,6 +662,10 @@ local function ShowVictoryUI(battleId, result, stageNum, extraRewards)
     if rightBat then rightBat.Visible = false end
     if victoryText then victoryText.Visible = false end
     if confirmButton then confirmButton.Visible = false end
+    if reviveFrame then reviveFrame.Visible = false end
+    if reviveButton and reviveButton ~= reviveFrame then
+        reviveButton.Visible = false
+    end
     if cashNumLabel then cashNumLabel.Visible = false end
     if distanceTextLabel then distanceTextLabel.Visible = false end
     if progressBg then progressBg.Visible = false end
@@ -648,6 +719,17 @@ local function ShowVictoryUI(battleId, result, stageNum, extraRewards)
         if confirmButton then
             PlayButtonFadeIn(confirmButton, 0.3)
         end
+
+        if reviveAvailable then
+            if reviveFrame then
+                reviveFrame.Visible = true
+            end
+            if reviveButton then
+                PlayButtonFadeIn(reviveButton, 0.3)
+            elseif reviveFrame then
+                PlayButtonFadeIn(reviveFrame, 0.3)
+            end
+        end
     end)
 
     DebugLog("胜利界面动画开始播放")
@@ -685,6 +767,10 @@ local function HideVictoryUI()
 
     isVictoryShowing = false
     currentBattleId = nil
+    reviveAvailable = false
+    revivePromptInProgress = false
+    currentReviveProductId = nil
+    currentRevivePrice = nil
 
     DebugLog("胜利界面隐藏完成")
 end
@@ -727,6 +813,37 @@ local function OnConfirmButtonClick()
         HideVictoryUI()
     else
         DebugLog("发送VictoryConfirm事件失败:", err)
+    end
+end
+
+--[[
+处理复活按钮点击
+]]
+local function OnReviveButtonClick()
+    if revivePromptInProgress then
+        return
+    end
+
+    if not currentReviveProductId then
+        local tipsSystem = _G.TipsSystem
+        if tipsSystem and tipsSystem.ShowError then
+            tipsSystem.ShowError("复活商品未配置")
+        end
+        return
+    end
+
+    revivePromptInProgress = true
+    local success, err = pcall(function()
+        MarketplaceService:PromptProductPurchase(player, currentReviveProductId)
+    end)
+
+    if not success then
+        revivePromptInProgress = false
+        local tipsSystem = _G.TipsSystem
+        if tipsSystem and tipsSystem.ShowError then
+            tipsSystem.ShowError("复活购买失败")
+        end
+        DebugLog("Revive Prompt失败:", err)
     end
 end
 
@@ -848,6 +965,36 @@ local function Initialize()
         end
     end)
 
+    local function ConnectReviveResultEvent(event)
+        if reviveResultConnected then
+            return
+        end
+
+        reviveResultConnected = true
+        event.OnClientEvent:Connect(function(success, message)
+            revivePromptInProgress = false
+            if success then
+                HideVictoryUI()
+            else
+                local tipsSystem = _G.TipsSystem
+                if tipsSystem and tipsSystem.ShowError then
+                    tipsSystem.ShowError(message or "复活失败")
+                end
+            end
+        end)
+    end
+
+    if reviveResultEvent then
+        ConnectReviveResultEvent(reviveResultEvent)
+    else
+        battleEvents.ChildAdded:Connect(function(child)
+            if child.Name == "ReviveResult" and child:IsA("RemoteEvent") then
+                reviveResultEvent = child
+                ConnectReviveResultEvent(child)
+            end
+        end)
+    end
+
     -- 连接确认按钮点击事件（延迟连接，直到按钮存在）
     local function ConnectConfirmButton()
         if confirmButton then
@@ -861,6 +1008,23 @@ local function Initialize()
                 end
             end)
             DebugLog("✅ 确认按钮事件已连接")
+            return true
+        end
+        return false
+    end
+
+    local function ConnectReviveButton()
+        if reviveButton then
+            reviveButton.MouseButton1Click:Connect(function()
+                local success, err = pcall(function()
+                    OnReviveButtonClick()
+                end)
+
+                if not success then
+                    DebugLog("处理复活按钮点击失败:", err)
+                end
+            end)
+            DebugLog("✅ 复活按钮事件已连接")
             return true
         end
         return false
@@ -882,6 +1046,27 @@ local function Initialize()
         end)
     end
 
+    if not ConnectReviveButton() then
+        task.spawn(function()
+            while not reviveButton do
+                task.wait(1)
+                if uiInitialized and reviveButton then
+                    ConnectReviveButton()
+                    break
+                end
+            end
+        end)
+    end
+
+    MarketplaceService.PromptProductPurchaseFinished:Connect(function(userId, productId)
+        if userId ~= player.UserId then
+            return
+        end
+        if currentReviveProductId and productId == currentReviveProductId then
+            revivePromptInProgress = false
+        end
+    end)
+
     DebugLog("VictoryUIController事件连接完成")
     return true
 end
@@ -902,6 +1087,12 @@ end)
 
 _G.VictoryUIController = _G.VictoryUIController or {}
 _G.VictoryUIController.ConfirmCurrent = function()
+    if reviveAvailable then
+        return
+    end
+    if currentBattleId == 0 then
+        return
+    end
     local ok, err = pcall(function()
         OnConfirmButtonClick()
     end)

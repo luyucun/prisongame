@@ -20,6 +20,7 @@ local CurrencySystem = {}
 -- 引用服务
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
+local Players = game:GetService("Players")
 
 -- 引用模块
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
@@ -31,6 +32,10 @@ local CurrencyEvents = nil
 
 -- V3.4.1新增：战斗金币表现事件
 local CoinEarnedEffectEvent = nil
+
+-- V5.8新增：好友金币加成
+local FRIEND_BONUS_ATTR = "FriendCoinBonusPercent"
+local friendBonusCache = {}
 
 -- ==================== 私有函数 ====================
 
@@ -177,6 +182,119 @@ local function ApplyVipBonus(player, amount, options)
     return total, bonus
 end
 
+local function GetFriendBonusRateByCount(count)
+    local rates = GameConfig.FriendCoinBonusRates
+    if type(rates) ~= "table" then
+        return 0
+    end
+
+    local maxCount = GameConfig.FriendCoinBonusMaxCount or 0
+    if maxCount > 0 then
+        count = math.clamp(count, 0, maxCount)
+    end
+
+    local rate = rates[count]
+    if rate == nil then
+        local bestRate = 0
+        for key, value in pairs(rates) do
+            if type(key) == "number" and key <= count and type(value) == "number" and value > bestRate then
+                bestRate = value
+            end
+        end
+        rate = bestRate
+    end
+
+    return math.max(0, tonumber(rate) or 0)
+end
+
+local function CountFriendsInServer(player)
+    local count = 0
+    for _, other in ipairs(Players:GetPlayers()) do
+        if other ~= player then
+            local success, isFriend = pcall(function()
+                return player:IsFriendsWith(other.UserId)
+            end)
+            if success and isFriend then
+                count += 1
+            end
+        end
+    end
+    return count
+end
+
+local function RefreshFriendBonus(player)
+    if not player then
+        return 0, 0
+    end
+
+    local friendCount = CountFriendsInServer(player)
+    local rate = GetFriendBonusRateByCount(friendCount)
+    local percent = math.floor(rate * 100 + 0.5)
+
+    if player:GetAttribute(FRIEND_BONUS_ATTR) ~= percent then
+        player:SetAttribute(FRIEND_BONUS_ATTR, percent)
+    end
+
+    friendBonusCache[player.UserId] = percent
+    return rate, percent
+end
+
+local function GetFriendBonusRate(player)
+    local cachedPercent = friendBonusCache[player.UserId]
+    if type(cachedPercent) ~= "number" then
+        return RefreshFriendBonus(player)
+    end
+    return math.max(0, cachedPercent) / 100, cachedPercent
+end
+
+local function ShouldApplyFriendBonus(player, options)
+    if not player then
+        return false
+    end
+    if options and (options.ApplyFriendBonus == false or options.NoFriendBonus == true) then
+        return false
+    end
+    return true
+end
+
+local function ApplyFriendBonus(player, amount, options)
+    if not ShouldApplyFriendBonus(player, options) then
+        return amount, 0
+    end
+
+    local rate = GetFriendBonusRate(player)
+    if type(rate) ~= "number" or rate <= 0 then
+        return amount, 0
+    end
+
+    local total = amount * (1 + rate)
+    local bonus = total - amount
+    return total, bonus
+end
+
+local function RefreshAllFriendBonuses()
+    for _, player in ipairs(Players:GetPlayers()) do
+        RefreshFriendBonus(player)
+    end
+end
+
+function CurrencySystem.GetFriendBonusPercent(player, refreshIfMissing)
+    if not player then
+        return 0
+    end
+
+    local percent = player:GetAttribute(FRIEND_BONUS_ATTR)
+    if type(percent) ~= "number" then
+        if refreshIfMissing then
+            local _, refreshedPercent = RefreshFriendBonus(player)
+            return math.max(0, tonumber(refreshedPercent) or 0)
+        end
+        return 0
+    end
+
+    return math.max(0, percent)
+end
+
 -- ==================== 公共接口 ====================
 
 --[[
@@ -304,7 +422,16 @@ function CurrencySystem.AddCoins(player, amount, reason, options)
     local finalAmount = amount
     local vipBonus = 0
     if type(amount) == "number" and amount > 0 then
-        finalAmount, vipBonus = ApplyVipBonus(player, amount, options)
+        local amountAfterFriends = amount
+        if ShouldApplyFriendBonus(player, options) then
+            amountAfterFriends = ApplyFriendBonus(player, amount, options)
+        end
+
+        if ShouldApplyVipBonus(player, options) then
+            finalAmount, vipBonus = ApplyVipBonus(player, amountAfterFriends, options)
+        else
+            finalAmount = math.ceil(amountAfterFriends)
+        end
     end
 
     local success, newAmount = CurrencySystem.AddCurrency(player, GameConfig.CurrencyType.COINS, finalAmount, reason)
@@ -383,9 +510,9 @@ end
 @param duration number - 挂机时长(秒,可选)
 @return boolean, number - 是否成功, 新的金币数量
 ]]
-function CurrencySystem.AddCoinsFromIdle(player, amount, duration)
-    local reason = string.format("挂机获得(时长:%s秒)", tostring(duration or "未知"))
-    return CurrencySystem.AddCoins(player, amount, reason)
+function CurrencySystem.AddCoinsFromIdle(player, amount, duration, options)
+	local reason = string.format("挂机获得(时长:%s秒)", tostring(duration or "未知"))
+	return CurrencySystem.AddCoins(player, amount, reason, options)
 end
 
 --[[
@@ -393,11 +520,12 @@ end
 @param player Player - 玩家对象
 @param amount number - 金币数量
 @param productId number - 产品ID
+@param options table? - 可选参数（如NoFriendBonus）
 @return boolean, number - 是否成功, 新的金币数量
 ]]
-function CurrencySystem.AddCoinsFromPurchase(player, amount, productId)
-    local reason = string.format("购买获得(产品ID:%s)", tostring(productId or "未知"))
-    return CurrencySystem.AddCoins(player, amount, reason)
+function CurrencySystem.AddCoinsFromPurchase(player, amount, productId, options)
+	local reason = string.format("购买获得(产品ID:%s)", tostring(productId or "未知"))
+	return CurrencySystem.AddCoins(player, amount, reason, options)
 end
 
 -- ==================== 客户端请求处理 ====================
@@ -475,6 +603,14 @@ function CurrencySystem.Initialize()
         return false
     end
 
+    RefreshAllFriendBonuses()
+    Players.PlayerAdded:Connect(function()
+        task.defer(RefreshAllFriendBonuses)
+    end)
+    Players.PlayerRemoving:Connect(function(player)
+        friendBonusCache[player.UserId] = nil
+        task.defer(RefreshAllFriendBonuses)
+    end)
 
     return true
 end

@@ -315,6 +315,10 @@ local function getWatchPartPosition(stageNum)
 	return nil
 end
 
+local function shouldFallbackToIdleFloor()
+	return currentState ~= "Victory" and currentState ~= "Defeat" and currentState ~= "Cleanup"
+end
+
 local function collectAllyPositions()
 	local positions = {}
 
@@ -322,9 +326,11 @@ local function collectAllyPositions()
 	local myHomeSlot = player:GetAttribute("HomeSlot")
 	if not myHomeSlot then
 		-- 如果还没分配HomeSlot，回退到IdleFloor
-		local idleFloor = getIdleFloor()
-		if idleFloor then
-			table.insert(positions, idleFloor.Position)
+		if shouldFallbackToIdleFloor() then
+			local idleFloor = getIdleFloor()
+			if idleFloor then
+				table.insert(positions, idleFloor.Position)
+			end
 		end
 		return positions
 	end
@@ -344,9 +350,11 @@ local function collectAllyPositions()
 	end
 
 	if #positions == 0 then
-		local idleFloor = getIdleFloor()
-		if idleFloor then
-			table.insert(positions, idleFloor.Position)
+		if shouldFallbackToIdleFloor() then
+			local idleFloor = getIdleFloor()
+			if idleFloor then
+				table.insert(positions, idleFloor.Position)
+			end
 		end
 	end
 

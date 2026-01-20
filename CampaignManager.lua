@@ -55,6 +55,7 @@ local StageService = require(SystemsFolder:WaitForChild("StageService") :: Modul
 local PathService = require(SystemsFolder:WaitForChild("PathService") :: ModuleScript)
 local BattleManager = require(SystemsFolder:WaitForChild("BattleManager") :: ModuleScript)
 local CurrencySystem = require(SystemsFolder:WaitForChild("CurrencySystem") :: ModuleScript)
+local CombatSystem = require(SystemsFolder:WaitForChild("CombatSystem") :: ModuleScript)
 local UnitAI = require(SystemsFolder:WaitForChild("UnitAI") :: ModuleScript)
 local CampaignUnitHelper = require(SystemsFolder:WaitForChild("CampaignUnitHelper") :: ModuleScript)
 local DoorControlService = require(SystemsFolder:WaitForChild("DoorControlService") :: ModuleScript)
@@ -2140,6 +2141,212 @@ function CampaignManager.ProcessPendingBattleResult(campaignData)
 		-- 跳过延迟直接进入失败流程
 		CampaignManager.OnDefeat(campaignData, { skipDelay = true })
 	end
+end
+
+--[[
+处理付费复活（V5.9）
+@param player Player - 玩家
+@param productId number - 开发者商品ID
+@return boolean - 是否复活成功
+@return string - 提示信息
+]]
+function CampaignManager.ProcessRevivePurchase(player, productId)
+	if not player or not player.Parent then
+		return false, "玩家无效"
+	end
+
+	local campaignData = CampaignManager.ActiveCampaigns[player.UserId]
+	if not campaignData then
+		return false, "当前不在战役中"
+	end
+
+	if not campaignData.IsWaitingForConfirm then
+		return false, "当前不在结算中"
+	end
+
+	if campaignData.IsVictory then
+		return false, "胜利无法复活"
+	end
+
+	local reviveConfig = GameConfig.Revive or {}
+	local maxChapter = reviveConfig.MaxChapter or 0
+	local currentChapter = campaignData.CurrentChapter or DataManager.GetCurrentChapter(player) or player:GetAttribute("CurrentChapter") or 0
+	currentChapter = tonumber(currentChapter) or 0
+
+	if currentChapter <= 0 or (maxChapter > 0 and currentChapter > maxChapter) then
+		return false, "当前章节不可复活"
+	end
+
+	local expectedProductId = reviveConfig.ProductIdsByChapter and reviveConfig.ProductIdsByChapter[currentChapter]
+	if expectedProductId and tonumber(productId) ~= tonumber(expectedProductId) then
+		return false, "复活道具不匹配"
+	end
+
+	local stageNum = campaignData.CurrentStage or 1
+	local stageFolder = StageService.GetOrCreateStage(campaignData.PlayerId, stageNum, false)
+	if not stageFolder then
+		return false, "关卡未加载"
+	end
+
+	local targetIdleFloor = stageFolder:FindFirstChild("IdleFloor", true)
+	if not targetIdleFloor then
+		return false, "关卡地板缺失"
+	end
+
+	-- 取消结算等待，避免自动清理
+	campaignData.IsWaitingForConfirm = false
+	campaignData.PendingBattleResult = nil
+	campaignData.State = CampaignState.PREPARE_BATTLE
+
+	pcall(function()
+		SoundSystem.OnVictoryConfirm(player)
+	end)
+
+	-- 丢弃旧战斗实例，避免自动清理摧毁敌军
+	local oldBattleId = campaignData.CurrentBattleId
+	if oldBattleId then
+		BattleManager.DiscardBattle(oldBattleId, true)
+		campaignData.CurrentBattleId = nil
+	end
+
+	local homeIdleFloor = GetHomeIdleFloor(campaignData.HomeId)
+	local targetParent = (homeIdleFloor and homeIdleFloor.Parent) or Workspace
+
+	local floorCenter = targetIdleFloor.Position
+	local floorHalfX = targetIdleFloor.Size.X / 2
+	local floorHalfZ = targetIdleFloor.Size.Z / 2
+
+	local preparedAllies = {}
+
+	for unitInstance, unitData in pairs(campaignData.Units) do
+		if unitInstance and unitData then
+			local instanceValid = false
+			local canAccess = pcall(function() return unitInstance.Name end)
+			if canAccess then
+				if unitInstance.Parent or unitInstance:IsDescendantOf(game) then
+					instanceValid = true
+				else
+					instanceValid = SafeSetParent(unitInstance, targetParent)
+				end
+			end
+
+			if instanceValid then
+				pcall(function()
+					CombatSystem.CancelDeathFade(unitInstance)
+				end)
+
+				pcall(function()
+					unitInstance:SetAttribute("IsActivated", false)
+				end)
+
+				local unitId = unitData.UnitId or unitInstance:GetAttribute("UnitId") or unitInstance.Name
+				local level = unitData.Level or unitInstance:GetAttribute("Level") or 1
+				local maxHP = UnitConfig.CalculateHealth(unitId, level)
+				local moveSpeed = UnitConfig.GetMoveSpeed(unitId)
+				if type(moveSpeed) ~= "number" or moveSpeed <= 0 then
+					moveSpeed = 16
+				end
+
+				unitData.MaxHP = maxHP
+				unitData.CurrentHP = maxHP
+				unitData.IsDead = false
+
+				local humanoid = unitInstance:FindFirstChild("Humanoid")
+				if humanoid then
+					humanoid.MaxHealth = maxHP
+					humanoid.Health = maxHP
+					humanoid.WalkSpeed = moveSpeed
+					if humanoid.JumpPower <= 0 then
+						humanoid.JumpPower = 50
+					end
+					humanoid.AutoRotate = true
+					humanoid.PlatformStand = false
+					humanoid:Move(Vector3.zero)
+					local rootPart = unitInstance:FindFirstChild("HumanoidRootPart") or unitInstance.PrimaryPart
+					if rootPart then
+						rootPart.AssemblyLinearVelocity = Vector3.zero
+						rootPart.AssemblyAngularVelocity = Vector3.zero
+					end
+				end
+
+				unitInstance:SetAttribute("IsDead", false)
+
+				local gridX = unitData.GridX or 0
+				local gridZ = unitData.GridZ or 0
+				local gridWidth = unitData.GridWidth or 1
+				local gridDepth = unitData.GridDepth or gridWidth
+
+				local targetPosition = PlacementConfig.GridToWorld(gridX, gridZ, floorCenter, gridWidth, gridDepth)
+				local unitHalfSpanX = (gridWidth * PlacementConfig.GRID_UNIT_SIZE) / 2
+				local unitHalfSpanZ = (gridDepth * PlacementConfig.GRID_UNIT_SIZE) / 2
+
+				local clampedX = math.clamp(targetPosition.X, floorCenter.X - floorHalfX + unitHalfSpanX, floorCenter.X + floorHalfX - unitHalfSpanX)
+				local clampedZ = math.clamp(targetPosition.Z, floorCenter.Z - floorHalfZ + unitHalfSpanZ, floorCenter.Z + floorHalfZ - unitHalfSpanZ)
+				targetPosition = Vector3.new(clampedX, targetPosition.Y, clampedZ)
+
+				unitInstance:PivotTo(CFrame.new(targetPosition))
+				SnapUnitToFloor(unitInstance, targetIdleFloor)
+
+				if UnitAI.SetMode then
+					pcall(function()
+						UnitAI.SetMode(unitInstance, "CombatMode")
+					end)
+				end
+				pcall(function()
+					unitInstance:SetAttribute("UnitAIMode", "CombatMode")
+				end)
+
+				local activated = CampaignUnitHelper.ActivateUnit(unitInstance, "ally")
+				if activated then
+					unitData.IsActivated = true
+				end
+				CampaignUnitHelper.PrepareForBattle(unitInstance)
+
+				local rootPart = unitInstance:FindFirstChild("HumanoidRootPart") or unitInstance.PrimaryPart
+				if rootPart and rootPart:CanSetNetworkOwnership() then
+					pcall(function()
+						rootPart:SetNetworkOwner(player)
+					end)
+				end
+
+				table.insert(preparedAllies, unitInstance)
+			else
+				DebugLog(string.format("[Revive] 单位实例无效，跳过: %s", tostring(unitData.UnitId)))
+			end
+		end
+	end
+
+	if #preparedAllies == 0 then
+		return false, "没有可复活的友军"
+	end
+
+	local preparedEnemies = {}
+	local idleFloorEnemy = stageFolder:FindFirstChild("IdleFloorEnemy", true)
+	if idleFloorEnemy then
+		for _, child in ipairs(idleFloorEnemy:GetChildren()) do
+			if child:IsA("Model") then
+				local humanoid = child:FindFirstChild("Humanoid")
+				if humanoid and humanoid.Health > 0 then
+					child:SetAttribute("IsActivated", false)
+					StopUnitAnimations(child)
+					SnapUnitToFloor(child, idleFloorEnemy)
+					CampaignUnitHelper.ActivateUnit(child, "enemy")
+					table.insert(preparedEnemies, child)
+				end
+			end
+		end
+	end
+
+	if #preparedEnemies == 0 then
+		return false, "敌方已清理"
+	end
+
+	fireAttachHealthBars(preparedAllies)
+	fireAttachHealthBars(preparedEnemies)
+
+	CampaignManager.StartStageBattle(campaignData, stageNum, preparedAllies, preparedEnemies)
+
+	return true, "复活成功"
 end
 
 --[[

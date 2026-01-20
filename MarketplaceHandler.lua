@@ -49,6 +49,17 @@ local ARMY_PACK_PRODUCTS = {
 		{ Type = "Unit", UnitId = "10018", Count = 4 },
 	},
 }
+local REVIVE_PRODUCTS = {}
+do
+	local reviveConfig = GameConfig.Revive or {}
+	if reviveConfig.ProductIdsByChapter then
+		for _, productId in pairs(reviveConfig.ProductIdsByChapter) do
+			if productId then
+				REVIVE_PRODUCTS[productId] = true
+			end
+		end
+	end
+end
 
 -- 延迟加载系统模块（避免循环依赖）
 local InventorySystem = nil
@@ -57,6 +68,8 @@ local IdleCoinSystem = nil
 local SevenDaysSystem = nil
 local armyPackEvents = nil
 local armyPackPurchaseResultEvent = nil
+local reviveEvents = nil
+local reviveResultEvent = nil
 
 -- 私有变量
 local ProcessedReceipts = {}  -- 已处理的收据ID: [receiptId] = true
@@ -158,6 +171,48 @@ local function SendArmyPackPurchaseResult(player, success, message, productId, r
 	end
 	if armyPackPurchaseResultEvent then
 		armyPackPurchaseResultEvent:FireClient(player, success, message or "", productId, rewards)
+	end
+end
+
+local function EnsureReviveEvents()
+	if reviveResultEvent then
+		return true
+	end
+
+	local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
+	if not eventsFolder then
+		eventsFolder = Instance.new("Folder")
+		eventsFolder.Name = "Events"
+		eventsFolder.Parent = ReplicatedStorage
+	end
+
+	reviveEvents = eventsFolder:FindFirstChild("BattleEvents")
+	if not reviveEvents then
+		reviveEvents = Instance.new("Folder")
+		reviveEvents.Name = "BattleEvents"
+		reviveEvents.Parent = eventsFolder
+	end
+
+	local event = reviveEvents:FindFirstChild("ReviveResult")
+	if not event then
+		event = Instance.new("RemoteEvent")
+		event.Name = "ReviveResult"
+		event.Parent = reviveEvents
+	end
+
+	reviveResultEvent = event
+	return true
+end
+
+local function SendReviveResult(player, success, message)
+	if not player or not player.Parent then
+		return
+	end
+	if not EnsureReviveEvents() then
+		return
+	end
+	if reviveResultEvent then
+		reviveResultEvent:FireClient(player, success, message or "")
 	end
 end
 
@@ -399,6 +454,7 @@ function MarketplaceHandler.ProcessReceipt(receiptInfo)
 		local unitId, unitShopId = FindUnitByDevProductId(productIdStr)
 		local skillId, skillShopId = FindSkillByDevProductId(receiptInfo.ProductId)
 		local armyPackRewards = ARMY_PACK_PRODUCTS[receiptInfo.ProductId]
+		local isReviveProduct = REVIVE_PRODUCTS[receiptInfo.ProductId]
 
 		local grantSuccess = false
 		local grantMessage = ""
@@ -415,6 +471,20 @@ function MarketplaceHandler.ProcessReceipt(receiptInfo)
 			if grantSuccess then
 				SendArmyPackPurchaseResult(player, true, grantMessage, receiptInfo.ProductId, rewardPayload)
 			end
+		elseif isReviveProduct then
+			local CampaignManager = require(ServerScriptService.Systems:WaitForChild("CampaignManager"))
+			local reviveSuccess, reviveMessage = false, "复活失败"
+			local ok, err = pcall(function()
+				reviveSuccess, reviveMessage = CampaignManager.ProcessRevivePurchase(player, receiptInfo.ProductId)
+			end)
+			if not ok then
+				reviveSuccess = false
+				reviveMessage = "复活失败"
+				warn("[MarketplaceHandler] 复活处理异常:", err)
+			end
+			SendReviveResult(player, reviveSuccess, reviveMessage)
+			grantSuccess = true
+			grantMessage = reviveMessage or "Purchase Successful!"
 		elseif receiptInfo.ProductId == IDLE_COIN_PRODUCT_ID then
 			-- 挂机金币10倍购买发放
 			local idleSystem = GetIdleCoinSystem()

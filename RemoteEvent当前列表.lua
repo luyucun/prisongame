@@ -34,6 +34,7 @@ ReplicatedStorage
         ├──DetachHealthBars（RemoteEvent） 【V2.3新增】 - 服务器→客户端：移除血条(unitModels)
         ├──VictoryPopup（RemoteEvent） 【V2.4新增】 - 服务器→客户端：显示战斗结算弹窗(battleId, result, stageNum, extraRewards)
         ├──VictoryConfirm（RemoteEvent） 【V2.4新增】 - 客户端→服务器：确认战斗结算(battleId)
+        ├──ReviveResult（RemoteEvent） 【V5.9新增】 - 服务器→客户端：复活结果(success, message)
         └──CoinEarnedEffect（RemoteEvent） 【V3.4.1新增】 - 服务器→客户端：战斗金币获取表现通知(amount, vipBonus)
     └──CampaignEvents（Folder）/  【V2.0新增】
         ├──RequestStartCampaign（RemoteEvent） - 客户端→服务器：请求开始战役

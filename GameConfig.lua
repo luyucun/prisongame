@@ -50,6 +50,31 @@ GameConfig.CurrencyType = {
 -- 货币显示格式
 GameConfig.COIN_DISPLAY_FORMAT = "$%d"  -- $XXXXX格式
 
+-- ==================== 好友金币加成配置 (V5.8) ====================
+GameConfig.FriendCoinBonusRates = {
+	[1] = 0.2,
+	[2] = 0.4,
+	[3] = 0.6,
+	[4] = 0.8,
+	[5] = 1.0,
+}
+GameConfig.FriendCoinBonusMaxCount = 5
+
+-- ==================== 复活配置 (V5.9) ====================
+GameConfig.Revive = {
+	MaxChapter = 3,
+	ProductIdsByChapter = {
+		[1] = 3517019111,
+		[2] = 3517019352,
+		[3] = 3517019548,
+	},
+	PricesByChapter = {
+		[1] = 9,
+		[2] = 29,
+		[3] = 79,
+	},
+}
+
 -- ==================== UI相关配置 ====================
 -- 主界面GUI名称
 GameConfig.MAIN_GUI_NAME = "MainGui"

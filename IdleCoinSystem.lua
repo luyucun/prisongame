@@ -30,6 +30,7 @@ local DataManager = nil
 local CurrencySystem = nil
 local PlayerManager = nil
 local SoundSystem = nil  -- V3.8新增
+local FRIEND_BONUS_ATTR = "FriendCoinBonusPercent"
 
 -- 收敛调试print，避免刷屏（仅在DEBUG_MODE开启时输出）
 local _print = print
@@ -68,6 +69,37 @@ local function LoadModules()
 	if not SoundSystem then
 		SoundSystem = require(ServerScriptService.Systems.SoundSystem)
 	end
+end
+
+local function GetFriendBonusPercent(player)
+	if not player then
+		return 0
+	end
+
+	if CurrencySystem and CurrencySystem.GetFriendBonusPercent then
+		return CurrencySystem.GetFriendBonusPercent(player, true) or 0
+	end
+
+	local percent = player:GetAttribute(FRIEND_BONUS_ATTR)
+	if type(percent) ~= "number" then
+		return 0
+	end
+	return math.max(0, percent)
+end
+
+local function ApplyFriendBonusToIdleCoins(player, baseCoins)
+	local amount = math.floor(tonumber(baseCoins) or 0)
+	if amount <= 0 then
+		return 0
+	end
+
+	local percent = GetFriendBonusPercent(player)
+	if percent <= 0 then
+		return amount
+	end
+
+	local total = amount * (1 + percent / 100)
+	return math.ceil(total)
 end
 
 local function GetIdleConfigForPlayer(player)
@@ -471,7 +503,7 @@ local function ProcessIdleCoinCollect(player, multiplier, source, productId)
 	-- 发放金币
 	local success, newAmount
 	if source == "Purchase" then
-		success, newAmount = CurrencySystem.AddCoinsFromPurchase(player, awardCoins, productId)
+		success, newAmount = CurrencySystem.AddCoinsFromPurchase(player, awardCoins, productId, { NoFriendBonus = true })
 	else
 		local idleConfig = GetIdleConfigForPlayer(player)
 		local coinsPerMinute = idleConfig.CoinsPerMinute or 0
@@ -479,7 +511,7 @@ local function ProcessIdleCoinCollect(player, multiplier, source, productId)
 		if coinsPerMinute and coinsPerMinute > 0 then
 			durationSeconds = pendingCoins * 60 / coinsPerMinute
 		end
-		success, newAmount = CurrencySystem.AddCoinsFromIdle(player, awardCoins, durationSeconds)
+		success, newAmount = CurrencySystem.AddCoinsFromIdle(player, awardCoins, durationSeconds, { NoFriendBonus = true })
 	end
 
 	if success then
@@ -634,6 +666,7 @@ function IdleCoinSystem.OnPlayerJoin(player)
 
 	-- 计算离线产生的金币
 	local offlineCoins = CalculateOfflineCoins(player, lastLogoutTime)
+	offlineCoins = ApplyFriendBonusToIdleCoins(player, offlineCoins)
 
 	-- 累加到待领取金币
 	local totalPendingCoins = existingPendingCoins + offlineCoins
@@ -719,6 +752,7 @@ function IdleCoinSystem.StartOnlineAccumulation(player)
 			local coinsPerMinute = idleConfig.CoinsPerMinute or 0
 			-- 计算这个间隔产生的金币
 			local coinsToAdd = math.floor(coinsPerMinute * (interval / 60))
+			coinsToAdd = ApplyFriendBonusToIdleCoins(player, coinsToAdd)
 			if coinsToAdd > 0 then
 				-- 添加到待领取金币
 				local success, newTotal = DataManager.AddPendingIdleCoins(player, coinsToAdd)

@@ -1003,7 +1003,7 @@ local function OnPurchaseUnit(player, unitId)
 
 		local addSuccess, instanceData = InventorySystem.AddUnit(player, unitId)
 		if not addSuccess then
-			CurrencySystem.AddCoins(player, price, "购买失败退款: " .. unitId, { ApplyVipBonus = false })
+			CurrencySystem.AddCoins(player, price, "购买失败退款: " .. unitId, { ApplyVipBonus = false, ApplyFriendBonus = false })
 			PurchaseLocks[player] = false
 			SendFailure(player, "兵种发放失败: " .. tostring(instanceData))
 			return
@@ -1012,7 +1012,7 @@ local function OnPurchaseUnit(player, unitId)
 		if GameConfig.Shop.EnableStockSystem then
 			local deductStockSuccess = DeductStock(player, shopId, unitId, 1)
 			if not deductStockSuccess then
-				CurrencySystem.AddCoins(player, price, "库存扣除失败退款: " .. unitId, { ApplyVipBonus = false })
+				CurrencySystem.AddCoins(player, price, "库存扣除失败退款: " .. unitId, { ApplyVipBonus = false, ApplyFriendBonus = false })
 				if instanceData and instanceData.InstanceId then
 					InventorySystem.RemoveUnit(player, instanceData.InstanceId)
 				end
