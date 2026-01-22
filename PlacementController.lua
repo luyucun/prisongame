@@ -62,6 +62,7 @@ local placementState = {
 	placedModels = {},           -- 客户端跟踪已放置的模型 {model = {gridX, gridZ, gridWidth, gridDepth}}
 	lastIsValid = true,          -- 当前预览位置是否合法（用于移动端交互）
 	confirmInFlight = false,     -- 确认请求是否进行中（防止重复FireServer）
+	inputBlockUntil = 0,         -- 放置开始后的短暂输入阻断时间戳（避免UI点击立刻触发放置）
 	-- 移动端触摸跟踪（用于“点格子确认放置”）
 	activeTouch = nil,           -- 当前用于放置的触摸InputObject
 	touchStartPos = nil,         -- 触摸开始的屏幕坐标(Vector2)
@@ -302,6 +303,7 @@ function PlacementController.StartPlacement(instanceId, unitId, gridWidth, gridD
 	placementState.currentUnitId = unitId
 	placementState.currentGridWidth = gridWidth
 	placementState.currentGridDepth = gridDepth
+	placementState.inputBlockUntil = os.clock() + 0.2
 
 	-- 克隆预览模型
 	local previewModel = PlacementHelper.CloneUnitModel(unitId)
@@ -433,6 +435,7 @@ function PlacementController.CancelPlacement()
 	placementState.lastGridZ = nil
 	placementState.lastIsValid = true
 	placementState.confirmInFlight = false
+	placementState.inputBlockUntil = 0
 	placementState.activeTouch = nil
 	placementState.touchStartPos = nil
 	placementState.touchStartTime = 0
@@ -573,6 +576,18 @@ function ConnectPCInput()
 
 		-- 左键确认
 		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			if not placementState.idleFloor then
+				PlacementController.CancelPlacement()
+				return
+			end
+
+			local currentCamera = Workspace.CurrentCamera or camera
+			local mouseWorldPos = PlacementHelper.GetMouseWorldPosition(currentCamera, mouse, placementState.idleFloor)
+			if not mouseWorldPos then
+				PlacementController.CancelPlacement()
+				return
+			end
+
 			PlacementController.ConfirmPlacement()
 		end
 
@@ -674,6 +689,9 @@ end
 function ConnectMobileInput()
 	-- 触摸开始 - 用于初始拖动
 	UserInputService.TouchStarted:Connect(function(touch, gameProcessed)
+		if os.clock() < placementState.inputBlockUntil then
+			return
+		end
 		-- ✅ V2.0.2关键修复：放置状态下允许穿透UI，解决背包遮挡地面无法放置的问题
 		if gameProcessed and not placementState.isPlacing then
 			return
@@ -706,14 +724,17 @@ function ConnectMobileInput()
 		-- 获取触摸点在地板上的位置
 		local currentCamera = Workspace.CurrentCamera or camera
 		local touchWorldPos = PlacementHelper.GetTouchWorldPosition(currentCamera, touch.Position, placementState.idleFloor)
-		if touchWorldPos then
-			placementState.activeTouch = touch
-			placementState.touchStartPos = startScreenPos
-			placementState.touchStartTime = os.clock()
-			UpdatePreviewPosition(touchWorldPos)
-			-- 拖动开始：禁用相机触摸旋转
-			BindCameraRotationBlock()
+		if not touchWorldPos then
+			PlacementController.CancelPlacement()
+			return
 		end
+
+		placementState.activeTouch = touch
+		placementState.touchStartPos = startScreenPos
+		placementState.touchStartTime = os.clock()
+		UpdatePreviewPosition(touchWorldPos)
+		-- 拖动开始：禁用相机触摸旋转
+		BindCameraRotationBlock()
 	end)
 
 	-- 触摸拖动
@@ -751,6 +772,9 @@ function ConnectMobileInput()
 
 	-- 触摸结束：如果是“点一下”，则直接确认放置（移动端无需额外按钮）
 	UserInputService.TouchEnded:Connect(function(touch, gameProcessed)
+		if os.clock() < placementState.inputBlockUntil then
+			return
+		end
 		-- ? V2.0.2关键修复：放置状态下允许穿透UI
 		if gameProcessed and not placementState.isPlacing then
 			return
@@ -810,6 +834,8 @@ function ConnectMobileInput()
 			if touchWorldPos then
 				UpdatePreviewPosition(touchWorldPos)
 				PlacementController.ConfirmPlacement()
+			else
+				PlacementController.CancelPlacement()
 			end
 		end
 	end)

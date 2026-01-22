@@ -35,7 +35,7 @@ end)
 
 -- 配置参数
 local CHECK_INTERVAL = 0.2  -- 检测间隔（秒）
-local DISTANCE_THRESHOLD = 5  -- 距离阈值（studs）- 角色与IdleFloor中心的距离
+local RAYCAST_DISTANCE = 8  -- studs downward to detect IdleFloor contact
 
 -- 状态变量
 local isOnIdleFloor = false  -- 当前是否在IdleFloor上
@@ -113,30 +113,21 @@ local function IsCharacterOnIdleFloor()
 		return false
 	end
 
-	-- 计算角色与IdleFloor中心的距离
-	local characterPos = humanoidRootPart.Position
-	local floorPos = idleFloor.Position
-	local floorSize = idleFloor.Size
+	local origin = humanoidRootPart.Position
+	local direction = Vector3.new(0, -RAYCAST_DISTANCE, 0)
 
-	-- 检查X和Z轴是否在IdleFloor范围内（加上阈值）
-	local halfSizeX = floorSize.X / 2 + DISTANCE_THRESHOLD
-	local halfSizeZ = floorSize.Z / 2 + DISTANCE_THRESHOLD
+	local rayParams = RaycastParams.new()
+	rayParams.FilterType = Enum.RaycastFilterType.Whitelist
+	rayParams.FilterDescendantsInstances = { idleFloor }
+	rayParams.IgnoreWater = true
 
-	local deltaX = math.abs(characterPos.X - floorPos.X)
-	local deltaZ = math.abs(characterPos.Z - floorPos.Z)
+	local hit = workspace:Raycast(origin, direction, rayParams)
 
-	-- Y轴检查（角色在IdleFloor上方或稍微下方）
-	local deltaY = characterPos.Y - floorPos.Y
-	local isOnY = deltaY > -5 and deltaY < 20  -- 允许在IdleFloor下方5studs到上方20studs
-
-	local isInBounds = deltaX <= halfSizeX and deltaZ <= halfSizeZ and isOnY
-
-	if DEBUG_MODE and isInBounds then
-		print(string.format("[BackpackTrigger] 角色在IdleFloor上 - deltaX:%.2f, deltaZ:%.2f, deltaY:%.2f",
-			deltaX, deltaZ, deltaY))
+	if DEBUG_MODE and hit then
+		print(string.format("[BackpackTrigger] IdleFloor contact - hitY:%.2f", hit.Position.Y))
 	end
 
-	return isInBounds
+	return hit ~= nil
 end
 
 local function HasAvailableUnits()
