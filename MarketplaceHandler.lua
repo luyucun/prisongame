@@ -31,6 +31,7 @@ local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild
 local ShopConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("ShopConfig"))
 local SkillConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("SkillConfig"))
 local SkillShopConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("SkillShopConfig"))
+local LimitPrisonerConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("LimitPrisonerConfig"))
 
 -- 挂机金币10倍购买
 local IDLE_COIN_PRODUCT_ID = 3487946200
@@ -66,8 +67,11 @@ local InventorySystem = nil
 local DataManager = nil
 local IdleCoinSystem = nil
 local SevenDaysSystem = nil
+local TaskSystem = nil
 local armyPackEvents = nil
 local armyPackPurchaseResultEvent = nil
+local limitPrisonerEvents = nil
+local limitPrisonerPurchaseResultEvent = nil
 local reviveEvents = nil
 local reviveResultEvent = nil
 
@@ -132,6 +136,21 @@ local function GetSevenDaysSystem()
 	return SevenDaysSystem
 end
 
+local function GetTaskSystem()
+	if not TaskSystem then
+		local taskModule = ServerScriptService.Systems:FindFirstChild("TaskSystem")
+		if taskModule and taskModule:IsA("ModuleScript") then
+			local ok, result = pcall(require, taskModule)
+			if ok then
+				TaskSystem = result
+			else
+				warn("[MarketplaceHandler] TaskSystem妯″潡鍔犺浇澶辫触:", result)
+			end
+		end
+	end
+	return TaskSystem
+end
+
 local function EnsureArmyPackEvents()
 	if armyPackPurchaseResultEvent then
 		return true
@@ -171,6 +190,48 @@ local function SendArmyPackPurchaseResult(player, success, message, productId, r
 	end
 	if armyPackPurchaseResultEvent then
 		armyPackPurchaseResultEvent:FireClient(player, success, message or "", productId, rewards)
+	end
+end
+
+local function EnsureLimitPrisonerEvents()
+	if limitPrisonerPurchaseResultEvent then
+		return true
+	end
+
+	local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
+	if not eventsFolder then
+		eventsFolder = Instance.new("Folder")
+		eventsFolder.Name = "Events"
+		eventsFolder.Parent = ReplicatedStorage
+	end
+
+	limitPrisonerEvents = eventsFolder:FindFirstChild("LimitPrisonerEvents")
+	if not limitPrisonerEvents then
+		limitPrisonerEvents = Instance.new("Folder")
+		limitPrisonerEvents.Name = "LimitPrisonerEvents"
+		limitPrisonerEvents.Parent = eventsFolder
+	end
+
+	local event = limitPrisonerEvents:FindFirstChild("LimitPrisonerPurchaseResult")
+	if not event then
+		event = Instance.new("RemoteEvent")
+		event.Name = "LimitPrisonerPurchaseResult"
+		event.Parent = limitPrisonerEvents
+	end
+
+	limitPrisonerPurchaseResultEvent = event
+	return true
+end
+
+local function SendLimitPrisonerPurchaseResult(player, success, message, unitId)
+	if not player or not player.Parent then
+		return
+	end
+	if not EnsureLimitPrisonerEvents() then
+		return
+	end
+	if limitPrisonerPurchaseResultEvent then
+		limitPrisonerPurchaseResultEvent:FireClient(player, success, message or "", "Robux", unitId or "", nil)
 	end
 end
 
@@ -293,6 +354,13 @@ local function GrantUnitProduct(player, unitId, shopId)
 	end
 
 	-- 扣除库存（如果启用库存系统）
+	if tostring(shopId) == "LimitPrisoner" then
+		local taskSystem = GetTaskSystem()
+		if taskSystem and taskSystem.OnPurchaseUnit then
+			taskSystem.OnPurchaseUnit(player, unitId)
+		end
+	end
+
 	if GameConfig.Shop.EnableStockSystem then
 		local ShopSystem = require(ServerScriptService.Systems:WaitForChild("ShopSystem"))
 		-- 注意：这里不扣除库存，因为Robux购买不受库存限制
@@ -439,6 +507,8 @@ function MarketplaceHandler.ProcessReceipt(receiptInfo)
 
 		-- 4. 转换ProductId为字符串（兼容配置格式）
 		local productIdStr = tostring(receiptInfo.ProductId)
+		local limitPrisoner = LimitPrisonerConfig.GetPrisonerByDevProductId(receiptInfo.ProductId)
+		local limitUnitId = limitPrisoner and tostring(limitPrisoner.UnitId or "") or nil
 
 		if DEBUG_MODE then
 			print(string.format(
@@ -459,7 +529,12 @@ function MarketplaceHandler.ProcessReceipt(receiptInfo)
 		local grantSuccess = false
 		local grantMessage = ""
 
-		if unitId then
+		if limitUnitId and limitUnitId ~= "" then
+			grantSuccess, grantMessage = GrantUnitProduct(player, limitUnitId, "LimitPrisoner")
+			if grantSuccess then
+				SendLimitPrisonerPurchaseResult(player, true, "Purchase successful.", limitUnitId)
+			end
+		elseif unitId then
 			-- 发放兵种
 			grantSuccess, grantMessage = GrantUnitProduct(player, unitId, unitShopId)
 		elseif skillId then

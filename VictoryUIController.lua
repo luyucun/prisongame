@@ -80,6 +80,7 @@ local currentRevivePrice = nil
 local reviveAvailable = false
 local revivePromptInProgress = false
 local reviveResultConnected = false
+local REVIVE_BUTTON_ENABLED = false
 
 -- 调试日志（已禁用）
 local function DebugLog(...)
@@ -596,7 +597,7 @@ local function ShowVictoryUI(battleId, result, stageNum, extraRewards)
     DebugLog(string.format("显示结算界面 - BattleId: %d, Result: %s, Stage: %d",
         battleId, tostring(result), stageNum))
 
-    if battleId == 0 and tostring(result) == "Defense" then
+    if REVIVE_BUTTON_ENABLED and battleId == 0 and tostring(result) == "Defense" then
         local _, productId, price = GetReviveConfig()
         if productId and price and (reviveButton or reviveFrame) then
             reviveAvailable = true

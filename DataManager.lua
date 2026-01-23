@@ -150,6 +150,21 @@ PlayerData = {
     GroupRewardData = {        -- V4.9加入群组奖励
         Claimed = boolean,     -- 是否已领取群组奖励
     },
+    HandcuffData = {           -- V6.0手铐道具
+        Count = number,        -- 手铐数量
+    },
+    LimitPrisonerData = {      -- V6.0限时囚犯
+        CurrentUnitId = string,
+        LastRefreshTime = number,
+        NextRefreshTime = number,
+        GoldPurchased = boolean,
+        Redeemed = boolean,
+    },
+    OnlineRewardData = {       -- V6.1在线奖励
+        LastRefreshDay = number,    -- 上次重置UTC日索引
+        TotalOnlineSeconds = number,-- 当日累计在线秒数
+        ClaimedRewards = {},        -- 已领取奖励 {[rewardId] = true}
+    },
     LastSaveTime = number,     -- 最后保存时间
 }
 ]]
@@ -297,6 +312,15 @@ local function LoadFromDataStore(player)
 			if data.GroupRewardData then
 				data.GroupRewardData = RestoreFromDataStore(data.GroupRewardData)  -- V4.9加入群组奖励
 			end
+			if data.HandcuffData then
+				data.HandcuffData = RestoreFromDataStore(data.HandcuffData)  -- V6.0手铐道具
+			end
+			if data.LimitPrisonerData then
+				data.LimitPrisonerData = RestoreFromDataStore(data.LimitPrisonerData)  -- V6.0限时囚犯
+			end
+			if data.OnlineRewardData then
+				data.OnlineRewardData = RestoreFromDataStore(data.OnlineRewardData)  -- V6.1在线奖励
+			end
 			if data.SoundSettings then
 				data.SoundSettings = RestoreFromDataStore(data.SoundSettings)  -- V4.6：恢复音效设置
 			end
@@ -365,6 +389,9 @@ local function SaveToDataStore(player, playerData, userId)
 		StarterPackData = SanitizeForDataStore(playerData.StarterPackData),  -- V5.4新手礼包
 		VipData = SanitizeForDataStore(playerData.VipData),  -- V5.5 VIP礼包
 		GroupRewardData = SanitizeForDataStore(playerData.GroupRewardData),  -- V4.9加入群组奖励
+		HandcuffData = SanitizeForDataStore(playerData.HandcuffData),  -- V6.0手铐道具
+		LimitPrisonerData = SanitizeForDataStore(playerData.LimitPrisonerData),  -- V6.0限时囚犯
+		OnlineRewardData = SanitizeForDataStore(playerData.OnlineRewardData),  -- V6.1在线奖励
 		LastSaveTime = os.time(),
 	}
 
@@ -524,6 +551,95 @@ local function NormalizeVipData(data)
     return data
 end
 
+local function BuildDefaultHandcuffData()
+    return {
+        Count = 0,
+    }
+end
+
+local function NormalizeHandcuffData(data)
+    if type(data) ~= "table" then
+        return BuildDefaultHandcuffData()
+    end
+
+    local count = tonumber(data.Count) or 0
+    if count < 0 then
+        count = 0
+    end
+    data.Count = math.floor(count)
+    return data
+end
+
+local function BuildDefaultLimitPrisonerData()
+    return {
+        CurrentUnitId = "",
+        LastRefreshTime = 0,
+        NextRefreshTime = 0,
+        GoldPurchased = false,
+        Redeemed = false,
+    }
+end
+
+local function NormalizeLimitPrisonerData(data)
+    if type(data) ~= "table" then
+        return BuildDefaultLimitPrisonerData()
+    end
+
+    data.CurrentUnitId = tostring(data.CurrentUnitId or "")
+    data.LastRefreshTime = tonumber(data.LastRefreshTime) or 0
+    data.NextRefreshTime = tonumber(data.NextRefreshTime) or 0
+    data.GoldPurchased = data.GoldPurchased == true
+    data.Redeemed = data.Redeemed == true
+
+    if data.LastRefreshTime < 0 then
+        data.LastRefreshTime = 0
+    end
+    if data.NextRefreshTime < 0 then
+        data.NextRefreshTime = 0
+    end
+
+    return data
+end
+
+local function BuildDefaultOnlineRewardData(now)
+	return {
+		LastRefreshDay = GetUtcDayIndex(now),
+		TotalOnlineSeconds = 0,
+		ClaimedRewards = {},
+	}
+end
+
+local function NormalizeOnlineRewardData(data)
+	if type(data) ~= "table" then
+		return BuildDefaultOnlineRewardData(os.time())
+	end
+
+	local refreshDay = tonumber(data.LastRefreshDay)
+	if not refreshDay or refreshDay < 0 then
+		refreshDay = GetUtcDayIndex(os.time())
+	end
+	data.LastRefreshDay = refreshDay
+
+	local totalSeconds = tonumber(data.TotalOnlineSeconds) or 0
+	if totalSeconds < 0 then
+		totalSeconds = 0
+	end
+	data.TotalOnlineSeconds = math.floor(totalSeconds)
+
+	local claimed = {}
+	if type(data.ClaimedRewards) == "table" then
+		for key, value in pairs(data.ClaimedRewards) do
+			local rewardId = tonumber(key)
+			if rewardId and value == true then
+				claimed[rewardId] = true
+			end
+		end
+	end
+	data.ClaimedRewards = claimed
+
+	return data
+end
+
 --[[
 创建默认玩家数据
 @param player Player - 玩家对象
@@ -581,6 +697,9 @@ local function CreateDefaultData(player)
         StarterPackData = BuildDefaultStarterPackData(), -- V5.4新手礼包
         VipData = BuildDefaultVipData(), -- V5.5 VIP礼包
         GroupRewardData = BuildDefaultGroupRewardData(), -- V4.9加入群组奖励
+        HandcuffData = BuildDefaultHandcuffData(), -- V6.0手铐道具
+        LimitPrisonerData = BuildDefaultLimitPrisonerData(), -- V6.0限时囚犯
+        OnlineRewardData = BuildDefaultOnlineRewardData(os.time()), -- V6.1在线奖励
         LastSaveTime = os.time(),
     }
 end
@@ -729,6 +848,181 @@ function DataManager.SetGroupRewardClaimed(player, claimed)
     end
 
     rewardData.Claimed = claimed == true
+    return true
+end
+
+-- ==================== V6.0限时囚犯/手铐接口 ====================
+
+function DataManager.GetHandcuffData(player)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData then
+        return nil
+    end
+
+    if not playerData.HandcuffData then
+        playerData.HandcuffData = BuildDefaultHandcuffData()
+    else
+        playerData.HandcuffData = NormalizeHandcuffData(playerData.HandcuffData)
+    end
+
+    return playerData.HandcuffData
+end
+
+function DataManager.GetHandcuffCount(player)
+    local data = DataManager.GetHandcuffData(player)
+    if not data then
+        return 0
+    end
+    return tonumber(data.Count) or 0
+end
+
+function DataManager.SetHandcuffCount(player, count)
+    local data = DataManager.GetHandcuffData(player)
+    if not data then
+        warn(GameConfig.LOG_PREFIX, "SetHandcuffCount: 找不到玩家数据")
+        return false
+    end
+
+    local value = tonumber(count) or 0
+    if value < 0 then
+        value = 0
+    end
+    data.Count = math.floor(value)
+    return true
+end
+
+function DataManager.AddHandcuffs(player, amount)
+    local data = DataManager.GetHandcuffData(player)
+    if not data then
+        warn(GameConfig.LOG_PREFIX, "AddHandcuffs: 找不到玩家数据")
+        return false, 0
+    end
+
+    local add = tonumber(amount) or 0
+    if add <= 0 then
+        return false, data.Count or 0
+    end
+
+    data.Count = math.floor((tonumber(data.Count) or 0) + add)
+    return true, data.Count
+end
+
+function DataManager.RemoveHandcuffs(player, amount)
+    local data = DataManager.GetHandcuffData(player)
+    if not data then
+        warn(GameConfig.LOG_PREFIX, "RemoveHandcuffs: 找不到玩家数据")
+        return false, 0
+    end
+
+    local removeCount = tonumber(amount) or 0
+    if removeCount <= 0 then
+        return false, data.Count or 0
+    end
+
+    local current = tonumber(data.Count) or 0
+    if current < removeCount then
+        return false, current
+    end
+
+    data.Count = math.floor(current - removeCount)
+    return true, data.Count
+end
+
+function DataManager.GetLimitPrisonerData(player)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData then
+        return nil
+    end
+
+    if not playerData.LimitPrisonerData then
+        playerData.LimitPrisonerData = BuildDefaultLimitPrisonerData()
+    else
+        playerData.LimitPrisonerData = NormalizeLimitPrisonerData(playerData.LimitPrisonerData)
+    end
+
+    return playerData.LimitPrisonerData
+end
+
+-- ==================== V6.1在线奖励接口 ====================
+
+function DataManager.GetOnlineRewardData(player)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData then
+        return nil
+    end
+
+    if not playerData.OnlineRewardData then
+        playerData.OnlineRewardData = BuildDefaultOnlineRewardData(os.time())
+    else
+        playerData.OnlineRewardData = NormalizeOnlineRewardData(playerData.OnlineRewardData)
+    end
+
+    return playerData.OnlineRewardData
+end
+
+function DataManager.SetOnlineRewardSeconds(player, seconds)
+    local data = DataManager.GetOnlineRewardData(player)
+    if not data then
+        warn(GameConfig.LOG_PREFIX, "SetOnlineRewardSeconds: 找不到玩家数据")
+        return false
+    end
+
+    local value = tonumber(seconds) or 0
+    if value < 0 then
+        value = 0
+    end
+    data.TotalOnlineSeconds = math.floor(value)
+    return true
+end
+
+function DataManager.SetOnlineRewardClaimed(player, rewardId, claimed)
+    local data = DataManager.GetOnlineRewardData(player)
+    if not data then
+        warn(GameConfig.LOG_PREFIX, "SetOnlineRewardClaimed: 找不到玩家数据")
+        return false
+    end
+
+    local id = tonumber(rewardId)
+    if not id then
+        return false
+    end
+
+    data.ClaimedRewards = data.ClaimedRewards or {}
+    if claimed == true then
+        data.ClaimedRewards[id] = true
+    else
+        data.ClaimedRewards[id] = nil
+    end
+
+    return true
+end
+
+function DataManager.SetOnlineRewardRefreshDay(player, refreshDay)
+    local data = DataManager.GetOnlineRewardData(player)
+    if not data then
+        warn(GameConfig.LOG_PREFIX, "SetOnlineRewardRefreshDay: 找不到玩家数据")
+        return false
+    end
+
+    local day = tonumber(refreshDay)
+    if not day or day < 0 then
+        day = GetUtcDayIndex(os.time())
+    end
+    data.LastRefreshDay = day
+    return true
+end
+
+function DataManager.ResetOnlineRewardData(player, now)
+    local data = DataManager.GetOnlineRewardData(player)
+    if not data then
+        warn(GameConfig.LOG_PREFIX, "ResetOnlineRewardData: 找不到玩家数据")
+        return false
+    end
+
+    local dayIndex = GetUtcDayIndex(now or os.time())
+    data.LastRefreshDay = dayIndex
+    data.TotalOnlineSeconds = 0
+    data.ClaimedRewards = {}
     return true
 end
 
@@ -946,6 +1240,27 @@ function DataManager.InitializePlayerData(player)
             playerData.GroupRewardData = BuildDefaultGroupRewardData()
         else
             playerData.GroupRewardData = NormalizeGroupRewardData(playerData.GroupRewardData)
+        end
+
+        -- V6.0手铐道具：确保HandcuffData字段存在（向后兼容）
+        if not playerData.HandcuffData then
+            playerData.HandcuffData = BuildDefaultHandcuffData()
+        else
+            playerData.HandcuffData = NormalizeHandcuffData(playerData.HandcuffData)
+        end
+
+        -- V6.0限时囚犯：确保LimitPrisonerData字段存在（向后兼容）
+        if not playerData.LimitPrisonerData then
+            playerData.LimitPrisonerData = BuildDefaultLimitPrisonerData()
+        else
+            playerData.LimitPrisonerData = NormalizeLimitPrisonerData(playerData.LimitPrisonerData)
+        end
+
+        -- V6.1在线奖励：确保OnlineRewardData字段存在（向后兼容）
+        if not playerData.OnlineRewardData then
+            playerData.OnlineRewardData = BuildDefaultOnlineRewardData(os.time())
+        else
+            playerData.OnlineRewardData = NormalizeOnlineRewardData(playerData.OnlineRewardData)
         end
 
         -- V4.6设置系统：确保SoundSettings字段存在（向后兼容）

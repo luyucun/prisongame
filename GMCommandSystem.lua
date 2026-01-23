@@ -32,6 +32,8 @@ GM命令系统模块
 - /resetdailyreward : 重置今日免费奖励领取状态 (V5.3)
 - /resetstarterpack : 重置新手礼包购买状态 (V5.4)
 - /resetvip : 重置VIP礼包购买状态 (V5.5)
+- /addhandcuff <count> : 添加手铐道具 (V6.0)
+- /resetonlinereward : Reset online reward data (V6.1)
 ]]
 
 local GMCommandSystem = {}
@@ -61,6 +63,7 @@ local SevenDaysSystem = nil   -- V4.8新增：延迟加载，避免循环依赖
 local DailyRewardSystem = nil -- V5.3新增：延迟加载，避免循环依赖
 local StarterPackSystem = nil -- V5.4新增：延迟加载，避免循环依赖
 local VipSystem = nil         -- V5.5新增：延迟加载，避免循环依赖
+local LimitPrisonerSystem = nil -- V6.0新增：延迟加载，避免循环依赖
 
 -- ==================== 配置 ====================
 
@@ -363,6 +366,8 @@ VIP礼包(V5.5):
 /help - 显示此帮助
 
 提示: 按V键打开战斗测试UI
+/addonlinetime <minutes> - add online reward time (V6.1)
+/resetonlinereward - reset online reward data (V6.1)
     ]]
     SendMessage(player, helpText)
 end
@@ -754,6 +759,35 @@ local function CMD_AddIdleCoins(player, args)
         SendMessage(player, "请靠近Mail模型长按E键领取")
     else
         SendMessage(player, "添加挂机金币失败")
+    end
+end
+
+--[[
+命令: /addhandcuff [count]
+添加手铐道具 V6.0
+默认添加1个
+]]
+local function CMD_AddHandcuff(player, args)
+    if not LimitPrisonerSystem then
+        LimitPrisonerSystem = require(ServerScriptService.Systems.LimitPrisonerSystem)
+    end
+
+    local count = tonumber(args[1]) or 1
+    if count <= 0 then
+        SendMessage(player, "错误: 数量必须大于0")
+        return
+    end
+
+    local success, newCount = DataManager.AddHandcuffs(player, count)
+    if success then
+        SendMessage(player, string.format("成功添加 %d 个手铐", count))
+        SendMessage(player, string.format("当前手铐数量: %d", newCount or 0))
+        DataManager.SavePlayerDataThrottled(player)
+        if LimitPrisonerSystem and LimitPrisonerSystem.SyncPlayer then
+            LimitPrisonerSystem.SyncPlayer(player)
+        end
+    else
+        SendMessage(player, "添加手铐失败")
     end
 end
 
@@ -1230,6 +1264,88 @@ local function CMD_ListGuides(player, args)
 end
 
 -- 命令映射表
+CMD_AddHandcuff = function(player, args)
+    if not LimitPrisonerSystem then
+        LimitPrisonerSystem = require(ServerScriptService.Systems.LimitPrisonerSystem)
+    end
+
+    local count = tonumber(args[1]) or 1
+    if count <= 0 then
+        SendMessage(player, "Error: count must be greater than 0.")
+        return
+    end
+
+    local success, newCount = DataManager.AddHandcuffs(player, count)
+    if success then
+        SendMessage(player, string.format("Added %d handcuff(s).", count))
+        SendMessage(player, string.format("Current handcuff count: %d", newCount or 0))
+        DataManager.SavePlayerDataThrottled(player)
+        if LimitPrisonerSystem and LimitPrisonerSystem.SyncPlayer then
+            LimitPrisonerSystem.SyncPlayer(player)
+        end
+    else
+        SendMessage(player, "Failed to add handcuffs.")
+    end
+end
+
+--[[
+Command: /addonlinetime [minutes]
+Add online reward time in minutes (V6.1)
+Default: 10 minutes
+]]
+local function CMD_AddOnlineTime(player, args)
+    local minutes = tonumber(args[1]) or 10
+    if minutes <= 0 then
+        SendMessage(player, "Error: minutes must be greater than 0.")
+        return
+    end
+
+    local onlineRewardSystem = require(ServerScriptService.Systems.OnlineRewardSystem)
+    if onlineRewardSystem and onlineRewardSystem.SyncPlayer then
+        onlineRewardSystem.SyncPlayer(player)
+    end
+
+    local rewardData = DataManager.GetOnlineRewardData(player)
+    if not rewardData then
+        SendMessage(player, "Online reward data not ready.")
+        return
+    end
+
+    local secondsToAdd = math.floor(minutes * 60)
+    local currentSeconds = tonumber(rewardData.TotalOnlineSeconds) or 0
+    rewardData.TotalOnlineSeconds = currentSeconds + secondsToAdd
+
+    DataManager.SavePlayerDataThrottled(player)
+
+    if onlineRewardSystem and onlineRewardSystem.SyncPlayer then
+        onlineRewardSystem.SyncPlayer(player)
+    end
+
+    SendMessage(player, string.format("Added %d minute(s) of online time.", minutes))
+    SendMessage(player, string.format("Total online seconds today: %d", rewardData.TotalOnlineSeconds or 0))
+end
+
+--[[
+Command: /resetonlinereward
+Reset online reward data (V6.1)
+]]
+local function CMD_ResetOnlineReward(player, args)
+    local success = DataManager.ResetOnlineRewardData(player, os.time())
+    if not success then
+        SendMessage(player, "Online reward reset failed.")
+        return
+    end
+
+    DataManager.SavePlayerDataThrottled(player)
+
+    local onlineRewardSystem = require(ServerScriptService.Systems.OnlineRewardSystem)
+    if onlineRewardSystem and onlineRewardSystem.SyncPlayer then
+        onlineRewardSystem.SyncPlayer(player)
+    end
+
+    SendMessage(player, "Online reward reset complete.")
+end
+
 local COMMAND_HANDLERS = {
     ["addunit"] = CMD_AddUnit,
     ["listunits"] = CMD_ListUnits,
@@ -1246,6 +1362,7 @@ local COMMAND_HANDLERS = {
     ["stopbattle"] = CMD_StopBattle,      -- V1.5新增
     ["clearbattle"] = CMD_ClearBattle,    -- V1.5新增
     ["addidlecoins"] = CMD_AddIdleCoins,  -- V2.6新增
+    ["addhandcuff"] = CMD_AddHandcuff,    -- V6.0新增
     ["idlecoins"] = CMD_IdleCoins,        -- V2.6新增
     ["resetdata"] = CMD_ResetData,        -- V2.9新增
     ["mainprogress"] = CMD_MainProgress,  -- 主线通关打点
@@ -1262,6 +1379,8 @@ local COMMAND_HANDLERS = {
     ["resetguide"] = CMD_ResetGuide,      -- V3.5新增
     ["resetallguides"] = CMD_ResetAllGuides,  -- V3.5新增
     ["listguides"] = CMD_ListGuides,      -- V3.5新增
+    ["addonlinetime"] = CMD_AddOnlineTime, -- V6.1
+    ["resetonlinereward"] = CMD_ResetOnlineReward, -- V6.1
     ["help"] = CMD_Help,
 }
 

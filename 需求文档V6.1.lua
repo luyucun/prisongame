@@ -1976,3 +1976,119 @@ VIP相关权益是：
 
 1.Victory - Information - Revive - Confirm - Price是复活道具的价格，显示时需要把这个文本改成对应的价格数值
 2.第一章价格：9，第二章价格29，第三章价格79，这些加到配置中
+
+
+需求文档V6.0 限时囚犯刷新
+
+概述：我们会给每个玩家的基地中，刷新一些限时囚犯，在普通商店买不到的那种让玩家购买
+
+详细规则：
+
+1.每个玩家的基地中，都有一个叫PrisonNaoHong的模型，比如PlayerHome6，路径就是Workspace - Home - PlayerHome6 - PrisonNaoHong
+2.在PrisonNaoHong下，有个叫RefreshPart的Part，每次刷新限时囚犯时，需要刷新在这个Part上
+3.刷新出来的囚犯，需要在这个Part上自主循环播放展示动画，类似摆放在idlefloor上时的动作
+
+刷新规则是：
+1.新增一张限时囚犯表，配置可刷新的囚犯id，刷新权重等，每次刷新时根据权重来进行刷新
+2.目前的限时囚犯表是：
+
+囚犯id	刷新权重
+10021	25
+10022	25
+10023	25
+10024	13
+10025	13
+
+3.刷新初始点是：每天的utc0点和utc12点，但是如果玩家是新玩家，进入游戏后立刻执行一次刷新，然后每天的utc0点和utc12点准时刷新一次，也就是比如玩家utc11点59分作为新用户进入游戏，进入时立刻刷新一次，等到1分钟后后又会再次刷新一次
+
+4.RefreshPart - SurfaceGui - Bg - Time是一个textlabel，用于显示刷新倒计时，内容是：Refreshes In:xx:yy,xx:yy是小时和分钟，如果进入到1分钟以内就是分钟和秒，注意要把xx:yy改成绿色，其他部分是默认颜色
+
+关于客户端界面规则是这样的：
+
+1.玩家靠近PrisonNaoHong，在PrisonNaoHong的PrimaryPart上生成系统默认的交互键，点击交互键，可以打开购买限时囚犯的界面
+2.打开界面就是把StarterGui - LimitPrisoner - StoreBg的visible属性改成true，点击StarterGui - LimitPrisoner - StoreBg - CloseButton关闭界面，就是把StarterGui - LimitPrisoner - StoreBg的visible属性改成false
+3.其中跟ArmyStore商店一样的逻辑，LimitPrisoner - StoreBg - ItemCardTemplate下的结构和ArmyStore逻辑一样，ItemCardTemplate - IconBg - Icon显示囚犯的头像，ATK是攻击力，HP是血量，Level是等级信息，Name是名字，Number是库存，这里固定都是1，Price是金币价格，Quality是品质，Range是近战还是远程，这些信息都需要显示正确
+4.玩家点击LimitPrisoner - StoreBg - BuyButtonFrame - GoldBuy触发对该商品的金币购买，点击LimitPrisoner - StoreBg - BuyButtonFrame - RobuxBuy触发对该商品的罗布币购买，与商店逻辑一致。并且GoldBuy - Price和RobuxBuy - Price这俩的文本都需要显示为正确的价格信息
+
+新增一个道具：手铐，这个道具我会在其他系统中产出，这里先不用管，但是需要先把手铐的逻辑给加好
+
+我们新增一个逻辑：
+1.每个刷新出来的限时兵种，都可以用多个手铐来进行兑换，我会在限时囚犯表中新增兑换所需要的手铐的数量
+2.StarterGui - LimitPrisoner - StoreBg - FreeButton - ProgressNum是当前的手铐数量/要求的手铐数量，格式是x/y，x是已经有的数量，y是需要的数量，如果x小于y，则需要把x的颜色改成红色，如果大于等于，就正常显示即可
+3.玩家点击StarterGui - LimitPrisoner - StoreBg - FreeButton - Redeem按钮，触发对该囚犯的兑换，如果数量足够兑换则扣除道具并发放一个这个囚犯，兑换成功时弹出获得的弹框，这里用和商店里的每日免费奖励抽取一样的获得效果弹框
+4.如果玩家的数量不足，点击Redeem按钮，则关闭界面并立刻打开在线奖励弹框。（这个下个版本做，这里先不处理）
+5.玩家兑换成功后，按钮隐藏，并把StoreBg - FreeButton - Claimed显示出来
+6.当刷新后，再次把按钮状态重置回未购买的状态
+
+
+购买次数
+每次刷新出来的限时囚犯，只可以用金币购买一次，购买完后就无法购买了，但是可以花费罗布币购买
+具体逻辑是：金币购买完成后，把金币按钮隐藏，并把RobuxBuy按钮的position的X轴改成0.5
+每次新囚犯刷新后，再重置回默认状态
+
+StarterGui - LimitPrisoner - StoreBg - Title是刷新倒计时，内容是：Refreshes In:xx:yy,xx:yy是小时和分钟，如果进入到1分钟以内就是分钟和秒，注意要把xx:yy改成绿色，其他部分是默认颜色
+
+补充：
+需要加一个gm命令，为我添加x个手铐道具
+
+
+需求文档V6.1  在线奖励
+
+概述：我们需要加一个在线奖励系统，玩家累计到达一定的在线时长，可以获得对应奖励
+
+详细规则：
+1.我们的在线时长是配置秒，需要在对应的客户端中转换成对应的小时和分钟
+2.我们的在线奖励在每天的utc0点重置奖励领取状态与重置在线时长累计
+3.在一天内玩家多次上线离线再上线，总的在线时长是累加的，只有到utc0点的时候会重置
+
+我们的奖励类型有：
+1.发送具体的数量的兵种
+2.发放具体数量的金币
+3.发放指定id 的技能
+4.发放道具“手铐”
+
+我们目前规划的在线奖励要求的时长与对应的奖励内容是：
+id	时间（秒）	奖励	数量
+1	180	技能1001	1
+2	360	囚犯10002	2
+3	600	金币	2000
+4	900	金币	2000
+5	1500	手铐	1
+6	2400	技能1002	5
+7	3000	小兵10008	2
+8	3600	金币	5000
+9	4500	小兵10010	3
+10	5400	手铐	1
+
+相应的客户端规则是：
+1.玩家点击StarterGui - TopRightGui - Bg - Online这个按钮，可以打开在线奖励界面（将StarterGui - OnlineReward - Bg的visible属性改成true）
+2.玩家点击StarterGui - OnlineReward - Bg - Title - CloseButton按钮，关闭奖励界面（将StarterGui - OnlineReward - Bg的visible属性改成false）
+3.StarterGui - OnlineReward - Bg - NextReward是一个textlabel，用来显示玩家距离下一个奖励可领取还有多久倒计时，格式是：Next Reward:xx:yy，xx是分钟，yy是秒，比如下个奖励还有3分钟，就03:00,倒计时结束后下个奖励还有15分钟，就显示为15：00
+4.当有可领取的在线奖励时，需要把StarterGui - TopRightGui - Bg - Online - RedPoint的visible属性改成true，领取完后再隐藏
+
+下面介绍在线奖励详细具体单个奖励的对应规则：
+1.以StarterGui - OnlineReward - Bg - Bg01 - Reward01为例子，这是我们的第一份奖励，对应id是1的那份奖励
+2.在奖励还不能领取的时候，OnlineReward - Bg - Bg01 - Reward01 - Time是一个textlabel，用于显示这个奖励还有多久才能领取，格式是xx:yy，xx是分钟，yy是秒，哪怕超过了100分钟，也显示是分钟
+3.前面一个奖励如果还未倒计时结束，这个奖励还不能领取时，这里的文本保持默认的内容，代码不控制，只有在下一个可领取的奖励就是这个奖励时，才把文本变成倒计时样式
+4.当奖励变成可领取状态时，需要把OnlineReward - Bg - Bg01 - Reward01 - Time隐藏，把OnlineReward - Bg - Bg01 - Reward01 - Claim按钮显示出来
+5.玩家点击claim按钮，给玩法发放道具，并且走一遍和shop里面获取免费奖励时一样的奖励获得弹框效果（上面的限时囚犯功能里也用了一样的表现）
+6.玩家领取后，把OnlineReward - Bg - Bg01 - Reward01 - Claim也隐藏，然后把OnlineReward - Bg - Bg01 - Reward01 - Claimed显示出来
+7.等奖励重置后，再把所有ui内容重置回默认状态
+
+每个奖励对应的具体的ui是：
+
+id	路径
+1	StarterGui - OnlineReward - Bg - Bg01 - Reward01
+2	StarterGui - OnlineReward - Bg - Bg01 - Reward02
+3	StarterGui - OnlineReward - Bg - Bg01 - Reward03
+4	StarterGui - OnlineReward - Bg - Bg01 - Reward04
+5	StarterGui - OnlineReward - Bg - Bg01 - Reward05
+6	StarterGui - OnlineReward - Bg - Bg02 - Reward01
+7	StarterGui - OnlineReward - Bg - Bg02 - Reward02
+8	StarterGui - OnlineReward - Bg - Bg03 - Reward03
+9	StarterGui - OnlineReward - Bg - Bg04 - Reward04
+10	StarterGui - OnlineReward - Bg - Bg05 - Reward05
+
+补充个规则：
+StarterGui - TopRightGui - Bg - Online - Time是一个textlabel，用于显示下一个可领取的奖励的倒计时，需要跟七日界面里最新的正在倒计时的奖励的倒计时对上，格式也一样，比如里面最新的第三个奖励在倒计时，这里也显示第三个的倒计时
+

@@ -143,6 +143,14 @@ ReplicatedStorage
         └──VipPurchaseResult（RemoteEvent） - 服务器→客户端：购买结果(success, message)
     └──ArmyPackEvents（Folder）/  【V5.6新增 - 兵种礼包开发者商品】
         └──ArmyPackPurchaseResult（RemoteEvent） - 服务器→客户端：购买结果(success, message, productId, rewards)
+    └──LimitPrisonerEvents（Folder）/  【V6.0新增 - 限时囚犯】
+        ├──RequestLimitPrisonerData（RemoteEvent） - 客户端→服务器：请求限时囚犯数据
+        ├──LimitPrisonerData（RemoteEvent） - 服务器→客户端：限时囚犯数据(unitId, prices, handcuffs, refreshTime)
+        ├──PurchaseLimitPrisonerGold（RemoteEvent） - 客户端→服务器：金币购买限时囚犯
+        ├──PurchaseLimitPrisonerRobux（RemoteEvent） - 客户端→服务器：Robux购买限时囚犯
+        ├──RedeemLimitPrisoner（RemoteEvent） - 客户端→服务器：手铐兑换限时囚犯
+        ├──LimitPrisonerPurchaseResult（RemoteEvent） - 服务器→客户端：购买结果(success, message, purchaseType, unitId, newCoins)
+        └──LimitPrisonerRedeemResult（RemoteEvent） - 服务器→客户端：兑换结果(success, message, rewardInfo)
 
 
 如果需要补充新的RemoteEvent或者Remotefunction，请在这里列出来，我会自己去创建
@@ -1232,6 +1240,13 @@ CampaignStateUpdate事件变更（V3.6）：
 - HouseUpgradeSystem.lua:
   - HOUSE_CHANGE_EFFECT_DURATION = 1.5秒（特效持续时间）
 - HouseUpgradeCameraController.lua:
+
+V6.1 Online Reward RemoteEvents
+Location: ReplicatedStorage/Events/OnlineRewardEvents
+- RequestOnlineRewardData (RemoteEvent) - Client -> Server: request online reward data
+- OnlineRewardData (RemoteEvent) - Server -> Client: online reward data(totalOnlineSeconds, claimedRewards, serverTime, lastRefreshDay)
+- ClaimOnlineReward (RemoteEvent) - Client -> Server: claim online reward(rewardId)
+- ClaimOnlineRewardResult (RemoteEvent) - Server -> Client: claim result(success, message, rewardInfo, rewardId)
   - WAIT_AFTER_REPLACE = 3.0秒（房屋替换后等待时间，即镜头解锁前的等待）
 
 

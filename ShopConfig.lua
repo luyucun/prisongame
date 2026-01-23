@@ -403,8 +403,8 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10021",
-				Price = 30000,             -- 同步监狱数据表价格
-				RobuxPrice = 2999,
+				Price = 50000,             -- 同步监狱数据表价格
+				RobuxPrice = 899,
 				DevProductId = "3472104793", -- 同步监狱数据表开发者商品ID
 				Icon = "rbxassetid://102001177844916", -- 同步监狱数据表Icon
 				Sort = 210,
@@ -421,8 +421,8 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10022",
-				Price = 40000,             -- 同步监狱数据表价格
-				RobuxPrice = 3999,
+				Price = 60000,             -- 同步监狱数据表价格
+				RobuxPrice = 939,
 				DevProductId = "3472105103", -- 同步监狱数据表开发者商品ID
 				Icon = "rbxassetid://86449419798698", -- 同步监狱数据表Icon
 				Sort = 220,
@@ -439,8 +439,8 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10023",
-				Price = 50000,             -- 同步监狱数据表价格
-				RobuxPrice = 4999,
+				Price = 80000,             -- 同步监狱数据表价格
+				RobuxPrice = 999,
 				DevProductId = "3472104998", -- 同步监狱数据表开发者商品ID
 				Icon = "rbxassetid://96284212262078", -- 同步监狱数据表Icon
 				Sort = 230,
@@ -457,8 +457,8 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10024",
-				Price = 100000,             -- 同步监狱数据表价格
-				RobuxPrice = 9999,
+				Price = 120000,             -- 同步监狱数据表价格
+				RobuxPrice = 1099,
 				DevProductId = "3472105858", -- 同步监狱数据表开发者商品ID
 				Icon = "rbxassetid://102620601082371", -- 同步监狱数据表Icon
 				Sort = 240,
@@ -475,8 +475,8 @@ ShopConfig.Shops = {
 			{
 				ItemType = "Unit",
 				UnitId = "10025",
-				Price = 100000,             -- 同步监狱数据表价格
-				RobuxPrice = 9999,
+				Price = 140000,             -- 同步监狱数据表价格
+				RobuxPrice = 1199,
 				DevProductId = "3472105595", -- 同步监狱数据表开发者商品ID
 				Icon = "rbxassetid://105156254180465", -- 同步监狱数据表Icon
 				Sort = 250,

@@ -30,7 +30,15 @@ local CurrencySystem = require(ServerScriptService.Systems.CurrencySystem)
 local HomeSystem = require(ServerScriptService.Systems.HomeSystem)
 local InventorySystem = require(ServerScriptService.Systems.InventorySystem)
 local PlacementSystem = require(ServerScriptService.Systems.PlacementSystem)
-local MergeSystem = require(ServerScriptService.Systems.MergeSystem)  -- V1.4新增
+local MergeSystem = nil -- V1.4新增
+do
+    local mergeModule = ServerScriptService.Systems:FindFirstChild("MergeSystem")
+    if mergeModule and mergeModule:IsA("ModuleScript") then
+        MergeSystem = require(mergeModule)
+    else
+        warn(GameConfig.LOG_PREFIX, "MergeSystem module missing; merge disabled.")
+    end
+end
 local PowerSystem = require(ServerScriptService.Systems.PowerSystem) -- V3.9.2新增 战斗力系统
 local LeaderboardSystem = require(ServerScriptService.Systems.LeaderboardSystem) -- V4.7新增 排行榜系统
 local BadgeSystem = require(ServerScriptService.Systems.BadgeSystem) -- V4.4 badge system
@@ -59,6 +67,7 @@ local SkillShopSystem = require(ServerScriptService.Systems.SkillShopSystem)
 local CollisionSystem = require(ServerScriptService.Systems.CollisionSystem)
 -- V2.6新增 - 挂机金币系统
 local IdleCoinSystem = require(ServerScriptService.Systems.IdleCoinSystem)
+local LimitPrisonerSystem = require(ServerScriptService.Systems.LimitPrisonerSystem)
 -- V3.0新增 - 技能系统
 local SkillSystem = require(ServerScriptService.Systems.SkillSystem)
 -- V3.2新增 - Loading系统
@@ -73,6 +82,8 @@ local TalkSystem = require(ServerScriptService.Systems.TalkSystem)
 local SevenDaysSystem = require(ServerScriptService.Systems.SevenDaysSystem)
 -- V5.3新增 - 每日免费奖励
 local DailyRewardSystem = require(ServerScriptService.Systems.DailyRewardSystem)
+-- V6.1鏂板 - 鍦ㄧ嚎濂栧姳
+local OnlineRewardSystem = require(ServerScriptService.Systems.OnlineRewardSystem)
 -- V5.4新增 - 新手礼包
 local StarterPackSystem = require(ServerScriptService.Systems.StarterPackSystem)
 -- V5.5新增 - VIP礼包
@@ -182,14 +193,16 @@ local function InitializeServer()
     end
 
     -- 5.5. 初始化合成系统(连接合成事件) V1.4新增
-    success, result = pcall(function()
-        return MergeSystem.Initialize()
-    end)
-    if not success then
-        warn(GameConfig.LOG_PREFIX, "合成系统初始化失败(异常):", result)
-        -- 合成系统不是关键系统,失败不影响游戏运行
-    elseif result == false then
-        warn(GameConfig.LOG_PREFIX, "合成系统初始化失败(返回false),合成功能将不可用")
+    if MergeSystem then
+        success, result = pcall(function()
+            return MergeSystem.Initialize()
+        end)
+        if not success then
+            warn(GameConfig.LOG_PREFIX, "合成系统初始化失败(异常):", result)
+            -- 合成系统不是关键系统,失败不影响游戏运行
+        elseif result == false then
+            warn(GameConfig.LOG_PREFIX, "合成系统初始化失败(返回false),合成功能将不可用")
+        end
     end
 
     -- 5.55 初始化战斗力系统 (V3.9.2新增)
@@ -365,6 +378,16 @@ local function InitializeServer()
         warn(GameConfig.LOG_PREFIX, "挂机金币系统初始化失败(返回false)")
     end
 
+    -- 9.1 初始化限时囚犯系统 (V6.0新增)
+    success, result = pcall(function()
+        return LimitPrisonerSystem.Initialize()
+    end)
+    if not success then
+        warn(GameConfig.LOG_PREFIX, "限时囚犯系统初始化失败(异常):", result)
+    elseif result == false then
+        warn(GameConfig.LOG_PREFIX, "限时囚犯系统初始化失败(返回false)")
+    end
+
     -- 10. 初始化技能系统 (V3.0新增)
     success, result = pcall(function()
         return SkillSystem.Initialize()
@@ -486,6 +509,17 @@ local function InitializeServer()
     end
 
     -- 检查是否有关键系统初始化失败
+    -- Online reward system (V6.1)
+    success, result = pcall(function()
+        return OnlineRewardSystem.Initialize()
+    end)
+    if not success then
+        warn(GameConfig.LOG_PREFIX, "Online reward system init failed (error):", result)
+    elseif result == false then
+        warn(GameConfig.LOG_PREFIX, "Online reward system init failed (returned false)")
+    end
+
+    -- Check if any critical system failed
     if initializationFailed then
         warn("==========================================")
         warn(GameConfig.LOG_PREFIX, "警告: 一个或多个系统初始化失败!")
@@ -634,6 +668,12 @@ Players.PlayerAdded:Connect(function(player)
 		end)
 		LoadingSystem.NotifySceneSetup(player, 0.75)
 
+		-- V6.0新增：初始化限时囚犯系统（创建Prompt与刷新展示）
+		pcall(function()
+			LimitPrisonerSystem.OnPlayerJoin(player)
+		end)
+		LoadingSystem.NotifySceneSetup(player, 0.85)
+
 		-- V3.2: 通知场景设置完成
 		LoadingSystem.NotifySceneSetupComplete(player)
 
@@ -687,6 +727,11 @@ Players.PlayerRemoving:Connect(function(player)
 	-- 2. V2.6新增：记录玩家登出时间（用于挂机金币计算）
 	pcall(function()
 		IdleCoinSystem.OnPlayerLeave(player)
+	end)
+
+	-- V6.0新增：清理限时囚犯计时器
+	pcall(function()
+		LimitPrisonerSystem.OnPlayerLeave(player)
 	end)
 
 	-- 4. V3.5新增：清理玩家引导状态
