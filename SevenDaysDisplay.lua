@@ -247,7 +247,11 @@ local function UpdateFeatureVisibility()
 		BindRewardButtons()
 	end
 
-	local unlocked = player:GetAttribute("SevenDaysUnlocked") == true
+	local unlocked = player:GetAttribute("SevenDaysUnlocked")
+	if unlocked == nil then
+		unlocked = true
+	end
+	unlocked = unlocked == true
 	if sevenDaysButtonContainer then
 		sevenDaysButtonContainer.Visible = unlocked
 	end

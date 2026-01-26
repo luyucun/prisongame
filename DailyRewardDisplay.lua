@@ -136,7 +136,7 @@ local function GetCompletedChapters()
 end
 
 local function IsShopUnlocked()
-	return GetCompletedChapters() >= 1
+	return true
 end
 
 local function IsShopEntryVisible()
