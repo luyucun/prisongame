@@ -42,6 +42,14 @@ local gridTemplates = {}
 -- 当前显示的Grid Part
 local currentGridPart = nil
 
+local function CleanupStrayGrids()
+    for _, child in ipairs(Workspace:GetChildren()) do
+        if child ~= currentGridPart and child.Name == "ActiveGridIndicator" then
+            child:Destroy()
+        end
+    end
+end
+
 -- V2.0.4新增: IdleFloor引用（用于精确计算Grid的Y坐标）
 local cachedIdleFloor = nil
 
@@ -277,6 +285,7 @@ function GridHelper.HideGrid()
         currentGridPart:Destroy()
         currentGridPart = nil
     end
+    CleanupStrayGrids()
 
     -- V2.0: 清空状态缓存
     gridStateCache.gridWidth = nil

@@ -773,7 +773,7 @@ function ProcessDragUpdate(raycastResult)
 		-- 检查是否可以合成
 		local canMerge = (targetUnitId == dragState.draggedUnitId) and
 			(targetLevel == dragState.draggedLevel) and
-			(dragState.draggedLevel < 3)  -- 最高等级3
+			(dragState.draggedLevel < UnitConfig.MAX_LEVEL)  -- 最高等级限制
 
 		-- 检测模式切换（从换位模式切换到合成模式）
 		local modeChanged = dragState.isRelocating or (dragState.targetModel ~= hitModel)
@@ -825,7 +825,7 @@ function ProcessDragUpdate(raycastResult)
 			-- 检查合成条件
 			canMerge = (targetUnitId == dragState.draggedUnitId) and
 				(targetLevel == dragState.draggedLevel) and
-				(dragState.draggedLevel < 3)  -- 最高等级3
+				(dragState.draggedLevel < UnitConfig.MAX_LEVEL)  -- 最高等级限制
 
 			if canMerge then
 				-- 满足合成条件：切换到合成模式

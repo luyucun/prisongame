@@ -117,7 +117,7 @@ local function IsCharacterOnIdleFloor()
 	local direction = Vector3.new(0, -RAYCAST_DISTANCE, 0)
 
 	local rayParams = RaycastParams.new()
-	rayParams.FilterType = Enum.RaycastFilterType.Whitelist
+	rayParams.FilterType = Enum.RaycastFilterType.Include
 	rayParams.FilterDescendantsInstances = { idleFloor }
 	rayParams.IgnoreWater = true
 
@@ -182,8 +182,7 @@ end
 ]]
 local function UpdateBackpackVisibility()
 	local onFloor = IsCharacterOnIdleFloor()
-	local hasUnits = HasAvailableUnits()
-	local shouldShow = onFloor and hasUnits
+	local shouldShow = onFloor
 
 	if shouldShow ~= isBackpackVisible then
 		isBackpackVisible = shouldShow

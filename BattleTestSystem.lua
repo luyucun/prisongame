@@ -48,7 +48,7 @@ local isInitialized = false
 TestSpawnRequest = {
     Team = string,               -- "Attack" 或 "Defense"
     UnitId = string,             -- 兵种ID
-    Level = number,              -- 等级 (1-3)
+    Level = number,              -- 等级 (1-5)
     Position = number,           -- 位置编号 (1-5)
 }
 ]]

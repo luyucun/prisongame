@@ -68,7 +68,7 @@ local activeDeathFades = {}
 UnitCombatState = {
     UnitInstance = Model,        -- 兵种模型实例
     UnitId = string,             -- 兵种ID (如"Noob")
-    Level = number,              -- 等级 (1-3)
+    Level = number,              -- 等级 (1-5)
     Team = string,               -- 阵营: "Attack" 或 "Defense"
     BattleId = number,           -- 所属战斗ID
 

@@ -41,7 +41,7 @@ function LevelColorConfig.GetLevelColors(level, maxLevel)
     -- 获取最高等级
     if not maxLevel then
         local UnitConfig = require(game.ReplicatedStorage.Config.UnitConfig)
-        maxLevel = UnitConfig.MAX_LEVEL or 3
+        maxLevel = UnitConfig.MAX_LEVEL or 5
     end
 
     -- 如果已达最高等级，使用Max配置
@@ -69,7 +69,7 @@ function LevelColorConfig.GetLevelText(level, maxLevel)
     -- 获取最高等级
     if not maxLevel then
         local UnitConfig = require(game.ReplicatedStorage.Config.UnitConfig)
-        maxLevel = UnitConfig.MAX_LEVEL or 3
+        maxLevel = UnitConfig.MAX_LEVEL or 5
     end
 
     -- 如果已达最高等级，显示Max

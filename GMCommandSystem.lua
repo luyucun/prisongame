@@ -317,7 +317,7 @@ local function CMD_Help(player, args)
 战斗测试:
 /battletest - 快速开始测试战斗(自动生成兵种)
 /spawnunit <team> <unitId> <level> <pos> - 生成测试兵种
-  team: attack/defense, level: 1-3, pos: 1-5
+  team: attack/defense, level: 1-5, pos: 1-5
 /startbattle - 开始战斗
 /stopbattle - 强制结束战斗
 /clearbattle - 清理战场
@@ -583,7 +583,7 @@ local function CMD_SpawnUnit(player, args)
         SendMessage(player, "用法: /spawnunit <team> <unitId> <level> <position>")
         SendMessage(player, "例如: /spawnunit attack Noob 1 1")
         SendMessage(player, "team可选: attack, defense")
-        SendMessage(player, "level范围: 1-3")
+        SendMessage(player, string.format("Level range: 1-%d.", UnitConfig.MAX_LEVEL or 5))
         SendMessage(player, "position范围: 1-5")
         return
     end
@@ -620,8 +620,9 @@ local function CMD_SpawnUnit(player, args)
         return
     end
 
-    if not level or level < 1 or level > 3 then
-        SendMessage(player, "错误: level必须在1-3之间")
+    local maxLevel = UnitConfig.MAX_LEVEL or 5
+    if not level or level < 1 or level > maxLevel then
+        SendMessage(player, string.format("Error: level must be between 1 and %d.", maxLevel))
         return
     end
 

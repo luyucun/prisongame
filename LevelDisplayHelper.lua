@@ -158,7 +158,7 @@ function LevelDisplayHelper.GetCurrentDisplayLevel(unitModel)
     if text == "Lv.Max" then
         -- 返回最高等级
         local UnitConfig = require(game.ReplicatedStorage.Config.UnitConfig)
-        return UnitConfig.MAX_LEVEL or 3
+        return UnitConfig.MAX_LEVEL or 5
     else
         -- 解析数字等级
         local level = tonumber(text:match("Lv%.(%d+)"))

@@ -101,6 +101,20 @@ local function GetAllUnitIds()
 	end
 end
 
+local function GetMaxUnitLevel()
+	local success, result = pcall(function()
+		local unitConfig = require(ReplicatedStorage:FindFirstChild("Config"):FindFirstChild("UnitConfig"))
+		return unitConfig and unitConfig.MAX_LEVEL
+	end)
+
+	local maxLevel = tonumber(result)
+	if success and maxLevel and maxLevel > 0 then
+		return maxLevel
+	end
+
+	return 5
+end
+
 --[[
 获取固定编辑地板
 @return Part|nil - 编辑地板
@@ -913,7 +927,8 @@ local unitIdInput, newOffset = CreateTextBox(mainFrame, "兵种ID (如10001):", 
 yOffset = newOffset
 
 -- 等级选择
-local levelInput, newOffset = CreateTextBox(mainFrame, "等级 (1-3):", "1", yOffset)
+local maxLevel = GetMaxUnitLevel()
+local levelInput, newOffset = CreateTextBox(mainFrame, string.format("等级 (1-%d):", maxLevel), "1", yOffset)
 yOffset = newOffset
 
 -- 第几排
@@ -942,8 +957,8 @@ CreateButton(mainFrame, "✨ 生成兵种", yOffset, function()
 		return
 	end
 
-	if level < 1 or level > 3 then
-		warn("[StageEditor] 等级必须在1-3之间")
+	if level < 1 or level > maxLevel then
+		warn(string.format("[StageEditor] Level must be between 1 and %d.", maxLevel))
 		return
 	end
 
