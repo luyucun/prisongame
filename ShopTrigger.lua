@@ -193,7 +193,11 @@ local function OpenShop()
 	end
 
 	-- 显示商店UI
-	shopFrame.Visible = true
+	if _G.ShopDisplay and _G.ShopDisplay.PlayOpen then
+		_G.ShopDisplay.PlayOpen()
+	else
+		shopFrame.Visible = true
+	end
 	isShopOpen = true
 
 	-- 请求商店列表
@@ -240,7 +244,11 @@ local function CloseShop(manual)
 	end
 
 	-- 隐藏商店UI
-	shopFrame.Visible = false
+	if _G.ShopDisplay and _G.ShopDisplay.PlayClose then
+		_G.ShopDisplay.PlayClose()
+	else
+		shopFrame.Visible = false
+	end
 	isShopOpen = false
 
 	if manual then

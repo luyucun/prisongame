@@ -23,6 +23,7 @@ V2.11新功能:
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -60,6 +61,23 @@ local currentMusicEnabled = true
 local currentSfxEnabled = true
 
 local ButtonEffectHelper = nil
+
+-- Options弹框动画配置
+local POPUP_OPEN_START_SCALE = 0.86
+local POPUP_OPEN_OVERSHOOT_SCALE = 1.10
+local POPUP_OPEN_DURATION_A = 0.18
+local POPUP_OPEN_DURATION_B = 0.10
+local POPUP_CLOSE_OVERSHOOT_SCALE = 1.12
+local POPUP_CLOSE_END_SCALE = 0.78
+local POPUP_CLOSE_DURATION_A = 0.08
+local POPUP_CLOSE_DURATION_B = 0.12
+
+local optionsScale = nil
+local optionsOpenTweenA = nil
+local optionsOpenTweenB = nil
+local optionsCloseTweenA = nil
+local optionsCloseTweenB = nil
+local optionsAnimating = false
 
 -- ==================== 日志函数 ====================
 
@@ -117,6 +135,133 @@ local function LoadButtonEffectHelper()
 
 	warn("[MainGuiController] ButtonEffectHelper加载失败:", result)
 	return false
+end
+
+local function EnsureOptionsScale()
+	if not optionsBg then
+		return nil
+	end
+
+	if not optionsScale or optionsScale.Parent ~= optionsBg then
+		optionsScale = optionsBg:FindFirstChild("PopupScale")
+		if not optionsScale then
+			optionsScale = Instance.new("UIScale")
+			optionsScale.Name = "PopupScale"
+			optionsScale.Scale = 1
+			optionsScale.Parent = optionsBg
+		end
+	end
+
+	return optionsScale
+end
+
+local function CancelOptionsTweens()
+	local tweens = {optionsOpenTweenA, optionsOpenTweenB, optionsCloseTweenA, optionsCloseTweenB}
+	for _, tween in ipairs(tweens) do
+		if tween and tween.PlaybackState ~= Enum.PlaybackState.Completed then
+			tween:Cancel()
+		end
+	end
+end
+
+local function PlayOptionsOpen()
+	if not optionsBg then
+		return false
+	end
+
+	local scale = EnsureOptionsScale()
+	if not scale then
+		optionsBg.Visible = true
+		return true
+	end
+
+	if optionsBg.Visible and not optionsAnimating then
+		return true
+	end
+
+	CancelOptionsTweens()
+	optionsAnimating = true
+
+	optionsBg.Visible = true
+	scale.Scale = POPUP_OPEN_START_SCALE
+
+	optionsOpenTweenA = TweenService:Create(
+		scale,
+		TweenInfo.new(POPUP_OPEN_DURATION_A, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{Scale = POPUP_OPEN_OVERSHOOT_SCALE}
+	)
+	optionsOpenTweenB = TweenService:Create(
+		scale,
+		TweenInfo.new(POPUP_OPEN_DURATION_B, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{Scale = 1}
+	)
+
+	local connA
+	connA = optionsOpenTweenA.Completed:Connect(function(state)
+		connA:Disconnect()
+		if state == Enum.PlaybackState.Completed then
+			optionsOpenTweenB:Play()
+		end
+	end)
+
+	local connB
+	connB = optionsOpenTweenB.Completed:Connect(function()
+		connB:Disconnect()
+		optionsAnimating = false
+		scale.Scale = 1
+	end)
+
+	optionsOpenTweenA:Play()
+	return true
+end
+
+local function PlayOptionsClose()
+	if not optionsBg then
+		return false
+	end
+
+	local scale = EnsureOptionsScale()
+	if not scale then
+		optionsBg.Visible = false
+		return true
+	end
+
+	if not optionsBg.Visible and not optionsAnimating then
+		return true
+	end
+
+	CancelOptionsTweens()
+	optionsAnimating = true
+
+	optionsCloseTweenA = TweenService:Create(
+		scale,
+		TweenInfo.new(POPUP_CLOSE_DURATION_A, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{Scale = POPUP_CLOSE_OVERSHOOT_SCALE}
+	)
+	optionsCloseTweenB = TweenService:Create(
+		scale,
+		TweenInfo.new(POPUP_CLOSE_DURATION_B, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+		{Scale = POPUP_CLOSE_END_SCALE}
+	)
+
+	local connA
+	connA = optionsCloseTweenA.Completed:Connect(function(state)
+		connA:Disconnect()
+		if state == Enum.PlaybackState.Completed then
+			optionsCloseTweenB:Play()
+		end
+	end)
+
+	local connB
+	connB = optionsCloseTweenB.Completed:Connect(function()
+		connB:Disconnect()
+		optionsBg.Visible = false
+		scale.Scale = 1
+		optionsAnimating = false
+	end)
+
+	optionsCloseTweenA:Play()
+	return true
 end
 
 local function SyncSettingsFromSoundController()
@@ -209,13 +354,11 @@ local function OpenOptions()
 	end
 	SyncSettingsFromSoundController()
 	ApplySettingsToUI()
-	optionsBg.Visible = true
+	PlayOptionsOpen()
 end
 
 local function CloseOptions()
-	if optionsBg then
-		optionsBg.Visible = false
-	end
+	PlayOptionsClose()
 end
 
 local function InitializeSettingsEvents()
@@ -301,6 +444,10 @@ local function InitializeSettingsUI()
 		sfxToggleGradient = sfxToggleButton:FindFirstChildOfClass("UIGradient")
 	end
 
+	local scale = EnsureOptionsScale()
+	if scale then
+		scale.Scale = 1
+	end
 	optionsBg.Visible = false
 	return true
 end

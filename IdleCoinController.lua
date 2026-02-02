@@ -60,8 +60,22 @@ local idleClaim10Button = nil
 local idleClaim10Cash = nil
 local idleScale = nil
 
+-- 弹框动画配置（仅Bg）
+local POPUP_OPEN_START_SCALE = 0.86
+local POPUP_OPEN_OVERSHOOT_SCALE = 1.10
+local POPUP_OPEN_DURATION_A = 0.18
+local POPUP_OPEN_DURATION_B = 0.10
+local POPUP_CLOSE_OVERSHOOT_SCALE = 1.12
+local POPUP_CLOSE_END_SCALE = 0.78
+local POPUP_CLOSE_DURATION_A = 0.08
+local POPUP_CLOSE_DURATION_B = 0.12
+
 -- UI状态
-local idleUiTween = nil
+local idleOpenTweenA = nil
+local idleOpenTweenB = nil
+local idleCloseTweenA = nil
+local idleCloseTweenB = nil
+local idleAnimating = false
 local idleUiToken = 0
 local idleUiBound = false
 local gradientTween = nil
@@ -261,6 +275,15 @@ local function InitializeIdleEarningUI()
 	return true
 end
 
+local function CancelIdleTweens()
+	local tweens = {idleOpenTweenA, idleOpenTweenB, idleCloseTweenA, idleCloseTweenB}
+	for _, tween in ipairs(tweens) do
+		if tween and tween.PlaybackState ~= Enum.PlaybackState.Completed then
+			tween:Cancel()
+		end
+	end
+end
+
 local function ShowIdleEarningUI()
 	if not InitializeIdleEarningUI() then
 		return
@@ -268,48 +291,85 @@ local function ShowIdleEarningUI()
 
 	UpdateIdleEarningUI()
 
-	if idleEarningBg.Visible then
+	if idleEarningBg.Visible and not idleAnimating then
 		return
 	end
 
-	idleUiToken = idleUiToken + 1
-	local token = idleUiToken
+	CancelIdleTweens()
+	idleAnimating = true
 
-	if idleUiTween then
-		idleUiTween:Cancel()
-	end
-
-	idleScale.Scale = 0.8
+	idleScale.Scale = POPUP_OPEN_START_SCALE
 	idleEarningBg.Visible = true
-	idleUiTween = TweenService:Create(
+
+	idleOpenTweenA = TweenService:Create(
 		idleScale,
-		TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		TweenInfo.new(POPUP_OPEN_DURATION_A, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{Scale = POPUP_OPEN_OVERSHOOT_SCALE}
+	)
+	idleOpenTweenB = TweenService:Create(
+		idleScale,
+		TweenInfo.new(POPUP_OPEN_DURATION_B, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
 		{Scale = 1}
 	)
-	idleUiTween:Play()
 
-	idleUiTween.Completed:Connect(function()
-		if token ~= idleUiToken then
-			return
+	local connA
+	connA = idleOpenTweenA.Completed:Connect(function(state)
+		connA:Disconnect()
+		if state == Enum.PlaybackState.Completed then
+			idleOpenTweenB:Play()
 		end
-		idleUiTween = nil
 	end)
+
+	local connB
+	connB = idleOpenTweenB.Completed:Connect(function()
+		connB:Disconnect()
+		idleAnimating = false
+		idleScale.Scale = 1
+	end)
+
+	idleOpenTweenA:Play()
 end
 
 local function HideIdleEarningUI()
-	if not idleEarningBg or not idleEarningBg.Visible then
+	if not idleEarningBg then
 		return
 	end
 
-	if idleUiTween then
-		idleUiTween:Cancel()
-		idleUiTween = nil
+	if not idleEarningBg.Visible and not idleAnimating then
+		return
 	end
 
-	if idleScale then
+	CancelIdleTweens()
+	idleAnimating = true
+
+	idleCloseTweenA = TweenService:Create(
+		idleScale,
+		TweenInfo.new(POPUP_CLOSE_DURATION_A, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{Scale = POPUP_CLOSE_OVERSHOOT_SCALE}
+	)
+	idleCloseTweenB = TweenService:Create(
+		idleScale,
+		TweenInfo.new(POPUP_CLOSE_DURATION_B, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+		{Scale = POPUP_CLOSE_END_SCALE}
+	)
+
+	local connA
+	connA = idleCloseTweenA.Completed:Connect(function(state)
+		connA:Disconnect()
+		if state == Enum.PlaybackState.Completed then
+			idleCloseTweenB:Play()
+		end
+	end)
+
+	local connB
+	connB = idleCloseTweenB.Completed:Connect(function()
+		connB:Disconnect()
+		idleEarningBg.Visible = false
 		idleScale.Scale = 1
-	end
-	idleEarningBg.Visible = false
+		idleAnimating = false
+	end)
+
+	idleCloseTweenA:Play()
 end
 
 local function StartClaim10Gradient()

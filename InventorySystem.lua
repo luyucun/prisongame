@@ -250,9 +250,10 @@ end
 添加兵种到玩家背包
 @param player Player - 玩家对象
 @param unitId string - 兵种ID
+@param skipSave boolean? - 是否跳过SavePlayerDataThrottled（可选）
 @return boolean, string|table - 是否成功, 失败返回错误信息/成功返回实例数据
 ]]
-function InventorySystem.AddUnit(player, unitId)
+function InventorySystem.AddUnit(player, unitId, skipSave)
     if not player then
         return false, "玩家对象为空"
     end
@@ -282,15 +283,17 @@ function InventorySystem.AddUnit(player, unitId)
     -- 改用InventoryRefresh确保客户端获得完整的实例信息
     NotifyClientInventoryRefresh(player)
 
-    -- 🔥修复持久化：添加兵种后保存数据
-    DataManager.SavePlayerDataThrottled(player)
-    print(string.format(
-        "%s [InventorySystem] 🔥 已保存数据: 玩家 %s 添加兵种 %s (实例: %s)",
-        GameConfig.LOG_PREFIX,
-        player.Name,
-        unitId,
-        instance.InstanceId
-    ))
+    if not skipSave then
+        -- 🔥修复持久化：添加兵种后保存数据
+        DataManager.SavePlayerDataThrottled(player)
+        print(string.format(
+            "%s [InventorySystem] 🔥 已保存数据: 玩家 %s 添加兵种 %s (实例: %s)",
+            GameConfig.LOG_PREFIX,
+            player.Name,
+            unitId,
+            instance.InstanceId
+        ))
+    end
 
     -- V3.9.2: 通知PowerSystem更新战斗力
     if LoadPowerSystem() then
@@ -306,9 +309,10 @@ end
 删除玩家背包中的兵种实例
 @param player Player - 玩家对象
 @param instanceId string - 实例ID
+@param skipSave boolean? - 是否跳过SavePlayerDataThrottled（可选）
 @return boolean, string - 是否成功, 失败返回错误信息
 ]]
-function InventorySystem.RemoveUnit(player, instanceId)
+function InventorySystem.RemoveUnit(player, instanceId, skipSave)
     if not player then
         return false, "玩家对象为空"
     end
@@ -329,15 +333,17 @@ function InventorySystem.RemoveUnit(player, instanceId)
             -- 改用InventoryRefresh确保客户端获得完整的实例信息
             NotifyClientInventoryRefresh(player)
 
-            -- 🔥修复持久化：删除兵种后保存数据
-            DataManager.SavePlayerDataThrottled(player)
-            print(string.format(
-                "%s [InventorySystem] 🔥 已保存数据: 玩家 %s 删除兵种 %s (实例: %s)",
-                GameConfig.LOG_PREFIX,
-                player.Name,
-                unitId,
-                instanceId
-            ))
+            if not skipSave then
+                -- 🔥修复持久化：删除兵种后保存数据
+                DataManager.SavePlayerDataThrottled(player)
+                print(string.format(
+                    "%s [InventorySystem] 🔥 已保存数据: 玩家 %s 删除兵种 %s (实例: %s)",
+                    GameConfig.LOG_PREFIX,
+                    player.Name,
+                    unitId,
+                    instanceId
+                ))
+            end
 
             -- V3.9.2: 通知PowerSystem更新战斗力
             if LoadPowerSystem() then

@@ -80,6 +80,23 @@ local POPUP_TWEEN_DURATION = 0.3
 local POPUP_ALLOW_CLOSE_SECONDS = 1
 local LIGHT_ROTATE_SPEED = 60
 
+-- Shop面板弹框动画配置（ShopBg）
+local SHOP_OPEN_START_SCALE = 0.86
+local SHOP_OPEN_OVERSHOOT_SCALE = 1.10
+local SHOP_OPEN_DURATION_A = 0.18
+local SHOP_OPEN_DURATION_B = 0.10
+local SHOP_CLOSE_OVERSHOOT_SCALE = 1.12
+local SHOP_CLOSE_END_SCALE = 0.78
+local SHOP_CLOSE_DURATION_A = 0.08
+local SHOP_CLOSE_DURATION_B = 0.12
+
+local shopScale = nil
+local shopOpenTweenA = nil
+local shopOpenTweenB = nil
+local shopCloseTweenA = nil
+local shopCloseTweenB = nil
+local shopAnimating = false
+
 -- ==================== 工具函数 ====================
 
 local function SafeWaitForChild(parent, childName, timeout)
@@ -125,6 +142,133 @@ end
 
 local function IsDescendantOfPlayerGui(instance)
 	return instance ~= nil and instance:IsDescendantOf(playerGui)
+end
+
+local function EnsureShopScale()
+	if not shopBg then
+		return nil
+	end
+
+	if not shopScale or shopScale.Parent ~= shopBg then
+		shopScale = shopBg:FindFirstChild("PopupScale")
+		if not shopScale then
+			shopScale = Instance.new("UIScale")
+			shopScale.Name = "PopupScale"
+			shopScale.Scale = 1
+			shopScale.Parent = shopBg
+		end
+	end
+
+	return shopScale
+end
+
+local function CancelShopTweens()
+	local tweens = {shopOpenTweenA, shopOpenTweenB, shopCloseTweenA, shopCloseTweenB}
+	for _, tween in ipairs(tweens) do
+		if tween and tween.PlaybackState ~= Enum.PlaybackState.Completed then
+			tween:Cancel()
+		end
+	end
+end
+
+local function PlayShopOpen()
+	if not shopBg then
+		return false
+	end
+
+	local scale = EnsureShopScale()
+	if not scale then
+		shopBg.Visible = true
+		return true
+	end
+
+	if shopBg.Visible and not shopAnimating then
+		return true
+	end
+
+	CancelShopTweens()
+	shopAnimating = true
+
+	shopBg.Visible = true
+	scale.Scale = SHOP_OPEN_START_SCALE
+
+	shopOpenTweenA = TweenService:Create(
+		scale,
+		TweenInfo.new(SHOP_OPEN_DURATION_A, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{Scale = SHOP_OPEN_OVERSHOOT_SCALE}
+	)
+	shopOpenTweenB = TweenService:Create(
+		scale,
+		TweenInfo.new(SHOP_OPEN_DURATION_B, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{Scale = 1}
+	)
+
+	local connA
+	connA = shopOpenTweenA.Completed:Connect(function(state)
+		connA:Disconnect()
+		if state == Enum.PlaybackState.Completed then
+			shopOpenTweenB:Play()
+		end
+	end)
+
+	local connB
+	connB = shopOpenTweenB.Completed:Connect(function()
+		connB:Disconnect()
+		shopAnimating = false
+		scale.Scale = 1
+	end)
+
+	shopOpenTweenA:Play()
+	return true
+end
+
+local function PlayShopClose()
+	if not shopBg then
+		return false
+	end
+
+	local scale = EnsureShopScale()
+	if not scale then
+		shopBg.Visible = false
+		return true
+	end
+
+	if not shopBg.Visible and not shopAnimating then
+		return true
+	end
+
+	CancelShopTweens()
+	shopAnimating = true
+
+	shopCloseTweenA = TweenService:Create(
+		scale,
+		TweenInfo.new(SHOP_CLOSE_DURATION_A, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{Scale = SHOP_CLOSE_OVERSHOOT_SCALE}
+	)
+	shopCloseTweenB = TweenService:Create(
+		scale,
+		TweenInfo.new(SHOP_CLOSE_DURATION_B, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+		{Scale = SHOP_CLOSE_END_SCALE}
+	)
+
+	local connA
+	connA = shopCloseTweenA.Completed:Connect(function(state)
+		connA:Disconnect()
+		if state == Enum.PlaybackState.Completed then
+			shopCloseTweenB:Play()
+		end
+	end)
+
+	local connB
+	connB = shopCloseTweenB.Completed:Connect(function()
+		connB:Disconnect()
+		shopBg.Visible = false
+		scale.Scale = 1
+		shopAnimating = false
+	end)
+
+	shopCloseTweenA:Play()
+	return true
 end
 
 local function GetCompletedChapters()
@@ -200,6 +344,10 @@ local function InitializeUI()
 	if shopBg then
 		local title = shopBg:FindFirstChild("Title")
 		shopCloseButton = title and title:FindFirstChild("CloseButton")
+		local scale = EnsureShopScale()
+		if scale then
+			scale.Scale = 1
+		end
 	end
 
 	local scrollingFrame = shopBg and shopBg:FindFirstChild("ScrollingFrame")
@@ -671,8 +819,8 @@ local function OpenShop()
 	if not IsShopUnlocked() or isBattleBlocked then
 		return
 	end
-	if shopBg then
-		shopBg.Visible = true
+	if not PlayShopOpen() then
+		return
 	end
 	if requestDataEvent then
 		requestDataEvent:FireServer()
@@ -685,9 +833,7 @@ local function OpenShop()
 end
 
 CloseShop = function()
-	if shopBg then
-		shopBg.Visible = false
-	end
+	PlayShopClose()
 	StopCountdown()
 end
 

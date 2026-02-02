@@ -250,7 +250,7 @@ function MergeSystem.MergeUnits(player, instanceIdA, instanceIdB)
 
 
     -- 4. 先创建新兵种（确保创建成功后再移除旧兵种，避免数据丢失）
-    local success, newInstance = InventorySystem.AddUnit(player, unitA.UnitId)
+    local success, newInstance = InventorySystem.AddUnit(player, unitA.UnitId, true)
 
     if not success then
         warn(GameConfig.LOG_PREFIX, "创建合成兵种失败:", newInstance)
@@ -269,17 +269,16 @@ function MergeSystem.MergeUnits(player, instanceIdA, instanceIdB)
     end
 
     -- 6. 移除两个旧兵种（从背包和场地移除）
-    PlacementSystem.RemovePlacedUnit(player, instanceIdA)
-    PlacementSystem.RemovePlacedUnit(player, instanceIdA)
-    PlacementSystem.RemovePlacedUnit(player, instanceIdB)
-    InventorySystem.RemoveUnit(player, instanceIdA)
-    InventorySystem.RemoveUnit(player, instanceIdB)
+    PlacementSystem.RemovePlacedUnit(player, instanceIdA, true)
+    PlacementSystem.RemovePlacedUnit(player, instanceIdB, true)
+    InventorySystem.RemoveUnit(player, instanceIdA, true)
+    InventorySystem.RemoveUnit(player, instanceIdB, true)
 
     -- 6.5. 播放合成特效 (V1.5.3新增，使用计算好的脚底位置)
     PlayMergeEffect(effectPosition, gridSize)
 
     -- 7. 立即放置新兵种到原来的位置
-    local placeSuccess, placeMessage = PlacementSystem.PlaceUnit(player, newInstance.InstanceId, mergePosition)
+    local placeSuccess, placeMessage = PlacementSystem.PlaceUnit(player, newInstance.InstanceId, mergePosition, true)
 
     if not placeSuccess then
         warn(GameConfig.LOG_PREFIX, "放置合成兵种失败:", placeMessage)
@@ -289,53 +288,63 @@ function MergeSystem.MergeUnits(player, instanceIdA, instanceIdB)
     -- V2.8.2修复: 合成后强制刷新客户端背包数据，确保等级信息同步
     InventorySystem.RefreshClientInventory(player)
 
-    -- 🔥修复持久化：合成后保存数据
-    DataManager.SavePlayerDataThrottled(player)
-    print(string.format(
-        "%s [MergeSystem] 🔥 已保存数据: 玩家 %s 合成兵种 %s (%s -> Lv.%d)",
-        GameConfig.LOG_PREFIX,
-        player.Name,
-        newInstance.UnitId,
-        newInstance.InstanceId,
-        newLevel
-    ))
+    -- 🔥修复持久化：合成后异步保存数据（避免阻塞合成响应）
+    task.spawn(function()
+        pcall(function()
+            DataManager.SavePlayerDataThrottled(player, true)
+        end)
+        print(string.format(
+            "%s [MergeSystem] 🔥 已保存数据: 玩家 %s 合成兵种 %s (%s -> Lv.%d)",
+            GameConfig.LOG_PREFIX,
+            player.Name,
+            newInstance.UnitId,
+            newInstance.InstanceId,
+            newLevel
+        ))
+    end)
 
     -- V3.3新增：通知任务系统（合成2级兵种任务）
-    if not TaskSystem then
-        local taskModule = ServerScriptService.Systems:FindFirstChild("TaskSystem")
-        if taskModule then
-            TaskSystem = require(taskModule)
+    task.spawn(function()
+        if not TaskSystem then
+            local taskModule = ServerScriptService.Systems:FindFirstChild("TaskSystem")
+            if taskModule then
+                TaskSystem = require(taskModule)
+            end
         end
-    end
-    if TaskSystem and TaskSystem.OnMergeLevel2Unit then
-        TaskSystem.OnMergeLevel2Unit(player, newInstance.UnitId, newLevel)
-    end
+        if TaskSystem and TaskSystem.OnMergeLevel2Unit then
+            TaskSystem.OnMergeLevel2Unit(player, newInstance.UnitId, newLevel)
+        end
+    end)
 
     -- V3.8新增：播放合成音效
-    if not SoundSystem then
-        local soundModule = ServerScriptService.Systems:FindFirstChild("SoundSystem")
-        if soundModule then
-            SoundSystem = require(soundModule)
+    task.spawn(function()
+        if not SoundSystem then
+            local soundModule = ServerScriptService.Systems:FindFirstChild("SoundSystem")
+            if soundModule then
+                SoundSystem = require(soundModule)
+            end
         end
-    end
-    if SoundSystem then
-        pcall(function()
-            SoundSystem.OnMerge(player)
-        end)
-    end
+        if SoundSystem then
+            pcall(function()
+                SoundSystem.OnMerge(player)
+            end)
+        end
+    end)
 
 	-- V3.9.2新增：通知PowerSystem更新战斗力（合成后全量重算）
-	if not PowerSystem then
-		local powerModule = ServerScriptService.Systems:FindFirstChild("PowerSystem")
-		if powerModule then
-			PowerSystem = require(powerModule)
+	task.spawn(function()
+		if not PowerSystem then
+			local powerModule = ServerScriptService.Systems:FindFirstChild("PowerSystem")
+			if powerModule then
+				PowerSystem = require(powerModule)
+			end
 		end
-	end
-	if PowerSystem then
-		pcall(function()
-			PowerSystem.OnMergeUnit(player, newInstance.UnitId, unitA.Level, newLevel)
-		end)
-	end
+		if PowerSystem then
+			pcall(function()
+				PowerSystem.OnMergeUnit(player, newInstance.UnitId, unitA.Level, newLevel)
+			end)
+		end
+	end)
 
     return true, "合成成功", {
         InstanceId = newInstance.InstanceId,

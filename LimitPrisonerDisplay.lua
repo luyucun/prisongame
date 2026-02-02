@@ -82,6 +82,23 @@ local POPUP_TWEEN_DURATION = 0.3
 local POPUP_ALLOW_CLOSE_SECONDS = 1
 local LIGHT_ROTATE_SPEED = 60
 
+-- StoreBg弹框动画配置
+local STORE_OPEN_START_SCALE = 0.86
+local STORE_OPEN_OVERSHOOT_SCALE = 1.10
+local STORE_OPEN_DURATION_A = 0.18
+local STORE_OPEN_DURATION_B = 0.10
+local STORE_CLOSE_OVERSHOOT_SCALE = 1.12
+local STORE_CLOSE_END_SCALE = 0.78
+local STORE_CLOSE_DURATION_A = 0.08
+local STORE_CLOSE_DURATION_B = 0.12
+
+local storeScale = nil
+local storeOpenTweenA = nil
+local storeOpenTweenB = nil
+local storeCloseTweenA = nil
+local storeCloseTweenB = nil
+local storeAnimating = false
+
 local buttonsBound = false
 local dataBound = false
 local promptBound = false
@@ -281,6 +298,125 @@ local function InitializeUI()
 
 	InitializeClaimPopup()
 	return true
+end
+
+local function EnsureStoreScale()
+	if not storeBg then
+		return nil
+	end
+
+	if not storeScale or storeScale.Parent ~= storeBg then
+		storeScale = storeBg:FindFirstChild("StorePopupScale")
+		if not storeScale then
+			storeScale = Instance.new("UIScale")
+			storeScale.Name = "StorePopupScale"
+			storeScale.Scale = 1
+			storeScale.Parent = storeBg
+		end
+	end
+
+	return storeScale
+end
+
+local function CancelStoreTweens()
+	local tweens = {storeOpenTweenA, storeOpenTweenB, storeCloseTweenA, storeCloseTweenB}
+	for _, tween in ipairs(tweens) do
+		if tween and tween.PlaybackState ~= Enum.PlaybackState.Completed then
+			tween:Cancel()
+		end
+	end
+end
+
+local function PlayStoreOpen()
+	if not InitializeUI() then
+		return
+	end
+
+	local scale = EnsureStoreScale()
+	if not scale then
+		return
+	end
+
+	if storeBg.Visible and not storeAnimating then
+		return
+	end
+
+	CancelStoreTweens()
+	storeAnimating = true
+
+	storeBg.Visible = true
+	scale.Scale = STORE_OPEN_START_SCALE
+
+	storeOpenTweenA = TweenService:Create(scale,
+		TweenInfo.new(STORE_OPEN_DURATION_A, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{Scale = STORE_OPEN_OVERSHOOT_SCALE}
+	)
+	storeOpenTweenB = TweenService:Create(scale,
+		TweenInfo.new(STORE_OPEN_DURATION_B, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{Scale = 1}
+	)
+
+	local connA
+	connA = storeOpenTweenA.Completed:Connect(function(state)
+		connA:Disconnect()
+		if state == Enum.PlaybackState.Completed then
+			storeOpenTweenB:Play()
+		end
+	end)
+
+	local connB
+	connB = storeOpenTweenB.Completed:Connect(function()
+		connB:Disconnect()
+		storeAnimating = false
+		scale.Scale = 1
+	end)
+
+	storeOpenTweenA:Play()
+end
+
+local function PlayStoreClose()
+	if not InitializeUI() then
+		return
+	end
+
+	local scale = EnsureStoreScale()
+	if not scale then
+		return
+	end
+
+	if not storeBg.Visible and not storeAnimating then
+		return
+	end
+
+	CancelStoreTweens()
+	storeAnimating = true
+
+	storeCloseTweenA = TweenService:Create(scale,
+		TweenInfo.new(STORE_CLOSE_DURATION_A, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{Scale = STORE_CLOSE_OVERSHOOT_SCALE}
+	)
+	storeCloseTweenB = TweenService:Create(scale,
+		TweenInfo.new(STORE_CLOSE_DURATION_B, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+		{Scale = STORE_CLOSE_END_SCALE}
+	)
+
+	local connA
+	connA = storeCloseTweenA.Completed:Connect(function(state)
+		connA:Disconnect()
+		if state == Enum.PlaybackState.Completed then
+			storeCloseTweenB:Play()
+		end
+	end)
+
+	local connB
+	connB = storeCloseTweenB.Completed:Connect(function()
+		connB:Disconnect()
+		storeBg.Visible = false
+		scale.Scale = 1
+		storeAnimating = false
+	end)
+
+	storeCloseTweenA:Play()
 end
 
 -- ==================== 卡片渲染 ====================
@@ -565,7 +701,7 @@ local function CloseClaimPopup()
 		lightBg.Visible = false
 	end
 	if restorePanelAfterPopup and storeBg then
-		storeBg.Visible = true
+		PlayStoreOpen()
 	end
 	restorePanelAfterPopup = false
 
@@ -725,9 +861,7 @@ local function BindButtons()
 			ButtonEffectHelper.AddClickEffect(closeButton)
 		end
 		closeButton.MouseButton1Click:Connect(function()
-			if storeBg then
-				storeBg.Visible = false
-			end
+			PlayStoreClose()
 		end)
 	end
 
@@ -816,9 +950,7 @@ local function BindPrompt()
 			return
 		end
 
-		if storeBg then
-			storeBg.Visible = true
-		end
+		PlayStoreOpen()
 
 		if requestDataEvent then
 			requestDataEvent:FireServer()

@@ -63,6 +63,23 @@ local UpdateRedPoint = nil
 local campaignEventsBound = false
 local lastCampaignTotalStages = nil
 
+-- 弹框动画配置（仅Bg）
+local POPUP_OPEN_START_SCALE = 0.86
+local POPUP_OPEN_OVERSHOOT_SCALE = 1.10
+local POPUP_OPEN_DURATION_A = 0.18
+local POPUP_OPEN_DURATION_B = 0.10
+local POPUP_CLOSE_OVERSHOOT_SCALE = 1.12
+local POPUP_CLOSE_END_SCALE = 0.78
+local POPUP_CLOSE_DURATION_A = 0.08
+local POPUP_CLOSE_DURATION_B = 0.12
+
+local panelScale = nil
+local panelOpenTweenA = nil
+local panelOpenTweenB = nil
+local panelCloseTweenA = nil
+local panelCloseTweenB = nil
+local panelAnimating = false
+
 local function SafeWaitForChild(parent, childName, timeout)
 	timeout = timeout or 3
 	if not parent then
@@ -122,6 +139,145 @@ local function LoadButtonEffectHelper()
 
 	warn("[SevenDaysDisplay] ButtonEffectHelper加载失败:", result)
 	return false
+end
+
+local function EnsurePanelScale()
+	if not sevenDaysBg then
+		return nil
+	end
+
+	if not panelScale or panelScale.Parent ~= sevenDaysBg then
+		panelScale = sevenDaysBg:FindFirstChild("PopupScale")
+		if not panelScale then
+			panelScale = Instance.new("UIScale")
+			panelScale.Name = "PopupScale"
+			panelScale.Scale = 1
+			panelScale.Parent = sevenDaysBg
+		end
+	end
+
+	return panelScale
+end
+
+local function CancelPanelTweens()
+	local tweens = {panelOpenTweenA, panelOpenTweenB, panelCloseTweenA, panelCloseTweenB}
+	for _, tween in ipairs(tweens) do
+		if tween and tween.PlaybackState ~= Enum.PlaybackState.Completed then
+			tween:Cancel()
+		end
+	end
+end
+
+local function PlayPanelOpen()
+	if not sevenDaysBg then
+		return false
+	end
+
+	local scale = EnsurePanelScale()
+	if not scale then
+		sevenDaysBg.Visible = true
+		if blackBg then
+			blackBg.Visible = true
+		end
+		return true
+	end
+
+	if sevenDaysBg.Visible and not panelAnimating then
+		return true
+	end
+
+	CancelPanelTweens()
+	panelAnimating = true
+
+	sevenDaysBg.Visible = true
+	if blackBg then
+		blackBg.Visible = true
+	end
+	scale.Scale = POPUP_OPEN_START_SCALE
+
+	panelOpenTweenA = TweenService:Create(
+		scale,
+		TweenInfo.new(POPUP_OPEN_DURATION_A, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{Scale = POPUP_OPEN_OVERSHOOT_SCALE}
+	)
+	panelOpenTweenB = TweenService:Create(
+		scale,
+		TweenInfo.new(POPUP_OPEN_DURATION_B, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{Scale = 1}
+	)
+
+	local connA
+	connA = panelOpenTweenA.Completed:Connect(function(state)
+		connA:Disconnect()
+		if state == Enum.PlaybackState.Completed then
+			panelOpenTweenB:Play()
+		end
+	end)
+
+	local connB
+	connB = panelOpenTweenB.Completed:Connect(function()
+		connB:Disconnect()
+		panelAnimating = false
+		scale.Scale = 1
+	end)
+
+	panelOpenTweenA:Play()
+	return true
+end
+
+local function PlayPanelClose()
+	if not sevenDaysBg then
+		return false
+	end
+
+	local scale = EnsurePanelScale()
+	if not scale then
+		sevenDaysBg.Visible = false
+		if blackBg then
+			blackBg.Visible = false
+		end
+		return true
+	end
+
+	if not sevenDaysBg.Visible and not panelAnimating then
+		return true
+	end
+
+	CancelPanelTweens()
+	panelAnimating = true
+
+	panelCloseTweenA = TweenService:Create(
+		scale,
+		TweenInfo.new(POPUP_CLOSE_DURATION_A, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{Scale = POPUP_CLOSE_OVERSHOOT_SCALE}
+	)
+	panelCloseTweenB = TweenService:Create(
+		scale,
+		TweenInfo.new(POPUP_CLOSE_DURATION_B, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+		{Scale = POPUP_CLOSE_END_SCALE}
+	)
+
+	local connA
+	connA = panelCloseTweenA.Completed:Connect(function(state)
+		connA:Disconnect()
+		if state == Enum.PlaybackState.Completed then
+			panelCloseTweenB:Play()
+		end
+	end)
+
+	local connB
+	connB = panelCloseTweenB.Completed:Connect(function()
+		connB:Disconnect()
+		sevenDaysBg.Visible = false
+		if blackBg then
+			blackBg.Visible = false
+		end
+		scale.Scale = 1
+		panelAnimating = false
+	end)
+
+	panelCloseTweenA:Play()
+	return true
 end
 
 local function InitializeEvents()
@@ -231,6 +387,10 @@ local function InitializeUI()
 	end
 
 	if sevenDaysBg and sevenDaysBg ~= previousSevenDaysBg then
+		local scale = EnsurePanelScale()
+		if scale then
+			scale.Scale = 1
+		end
 		sevenDaysBg.Visible = false
 		if blackBg then
 			blackBg.Visible = false
@@ -256,7 +416,15 @@ local function UpdateFeatureVisibility()
 		sevenDaysButtonContainer.Visible = unlocked
 	end
 	if not unlocked and sevenDaysBg then
+		CancelPanelTweens()
+		local scale = EnsurePanelScale()
+		if scale then
+			scale.Scale = 1
+		end
 		sevenDaysBg.Visible = false
+		if blackBg then
+			blackBg.Visible = false
+		end
 	end
 	if not unlocked and blackBg then
 		blackBg.Visible = false
@@ -531,12 +699,7 @@ local function OpenSevenDays()
 end
 
 local function CloseSevenDays()
-	if sevenDaysBg then
-		sevenDaysBg.Visible = false
-	end
-	if blackBg then
-		blackBg.Visible = false
-	end
+	PlayPanelClose()
 	StopCountdown()
 end
 

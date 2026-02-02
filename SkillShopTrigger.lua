@@ -180,7 +180,11 @@ local function OpenSkillShop()
 	end
 
 	-- 显示商店UI
-	skillShopFrame.Visible = true
+	if _G.SkillShopDisplay and _G.SkillShopDisplay.PlayOpen then
+		_G.SkillShopDisplay.PlayOpen()
+	else
+		skillShopFrame.Visible = true
+	end
 
 	-- 请求商店列表（通过事件通知SkillShopDisplay）
 	RequestSkillShopList:FireServer()
@@ -196,7 +200,11 @@ end
 ]]
 local function CloseSkillShop()
 	if skillShopFrame then
-		skillShopFrame.Visible = false
+		if _G.SkillShopDisplay and _G.SkillShopDisplay.PlayClose then
+			_G.SkillShopDisplay.PlayClose()
+		else
+			skillShopFrame.Visible = false
+		end
 	end
 
 	if DEBUG_MODE then

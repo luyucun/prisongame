@@ -629,6 +629,7 @@ local function CreateUnitModel(unitId, position, instanceId, level, gridWidth, g
 		-- 锚定根部件，防止模型移动和下沉
 		rootPart.Anchored = true
 		rootPart.CanCollide = true
+		rootPart.CanQuery = true
 
 	else
 		warn(GameConfig.LOG_PREFIX, "CreateUnitModel: 找不到根部件，模型可能会下沉:", model.Name)
@@ -639,6 +640,7 @@ local function CreateUnitModel(unitId, position, instanceId, level, gridWidth, g
 		if descendant:IsA("BasePart") and descendant ~= rootPart then
 			descendant.Anchored = false      -- 不锚定，允许动画移动
 			descendant.CanCollide = false    -- 禁用碰撞，避免肢体碰撞干扰
+			descendant.CanQuery = true       -- 允许射线命中，提升拖动判定灵敏度
 		end
 	end
 
@@ -752,9 +754,10 @@ end
 @param player Player
 @param instanceId string
 @param position Vector3
+@param skipSave boolean? - 是否跳过SavePlayerDataThrottled（可选）
 @return boolean, string - 是否成功, 错误/成功信息
 ]]
-function PlacementSystem.PlaceUnit(player, instanceId, position)
+function PlacementSystem.PlaceUnit(player, instanceId, position, skipSave)
 	-- 验证放置
 	local valid, message = PlacementSystem.ValidatePlacement(player, instanceId, position)
 	if not valid then
@@ -880,8 +883,10 @@ function PlacementSystem.PlaceUnit(player, instanceId, position)
 
 	local saveSuccess = DataManager.SavePlacedUnit(player, instanceId, placedData)
 	if saveSuccess then
-		-- 节流式保存整个玩家数据
-		DataManager.SavePlayerDataThrottled(player)
+		if not skipSave then
+			-- 节流式保存整个玩家数据
+			DataManager.SavePlayerDataThrottled(player)
+		end
 		-- print(string.format(
 		-- 	"%s [PlacementSystem] 🔥 已保存放置数据: 玩家 %s, 兵种 %s, 位置 (%d,%d)",
 		-- 	GameConfig.LOG_PREFIX,
@@ -906,9 +911,10 @@ end
 取消放置(移除已放置的兵种) (V2.0重构: 支持矩形占地)
 @param player Player
 @param instanceId string
+@param skipSave boolean? - 是否跳过SavePlayerDataThrottled（可选）
 @return boolean, string
 ]]
-function PlacementSystem.RemovePlacedUnit(player, instanceId)
+function PlacementSystem.RemovePlacedUnit(player, instanceId, skipSave)
 	local userId = player.UserId
 	if not placedUnits[userId] or not placedUnits[userId][instanceId] then
 		return false, "兵种未放置"
@@ -939,8 +945,10 @@ function PlacementSystem.RemovePlacedUnit(player, instanceId)
 	-- 🔥修复持久化：从DataManager移除放置数据
 	local removeSuccess = DataManager.RemovePlacedUnit(player, instanceId)
 	if removeSuccess then
-		-- 节流式保存整个玩家数据
-		DataManager.SavePlayerDataThrottled(player)
+		if not skipSave then
+			-- 节流式保存整个玩家数据
+			DataManager.SavePlayerDataThrottled(player)
+		end
 		-- print(string.format(
 		-- 	"%s [PlacementSystem] 🔥 已移除放置数据: 玩家 %s, 兵种 %s",
 		-- 	GameConfig.LOG_PREFIX,

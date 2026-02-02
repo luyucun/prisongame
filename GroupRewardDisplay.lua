@@ -9,6 +9,7 @@ local GroupRewardDisplay = {}
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -38,6 +39,23 @@ local dataBound = false
 local BindButtons = nil
 local UpdateClaimState = nil
 local UpdateFeatureVisibility = nil
+
+-- 弹框动画配置（仅Bg）
+local POPUP_OPEN_START_SCALE = 0.86
+local POPUP_OPEN_OVERSHOOT_SCALE = 1.10
+local POPUP_OPEN_DURATION_A = 0.18
+local POPUP_OPEN_DURATION_B = 0.10
+local POPUP_CLOSE_OVERSHOOT_SCALE = 1.12
+local POPUP_CLOSE_END_SCALE = 0.78
+local POPUP_CLOSE_DURATION_A = 0.08
+local POPUP_CLOSE_DURATION_B = 0.12
+
+local popupScale = nil
+local popupOpenTweenA = nil
+local popupOpenTweenB = nil
+local popupCloseTweenA = nil
+local popupCloseTweenB = nil
+local popupAnimating = false
 
 local function SafeWaitForChild(parent, childName, timeout)
 	timeout = timeout or 3
@@ -82,6 +100,133 @@ local function LoadButtonEffectHelper()
 
 	warn("[GroupRewardDisplay] ButtonEffectHelper load failed:", result)
 	return false
+end
+
+local function EnsurePopupScale()
+	if not groupRewardBg then
+		return nil
+	end
+
+	if not popupScale or popupScale.Parent ~= groupRewardBg then
+		popupScale = groupRewardBg:FindFirstChild("PopupScale")
+		if not popupScale then
+			popupScale = Instance.new("UIScale")
+			popupScale.Name = "PopupScale"
+			popupScale.Scale = 1
+			popupScale.Parent = groupRewardBg
+		end
+	end
+
+	return popupScale
+end
+
+local function CancelPopupTweens()
+	local tweens = {popupOpenTweenA, popupOpenTweenB, popupCloseTweenA, popupCloseTweenB}
+	for _, tween in ipairs(tweens) do
+		if tween and tween.PlaybackState ~= Enum.PlaybackState.Completed then
+			tween:Cancel()
+		end
+	end
+end
+
+local function PlayPopupOpen()
+	if not groupRewardBg then
+		return false
+	end
+
+	local scale = EnsurePopupScale()
+	if not scale then
+		groupRewardBg.Visible = true
+		return true
+	end
+
+	if groupRewardBg.Visible and not popupAnimating then
+		return true
+	end
+
+	CancelPopupTweens()
+	popupAnimating = true
+
+	groupRewardBg.Visible = true
+	scale.Scale = POPUP_OPEN_START_SCALE
+
+	popupOpenTweenA = TweenService:Create(
+		scale,
+		TweenInfo.new(POPUP_OPEN_DURATION_A, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{Scale = POPUP_OPEN_OVERSHOOT_SCALE}
+	)
+	popupOpenTweenB = TweenService:Create(
+		scale,
+		TweenInfo.new(POPUP_OPEN_DURATION_B, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{Scale = 1}
+	)
+
+	local connA
+	connA = popupOpenTweenA.Completed:Connect(function(state)
+		connA:Disconnect()
+		if state == Enum.PlaybackState.Completed then
+			popupOpenTweenB:Play()
+		end
+	end)
+
+	local connB
+	connB = popupOpenTweenB.Completed:Connect(function()
+		connB:Disconnect()
+		popupAnimating = false
+		scale.Scale = 1
+	end)
+
+	popupOpenTweenA:Play()
+	return true
+end
+
+local function PlayPopupClose()
+	if not groupRewardBg then
+		return false
+	end
+
+	local scale = EnsurePopupScale()
+	if not scale then
+		groupRewardBg.Visible = false
+		return true
+	end
+
+	if not groupRewardBg.Visible and not popupAnimating then
+		return true
+	end
+
+	CancelPopupTweens()
+	popupAnimating = true
+
+	popupCloseTweenA = TweenService:Create(
+		scale,
+		TweenInfo.new(POPUP_CLOSE_DURATION_A, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{Scale = POPUP_CLOSE_OVERSHOOT_SCALE}
+	)
+	popupCloseTweenB = TweenService:Create(
+		scale,
+		TweenInfo.new(POPUP_CLOSE_DURATION_B, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+		{Scale = POPUP_CLOSE_END_SCALE}
+	)
+
+	local connA
+	connA = popupCloseTweenA.Completed:Connect(function(state)
+		connA:Disconnect()
+		if state == Enum.PlaybackState.Completed then
+			popupCloseTweenB:Play()
+		end
+	end)
+
+	local connB
+	connB = popupCloseTweenB.Completed:Connect(function()
+		connB:Disconnect()
+		groupRewardBg.Visible = false
+		scale.Scale = 1
+		popupAnimating = false
+	end)
+
+	popupCloseTweenA:Play()
+	return true
 end
 
 local function InitializeEvents()
@@ -186,6 +331,11 @@ UpdateFeatureVisibility = function()
 		groupRewardButtonContainer.Visible = not claimed
 	end
 	if claimed and groupRewardBg then
+		CancelPopupTweens()
+		local scale = EnsurePopupScale()
+		if scale then
+			scale.Scale = 1
+		end
 		groupRewardBg.Visible = false
 	end
 
@@ -199,8 +349,8 @@ local function OpenGroupReward()
 		return
 	end
 
-	if groupRewardBg then
-		groupRewardBg.Visible = true
+	if not PlayPopupOpen() then
+		return
 	end
 
 	if requestDataEvent then
@@ -213,9 +363,7 @@ local function OpenGroupReward()
 end
 
 local function CloseGroupReward()
-	if groupRewardBg then
-		groupRewardBg.Visible = false
-	end
+	PlayPopupClose()
 end
 
 local function OnClaimButtonClicked()

@@ -76,6 +76,23 @@ local POPUP_TWEEN_DURATION = 0.3
 local POPUP_ALLOW_CLOSE_SECONDS = 1
 local LIGHT_ROTATE_SPEED = 60
 
+-- 面板弹框动画配置（OnlineReward Bg）
+local PANEL_OPEN_START_SCALE = 0.86
+local PANEL_OPEN_OVERSHOOT_SCALE = 1.10
+local PANEL_OPEN_DURATION_A = 0.18
+local PANEL_OPEN_DURATION_B = 0.10
+local PANEL_CLOSE_OVERSHOOT_SCALE = 1.12
+local PANEL_CLOSE_END_SCALE = 0.78
+local PANEL_CLOSE_DURATION_A = 0.08
+local PANEL_CLOSE_DURATION_B = 0.12
+
+local panelScale = nil
+local panelOpenTweenA = nil
+local panelOpenTweenB = nil
+local panelCloseTweenA = nil
+local panelCloseTweenB = nil
+local panelAnimating = false
+
 local RewardPathCandidates = {
 	[1] = { { "Bg01", "Reward01" } },
 	[2] = { { "Bg01", "Reward02" } },
@@ -352,6 +369,147 @@ local function InitializeUI()
 	return true
 end
 
+local function EnsurePanelScale()
+	if not onlineRewardBg then
+		return nil
+	end
+
+	if not panelScale or panelScale.Parent ~= onlineRewardBg then
+		panelScale = onlineRewardBg:FindFirstChild("PopupScale")
+		if not panelScale then
+			panelScale = Instance.new("UIScale")
+			panelScale.Name = "PopupScale"
+			panelScale.Scale = 1
+			panelScale.Parent = onlineRewardBg
+		end
+	end
+
+	return panelScale
+end
+
+local function CancelPanelTweens()
+	local tweens = {panelOpenTweenA, panelOpenTweenB, panelCloseTweenA, panelCloseTweenB}
+	for _, tween in ipairs(tweens) do
+		if tween and tween.PlaybackState ~= Enum.PlaybackState.Completed then
+			tween:Cancel()
+		end
+	end
+end
+
+local function ForceHidePanel()
+	if not onlineRewardBg then
+		return
+	end
+
+	CancelPanelTweens()
+	local scale = EnsurePanelScale()
+	if scale then
+		scale.Scale = 1
+	end
+	onlineRewardBg.Visible = false
+	panelAnimating = false
+end
+
+local function PlayPanelOpen()
+	if not onlineRewardBg then
+		return false
+	end
+
+	local scale = EnsurePanelScale()
+	if not scale then
+		onlineRewardBg.Visible = true
+		return true
+	end
+
+	if onlineRewardBg.Visible and not panelAnimating then
+		return true
+	end
+
+	CancelPanelTweens()
+	panelAnimating = true
+
+	onlineRewardBg.Visible = true
+	scale.Scale = PANEL_OPEN_START_SCALE
+
+	panelOpenTweenA = TweenService:Create(
+		scale,
+		TweenInfo.new(PANEL_OPEN_DURATION_A, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{Scale = PANEL_OPEN_OVERSHOOT_SCALE}
+	)
+	panelOpenTweenB = TweenService:Create(
+		scale,
+		TweenInfo.new(PANEL_OPEN_DURATION_B, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{Scale = 1}
+	)
+
+	local connA
+	connA = panelOpenTweenA.Completed:Connect(function(state)
+		connA:Disconnect()
+		if state == Enum.PlaybackState.Completed then
+			panelOpenTweenB:Play()
+		end
+	end)
+
+	local connB
+	connB = panelOpenTweenB.Completed:Connect(function()
+		connB:Disconnect()
+		panelAnimating = false
+		scale.Scale = 1
+	end)
+
+	panelOpenTweenA:Play()
+	return true
+end
+
+local function PlayPanelClose()
+	if not onlineRewardBg then
+		return false
+	end
+
+	local scale = EnsurePanelScale()
+	if not scale then
+		onlineRewardBg.Visible = false
+		return true
+	end
+
+	if not onlineRewardBg.Visible and not panelAnimating then
+		return true
+	end
+
+	CancelPanelTweens()
+	panelAnimating = true
+
+	panelCloseTweenA = TweenService:Create(
+		scale,
+		TweenInfo.new(PANEL_CLOSE_DURATION_A, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{Scale = PANEL_CLOSE_OVERSHOOT_SCALE}
+	)
+	panelCloseTweenB = TweenService:Create(
+		scale,
+		TweenInfo.new(PANEL_CLOSE_DURATION_B, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+		{Scale = PANEL_CLOSE_END_SCALE}
+	)
+
+	local connA
+	connA = panelCloseTweenA.Completed:Connect(function(state)
+		connA:Disconnect()
+		if state == Enum.PlaybackState.Completed then
+			panelCloseTweenB:Play()
+		end
+	end)
+
+	local connB
+	connB = panelCloseTweenB.Completed:Connect(function()
+		connB:Disconnect()
+		onlineRewardBg.Visible = false
+		scale.Scale = 1
+		panelAnimating = false
+	end)
+
+	panelCloseTweenA:Play()
+	return true
+end
+
 -- ==================== 弹框表现 ====================
 
 local function StopLightRotation()
@@ -422,6 +580,11 @@ local function ClosePopup()
 		lightBg.Visible = false
 	end
 	if restorePanelAfterPopup and onlineRewardBg then
+		CancelPanelTweens()
+		local scale = EnsurePanelScale()
+		if scale then
+			scale.Scale = 1
+		end
 		onlineRewardBg.Visible = true
 	end
 	restorePanelAfterPopup = false
@@ -485,7 +648,7 @@ local function ShowPopup(rewardInfo, titleText)
 
 	restorePanelAfterPopup = onlineRewardBg and onlineRewardBg.Visible == true
 	if restorePanelAfterPopup and onlineRewardBg then
-		onlineRewardBg.Visible = false
+		ForceHidePanel()
 	end
 
 	ClearPopupItems()
@@ -663,8 +826,8 @@ end
 -- ==================== 交互处理 ====================
 
 local function OpenPanel()
-	if onlineRewardBg then
-		onlineRewardBg.Visible = true
+	if not PlayPanelOpen() then
+		return
 	end
 	if requestDataEvent and not refreshRequested then
 		refreshRequested = true
@@ -676,9 +839,7 @@ local function OpenPanel()
 end
 
 local function ClosePanel()
-	if onlineRewardBg then
-		onlineRewardBg.Visible = false
-	end
+	PlayPanelClose()
 end
 
 local function OnClaimButtonClicked(rewardId)

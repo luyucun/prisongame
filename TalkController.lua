@@ -581,7 +581,11 @@ local function OpenArmyShop()
 	local shopUI = playerGui:FindFirstChild("ArmyStore")
 	local shopFrame = shopUI and shopUI:FindFirstChild("StoreBg")
 	if shopFrame then
-		shopFrame.Visible = true
+		if _G.ShopDisplay and _G.ShopDisplay.PlayOpen then
+			_G.ShopDisplay.PlayOpen()
+		else
+			shopFrame.Visible = true
+		end
 	end
 
 	local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
