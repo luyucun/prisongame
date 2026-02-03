@@ -1091,9 +1091,6 @@ _G.VictoryUIController.ConfirmCurrent = function()
     if reviveAvailable then
         return
     end
-    if currentBattleId == 0 then
-        return
-    end
     local ok, err = pcall(function()
         OnConfirmButtonClick()
     end)

@@ -20,6 +20,7 @@ local ButtonEffectHelper = nil
 
 local mainGui = nil
 local targetButton = nil
+local BACKPACK_HIDE_KEY = "Prisons"
 
 local prisonsGui = nil
 local prisonsBg = nil
@@ -55,6 +56,25 @@ local popupCloseTweenA = nil
 local popupCloseTweenB = nil
 local popupAnimating = false
 
+local function RequestBackpackHide()
+	local trigger = _G.BackpackTrigger
+	if trigger and trigger.IsOnIdleFloor and trigger.IsOnIdleFloor() then
+		if trigger.PushHideLock then
+			trigger.PushHideLock(BACKPACK_HIDE_KEY)
+		elseif _G.BackpackDisplay and _G.BackpackDisplay.HideBackpack then
+			_G.BackpackDisplay.HideBackpack()
+		end
+	end
+end
+
+local function ReleaseBackpackHide()
+	local trigger = _G.BackpackTrigger
+	if trigger and trigger.PopHideLock then
+		trigger.PopHideLock(BACKPACK_HIDE_KEY)
+	elseif trigger and trigger.RefreshVisibility then
+		trigger.RefreshVisibility()
+	end
+end
 local function SafeWaitForChild(parent, childName, timeout)
 	timeout = timeout or 3
 	if not parent then
@@ -335,6 +355,7 @@ local function OpenPrisons()
 	if not PlayPopupOpen() then
 		return
 	end
+    RequestBackpackHide()
 	RefreshHouseEntries()
 
 	local currentModel = GetCurrentHouseModel()
@@ -349,6 +370,7 @@ end
 
 local function ClosePrisons()
 	PlayPopupClose()
+    ReleaseBackpackHide()
 end
 
 BindHouseEntry = function(entry)

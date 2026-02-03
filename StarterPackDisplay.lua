@@ -38,6 +38,7 @@ local starterPackLight = nil
 local shopGui = nil
 local shopBg = nil
 local shopCloseButton = nil
+local BACKPACK_HIDE_KEY = "ShopBg"
 local newPlayerFrame = nil
 local buyButton = nil
 local tabList = nil
@@ -97,6 +98,26 @@ local shopAnimating = false
 local starterPackLightRotateConnection = nil
 
 -- ==================== Helpers ====================
+
+local function RequestBackpackHide()
+	local trigger = _G.BackpackTrigger
+	if trigger and trigger.IsOnIdleFloor and trigger.IsOnIdleFloor() then
+		if trigger.PushHideLock then
+			trigger.PushHideLock(BACKPACK_HIDE_KEY)
+		elseif _G.BackpackDisplay and _G.BackpackDisplay.HideBackpack then
+			_G.BackpackDisplay.HideBackpack()
+		end
+	end
+end
+
+local function ReleaseBackpackHide()
+	local trigger = _G.BackpackTrigger
+	if trigger and trigger.PopHideLock then
+		trigger.PopHideLock(BACKPACK_HIDE_KEY)
+	elseif trigger and trigger.RefreshVisibility then
+		trigger.RefreshVisibility()
+	end
+end
 
 local function SafeWaitForChild(parent, childName, timeout)
 	timeout = timeout or 3
@@ -715,6 +736,7 @@ local function OpenShop()
 	if not PlayShopOpen() then
 		return
 	end
+	RequestBackpackHide()
 	if requestDataEvent then
 		requestDataEvent:FireServer()
 	end
@@ -723,6 +745,7 @@ end
 
 CloseShop = function()
 	PlayShopClose()
+	ReleaseBackpackHide()
 end
 
 local function OnBuyButtonClicked()

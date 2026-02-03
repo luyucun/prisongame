@@ -34,6 +34,7 @@ local onlineButtonContainer = nil
 local openButton = nil
 local redPoint = nil
 local onlineTimeLabel = nil
+local BACKPACK_HIDE_KEY = "OnlineReward"
 
 local onlineRewardGui = nil
 local onlineRewardBg = nil
@@ -735,7 +736,7 @@ end
 
 local function UpdateTopRightTimeLabel(remainingSeconds)
 	if onlineTimeLabel and onlineTimeLabel:IsA("TextLabel") then
-		onlineTimeLabel.Text = FormatHourMinute(remainingSeconds)
+		onlineTimeLabel.Text = FormatDuration(remainingSeconds)
 	end
 end
 
@@ -825,10 +826,30 @@ end
 
 -- ==================== 交互处理 ====================
 
+local function RequestBackpackHide()
+	local trigger = _G.BackpackTrigger
+	if trigger and trigger.IsOnIdleFloor and trigger.IsOnIdleFloor() then
+		if trigger.PushHideLock then
+			trigger.PushHideLock(BACKPACK_HIDE_KEY)
+		elseif _G.BackpackDisplay and _G.BackpackDisplay.HideBackpack then
+			_G.BackpackDisplay.HideBackpack()
+		end
+	end
+end
+
+local function ReleaseBackpackHide()
+	local trigger = _G.BackpackTrigger
+	if trigger and trigger.PopHideLock then
+		trigger.PopHideLock(BACKPACK_HIDE_KEY)
+	elseif trigger and trigger.RefreshVisibility then
+		trigger.RefreshVisibility()
+	end
+end
 local function OpenPanel()
 	if not PlayPanelOpen() then
 		return
 	end
+    RequestBackpackHide()
 	if requestDataEvent and not refreshRequested then
 		refreshRequested = true
 		requestDataEvent:FireServer()
@@ -840,6 +861,7 @@ end
 
 local function ClosePanel()
 	PlayPanelClose()
+    ReleaseBackpackHide()
 end
 
 local function OnClaimButtonClicked(rewardId)

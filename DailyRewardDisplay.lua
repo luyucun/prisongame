@@ -52,6 +52,7 @@ local itemListFrame = nil
 local itemTemplate = nil
 local lightBg = nil
 local lightImage = nil
+local BACKPACK_HIDE_KEY = "ShopBg"
 
 -- 状态缓存
 local cachedData = nil
@@ -79,6 +80,26 @@ local POPUP_BG_OFFSET = 0.08
 local POPUP_TWEEN_DURATION = 0.3
 local POPUP_ALLOW_CLOSE_SECONDS = 1
 local LIGHT_ROTATE_SPEED = 60
+
+local function RequestBackpackHide()
+	local trigger = _G.BackpackTrigger
+	if trigger and trigger.IsOnIdleFloor and trigger.IsOnIdleFloor() then
+		if trigger.PushHideLock then
+			trigger.PushHideLock(BACKPACK_HIDE_KEY)
+		elseif _G.BackpackDisplay and _G.BackpackDisplay.HideBackpack then
+			_G.BackpackDisplay.HideBackpack()
+		end
+	end
+end
+
+local function ReleaseBackpackHide()
+	local trigger = _G.BackpackTrigger
+	if trigger and trigger.PopHideLock then
+		trigger.PopHideLock(BACKPACK_HIDE_KEY)
+	elseif trigger and trigger.RefreshVisibility then
+		trigger.RefreshVisibility()
+	end
+end
 
 -- Shop面板弹框动画配置（ShopBg）
 local SHOP_OPEN_START_SCALE = 0.86
@@ -822,6 +843,7 @@ local function OpenShop()
 	if not PlayShopOpen() then
 		return
 	end
+	RequestBackpackHide()
 	if requestDataEvent then
 		requestDataEvent:FireServer()
 	end
@@ -834,6 +856,7 @@ end
 
 CloseShop = function()
 	PlayShopClose()
+	ReleaseBackpackHide()
 	StopCountdown()
 end
 

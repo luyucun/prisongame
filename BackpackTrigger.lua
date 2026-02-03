@@ -42,7 +42,8 @@ local isOnIdleFloor = false  -- 当前是否在IdleFloor上
 local isBackpackVisible = false  -- 当前背包是否已显示
 local idleFloor = nil  -- 玩家的IdleFloor引用
 local lastCheckTime = 0  -- 上次检测时间
-local idleFloorListeners = {} -- 监听IdleFloor状态变化的回调列表
+local idleFloorListeners = {}
+local hideLocks = {} -- 临时隐藏背包的锁（多界面叠加）
 local heartbeatConnection = nil
 local idleFloorResolveInProgress = false
 local IDLE_FLOOR_RETRY_INTERVAL = 0.5
@@ -59,6 +60,13 @@ local function WarnIdleFloorIssue(message)
 	end
 	lastIdleFloorWarnTime = now
 	warn(message)
+end
+
+local function HasHideLock()
+	for _ in pairs(hideLocks) do
+		return true
+	end
+	return false
 end
 
 --[[
@@ -182,7 +190,8 @@ end
 ]]
 local function UpdateBackpackVisibility()
 	local onFloor = IsCharacterOnIdleFloor()
-	local shouldShow = onFloor
+	local forceHide = HasHideLock()
+	local shouldShow = onFloor and not forceHide
 
 	if shouldShow ~= isBackpackVisible then
 		isBackpackVisible = shouldShow
@@ -276,6 +285,20 @@ end)
 
 _G.BackpackTrigger = _G.BackpackTrigger or {}
 _G.BackpackTrigger.RefreshVisibility = UpdateBackpackVisibility
+_G.BackpackTrigger.PushHideLock = function(key)
+	if not key then
+		return
+	end
+	hideLocks[key] = true
+	UpdateBackpackVisibility()
+end
+_G.BackpackTrigger.PopHideLock = function(key)
+	if not key then
+		return
+	end
+	hideLocks[key] = nil
+	UpdateBackpackVisibility()
+end
 _G.BackpackTrigger.IsOnIdleFloor = function()
 	return isOnIdleFloor
 end

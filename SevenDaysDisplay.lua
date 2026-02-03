@@ -29,10 +29,30 @@ local claimResultEvent = nil
 local topRightGui = nil
 local sevenDaysButtonContainer = nil
 local openButton = nil
+local BACKPACK_HIDE_KEY = "SevenDays"
 local redPoint = nil
 local redPointOriginalPos = nil
 local redPointShakeToken = nil
 local StopRedPointShake = nil
+local function RequestBackpackHide()
+	local trigger = _G.BackpackTrigger
+	if trigger and trigger.IsOnIdleFloor and trigger.IsOnIdleFloor() then
+		if trigger.PushHideLock then
+			trigger.PushHideLock(BACKPACK_HIDE_KEY)
+		elseif _G.BackpackDisplay and _G.BackpackDisplay.HideBackpack then
+			_G.BackpackDisplay.HideBackpack()
+		end
+	end
+end
+
+local function ReleaseBackpackHide()
+	local trigger = _G.BackpackTrigger
+	if trigger and trigger.PopHideLock then
+		trigger.PopHideLock(BACKPACK_HIDE_KEY)
+	elseif trigger and trigger.RefreshVisibility then
+		trigger.RefreshVisibility()
+	end
+end
 
 local sevenDaysGui = nil
 local sevenDaysBg = nil
@@ -193,6 +213,7 @@ local function PlayPanelOpen()
 	if blackBg then
 		blackBg.Visible = true
 	end
+    RequestBackpackHide()
 	scale.Scale = POPUP_OPEN_START_SCALE
 
 	panelOpenTweenA = TweenService:Create(
@@ -685,6 +706,7 @@ local function OpenSevenDays()
 	if blackBg then
 		blackBg.Visible = true
 	end
+    RequestBackpackHide()
 
 	if requestDataEvent then
 		requestDataEvent:FireServer(true)
@@ -700,6 +722,7 @@ end
 
 local function CloseSevenDays()
 	PlayPanelClose()
+    ReleaseBackpackHide()
 	StopCountdown()
 end
 

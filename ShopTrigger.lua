@@ -44,6 +44,7 @@ local checkConnection = nil       -- 距离检测连接
 -- UI引用（延迟加载）
 local shopUI = nil
 local shopFrame = nil
+local BACKPACK_HIDE_KEY = "Shop"
 
 -- 事件引用
 local RequestShopList = nil
@@ -55,6 +56,25 @@ local ShopListEvent = nil
 初始化UI引用
 @return boolean - 是否成功
 ]]
+local function RequestBackpackHide()
+	local trigger = _G.BackpackTrigger
+	if trigger and trigger.IsOnIdleFloor and trigger.IsOnIdleFloor() then
+		if trigger.PushHideLock then
+			trigger.PushHideLock(BACKPACK_HIDE_KEY)
+		elseif _G.BackpackDisplay and _G.BackpackDisplay.HideBackpack then
+			_G.BackpackDisplay.HideBackpack()
+		end
+	end
+end
+
+local function ReleaseBackpackHide()
+	local trigger = _G.BackpackTrigger
+	if trigger and trigger.PopHideLock then
+		trigger.PopHideLock(BACKPACK_HIDE_KEY)
+	elseif trigger and trigger.RefreshVisibility then
+		trigger.RefreshVisibility()
+	end
+end
 local function InitializeUI()
 	if shopUI then
 		return true -- 已初始化
@@ -198,6 +218,7 @@ local function OpenShop()
 	else
 		shopFrame.Visible = true
 	end
+    RequestBackpackHide()
 	isShopOpen = true
 
 	-- 请求商店列表
@@ -249,6 +270,7 @@ local function CloseShop(manual)
 	else
 		shopFrame.Visible = false
 	end
+    ReleaseBackpackHide()
 	isShopOpen = false
 
 	if manual then
