@@ -84,6 +84,8 @@ local SevenDaysSystem = require(ServerScriptService.Systems.SevenDaysSystem)
 local DailyRewardSystem = require(ServerScriptService.Systems.DailyRewardSystem)
 -- V6.1鏂板 - 鍦ㄧ嚎濂栧姳
 local OnlineRewardSystem = require(ServerScriptService.Systems.OnlineRewardSystem)
+-- V6.7新增 - 养成系统
+local UpgradeSystem = require(ServerScriptService.Systems.UpgradeSystem)
 -- V5.4新增 - 新手礼包
 local StarterPackSystem = require(ServerScriptService.Systems.StarterPackSystem)
 -- V5.5新增 - VIP礼包
@@ -496,6 +498,16 @@ local function InitializeServer()
         warn(GameConfig.LOG_PREFIX, "音效系统初始化失败(异常):", result)
     elseif result == false then
         warn(GameConfig.LOG_PREFIX, "音效系统初始化失败(返回false)")
+    end
+
+    -- 14.5 初始化养成系统 (V6.7新增)
+    success, result = pcall(function()
+        return UpgradeSystem.Initialize()
+    end)
+    if not success then
+        warn(GameConfig.LOG_PREFIX, "养成系统初始化失败(异常):", result)
+    elseif result == false then
+        warn(GameConfig.LOG_PREFIX, "养成系统初始化失败(返回false)")
     end
 
     -- 15. 初始化Robux购买处理器 (MarketplaceHandler)

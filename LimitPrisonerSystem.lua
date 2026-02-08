@@ -593,6 +593,15 @@ local function RefreshLimitPrisoner(player, forceRefresh)
 
 	local now = os.time()
 	local nextRefresh = tonumber(data.NextRefreshTime) or 0
+	-- 配置变更对齐：如果下一次刷新时间与当前配置不一致且仍在未来，则按最新配置重算
+	local scheduledNext = GetNextRefreshTimeUtc(now)
+	if scheduledNext > 0 and nextRefresh > now and math.abs(nextRefresh - scheduledNext) > 60 then
+		nextRefresh = scheduledNext
+		data.NextRefreshTime = scheduledNext
+		if DataManager then
+			DataManager.SavePlayerDataThrottled(player)
+		end
+	end
 	local needRefresh = forceRefresh
 		or data.LastRefreshTime <= 0
 		or data.CurrentUnitId == ""

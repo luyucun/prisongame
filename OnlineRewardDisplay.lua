@@ -22,7 +22,7 @@ local UnitConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild
 local SkillConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("SkillConfig"))
 
 local COIN_ICON = "rbxassetid://92295649647469"
-
+local HANDCUFF_ICON = "rbxassetid://118659064631130"
 local onlineRewardEvents = nil
 local requestDataEvent = nil
 local dataEvent = nil
@@ -633,7 +633,7 @@ local function ResolveIcon(item)
 		return item.Icon or COIN_ICON
 	end
 	if item.Type == "Handcuff" then
-		return item.Icon or ""
+		return item.Icon or HANDCUFF_ICON
 	end
 	return ""
 end

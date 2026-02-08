@@ -1,4 +1,4 @@
-﻿--[[
+--[[
 =====================================================
 脚本名称: CampaignManager
 脚本类型: ModuleScript (服务端核心)
@@ -61,6 +61,7 @@ local CampaignUnitHelper = require(SystemsFolder:WaitForChild("CampaignUnitHelpe
 local DoorControlService = require(SystemsFolder:WaitForChild("DoorControlService") :: ModuleScript)
 -- V3.8新增 - 音效系统
 local SoundSystem = require(SystemsFolder:WaitForChild("SoundSystem") :: ModuleScript)
+local UpgradeSystem = require(SystemsFolder:WaitForChild("UpgradeSystem") :: ModuleScript)
 
 -- 徽章系统（延迟加载，避免循环依赖）
 local BadgeSystem
@@ -129,6 +130,53 @@ local function DebugLog(...)
 		print(GameConfig.LOG_PREFIX, "[CampaignManager]", ...)
 	end
 end
+
+local function GetCampaignMultipliers(campaignData)
+	if not campaignData then
+		return nil
+	end
+
+	if campaignData.UpgradeMultipliers then
+		return campaignData.UpgradeMultipliers
+	end
+
+	if campaignData.Player and UpgradeSystem and UpgradeSystem.GetPlayerMultipliers then
+		campaignData.UpgradeMultipliers = UpgradeSystem.GetPlayerMultipliers(campaignData.Player)
+		return campaignData.UpgradeMultipliers
+	end
+
+	return nil
+end
+
+local function ApplyCampaignHealthBonus(baseHealth, campaignData)
+	local value = tonumber(baseHealth) or 0
+	if value <= 0 then
+		return 1
+	end
+
+	local multipliers = GetCampaignMultipliers(campaignData)
+	local healthMultiplier = multipliers and tonumber(multipliers.HealthMultiplier) or 1
+	if not healthMultiplier or healthMultiplier <= 0 then
+		healthMultiplier = 1
+	end
+	return math.max(1, value * healthMultiplier)
+end
+
+local function ApplyCampaignMoveSpeedBonus(baseMoveSpeed, campaignData)
+	local value = tonumber(baseMoveSpeed) or 16
+	if value <= 0 then
+		value = 16
+	end
+
+	local multipliers = GetCampaignMultipliers(campaignData)
+	local speedMultiplier = multipliers and tonumber(multipliers.MoveSpeedMultiplier) or 1
+	if not speedMultiplier or speedMultiplier <= 0 then
+		speedMultiplier = 1
+	end
+
+	return math.max(1, value * speedMultiplier)
+end
+
 
 -- ==================== 主线进度埋点（Roblox后台自定义事件） ====================
 
@@ -992,6 +1040,7 @@ function CampaignManager.StartCampaign(player)
 		StartZPosition = startZPosition,           -- 战斗开始时的起点Z坐标(CommandPart位置)
 		MaxAdvancedZ = startZPosition,             -- 已经前进过的最远Z坐标
 		LastRewardedDistance = 0,                  -- 上次获得奖励时的累计前进距离
+		UpgradeMultipliers = (UpgradeSystem and UpgradeSystem.GetPlayerMultipliers) and UpgradeSystem.GetPlayerMultipliers(player) or nil,
 	}
 
 	-- 获取家园IdleFloor
@@ -1083,6 +1132,18 @@ function CampaignManager.StartCampaign(player)
 
 			-- 解除单位锚定,允许移动
 			SetUnitAnchored(unitModel, false)
+			local maxHP = ApplyCampaignHealthBonus(UnitConfig.CalculateHealth(unitId, level), campaignData)
+			local moveSpeed = ApplyCampaignMoveSpeedBonus(UnitConfig.GetMoveSpeed(unitId), campaignData)
+			local unitHumanoid = unitModel:FindFirstChild("Humanoid")
+			if unitHumanoid then
+				unitHumanoid.MaxHealth = maxHP
+				-- StartCampaign begins a fresh sortie; keep initial HP full after max HP changes
+				unitHumanoid.Health = maxHP
+				unitHumanoid.WalkSpeed = moveSpeed
+			end
+			unitModel:SetAttribute("BattleMaxHealth", maxHP)
+			unitModel:SetAttribute("BattleMoveSpeed", moveSpeed)
+
 
 			-- 构建单位数据(V2.8.1: 包含完整占地信息和InstanceId)
 			campaignData.Units[unitModel] = {
@@ -1097,8 +1158,9 @@ function CampaignManager.StartCampaign(player)
 				GridZ = gridZ,
 				GridWidth = gridWidth,
 				GridDepth = gridDepth,
-				CurrentHP = unitModel.Humanoid.Health,
-				MaxHP = unitModel.Humanoid.MaxHealth,
+				CurrentHP = maxHP,
+				MaxHP = maxHP,
+				MoveSpeed = moveSpeed,
 				IsDead = false,
 				WasAnchored = true,
 
@@ -1406,22 +1468,15 @@ function CampaignManager.MarchToStage(campaignData, stageNum)
 		end
 		local humanoid = unitInstance:FindFirstChild("Humanoid")
 		if humanoid and unitId then
-			local UnitConfigModule = require(ReplicatedStorage.Config.UnitConfig)
-			local success, configSpeed = pcall(function()
-				return UnitConfigModule.GetMoveSpeed(unitId)
-			end)
-			if success and configSpeed and type(configSpeed) == "number" and configSpeed > 0 then
-				humanoid.WalkSpeed = configSpeed
-				DebugLog(string.format("  ✅ %s 设置移动速度: %.1f", tostring(unitInstance.Name), configSpeed))
-			else
-				-- 使用默认速度
-				local defaultSpeed = humanoid.WalkSpeed
-				if defaultSpeed <= 0 then
-					defaultSpeed = 16
-				end
-				humanoid.WalkSpeed = defaultSpeed
-				DebugLog(string.format("  ℹ %s 使用默认速度: %.1f", tostring(unitInstance.Name), defaultSpeed))
+			local configSpeed = tonumber(UnitConfig.GetMoveSpeed(unitId))
+			if not configSpeed or configSpeed <= 0 then
+				configSpeed = humanoid.WalkSpeed
 			end
+			local finalSpeed = ApplyCampaignMoveSpeedBonus(configSpeed, campaignData)
+			humanoid.WalkSpeed = finalSpeed
+			unitData.MoveSpeed = finalSpeed
+			unitInstance:SetAttribute("BattleMoveSpeed", finalSpeed)
+			DebugLog(string.format("  ✅ %s 设置移动速度: %.1f", tostring(unitInstance.Name), finalSpeed))
 		end
 
 		-- 停止所有正在播放的动画
@@ -2241,14 +2296,12 @@ function CampaignManager.ProcessRevivePurchase(player, productId)
 
 				local unitId = unitData.UnitId or unitInstance:GetAttribute("UnitId") or unitInstance.Name
 				local level = unitData.Level or unitInstance:GetAttribute("Level") or 1
-				local maxHP = UnitConfig.CalculateHealth(unitId, level)
-				local moveSpeed = UnitConfig.GetMoveSpeed(unitId)
-				if type(moveSpeed) ~= "number" or moveSpeed <= 0 then
-					moveSpeed = 16
-				end
+				local maxHP = ApplyCampaignHealthBonus(UnitConfig.CalculateHealth(unitId, level), campaignData)
+				local moveSpeed = ApplyCampaignMoveSpeedBonus(UnitConfig.GetMoveSpeed(unitId), campaignData)
 
 				unitData.MaxHP = maxHP
 				unitData.CurrentHP = maxHP
+				unitData.MoveSpeed = moveSpeed
 				unitData.IsDead = false
 
 				local humanoid = unitInstance:FindFirstChild("Humanoid")
@@ -2270,6 +2323,8 @@ function CampaignManager.ProcessRevivePurchase(player, productId)
 				end
 
 				unitInstance:SetAttribute("IsDead", false)
+				unitInstance:SetAttribute("BattleMaxHealth", maxHP)
+				unitInstance:SetAttribute("BattleMoveSpeed", moveSpeed)
 
 				local gridX = unitData.GridX or 0
 				local gridZ = unitData.GridZ or 0
@@ -3601,7 +3656,7 @@ V2.11新增：传送玩家回家园出生点
 @param player Player - 玩家
 @return boolean - 是否传送成功
 ]]
-function CampaignManager.ReturnToHome(player)
+function CampaignManager.ReturnToHome(player, targetPartName)
 	if not player then
 		return false
 	end
@@ -3623,16 +3678,27 @@ function CampaignManager.ReturnToHome(player)
 		return false
 	end
 
-	-- 获取家园出生点
+	-- 获取家园目标点
 	local homeFolder = Workspace.Home:FindFirstChild("PlayerHome" .. homeId)
 	if not homeFolder then
 		DebugLog(string.format("ReturnToHome失败: 未找到PlayerHome%s", tostring(homeId)))
 		return false
 	end
 
-	local spawnLocation = homeFolder:FindFirstChild("SpawnLocation")
-	if not spawnLocation then
-		DebugLog(string.format("ReturnToHome失败: PlayerHome%s中未找到SpawnLocation", tostring(homeId)))
+	local targetPart = nil
+	if targetPartName == "PrisonerTouch" then
+		local candidate = homeFolder:FindFirstChild("PrisonerTouch", true)
+		if candidate and candidate:IsA("BasePart") then
+			targetPart = candidate
+		end
+	end
+
+	if not targetPart then
+		targetPart = homeFolder:FindFirstChild("SpawnLocation")
+	end
+
+	if not targetPart then
+		DebugLog(string.format("ReturnToHome失败: PlayerHome%s中未找到目标点", tostring(homeId)))
 		return false
 	end
 
@@ -3649,11 +3715,56 @@ function CampaignManager.ReturnToHome(player)
 		return false
 	end
 
-	-- 执行传送（在出生点上方一定高度）
-	local teleportPosition = spawnLocation.CFrame + Vector3.new(0, 5, 0)
-	humanoidRootPart.CFrame = teleportPosition
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		local seatPart = humanoid.SeatPart
+		if seatPart then
+			seatPart:Sit(nil)
+			humanoid.Sit = false
+			humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+			local seatWeld = seatPart:FindFirstChild("SeatWeld")
+			if seatWeld then
+				seatWeld:Destroy()
+			end
+			for _, joint in ipairs(seatPart:GetChildren()) do
+				if joint:IsA("Weld") or joint:IsA("WeldConstraint") then
+					local part0 = joint.Part0
+					local part1 = joint.Part1
+					if (part0 and part0:IsDescendantOf(character)) or (part1 and part1:IsDescendantOf(character)) then
+						joint:Destroy()
+					end
+				end
+			end
+			task.wait()
+		end
+	end
 
-	DebugLog(string.format("✅ 玩家 %s 已传送回家园出生点", player.Name))
+	-- 执行传送（落地对齐目标点）
+	local _, charSize = character:GetBoundingBox()
+	local targetPos = targetPart.Position
+	local yOffset = (targetPart.Size.Y * 0.5) + (charSize.Y * 0.5)
+	local teleportCFrame = CFrame.new(Vector3.new(targetPos.X, targetPos.Y + yOffset, targetPos.Z))
+
+	-- V6.3：传送到PrisonerTouch后面向商店
+	if targetPartName == "PrisonerTouch" then
+		local npcName = (GameConfig.Shop and GameConfig.Shop.NPCName) or "KeepShoper01"
+		local npc = homeFolder:FindFirstChild(npcName, true)
+		local npcPart = npc and (npc:FindFirstChild("HumanoidRootPart") or npc.PrimaryPart or npc:FindFirstChildWhichIsA("BasePart"))
+		if npcPart then
+			local pos = teleportCFrame.Position
+			local targetPos = npcPart.Position
+			local lookAt = Vector3.new(targetPos.X, pos.Y, targetPos.Z)
+			if (lookAt - pos).Magnitude > 0.1 then
+				teleportCFrame = CFrame.new(pos, lookAt)
+			end
+		else
+			teleportCFrame = teleportCFrame * CFrame.Angles(0, math.rad(90), 0)
+		end
+	end
+
+	humanoidRootPart.CFrame = teleportCFrame
+
+	DebugLog(string.format("✅ 玩家 %s 已传送回家园目标点", player.Name))
 	return true
 end
 
@@ -3696,9 +3807,9 @@ function CampaignManager.Initialize()
 		if battleControlEvents then
 			local returnToHomeEvent = battleControlEvents:FindFirstChild("ReturnToHome")
 			if returnToHomeEvent then
-				returnToHomeEvent.OnServerEvent:Connect(function(player)
+				returnToHomeEvent.OnServerEvent:Connect(function(player, targetPartName)
 					local success, err = pcall(function()
-						CampaignManager.ReturnToHome(player)
+						CampaignManager.ReturnToHome(player, targetPartName)
 					end)
 					if not success then
 						warn("[CampaignManager] ReturnToHome处理失败:", err)
@@ -3760,3 +3871,4 @@ function CampaignManager.Initialize()
 end
 
 return CampaignManager
+

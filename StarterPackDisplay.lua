@@ -34,13 +34,20 @@ local mainGui = nil
 local starterPackContainer = nil
 local starterPackButton = nil
 local starterPackLight = nil
+local starterPackIcon = nil
+local starterPackNameLabel = nil
+local starterPackNameGradient = nil
+
+local starterPackGui = nil
+local starterPackBg = nil
+local starterPackCloseButton = nil
+local starterPackBuyButton = nil
 
 local shopGui = nil
 local shopBg = nil
-local shopCloseButton = nil
-local BACKPACK_HIDE_KEY = "ShopBg"
+local BACKPACK_HIDE_KEY = "StarterPackBg"
 local newPlayerFrame = nil
-local buyButton = nil
+local shopBuyButton = nil
 local tabList = nil
 local tabNewPlayerButton = nil
 
@@ -59,10 +66,10 @@ local cachedPurchased = nil
 local purchaseLock = false
 local dataBound = false
 local boundButtons = {}
-local shopVisibleConn = nil
+local starterPackVisibleConn = nil
 local campaignEventsBound = false
 local isBattleBlocked = false
-local CloseShop = nil
+local CloseStarterPack = nil
 
 -- Popup state
 local lightRotateConnection = nil
@@ -88,14 +95,16 @@ local SHOP_CLOSE_END_SCALE = 0.78
 local SHOP_CLOSE_DURATION_A = 0.08
 local SHOP_CLOSE_DURATION_B = 0.12
 
-local shopScale = nil
-local shopOpenTweenA = nil
-local shopOpenTweenB = nil
-local shopCloseTweenA = nil
-local shopCloseTweenB = nil
-local shopAnimating = false
+local starterPackScale = nil
+local starterPackOpenTweenA = nil
+local starterPackOpenTweenB = nil
+local starterPackCloseTweenA = nil
+local starterPackCloseTweenB = nil
+local starterPackAnimating = false
 
 local starterPackLightRotateConnection = nil
+local starterPackNameGradientTween = nil
+local starterPackIconShakeToken = nil
 
 -- ==================== Helpers ====================
 
@@ -164,26 +173,26 @@ local function IsDescendantOfPlayerGui(instance)
 	return instance ~= nil and instance:IsDescendantOf(playerGui)
 end
 
-local function EnsureShopScale()
-	if not shopBg then
+local function EnsureStarterPackScale()
+	if not starterPackBg then
 		return nil
 	end
 
-	if not shopScale or shopScale.Parent ~= shopBg then
-		shopScale = shopBg:FindFirstChild("PopupScale")
-		if not shopScale then
-			shopScale = Instance.new("UIScale")
-			shopScale.Name = "PopupScale"
-			shopScale.Scale = 1
-			shopScale.Parent = shopBg
+	if not starterPackScale or starterPackScale.Parent ~= starterPackBg then
+		starterPackScale = starterPackBg:FindFirstChild("PopupScale")
+		if not starterPackScale then
+			starterPackScale = Instance.new("UIScale")
+			starterPackScale.Name = "PopupScale"
+			starterPackScale.Scale = 1
+			starterPackScale.Parent = starterPackBg
 		end
 	end
 
-	return shopScale
+	return starterPackScale
 end
 
-local function CancelShopTweens()
-	local tweens = {shopOpenTweenA, shopOpenTweenB, shopCloseTweenA, shopCloseTweenB}
+local function CancelStarterPackTweens()
+	local tweens = {starterPackOpenTweenA, starterPackOpenTweenB, starterPackCloseTweenA, starterPackCloseTweenB}
 	for _, tween in ipairs(tweens) do
 		if tween and tween.PlaybackState ~= Enum.PlaybackState.Completed then
 			tween:Cancel()
@@ -191,103 +200,103 @@ local function CancelShopTweens()
 	end
 end
 
-local function PlayShopOpen()
-	if not shopBg then
+local function PlayStarterPackOpen()
+	if not starterPackBg then
 		return false
 	end
 
-	local scale = EnsureShopScale()
+	local scale = EnsureStarterPackScale()
 	if not scale then
-		shopBg.Visible = true
+		starterPackBg.Visible = true
 		return true
 	end
 
-	if shopBg.Visible and not shopAnimating then
+	if starterPackBg.Visible and not starterPackAnimating then
 		return true
 	end
 
-	CancelShopTweens()
-	shopAnimating = true
+	CancelStarterPackTweens()
+	starterPackAnimating = true
 
-	shopBg.Visible = true
+	starterPackBg.Visible = true
 	scale.Scale = SHOP_OPEN_START_SCALE
 
-	shopOpenTweenA = TweenService:Create(
+	starterPackOpenTweenA = TweenService:Create(
 		scale,
 		TweenInfo.new(SHOP_OPEN_DURATION_A, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
 		{Scale = SHOP_OPEN_OVERSHOOT_SCALE}
 	)
-	shopOpenTweenB = TweenService:Create(
+	starterPackOpenTweenB = TweenService:Create(
 		scale,
 		TweenInfo.new(SHOP_OPEN_DURATION_B, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
 		{Scale = 1}
 	)
 
 	local connA
-	connA = shopOpenTweenA.Completed:Connect(function(state)
+	connA = starterPackOpenTweenA.Completed:Connect(function(state)
 		connA:Disconnect()
 		if state == Enum.PlaybackState.Completed then
-			shopOpenTweenB:Play()
+			starterPackOpenTweenB:Play()
 		end
 	end)
 
 	local connB
-	connB = shopOpenTweenB.Completed:Connect(function()
+	connB = starterPackOpenTweenB.Completed:Connect(function()
 		connB:Disconnect()
-		shopAnimating = false
+		starterPackAnimating = false
 		scale.Scale = 1
 	end)
 
-	shopOpenTweenA:Play()
+	starterPackOpenTweenA:Play()
 	return true
 end
 
-local function PlayShopClose()
-	if not shopBg then
+local function PlayStarterPackClose()
+	if not starterPackBg then
 		return false
 	end
 
-	local scale = EnsureShopScale()
+	local scale = EnsureStarterPackScale()
 	if not scale then
-		shopBg.Visible = false
+		starterPackBg.Visible = false
 		return true
 	end
 
-	if not shopBg.Visible and not shopAnimating then
+	if not starterPackBg.Visible and not starterPackAnimating then
 		return true
 	end
 
-	CancelShopTweens()
-	shopAnimating = true
+	CancelStarterPackTweens()
+	starterPackAnimating = true
 
-	shopCloseTweenA = TweenService:Create(
+	starterPackCloseTweenA = TweenService:Create(
 		scale,
 		TweenInfo.new(SHOP_CLOSE_DURATION_A, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
 		{Scale = SHOP_CLOSE_OVERSHOOT_SCALE}
 	)
-	shopCloseTweenB = TweenService:Create(
+	starterPackCloseTweenB = TweenService:Create(
 		scale,
 		TweenInfo.new(SHOP_CLOSE_DURATION_B, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
 		{Scale = SHOP_CLOSE_END_SCALE}
 	)
 
 	local connA
-	connA = shopCloseTweenA.Completed:Connect(function(state)
+	connA = starterPackCloseTweenA.Completed:Connect(function(state)
 		connA:Disconnect()
 		if state == Enum.PlaybackState.Completed then
-			shopCloseTweenB:Play()
+			starterPackCloseTweenB:Play()
 		end
 	end)
 
 	local connB
-	connB = shopCloseTweenB.Completed:Connect(function()
+	connB = starterPackCloseTweenB.Completed:Connect(function()
 		connB:Disconnect()
-		shopBg.Visible = false
+		starterPackBg.Visible = false
 		scale.Scale = 1
-		shopAnimating = false
+		starterPackAnimating = false
 	end)
 
-	shopCloseTweenA:Play()
+	starterPackCloseTweenA:Play()
 	return true
 end
 
@@ -304,6 +313,122 @@ local function IsShopUnlocked()
 end
 
 -- ==================== Initialization ====================
+
+local function StartStarterPackIconShake()
+	if starterPackIconShakeToken or not starterPackIcon or not starterPackIcon:IsA("GuiObject") then
+		return
+	end
+
+	local token = {}
+	starterPackIconShakeToken = token
+	local baseRotation = starterPackIcon.Rotation
+
+	task.spawn(function()
+		while starterPackIconShakeToken == token do
+			local tween1 = TweenService:Create(starterPackIcon, TweenInfo.new(0.05, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Rotation = baseRotation + 10})
+			local tween2 = TweenService:Create(starterPackIcon, TweenInfo.new(0.05, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Rotation = baseRotation - 10})
+			local tween3 = TweenService:Create(starterPackIcon, TweenInfo.new(0.05, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Rotation = baseRotation + 6})
+			local tween4 = TweenService:Create(starterPackIcon, TweenInfo.new(0.05, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Rotation = baseRotation - 6})
+			local tween5 = TweenService:Create(starterPackIcon, TweenInfo.new(0.07, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Rotation = baseRotation})
+
+			tween1:Play()
+			tween1.Completed:Wait()
+			if starterPackIconShakeToken ~= token then
+				break
+			end
+			tween2:Play()
+			tween2.Completed:Wait()
+			if starterPackIconShakeToken ~= token then
+				break
+			end
+			tween3:Play()
+			tween3.Completed:Wait()
+			if starterPackIconShakeToken ~= token then
+				break
+			end
+			tween4:Play()
+			tween4.Completed:Wait()
+			if starterPackIconShakeToken ~= token then
+				break
+			end
+			tween5:Play()
+			tween5.Completed:Wait()
+			if starterPackIconShakeToken ~= token then
+				break
+			end
+			task.wait(4)
+		end
+
+		if starterPackIcon then
+			starterPackIcon.Rotation = baseRotation
+		end
+	end)
+end
+
+local function StopStarterPackIconShake()
+	if starterPackIconShakeToken then
+		starterPackIconShakeToken = nil
+	end
+	if starterPackIcon then
+		starterPackIcon.Rotation = 0
+	end
+end
+
+local function EnsureStarterPackNameGradient()
+	if not starterPackNameLabel or not starterPackNameLabel:IsA("GuiObject") then
+		return nil
+	end
+
+	local gradient = starterPackNameLabel:FindFirstChildWhichIsA("UIGradient", true)
+	if not gradient then
+		gradient = Instance.new("UIGradient")
+		gradient.Name = "NameGradient"
+		gradient.Parent = starterPackNameLabel
+	end
+
+	gradient.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 98, 0)),
+		ColorSequenceKeypoint.new(0.25, Color3.fromRGB(255, 230, 0)),
+		ColorSequenceKeypoint.new(0.5, Color3.fromRGB(85, 255, 0)),
+		ColorSequenceKeypoint.new(0.75, Color3.fromRGB(0, 209, 255)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 98, 0)),
+	})
+
+	if starterPackNameLabel:IsA("TextLabel") or starterPackNameLabel:IsA("TextButton") then
+		starterPackNameLabel.TextColor3 = Color3.new(1, 1, 1)
+	end
+
+	starterPackNameGradient = gradient
+	return gradient
+end
+
+local function StartStarterPackNameGradient()
+	if starterPackNameGradientTween then
+		return
+	end
+	local gradient = EnsureStarterPackNameGradient()
+	if not gradient then
+		return
+	end
+
+	gradient.Rotation = 0
+	starterPackNameGradientTween = TweenService:Create(
+		gradient,
+		TweenInfo.new(6, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, -1),
+		{ Rotation = 360 }
+	)
+	starterPackNameGradientTween:Play()
+end
+
+local function StopStarterPackNameGradient()
+	if starterPackNameGradientTween then
+		starterPackNameGradientTween:Cancel()
+		starterPackNameGradientTween = nil
+	end
+	if starterPackNameGradient then
+		starterPackNameGradient.Rotation = 0
+	end
+end
 
 local function InitializeEvents()
 	if starterPackEvents then
@@ -337,10 +462,10 @@ end
 
 local function InitializeUI()
 	local mainGuiValid = IsDescendantOfPlayerGui(starterPackContainer)
-	local shopValid = IsDescendantOfPlayerGui(shopBg)
+	local starterPackValid = IsDescendantOfPlayerGui(starterPackBg)
 	local popupValid = IsDescendantOfPlayerGui(claimSuccess)
 
-	if mainGuiValid and shopValid and popupValid then
+	if mainGuiValid and starterPackValid and popupValid then
 		return true
 	end
 
@@ -353,21 +478,48 @@ local function InitializeUI()
 			starterPackButton = innerButton
 		end
 	end
-	starterPackLight = starterPackContainer and starterPackContainer:FindFirstChild("Light", true)
 
-	shopGui = SafeWaitForChild(playerGui, "Shop", 5)
-	shopBg = shopGui and shopGui:FindFirstChild("ShopBg")
-	if shopBg then
-		local title = shopBg:FindFirstChild("Title")
-		shopCloseButton = title and title:FindFirstChild("CloseButton")
-		local scale = EnsureShopScale()
+	starterPackLight = starterPackContainer and starterPackContainer:FindFirstChild("Light", true)
+	starterPackIcon = starterPackContainer and starterPackContainer:FindFirstChild("Icon", true)
+	starterPackNameLabel = starterPackContainer and starterPackContainer:FindFirstChild("Name", true)
+	if starterPackNameLabel and not starterPackNameLabel:IsA("TextLabel") then
+		local innerName = starterPackNameLabel:FindFirstChild("Text") or starterPackNameLabel:FindFirstChildWhichIsA("TextLabel")
+		if innerName then
+			starterPackNameLabel = innerName
+		end
+	end
+	starterPackNameGradient = starterPackNameLabel and starterPackNameLabel:FindFirstChildWhichIsA("UIGradient", true)
+
+	starterPackGui = SafeWaitForChild(playerGui, "StarterPack", 5)
+	starterPackBg = starterPackGui and starterPackGui:FindFirstChild("Bg")
+	if starterPackBg then
+		local title = starterPackBg:FindFirstChild("Title")
+		starterPackCloseButton = title and title:FindFirstChild("CloseButton")
+
+		starterPackBuyButton = starterPackBg:FindFirstChild("BuyButton", true)
+		if starterPackBuyButton and not (starterPackBuyButton:IsA("TextButton") or starterPackBuyButton:IsA("ImageButton")) then
+			local innerBuy = starterPackBuyButton:FindFirstChild("Button")
+				or starterPackBuyButton:FindFirstChildWhichIsA("TextButton")
+				or starterPackBuyButton:FindFirstChildWhichIsA("ImageButton")
+			if innerBuy then
+				starterPackBuyButton = innerBuy
+			end
+		end
+
+		local scale = EnsureStarterPackScale()
 		if scale then
 			scale.Scale = 1
 		end
+
+		starterPackBg.Visible = false
 	end
 
+	-- Shop内的NewPlayer区域（用于隐藏，不再作为购买入口）
+	shopGui = SafeWaitForChild(playerGui, "Shop", 5)
+	shopBg = shopGui and shopGui:FindFirstChild("ShopBg")
+
 	newPlayerFrame = nil
-	buyButton = nil
+	shopBuyButton = nil
 	tabList = nil
 	tabNewPlayerButton = nil
 
@@ -377,13 +529,13 @@ local function InitializeUI()
 		if not newPlayerFrame and scrollingFrame then
 			newPlayerFrame = scrollingFrame:FindFirstChild("NewPlayer")
 		end
-		buyButton = newPlayerFrame and newPlayerFrame:FindFirstChild("BuyButton")
-		if buyButton and not (buyButton:IsA("TextButton") or buyButton:IsA("ImageButton")) then
-			local innerBuy = buyButton:FindFirstChild("Button")
-				or buyButton:FindFirstChildWhichIsA("TextButton")
-				or buyButton:FindFirstChildWhichIsA("ImageButton")
+		shopBuyButton = newPlayerFrame and newPlayerFrame:FindFirstChild("BuyButton")
+		if shopBuyButton and not (shopBuyButton:IsA("TextButton") or shopBuyButton:IsA("ImageButton")) then
+			local innerBuy = shopBuyButton:FindFirstChild("Button")
+				or shopBuyButton:FindFirstChildWhichIsA("TextButton")
+				or shopBuyButton:FindFirstChildWhichIsA("ImageButton")
 			if innerBuy then
-				buyButton = innerBuy
+				shopBuyButton = innerBuy
 			end
 		end
 
@@ -419,7 +571,7 @@ local function InitializeUI()
 		lightBg.Visible = false
 	end
 
-	return mainGui ~= nil and shopBg ~= nil
+	return mainGui ~= nil and starterPackBg ~= nil
 end
 
 -- ==================== UI State ====================
@@ -446,6 +598,12 @@ local function UpdateVisibility()
 		tabNewPlayerButton.Visible = not purchased
 	end
 
+	if purchased and starterPackBg and starterPackBg.Visible then
+		if CloseStarterPack then
+			CloseStarterPack()
+		end
+	end
+
 	if purchased and shopBg and shopBg.Visible then
 		if newPlayerFrame then
 			newPlayerFrame.Visible = false
@@ -464,6 +622,8 @@ local function UpdateVisibility()
 				end
 			end)
 		end
+		StartStarterPackIconShake()
+		StartStarterPackNameGradient()
 	else
 		if starterPackLightRotateConnection then
 			starterPackLightRotateConnection:Disconnect()
@@ -472,6 +632,8 @@ local function UpdateVisibility()
 		if starterPackLight then
 			starterPackLight.Rotation = 0
 		end
+		StopStarterPackIconShake()
+		StopStarterPackNameGradient()
 	end
 end
 
@@ -673,6 +835,9 @@ local function OnPurchaseResult(success, message, rewards)
 		if tipsSystem and tipsSystem.ShowSuccess then
 			tipsSystem.ShowSuccess(message or "Purchase Successful!")
 		end
+		if CloseStarterPack then
+			CloseStarterPack()
+		end
 		ShowPopup(rewards, "Purchase Successful!")
 	else
 		local tipsSystem = _G.TipsSystem
@@ -684,6 +849,7 @@ local function OnPurchaseResult(success, message, rewards)
 	if requestDataEvent then
 		requestDataEvent:FireServer()
 	end
+	UpdateVisibility()
 end
 
 local function OnCampaignStateUpdate(state)
@@ -694,7 +860,9 @@ local function OnCampaignStateUpdate(state)
 
 	isBattleBlocked = battle
 	if isBattleBlocked then
-		CloseShop()
+		if CloseStarterPack then
+			CloseStarterPack()
+		end
 	end
 	UpdateVisibility()
 end
@@ -726,14 +894,14 @@ end
 
 -- ==================== Button Actions ====================
 
-local function OpenShop()
+local function OpenStarterPack()
 	if not IsShopUnlocked() or isBattleBlocked then
 		return
 	end
 	if cachedPurchased == true or player:GetAttribute("StarterPackPurchased") == true then
 		return
 	end
-	if not PlayShopOpen() then
+	if not PlayStarterPackOpen() then
 		return
 	end
 	RequestBackpackHide()
@@ -743,8 +911,8 @@ local function OpenShop()
 	UpdateVisibility()
 end
 
-CloseShop = function()
-	PlayShopClose()
+CloseStarterPack = function()
+	PlayStarterPackClose()
 	ReleaseBackpackHide()
 end
 
@@ -776,33 +944,44 @@ local function BindButtons()
 	if starterPackButton and (starterPackButton:IsA("TextButton") or starterPackButton:IsA("ImageButton")) then
 		if not boundButtons[starterPackButton] then
 			if ButtonEffectHelper then
-				ButtonEffectHelper.AddClickEffect(starterPackButton, { OnClick = OpenShop })
+				ButtonEffectHelper.AddClickEffect(starterPackButton, { OnClick = OpenStarterPack })
 			else
-				starterPackButton.MouseButton1Click:Connect(OpenShop)
+				starterPackButton.MouseButton1Click:Connect(OpenStarterPack)
 			end
 			boundButtons[starterPackButton] = true
 		end
 	end
 
-	if shopCloseButton and (shopCloseButton:IsA("TextButton") or shopCloseButton:IsA("ImageButton")) then
-		if not boundButtons[shopCloseButton] then
+	if starterPackCloseButton and (starterPackCloseButton:IsA("TextButton") or starterPackCloseButton:IsA("ImageButton")) then
+		if not boundButtons[starterPackCloseButton] then
 			if ButtonEffectHelper then
-				ButtonEffectHelper.AddClickEffect(shopCloseButton, { OnClick = CloseShop })
+				ButtonEffectHelper.AddClickEffect(starterPackCloseButton, { OnClick = CloseStarterPack })
 			else
-				shopCloseButton.MouseButton1Click:Connect(CloseShop)
+				starterPackCloseButton.MouseButton1Click:Connect(CloseStarterPack)
 			end
-			boundButtons[shopCloseButton] = true
+			boundButtons[starterPackCloseButton] = true
 		end
 	end
 
-	if buyButton and (buyButton:IsA("TextButton") or buyButton:IsA("ImageButton")) then
-		if not boundButtons[buyButton] then
+	if starterPackBuyButton and (starterPackBuyButton:IsA("TextButton") or starterPackBuyButton:IsA("ImageButton")) then
+		if not boundButtons[starterPackBuyButton] then
 			if ButtonEffectHelper then
-				ButtonEffectHelper.AddClickEffect(buyButton, { OnClick = OnBuyButtonClicked })
+				ButtonEffectHelper.AddClickEffect(starterPackBuyButton, { OnClick = OnBuyButtonClicked })
 			else
-				buyButton.MouseButton1Click:Connect(OnBuyButtonClicked)
+				starterPackBuyButton.MouseButton1Click:Connect(OnBuyButtonClicked)
 			end
-			boundButtons[buyButton] = true
+			boundButtons[starterPackBuyButton] = true
+		end
+	end
+
+	if shopBuyButton and (shopBuyButton:IsA("TextButton") or shopBuyButton:IsA("ImageButton")) then
+		if not boundButtons[shopBuyButton] then
+			if ButtonEffectHelper then
+				ButtonEffectHelper.AddClickEffect(shopBuyButton, { OnClick = OnBuyButtonClicked })
+			else
+				shopBuyButton.MouseButton1Click:Connect(OnBuyButtonClicked)
+			end
+			boundButtons[shopBuyButton] = true
 		end
 	end
 end
@@ -824,17 +1003,17 @@ local function TryInitialize()
 	if uiReady then
 		BindButtons()
 		UpdateVisibility()
-		if shopBg then
-			if shopVisibleConn then
-				shopVisibleConn:Disconnect()
-				shopVisibleConn = nil
+		if starterPackBg then
+			if starterPackVisibleConn then
+				starterPackVisibleConn:Disconnect()
+				starterPackVisibleConn = nil
 			end
-			shopVisibleConn = shopBg:GetPropertyChangedSignal("Visible"):Connect(function()
-				if shopBg.Visible then
+			starterPackVisibleConn = starterPackBg:GetPropertyChangedSignal("Visible"):Connect(function()
+				if starterPackBg.Visible then
 					UpdateVisibility()
 				end
 			end)
-			if shopBg.Visible then
+			if starterPackBg.Visible then
 				UpdateVisibility()
 			end
 		end
@@ -871,7 +1050,7 @@ function StarterPackDisplay.Initialize()
 		if not child then
 			return
 		end
-		if child.Name ~= "MainGui" and child.Name ~= "Shop" and child.Name ~= "ClaimTipsGui" then
+		if child.Name ~= "MainGui" and child.Name ~= "Shop" and child.Name ~= "StarterPack" and child.Name ~= "ClaimTipsGui" then
 			return
 		end
 

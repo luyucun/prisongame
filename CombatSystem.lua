@@ -57,6 +57,7 @@ local HitboxService = nil
 local UnitManager = nil
 local ProjectileSystem = nil  -- V1.5远程攻击支持
 local WeaponEffectSystem = nil  -- V1.5.4远程武器特效支持
+local UpgradeSystem = nil  -- V6.7养成系统
 
 -- V1.5.12新增：集中管理死亡渐隐Tween，用于战役复活时一键取消
 -- [unitModel] = { tweens = {Tween...}, connections = {RBXScriptConnection...} }
@@ -112,6 +113,49 @@ end
 local function WarnLog(...)
 	warn(GameConfig.LOG_PREFIX, "[CombatSystem]", ...)
 end
+
+local function GetUpgradeSystem()
+	if UpgradeSystem then
+		return UpgradeSystem
+	end
+
+	local upgradeModule = ServerScriptService.Systems:FindFirstChild("UpgradeSystem")
+	if not upgradeModule then
+		return nil
+	end
+
+	local success, result = pcall(require, upgradeModule)
+	if success and result then
+		UpgradeSystem = result
+		return UpgradeSystem
+	end
+
+	WarnLog("加载UpgradeSystem失败:", result)
+	return nil
+end
+
+local function GetBattlePlayerId(battleId)
+	if not battleId then
+		return nil
+	end
+
+	local battleManagerModule = ServerScriptService.Systems:FindFirstChild("BattleManager")
+	if not battleManagerModule then
+		return nil
+	end
+
+	local success, battleManager = pcall(require, battleManagerModule)
+	if not success or not battleManager or not battleManager.GetBattle then
+		return nil
+	end
+
+	local battle = battleManager.GetBattle(battleId)
+	if not battle then
+		return nil
+	end
+	return battle.PlayerId
+end
+
 
 --[[
 驱动攻击阶段更新
@@ -232,11 +276,37 @@ function CombatSystem.InitializeUnit(unitModel, unitId, level, team, battleId, c
 	end
 
 	-- 计算战斗属性
-	local maxHealth = UnitConfig.CalculateHealth(unitId, level)
-	local attack = UnitConfig.CalculateAttack(unitId, level)
-	local attackSpeed = UnitConfig.GetAttackSpeed(unitId)
+	local baseMaxHealth = UnitConfig.CalculateHealth(unitId, level)
+	local baseAttack = UnitConfig.CalculateAttack(unitId, level)
+	local baseAttackSpeed = UnitConfig.GetAttackSpeed(unitId)
 	local attackRange = UnitConfig.GetAttackRange(unitId)
-	local moveSpeed = UnitConfig.GetMoveSpeed(unitId)
+	local baseMoveSpeed = UnitConfig.GetMoveSpeed(unitId)
+
+	local maxHealth = baseMaxHealth
+	local attack = baseAttack
+	local attackSpeed = baseAttackSpeed
+	local moveSpeed = baseMoveSpeed
+	local ownerUserId = nil
+
+	if team == BattleConfig.Team.ATTACK then
+		ownerUserId = GetBattlePlayerId(battleId)
+		if ownerUserId then
+			local upgradeSystem = GetUpgradeSystem()
+			if upgradeSystem and upgradeSystem.GetMultipliersByUserId and upgradeSystem.ApplyMultipliersToStats then
+				local multipliers = upgradeSystem.GetMultipliersByUserId(ownerUserId)
+				local modifiedStats = upgradeSystem.ApplyMultipliersToStats({
+					Attack = baseAttack,
+					MaxHealth = baseMaxHealth,
+					AttackSpeed = baseAttackSpeed,
+					MoveSpeed = baseMoveSpeed,
+				}, multipliers)
+				attack = modifiedStats.Attack
+				maxHealth = modifiedStats.MaxHealth
+				attackSpeed = modifiedStats.AttackSpeed
+				moveSpeed = modifiedStats.MoveSpeed
+			end
+		end
+	end
 
 	-- V2.8.9修复：支持血量继承
 	-- 如果传入了currentHealth，使用它（战役跨关卡血量继承）
@@ -256,6 +326,7 @@ function CombatSystem.InitializeUnit(unitModel, unitId, level, team, battleId, c
 		Level = level,
 		Team = team,
 		BattleId = battleId,
+		OwnerUserId = ownerUserId,
 
 		MaxHealth = maxHealth,
 		CurrentHealth = actualHealth,  -- V2.8.9: 使用实际血量（可能是继承的残血）
@@ -281,6 +352,12 @@ function CombatSystem.InitializeUnit(unitModel, unitId, level, team, battleId, c
 	-- 当单位被重新初始化时，必须确保IsDead属性被清除
 	-- 否则客户端AI会认为该单位已死亡，不会攻击
 	unitModel:SetAttribute("IsDead", false)
+	unitModel:SetAttribute("BattleOwnerUserId", ownerUserId or 0)
+	unitModel:SetAttribute("BattleAttack", attack)
+	unitModel:SetAttribute("BattleMaxHealth", maxHealth)
+	unitModel:SetAttribute("BattleAttackSpeed", attackSpeed)
+	unitModel:SetAttribute("BattleAttackRange", attackRange)
+	unitModel:SetAttribute("BattleMoveSpeed", moveSpeed)
 
 	-- ✅ 关键修复：同步Humanoid.Health到CombatSystem状态
 	-- 确保Humanoid.Health和CombatSystem.CurrentHealth一致
@@ -288,6 +365,7 @@ function CombatSystem.InitializeUnit(unitModel, unitId, level, team, battleId, c
 	if humanoid then
 		humanoid.MaxHealth = maxHealth
 		humanoid.Health = actualHealth    -- V2.8.9: 同步实际血量
+		humanoid.WalkSpeed = moveSpeed
 	end
 
 	DebugLog(string.format("初始化兵种战斗状态: %s Lv.%d [%s] HP:%d/%d ATK:%d",

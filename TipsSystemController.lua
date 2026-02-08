@@ -8,6 +8,7 @@
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -42,6 +43,26 @@ if powerFrame then
 	powerFrame.Visible = false
 else
 	warn("[TipsSystemController] 未找到 Power 节点")
+end
+
+local refreshTips = tipsGui:FindFirstChild("RefreshTips")
+if not refreshTips then
+	warn("[TipsSystemController] RefreshTips node missing")
+end
+
+local refreshTargetPosition = refreshTips and refreshTips.Position or nil
+local refreshStartOffset = 24
+local refreshOvershootOffset = 8
+local refreshShowDuration = 6
+local refreshTweenDurationA = 0.32
+local refreshTweenDurationB = 0.18
+
+local refreshToken = 0
+local refreshTweenA = nil
+local refreshTweenB = nil
+
+if refreshTips then
+	refreshTips.Visible = false
 end
 
 local targetPosition = frame.Position
@@ -84,6 +105,86 @@ local function StopPowerTip()
 	if powerFrame then
 		powerFrame.Visible = false
 	end
+end
+
+local function StopRefreshTip()
+	if refreshTweenA then
+		refreshTweenA:Cancel()
+		refreshTweenA = nil
+	end
+	if refreshTweenB then
+		refreshTweenB:Cancel()
+		refreshTweenB = nil
+	end
+	if refreshTips then
+		refreshTips.Visible = false
+		if refreshTargetPosition then
+			refreshTips.Position = refreshTargetPosition
+		end
+	end
+end
+
+local function PlayRefreshTipSound()
+	local soundController = _G.SoundController
+	if soundController and soundController.PlaySFX then
+		soundController.PlaySFX("ShopRefresh")
+	end
+end
+
+local function ShowRefreshTip()
+	if not refreshTips or not refreshTargetPosition then
+		return
+	end
+
+	refreshToken = refreshToken + 1
+	local token = refreshToken
+
+	StopRefreshTip()
+
+	local startPos = UDim2.new(
+		refreshTargetPosition.X.Scale, refreshTargetPosition.X.Offset,
+		refreshTargetPosition.Y.Scale, refreshTargetPosition.Y.Offset + refreshStartOffset
+	)
+	local overshootPos = UDim2.new(
+		refreshTargetPosition.X.Scale, refreshTargetPosition.X.Offset,
+		refreshTargetPosition.Y.Scale, refreshTargetPosition.Y.Offset - refreshOvershootOffset
+	)
+
+	refreshTips.Position = startPos
+	refreshTips.Visible = true
+
+	refreshTweenA = TweenService:Create(
+		refreshTips,
+		TweenInfo.new(refreshTweenDurationA, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ Position = overshootPos }
+	)
+	refreshTweenB = TweenService:Create(
+		refreshTips,
+		TweenInfo.new(refreshTweenDurationB, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ Position = refreshTargetPosition }
+	)
+
+	refreshTweenA.Completed:Connect(function(state)
+		if token ~= refreshToken then
+			return
+		end
+		if state == Enum.PlaybackState.Completed and refreshTweenB then
+			refreshTweenB:Play()
+		end
+	end)
+
+	refreshTweenA:Play()
+	PlayRefreshTipSound()
+
+	task.delay(refreshShowDuration, function()
+		if token ~= refreshToken then
+			return
+		end
+		if refreshTips then
+			refreshTips.Visible = false
+			refreshTips.Position = refreshTargetPosition
+		end
+	end)
 end
 
 local function ShowTip(text, color)
@@ -195,6 +296,41 @@ function TipsSystemController.ShowPowerChange(oldPower, newPower)
 
 	powerTween:Play()
 end
+
+function TipsSystemController.ShowRefreshTip()
+	ShowRefreshTip()
+end
+
+local function BindRefreshTipEvent()
+	local eventsFolder = ReplicatedStorage:WaitForChild("Events", 10)
+	if not eventsFolder then
+		warn("[TipsSystemController] Events folder missing")
+		return
+	end
+
+	local shopEvents = eventsFolder:WaitForChild("ShopEvents", 10)
+	if not shopEvents then
+		warn("[TipsSystemController] ShopEvents folder missing")
+		return
+	end
+
+	local refreshEvent = shopEvents:FindFirstChild("ShopRefreshTip")
+	if not refreshEvent then
+		refreshEvent = shopEvents:WaitForChild("ShopRefreshTip", 10)
+	end
+
+	if refreshEvent and refreshEvent:IsA("RemoteEvent") then
+		refreshEvent.OnClientEvent:Connect(function(shopId)
+			if shopId == nil or shopId == "UnitShop" then
+				ShowRefreshTip()
+			end
+		end)
+	else
+		warn("[TipsSystemController] ShopRefreshTip event missing")
+	end
+end
+
+BindRefreshTipEvent()
 
 _G.TipsSystem = TipsSystemController
 

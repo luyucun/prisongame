@@ -1,4 +1,4 @@
-﻿--[[
+--[[
 脚本名称: DataManager
 脚本类型: ModuleScript (服务端核心)
 脚本位置: ServerScriptService/Core/DataManager
@@ -23,6 +23,7 @@ local HttpService = game:GetService("HttpService")  -- V3.9：用于生成Instan
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
 local StageConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("StageConfig"))  -- V3.7.1：章节配置
 local HouseConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("HouseConfig"))
+local UpgradeConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("UpgradeConfig"))
 
 -- DataStore实例（V2.1库存系统：添加真正的持久化）
 -- Studio与线上数据隔离：根据环境和配置决定DataStore名称
@@ -321,6 +322,9 @@ local function LoadFromDataStore(player)
 			if data.OnlineRewardData then
 				data.OnlineRewardData = RestoreFromDataStore(data.OnlineRewardData)  -- V6.1在线奖励
 			end
+			if data.UpgradeData then
+				data.UpgradeData = RestoreFromDataStore(data.UpgradeData)  -- V6.7：恢复养成数据
+			end
 			if data.SoundSettings then
 				data.SoundSettings = RestoreFromDataStore(data.SoundSettings)  -- V4.6：恢复音效设置
 			end
@@ -392,6 +396,7 @@ local function SaveToDataStore(player, playerData, userId)
 		HandcuffData = SanitizeForDataStore(playerData.HandcuffData),  -- V6.0手铐道具
 		LimitPrisonerData = SanitizeForDataStore(playerData.LimitPrisonerData),  -- V6.0限时囚犯
 		OnlineRewardData = SanitizeForDataStore(playerData.OnlineRewardData),  -- V6.1在线奖励
+		UpgradeData = SanitizeForDataStore(playerData.UpgradeData),  -- V6.7：保存养成数据
 		LastSaveTime = os.time(),
 	}
 
@@ -640,6 +645,37 @@ local function NormalizeOnlineRewardData(data)
 	return data
 end
 
+local function BuildDefaultUpgradeData()
+	local data = {}
+	for _, typeId in ipairs(UpgradeConfig.GetTypeIds()) do
+		data[typeId] = UpgradeConfig.GetInitialLevel(typeId)
+	end
+	return data
+end
+
+local function NormalizeUpgradeData(data)
+	if type(data) ~= "table" then
+		return BuildDefaultUpgradeData()
+	end
+
+	local normalized = {}
+	for _, typeId in ipairs(UpgradeConfig.GetTypeIds()) do
+		local initialLevel = UpgradeConfig.GetInitialLevel(typeId)
+		local maxLevel = UpgradeConfig.GetMaxLevel(typeId)
+		local rawLevel = tonumber(data[typeId]) or tonumber(data[tostring(typeId)])
+		local level = math.floor(rawLevel or initialLevel)
+		if level < initialLevel then
+			level = initialLevel
+		end
+		if maxLevel > 0 and level > maxLevel then
+			level = maxLevel
+		end
+		normalized[typeId] = level
+	end
+
+	return normalized
+end
+
 --[[
 创建默认玩家数据
 @param player Player - 玩家对象
@@ -700,6 +736,7 @@ local function CreateDefaultData(player)
         HandcuffData = BuildDefaultHandcuffData(), -- V6.0手铐道具
         LimitPrisonerData = BuildDefaultLimitPrisonerData(), -- V6.0限时囚犯
         OnlineRewardData = BuildDefaultOnlineRewardData(os.time()), -- V6.1在线奖励
+        UpgradeData = BuildDefaultUpgradeData(), -- V6.7养成系统
         LastSaveTime = os.time(),
     }
 end
@@ -1026,6 +1063,108 @@ function DataManager.ResetOnlineRewardData(player, now)
     return true
 end
 
+
+-- ==================== V6.7养成系统接口 ====================
+
+function DataManager.GetUpgradeData(player)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData then
+        return nil
+    end
+
+    if not playerData.UpgradeData then
+        playerData.UpgradeData = BuildDefaultUpgradeData()
+    else
+        playerData.UpgradeData = NormalizeUpgradeData(playerData.UpgradeData)
+    end
+
+    return playerData.UpgradeData
+end
+
+function DataManager.GetUpgradeLevel(player, typeId)
+    local data = DataManager.GetUpgradeData(player)
+    if not data then
+        return 0
+    end
+
+    local tid = tonumber(typeId)
+    if not tid then
+        return 0
+    end
+
+    local initialLevel = UpgradeConfig.GetInitialLevel(tid)
+    local maxLevel = UpgradeConfig.GetMaxLevel(tid)
+    local level = math.floor(tonumber(data[tid]) or initialLevel)
+
+    if level < initialLevel then
+        level = initialLevel
+    end
+    if maxLevel > 0 and level > maxLevel then
+        level = maxLevel
+    end
+
+    return level
+end
+
+function DataManager.SetUpgradeLevel(player, typeId, level)
+    local data = DataManager.GetUpgradeData(player)
+    if not data then
+        warn(GameConfig.LOG_PREFIX, "SetUpgradeLevel: 找不到玩家数据")
+        return false
+    end
+
+    local tid = tonumber(typeId)
+    local targetLevel = tonumber(level)
+    if not tid or not targetLevel then
+        return false
+    end
+
+    local initialLevel = UpgradeConfig.GetInitialLevel(tid)
+    local maxLevel = UpgradeConfig.GetMaxLevel(tid)
+    targetLevel = math.floor(targetLevel)
+
+    if targetLevel < initialLevel then
+        targetLevel = initialLevel
+    end
+    if maxLevel > 0 and targetLevel > maxLevel then
+        targetLevel = maxLevel
+    end
+
+    data[tid] = targetLevel
+    return true
+end
+
+function DataManager.IncreaseUpgradeLevel(player, typeId, delta)
+    local step = tonumber(delta) or 1
+    if step <= 0 then
+        return false, DataManager.GetUpgradeLevel(player, typeId)
+    end
+
+    local currentLevel = DataManager.GetUpgradeLevel(player, typeId)
+    local targetLevel = currentLevel + math.floor(step)
+    local setSuccess = DataManager.SetUpgradeLevel(player, typeId, targetLevel)
+    if not setSuccess then
+        return false, currentLevel
+    end
+
+    return true, DataManager.GetUpgradeLevel(player, typeId)
+end
+
+function DataManager.ResetUpgradeData(player)
+    local data = DataManager.GetUpgradeData(player)
+    if not data then
+        warn(GameConfig.LOG_PREFIX, "ResetUpgradeData: 找不到玩家数据")
+        return false
+    end
+
+    local resetData = BuildDefaultUpgradeData()
+    for _, typeId in ipairs(UpgradeConfig.GetTypeIds()) do
+        data[typeId] = resetData[typeId]
+    end
+
+    return true
+end
+
 -- ==================== 主线进度工具（最大通关关卡） ====================
 
 local function GetStagesPerChapterSafe(chapterId: number): number
@@ -1261,6 +1400,13 @@ function DataManager.InitializePlayerData(player)
             playerData.OnlineRewardData = BuildDefaultOnlineRewardData(os.time())
         else
             playerData.OnlineRewardData = NormalizeOnlineRewardData(playerData.OnlineRewardData)
+        end
+
+        -- V6.7养成系统：确保UpgradeData字段存在（向后兼容）
+        if not playerData.UpgradeData then
+            playerData.UpgradeData = BuildDefaultUpgradeData()
+        else
+            playerData.UpgradeData = NormalizeUpgradeData(playerData.UpgradeData)
         end
 
         -- V4.6设置系统：确保SoundSettings字段存在（向后兼容）

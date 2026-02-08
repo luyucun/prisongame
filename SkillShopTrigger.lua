@@ -38,6 +38,16 @@ local isNearShop = false
 local lastCheckTime = 0
 local checkConnection = nil
 
+-- SkillTouch触发
+local skillTouchPart = nil
+local skillTouchConn = nil
+local skillTouchEndedConn = nil
+local skillTouchingParts = {}
+local skillTouchActive = false
+local skillTouchClosed = false
+local lastTouchResolve = 0
+local TOUCH_RESOLVE_INTERVAL = 0.5
+
 -- 技能商店NPC名称（从SkillShopConfig获取）
 local SKILL_SHOP_NPC_NAME = "KeepShoper02"
 
@@ -47,6 +57,8 @@ local skillShopFrame = nil
 
 -- 事件引用
 local RequestSkillShopList = nil
+local OpenSkillShop = nil
+local CloseSkillShop = nil
 
 -- ==================== 私有函数 ====================
 
@@ -104,6 +116,33 @@ local function InitializeUI()
 	return true
 end
 
+local function IsLocalCharacterPart(part)
+	local character = player.Character
+	return character and part and part:IsDescendantOf(character)
+end
+
+local function IsCharacterTouchingPart(part)
+	local character = player.Character
+	if not character or not part or not part.Parent then
+		return false
+	end
+
+	local ok, touching = pcall(function()
+		return part:GetTouchingParts()
+	end)
+	if not ok or type(touching) ~= "table" then
+		return false
+	end
+
+	for _, hit in ipairs(touching) do
+		if hit and hit:IsDescendantOf(character) then
+			return true
+		end
+	end
+
+	return false
+end
+
 --[[
 获取技能商店NPC
 @return Instance|nil - NPC模型
@@ -138,6 +177,113 @@ local function GetSkillShopNPC()
 	return playerHome:FindFirstChild(SKILL_SHOP_NPC_NAME)
 end
 
+local function FindSkillTouchPart()
+	local homeSlot = player:GetAttribute("HomeSlot")
+	if not homeSlot then
+		return nil
+	end
+
+	local home = workspace:FindFirstChild("Home")
+	if not home then
+		return nil
+	end
+
+	local playerHome = home:FindFirstChild("PlayerHome" .. homeSlot)
+	if not playerHome then
+		return nil
+	end
+
+	return playerHome:FindFirstChild("SkillTouch")
+end
+
+local function ClearSkillTouchConnections()
+	if skillTouchConn then
+		skillTouchConn:Disconnect()
+		skillTouchConn = nil
+	end
+	if skillTouchEndedConn then
+		skillTouchEndedConn:Disconnect()
+		skillTouchEndedConn = nil
+	end
+	skillTouchingParts = {}
+	skillTouchActive = false
+end
+
+local function BindSkillTouch(part)
+	if skillTouchPart == part then
+		return
+	end
+
+	ClearSkillTouchConnections()
+	skillTouchPart = part
+	if not part then
+		return
+	end
+
+	skillTouchConn = part.Touched:Connect(function(hit)
+		if not IsLocalCharacterPart(hit) then
+			return
+		end
+		skillTouchingParts[hit] = true
+		skillTouchClosed = false
+		if not skillTouchActive then
+			skillTouchActive = true
+			OpenSkillShop()
+		end
+	end)
+
+	skillTouchEndedConn = part.TouchEnded:Connect(function(hit)
+		if not skillTouchingParts[hit] then
+			return
+		end
+		skillTouchingParts[hit] = nil
+		if next(skillTouchingParts) == nil then
+			skillTouchActive = false
+			skillTouchClosed = true
+			isNearShop = false
+			CloseSkillShop()
+		end
+	end)
+end
+
+local function ResolveSkillTouch(force)
+	local now = tick()
+	if not force and (now - lastTouchResolve) < TOUCH_RESOLVE_INTERVAL then
+		return
+	end
+	lastTouchResolve = now
+
+	local part = FindSkillTouchPart()
+	if part and not part:IsA("BasePart") then
+		part = nil
+	end
+	if part ~= skillTouchPart then
+		BindSkillTouch(part)
+	end
+end
+
+local function UpdateSkillTouchState()
+	if not skillTouchPart or not skillTouchPart.Parent then
+		if skillTouchActive then
+			skillTouchActive = false
+			skillTouchingParts = {}
+		end
+		return
+	end
+
+	local touching = IsCharacterTouchingPart(skillTouchPart)
+	if touching and not skillTouchActive then
+		skillTouchActive = true
+		skillTouchClosed = false
+		OpenSkillShop()
+	elseif (not touching) and skillTouchActive and next(skillTouchingParts) == nil then
+		skillTouchActive = false
+		skillTouchClosed = true
+		isNearShop = false
+		CloseSkillShop()
+	end
+end
+
 --[[
 计算玩家与NPC的距离
 @param npc Instance - NPC模型
@@ -168,7 +314,7 @@ end
 --[[
 打开技能商店
 ]]
-local function OpenSkillShop()
+OpenSkillShop = function()
 	if not InitializeUI() then
 		warn(LOG_PREFIX, "UI未初始化，无法打开商店")
 		return false
@@ -198,7 +344,7 @@ end
 --[[
 关闭技能商店
 ]]
-local function CloseSkillShop()
+CloseSkillShop = function()
 	if skillShopFrame then
 		if _G.SkillShopDisplay and _G.SkillShopDisplay.PlayClose then
 			_G.SkillShopDisplay.PlayClose()
@@ -224,11 +370,14 @@ local function CheckProximity()
 	end
 	lastCheckTime = currentTime
 
+	ResolveSkillTouch(false)
+	UpdateSkillTouchState()
+
 	-- 获取技能商店NPC
 	local npc = GetSkillShopNPC()
 	if not npc then
 		-- NPC不存在时，如果之前在商店范围内则关闭
-		if isNearShop then
+		if isNearShop and not skillTouchActive then
 			isNearShop = false
 			CloseSkillShop()
 		end
@@ -238,6 +387,22 @@ local function CheckProximity()
 	-- 计算距离
 	local distance = GetDistanceToNPC(npc)
 	local isInRange = distance <= GameConfig.Shop.OpenDistance
+	if skillTouchActive then
+		isInRange = true
+	end
+
+	if skillTouchClosed and not skillTouchActive then
+		if not isInRange then
+			skillTouchClosed = false
+		else
+			if isNearShop then
+				isNearShop = false
+				CloseSkillShop()
+			end
+			return
+		end
+	end
+
 
 	-- 状态变化处理
 	if isInRange and not isNearShop then
@@ -273,6 +438,7 @@ function SkillShopTrigger.Initialize()
 
 	-- 初始化UI
 	InitializeUI()
+	ResolveSkillTouch(true)
 
 	-- 启动距离检测循环
 	if checkConnection then
@@ -285,6 +451,8 @@ function SkillShopTrigger.Initialize()
 	player.CharacterAdded:Connect(function(character)
 		-- 重置状态
 		isNearShop = false
+		skillTouchActive = false
+		skillTouchingParts = {}
 
 		-- 等待角色加载完成
 		character:WaitForChild("HumanoidRootPart")
@@ -356,6 +524,10 @@ task.spawn(function()
 	if not success then
 		warn(LOG_PREFIX, "初始化失败:", result)
 	end
+end)
+
+player:GetAttributeChangedSignal("HomeSlot"):Connect(function()
+	ResolveSkillTouch(true)
 end)
 
 return SkillShopTrigger

@@ -34,6 +34,7 @@ GM命令系统模块
 - /resetvip : 重置VIP礼包购买状态 (V5.5)
 - /addhandcuff <count> : 添加手铐道具 (V6.0)
 - /resetonlinereward : Reset online reward data (V6.1)
+- /resetupgrade : 重置我的养成等级 (V6.7)
 ]]
 
 local GMCommandSystem = {}
@@ -64,6 +65,8 @@ local DailyRewardSystem = nil -- V5.3新增：延迟加载，避免循环依赖
 local StarterPackSystem = nil -- V5.4新增：延迟加载，避免循环依赖
 local VipSystem = nil         -- V5.5新增：延迟加载，避免循环依赖
 local LimitPrisonerSystem = nil -- V6.0新增：延迟加载，避免循环依赖
+local UpgradeSystem = nil -- V6.7新增：延迟加载，避免循环依赖
+local PowerSystem = nil -- V6.7新增：延迟加载，避免循环依赖
 
 -- ==================== 配置 ====================
 
@@ -368,6 +371,7 @@ VIP礼包(V5.5):
 提示: 按V键打开战斗测试UI
 /addonlinetime <minutes> - add online reward time (V6.1)
 /resetonlinereward - reset online reward data (V6.1)
+/resetupgrade - 重置我的养成等级 (V6.7)
     ]]
     SendMessage(player, helpText)
 end
@@ -1347,6 +1351,54 @@ local function CMD_ResetOnlineReward(player, args)
     SendMessage(player, "Online reward reset complete.")
 end
 
+--[[
+命令: /resetupgrade
+重置玩家养成等级 (V6.7)
+]]
+local function CMD_ResetUpgrade(player, args)
+    local success = DataManager.ResetUpgradeData(player)
+    if not success then
+        SendMessage(player, "重置养成等级失败")
+        return
+    end
+
+    DataManager.SavePlayerDataThrottled(player)
+
+    if not UpgradeSystem then
+        local upgradeModule = ServerScriptService.Systems:FindFirstChild("UpgradeSystem")
+        if upgradeModule then
+            local ok, result = pcall(require, upgradeModule)
+            if ok then
+                UpgradeSystem = result
+            else
+                warn("[GMCommandSystem] 加载UpgradeSystem失败:", result)
+            end
+        end
+    end
+
+    if UpgradeSystem and UpgradeSystem.SyncPlayer then
+        UpgradeSystem.SyncPlayer(player)
+    end
+
+    if not PowerSystem then
+        local powerModule = ServerScriptService.Systems:FindFirstChild("PowerSystem")
+        if powerModule then
+            local ok, result = pcall(require, powerModule)
+            if ok then
+                PowerSystem = result
+            else
+                warn("[GMCommandSystem] 加载PowerSystem失败:", result)
+            end
+        end
+    end
+
+    if PowerSystem and PowerSystem.RecalculatePlayerPower then
+        PowerSystem.RecalculatePlayerPower(player)
+    end
+
+    SendMessage(player, "养成等级已重置")
+end
+
 local COMMAND_HANDLERS = {
     ["addunit"] = CMD_AddUnit,
     ["listunits"] = CMD_ListUnits,
@@ -1382,6 +1434,7 @@ local COMMAND_HANDLERS = {
     ["listguides"] = CMD_ListGuides,      -- V3.5新增
     ["addonlinetime"] = CMD_AddOnlineTime, -- V6.1
     ["resetonlinereward"] = CMD_ResetOnlineReward, -- V6.1
+    ["resetupgrade"] = CMD_ResetUpgrade, -- V6.7
     ["help"] = CMD_Help,
 }
 

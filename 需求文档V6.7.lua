@@ -2090,7 +2090,7 @@ id	路径
 10	StarterGui - OnlineReward - Bg - Bg05 - Reward05
 
 补充个规则：
-StarterGui - TopRightGui - Bg - Online - Time是一个textlabel，用于显示下一个可领取的奖励的倒计时，需要跟七日界面里最新的正在倒计时的奖励的倒计时对上，格式也一样，比如里面最新的第三个奖励在倒计时，这里也显示第三个的倒计时
+StarterGui - TopRightGui - Bg - Online - Time是一个textlabel，用于显示下一个可领取的奖励的倒计时，需要跟在线奖励界面里最新的正在倒计时的奖励的倒计时对上，格式也一样，比如里面最新的第三个奖励在倒计时，这里也显示第三个的倒计时
 
 需求文档V6.2 编辑功能
 
@@ -2105,3 +2105,98 @@ StarterGui - TopRightGui - Bg - Online - Time是一个textlabel，用于显示�
 6.在玩家点击了Remove按钮后，除了保持当前的逻辑外，需要加一条把Edit按钮也隐藏起来
 7.在编辑状态下，把RemoveTips的文本内容改成：You can drag or merge，同时保持呼吸动效，只是换文本内容
 8.玩家点击EditExit按钮，退出编辑状态，退出后，隐藏EditExit，显示出来Remove按钮，隐藏RemoveTips
+
+需求文档V6.3 快速传送功能
+
+1.当前游戏中，默认的触发兵种商店页面和技能商店页面打开的方式是判定玩家与对应NPC之间的距离
+2.现在我们新增一种触发方式，二者满足一者即可触发打开商店的流程（流程不变，兵种商店还是出对话框打开）。具体逻辑是：
+    1）每个家园下都有一个叫PrisonerTouch和SkillTouch的Part，以PlayerHome1举例，路径分别是Workspace - Home - PlayerHome1 - PrisonerTouch和Workspace - Home - PlayerHome1 - SkillTouch
+    2）玩家只要触碰到了PrisonerTouch，就自动打开自家的兵种商店界面（走对话流程其实是打开对话界面），只要触碰到了SkillTouch，就打开技能商店界面（直接打开）
+    3）玩家如果关闭了界面，需要离开后，再次触碰这俩part，才触发打开流程，注意新增的逻辑和之前的距离判定逻辑是并行的
+3.新增一个按钮：StarterGui - MainGui - PrisonerStore，玩家点击这个按钮，不论身处什么状态，都立刻将玩家传送到自己家园中的PrisonerTouch的位置
+4.注意这个按钮在玩家挑战过程中，需要暂时隐藏，只有战斗结束回到了基地，才显示出来
+
+需求文档V6.4 调整新手礼包
+
+1.之前的逻辑是：玩家点击MainGui - StarterPack按钮，可以打开shop界面，然后在shop界面中去购买新手礼包
+2.现在我们需要修改为：玩家点击MainGui - StarterPack按钮，可以打开新手礼包专属界面，（把StarterGui - StarterPack - Bg的Visible属性改成true）
+3.玩家点击StarterGui - StarterPack - Bg - Title - CloseButton按钮，关闭新手礼包专属界面（把StarterGui - StarterPack - Bg的Visible属性改成false）
+4.玩家点击StarterGui - StarterPack - Bg - BuyButton按钮，触发对新手礼包的购买
+5.购买成功后，要弹出购买成功的弹框，跟现有的逻辑一致。
+6.购买成功后，不再显示MainGui - StarterPack按钮，并且立刻关闭新手礼包专属界面
+7.注意打开弹框的时候也是需要有游戏内现有的通用的弹框打开和关闭的动效
+8.StarterGui - MainGui - StarterPack - Icon需要做一个小的抖动效果，圆心不变的那种抖动，而不是左右晃动，而是抖动、
+9.需要给StarterGui - MainGui - StarterPack - Name加一个渐变的动效，具体效果可以参考D:\RobloxGame\Labubu\Labubu这个项目中新手礼包里关于价格文本的渐变效果
+
+需求文档V6.5 新增兵种商店补货提示
+
+具体逻辑是：每次兵种商店完成库存刷新时，需要弹出提示：把StarterGui - TipsSystem - RefreshTips的Visible属性改成True，停留2秒后消失
+在出现的时候，需要给RefreshTips做一个出现动效i，从下面向上滑动到目标点，然后做一个刹车回弹效果，丝滑一点
+在弹出的瞬间，需要播放音频，id是：rbxassetid://105818371386904，播放一次即可
+
+需求文档V6.6  兵种商店详情展示
+
+概述：目前我们兵种商店，打开后会生成兵种列表，我们需要加的是：关于兵种详情显示的一些需求
+
+详细规则：
+1.每次打开兵种商店界面的时候，需要同时把StarterGui - ArmyStore - Bg的Visible属性改成true，然后同时需要把Lighting - Blur的Enable属性改成True，关闭商店界面的时候再把这些隐藏
+2.加了StarterGui - ArmyStore - StoreBg - ScrollingFrame - ItemCardTemplate - IconBg - Information这个按钮，点击这个按钮，可以打开这个兵种详情界面（把StarterGui - ArmyStore - Information的Visible属性改成True）
+3.点击StarterGui - ArmyStore - Information - CloseButton按钮，关闭Information界面（把StarterGui - ArmyStore - Information的Visible属性改成false）
+4.打开商店界面后，任意点击一个兵种的卡片（就是会触发显示出购买按钮的那个点击操作），就立刻打开这个兵种对应的兵种详情界面，切换兵种时，也切换弹框里兵种的对应详情
+5.具体的信息显示逻辑是：
+    1）StarterGui - ArmyStore - Information - ItemCardTemplate - IconBg - Icon用于显示这个兵的头像
+    2）StarterGui - ArmyStore - Information - ItemCardTemplate - Power是这个兵1级时候的战斗力数值，格式是：Power:xxxx，xxxx是战斗力数值，注意数字要用黄色显示
+    3）StarterGui - ArmyStore - Information - ItemCardTemplate - Quality用于显示这个兵的品质信息，主要是品质名字，品质的名字和颜色用卡片中对应的逻辑即可，保持一致
+    4）StarterGui - ArmyStore - Information - HP - Num是这个兵的基础血量数值
+    5）StarterGui - ArmyStore - Information - ATK - Num是这个兵的攻击力数值
+    6）StarterGui - ArmyStore - Information - AS - Num是这个兵的攻击速度数值
+    7）StarterGui - ArmyStore - Information - RNG - Num是这个兵的攻击距离数值
+6.以上这些数值在我们的兵种的信息中都有对应信息
+7.注意在Information显示出来的时候，需要有个和其他弹框显示出来的时候一样的弹框效果
+
+需求文档V6.7 养成系统
+
+概述：我们需要在游戏中，增加一套养成系统，这个养成是针对玩家自己的所有的兵的，不是只对某个兵生效而是对自己的所有的兵都同时生效
+
+详细规则：
+
+加入以下4类全局养成维度：
+1.全体移动速度加成x%；
+2.全体攻击速度加成x%
+3.全体攻击力增加x%
+4.全体生命值增加x%
+
+注意：以上的几个加成类型，都是针对玩家的所有兵生效，另外这些养成维度可以升级，下一级与上一级之间是替换关系，比如：
+全体生命力加成X%，1级时加2%，2级加4%，那我1级的时候这个生效数值是2%，2级时候的生效数值就是4%，替代关系
+以上所有的类型都是替代关系
+
+每个养成线的默认等级都是1级，初始加成数值都是0，这个在表中配置即可
+玩家可以消耗对应的金币来提升等级，或者直接购买一次对应的开发者商品，来直接给这个养成线提升1级，具体见下方的配置数据表即可
+
+详细的客户端规则是：
+
+1.玩家点击StarterGui - MainGui - Upgrade按钮，可以打开升级界面（把StarterGui - Upgrade - LevelUpBg的visible属性改成true，并且把StarterGui - Upgrade - Bg的visible也改成true）
+2.玩家点击StarterGui - Upgrade - LevelUpBg - Title - CloseButton按钮，关闭升级界面（把StarterGui - Upgrade - LevelUpBg的visible属性改成false，并且把StarterGui - Upgrade - Bg的visible也改成false）
+3.注意上面弹框除了Bg，LevelUpBg打开和关闭的时候要有现在通用的动效
+4.Upgrade - LevelUpBg - ScrollingFrame - Option01默认的全体移动速度加成相关的信息表达，我们下面会以Option01为例子说明相关的客户端规则：
+    1）Option01 - Level是一个textlabel，用于显示这个养成线当前的等级信息，格式是Lv.xx，xx是等级数字，初始默认等级是0级
+    2）Option01 - Num是当前的加成数值，格式是+xx%,初始默认是+0%，后面随着玩家等级提高，需要显示为具体的加成数值百分比
+    3）当这几个条目达到配置的最高等级时，需要把Option01 - Level的文本改成Lv.Max，同时需要把Option01 - CoinBuy和Option01 - RbxBuy的Visible属性改成false
+    4）Option01 - CoinBuy - Price是升级至下一等级所需要花费的金币数值，注意这里要使用大数值逻辑，格式是$xxx,比如$98.9M这样，玩家点击这个按钮，可以触发消耗金币和升级的操作，如果金币数量不足，需要提示Not Enough Coins
+    5）Option01 - RbxBuy 是这个条目升级对应的罗布币购买，点击后触发对对应开发者道具的购买
+下面是各类养成线对应的开发者商品id：
+1.全体移动速度加成x% ：3531774125
+2.全体攻击速度加成x% ：3531774364
+3.全体攻击力增加x% ： 3531774660
+4.全体生命值增加x% ： 3531774899
+
+下面是我的对应的数据表配置：
+
+放在"D:\RobloxGame\Prison\prisongame\升级数据表.lua"  这个文件中，其中：
+类型	加成类型
+1	移动速度
+2	攻击速度
+3	攻击力
+4	生命值
+
+你需要给我补充对应的gm命令：重置我的养成等级

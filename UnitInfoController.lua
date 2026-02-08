@@ -17,6 +17,7 @@ local camera = Workspace.CurrentCamera
 
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
 local UnitConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("UnitConfig"))
+local UpgradeConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("UpgradeConfig"))
 
 local tipsGui = playerGui:WaitForChild("TipsRole", 10)
 if not tipsGui then
@@ -56,6 +57,75 @@ local clickState = {
 	inputType = nil,
 	touch = nil,
 }
+
+
+local upgradeMultipliers = {
+	AttackMultiplier = 1,
+	HealthMultiplier = 1,
+	AttackSpeedMultiplier = 1,
+	MoveSpeedMultiplier = 1,
+}
+
+local upgradeDataBound = false
+
+local function ApplyUpgradeEntries(entries)
+	if type(entries) ~= "table" then
+		return
+	end
+
+	local ratioByType = {}
+	for _, typeId in ipairs(UpgradeConfig.GetTypeIds()) do
+		ratioByType[typeId] = 0
+	end
+
+	for _, entry in ipairs(entries) do
+		local typeId = tonumber(entry and entry.TypeId)
+		if typeId then
+			ratioByType[typeId] = math.max(0, tonumber(entry.CurrentBonusRatio) or 0)
+		end
+	end
+
+	upgradeMultipliers.AttackMultiplier = 1 + (ratioByType[UpgradeConfig.TYPE.ATTACK] or 0)
+	upgradeMultipliers.HealthMultiplier = 1 + (ratioByType[UpgradeConfig.TYPE.HEALTH] or 0)
+	upgradeMultipliers.AttackSpeedMultiplier = 1 + (ratioByType[UpgradeConfig.TYPE.ATTACK_SPEED] or 0)
+	upgradeMultipliers.MoveSpeedMultiplier = 1 + (ratioByType[UpgradeConfig.TYPE.MOVE_SPEED] or 0)
+end
+
+local function BindUpgradeDataEvents()
+	if upgradeDataBound then
+		return true
+	end
+
+	local eventsFolder = ReplicatedStorage:WaitForChild("Events", 10)
+	if not eventsFolder then
+		return false
+	end
+
+	local upgradeEvents = eventsFolder:WaitForChild("UpgradeEvents", 10)
+	if not upgradeEvents then
+		return false
+	end
+
+	local upgradeDataEvent = upgradeEvents:FindFirstChild("UpgradeData")
+	local requestUpgradeDataEvent = upgradeEvents:FindFirstChild("RequestUpgradeData")
+
+	if not (upgradeDataEvent and upgradeDataEvent:IsA("RemoteEvent")) then
+		return false
+	end
+
+	upgradeDataEvent.OnClientEvent:Connect(function(payload)
+		if type(payload) == "table" then
+			ApplyUpgradeEntries(payload.Entries)
+		end
+	end)
+	upgradeDataBound = true
+
+	if requestUpgradeDataEvent and requestUpgradeDataEvent:IsA("RemoteEvent") then
+		requestUpgradeDataEvent:FireServer()
+	end
+
+	return true
+end
 
 local function IsRemovalMode()
 	local removalController = _G.RemovalController
@@ -144,11 +214,15 @@ local function ShowUnitInfo(unitModel)
 		return
 	end
 
-	local attack = UnitConfig.CalculateAttack(unitId, level)
-	local health = UnitConfig.CalculateHealth(unitId, level)
+	local attack = UnitConfig.CalculateAttack(unitId, level) * (upgradeMultipliers.AttackMultiplier or 1)
+	attack = math.max(1, math.floor(attack + 0.5))
+
+	local health = UnitConfig.CalculateHealth(unitId, level) * (upgradeMultipliers.HealthMultiplier or 1)
+	health = math.max(1, math.floor(health + 0.5))
+
 	local humanoid = unitModel:FindFirstChildOfClass("Humanoid")
 	if humanoid and humanoid.MaxHealth > 0 then
-		health = humanoid.MaxHealth
+		health = math.max(health, math.floor(humanoid.MaxHealth + 0.5))
 	end
 
 	if icon and icon:IsA("ImageLabel") then
@@ -178,6 +252,15 @@ local function ShowUnitInfo(unitModel)
 
 	tipsBg.Visible = true
 end
+
+-- Pull upgrade data once so popup stats include real-time nurture bonuses.
+task.spawn(function()
+	local attempts = 0
+	while attempts < 6 and not BindUpgradeDataEvents() do
+		attempts += 1
+		task.wait(2)
+	end
+end)
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if input.UserInputType ~= Enum.UserInputType.MouseButton1

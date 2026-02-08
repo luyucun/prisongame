@@ -23,10 +23,12 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")  -- V2.1修复：用于实时更新倒计时
+local Lighting = game:GetService("Lighting")
 
 -- 引用配置
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
 local UnitConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("UnitConfig"))  -- V2.1修复：用于读取兵种属性
+local PowerConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("PowerConfig"))
 
 -- 引用格式化工具
 local FormatHelper = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("FormatHelper"))
@@ -47,6 +49,10 @@ local itemContainer = nil        -- 商品容器
 local closeButton = nil          -- 关闭按钮
 local titleLabel = nil           -- 标题标签
 local coinDisplay = nil          -- 金币显示
+local shopBg = nil               -- 商店背景遮罩
+local infoFrame = nil            -- 兵种详情面板
+local infoCloseButton = nil      -- 详情关闭按钮
+local blurEffect = nil           -- Lighting下的Blur
 
 -- 购买状态管理
 local isPurchasing = false       -- V2.1修复：防止重复购买
@@ -90,6 +96,14 @@ local popupOpenTweenB = nil
 local popupCloseTweenA = nil
 local popupCloseTweenB = nil
 local popupAnimating = false
+
+-- 详情弹框动画状态（Information）
+local infoPopupScale = nil
+local infoOpenTweenA = nil
+local infoOpenTweenB = nil
+local infoCloseTweenA = nil
+local infoCloseTweenB = nil
+local infoPopupAnimating = false
 
 -- ==================== 私有函数 ====================
 
@@ -159,6 +173,31 @@ end
 ]]
 local function InitializeUI()
     if shopUI and shopFrame then
+        -- 补充可能尚未缓存的引用
+        if not itemContainer then
+            itemContainer = shopFrame:FindFirstChild("ItemContainer") or shopFrame:FindFirstChild("ScrollingFrame")
+        end
+        if not closeButton then
+            closeButton = shopFrame:FindFirstChild("CloseButton")
+        end
+        if not titleLabel then
+            titleLabel = shopFrame:FindFirstChild("TitleLabel") or shopFrame:FindFirstChild("Title")
+        end
+        if not coinDisplay then
+            coinDisplay = shopFrame:FindFirstChild("CoinDisplay")
+        end
+        if not shopBg then
+            shopBg = shopUI:FindFirstChild("Bg")
+        end
+        if not infoFrame then
+            infoFrame = shopUI:FindFirstChild("Information")
+        end
+        if infoFrame and not infoCloseButton then
+            infoCloseButton = infoFrame:FindFirstChild("CloseButton")
+        end
+        if not blurEffect then
+            blurEffect = Lighting:FindFirstChild("Blur")
+        end
         return true -- 已初始化
     end
 
@@ -180,10 +219,28 @@ local function InitializeUI()
     closeButton = shopFrame:FindFirstChild("CloseButton")
     titleLabel = shopFrame:FindFirstChild("TitleLabel") or shopFrame:FindFirstChild("Title")
     coinDisplay = shopFrame:FindFirstChild("CoinDisplay")
+    shopBg = shopUI:FindFirstChild("Bg")
+    infoFrame = shopUI:FindFirstChild("Information")
+    infoCloseButton = infoFrame and infoFrame:FindFirstChild("CloseButton") or nil
+    blurEffect = Lighting:FindFirstChild("Blur")
 
     if not itemContainer then
         warn(LOG_PREFIX, "找不到 ItemContainer 或 ScrollingFrame")
         return false
+    end
+
+    if not shopBg then
+        warn(LOG_PREFIX, "找不到 ArmyStore/Bg")
+    end
+
+    if not infoFrame then
+        warn(LOG_PREFIX, "找不到 ArmyStore/Information")
+    else
+        infoFrame.Visible = false
+    end
+
+    if not blurEffect then
+        warn(LOG_PREFIX, "找不到 Lighting/Blur")
     end
 
     if DEBUG_MODE then
@@ -218,6 +275,160 @@ local function CancelPopupTweens()
             tween:Cancel()
         end
     end
+end
+
+local function SetShopBackdropVisible(visible)
+    if not shopBg and shopUI then
+        shopBg = shopUI:FindFirstChild("Bg")
+    end
+    if not blurEffect then
+        blurEffect = Lighting:FindFirstChild("Blur")
+    end
+
+    if shopBg then
+        shopBg.Visible = visible
+    end
+    if blurEffect then
+        blurEffect.Enabled = visible
+    end
+end
+
+local function EnsureInfoPopupScale()
+    if not infoFrame then
+        return nil
+    end
+
+    if not infoPopupScale or infoPopupScale.Parent ~= infoFrame then
+        infoPopupScale = infoFrame:FindFirstChild("PopupScale")
+        if not infoPopupScale then
+            infoPopupScale = Instance.new("UIScale")
+            infoPopupScale.Name = "PopupScale"
+            infoPopupScale.Scale = 1
+            infoPopupScale.Parent = infoFrame
+        end
+    end
+
+    return infoPopupScale
+end
+
+local function CancelInfoPopupTweens()
+    local tweens = {infoOpenTweenA, infoOpenTweenB, infoCloseTweenA, infoCloseTweenB}
+    for _, tween in ipairs(tweens) do
+        if tween and tween.PlaybackState ~= Enum.PlaybackState.Completed then
+            tween:Cancel()
+        end
+    end
+end
+
+local function HideInformationImmediate()
+    if not infoFrame then
+        return
+    end
+
+    CancelInfoPopupTweens()
+    if infoPopupScale then
+        infoPopupScale.Scale = 1
+    end
+    infoFrame.Visible = false
+    infoPopupAnimating = false
+end
+
+local function PlayInfoOpen()
+    if not InitializeUI() then
+        return
+    end
+    if not infoFrame then
+        return
+    end
+
+    local scale = EnsureInfoPopupScale()
+    if not scale then
+        return
+    end
+
+    if infoFrame.Visible and not infoPopupAnimating then
+        return
+    end
+
+    CancelInfoPopupTweens()
+    infoPopupAnimating = true
+
+    infoFrame.Visible = true
+    scale.Scale = POPUP_OPEN_START_SCALE
+
+    infoOpenTweenA = TweenService:Create(scale,
+        TweenInfo.new(POPUP_OPEN_DURATION_A, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+        {Scale = POPUP_OPEN_OVERSHOOT_SCALE}
+    )
+    infoOpenTweenB = TweenService:Create(scale,
+        TweenInfo.new(POPUP_OPEN_DURATION_B, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+        {Scale = 1}
+    )
+
+    local connA
+    connA = infoOpenTweenA.Completed:Connect(function(state)
+        connA:Disconnect()
+        if state == Enum.PlaybackState.Completed then
+            infoOpenTweenB:Play()
+        end
+    end)
+
+    local connB
+    connB = infoOpenTweenB.Completed:Connect(function()
+        connB:Disconnect()
+        infoPopupAnimating = false
+        scale.Scale = 1
+    end)
+
+    infoOpenTweenA:Play()
+end
+
+local function PlayInfoClose()
+    if not InitializeUI() then
+        return
+    end
+    if not infoFrame then
+        return
+    end
+
+    local scale = EnsureInfoPopupScale()
+    if not scale then
+        return
+    end
+
+    if not infoFrame.Visible and not infoPopupAnimating then
+        return
+    end
+
+    CancelInfoPopupTweens()
+    infoPopupAnimating = true
+
+    infoCloseTweenA = TweenService:Create(scale,
+        TweenInfo.new(POPUP_CLOSE_DURATION_A, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+        {Scale = POPUP_CLOSE_OVERSHOOT_SCALE}
+    )
+    infoCloseTweenB = TweenService:Create(scale,
+        TweenInfo.new(POPUP_CLOSE_DURATION_B, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+        {Scale = POPUP_CLOSE_END_SCALE}
+    )
+
+    local connA
+    connA = infoCloseTweenA.Completed:Connect(function(state)
+        connA:Disconnect()
+        if state == Enum.PlaybackState.Completed then
+            infoCloseTweenB:Play()
+        end
+    end)
+
+    local connB
+    connB = infoCloseTweenB.Completed:Connect(function()
+        connB:Disconnect()
+        infoFrame.Visible = false
+        scale.Scale = 1
+        infoPopupAnimating = false
+    end)
+
+    infoCloseTweenA:Play()
 end
 
 --[[
@@ -275,6 +486,8 @@ function ShopDisplay.PlayOpen()
         return
     end
 
+    SetShopBackdropVisible(true)
+
     if shopFrame.Visible and not popupAnimating then
         return
     end
@@ -323,7 +536,13 @@ function ShopDisplay.PlayClose()
     end
 
     if not shopFrame.Visible and not popupAnimating then
+        SetShopBackdropVisible(false)
+        HideInformationImmediate()
         return
+    end
+
+    if infoFrame and infoFrame.Visible then
+        PlayInfoClose()
     end
 
     CancelPopupTweens()
@@ -350,6 +569,8 @@ function ShopDisplay.PlayClose()
     connB = popupCloseTweenB.Completed:Connect(function()
         connB:Disconnect()
         shopFrame.Visible = false
+        SetShopBackdropVisible(false)
+        HideInformationImmediate()
         scale.Scale = 1
         popupAnimating = false
     end)
@@ -374,6 +595,105 @@ end
 ]]
 local function FormatCoins(amount)
     return FormatHelper.FormatCoinsShort(amount, true)  -- 带$符号
+end
+
+local function FormatStatNumber(value)
+    if value == nil then
+        return "0"
+    end
+    if type(value) ~= "number" then
+        return tostring(value)
+    end
+
+    local intValue = math.floor(value + 1e-6)
+    if math.abs(value - intValue) < 0.001 then
+        return tostring(intValue)
+    end
+
+    local text = string.format("%.2f", value)
+    text = text:gsub("0+$", ""):gsub("%.$", "")
+    return text
+end
+
+local function UpdateInformationPanel(itemData)
+    if not itemData or not itemData.UnitId then
+        return
+    end
+    if not InitializeUI() then
+        return
+    end
+    if not infoFrame then
+        return
+    end
+
+    local unitId = itemData.UnitId
+    local unitData = UnitConfig.GetUnitById(unitId)
+    local level = 1
+
+    local infoCard = infoFrame:FindFirstChild("ItemCardTemplate")
+    if not infoCard then
+        warn(LOG_PREFIX, "找不到 Information/ItemCardTemplate")
+        return
+    end
+    infoCard.Visible = true
+
+    local iconBg = infoCard:FindFirstChild("IconBg")
+    local icon = iconBg and iconBg:FindFirstChild("Icon")
+    if icon and icon:IsA("ImageLabel") then
+        icon.Image = itemData.Icon or (unitData and unitData.Icon) or "rbxassetid://0"
+    end
+
+    local powerLabel = infoCard:FindFirstChild("Power")
+    if powerLabel and powerLabel:IsA("TextLabel") then
+        local powerValue = PowerConfig.CalculateUnitPowerByIdAndLevel(unitId, level)
+        powerLabel.RichText = true
+        powerLabel.Text = string.format(
+            "Power:<font color=\"rgb(255,255,0)\">%s</font>",
+            FormatStatNumber(powerValue)
+        )
+    end
+
+    local qualityLabel = infoCard:FindFirstChild("Quality")
+    if qualityLabel and qualityLabel:IsA("TextLabel") then
+        local qualityName = itemData.Quality or (unitData and unitData.Quality) or "Common"
+        qualityLabel.Text = qualityName
+        qualityLabel.TextColor3 = GetQualityColor(qualityName)
+    end
+
+    local atkVal = UnitConfig.CalculateAttack(unitId, level)
+    local hpVal = UnitConfig.CalculateHealth(unitId, level)
+    local asVal = UnitConfig.GetAttackSpeed(unitId)
+    local rngVal = UnitConfig.GetAttackRange(unitId)
+
+    local function SetStat(containerName, value)
+        local container = infoFrame:FindFirstChild(containerName)
+        local numLabel = container and container:FindFirstChild("Num")
+        if numLabel and numLabel:IsA("TextLabel") then
+            numLabel.Text = FormatStatNumber(value)
+        end
+    end
+
+    SetStat("HP", hpVal)
+    SetStat("ATK", atkVal)
+    SetStat("AS", asVal)
+    SetStat("RNG", rngVal)
+end
+
+local function OpenInformationPanel(itemData)
+    if not itemData or not itemData.UnitId then
+        return
+    end
+    if not InitializeUI() then
+        return
+    end
+    if not infoFrame then
+        return
+    end
+
+    UpdateInformationPanel(itemData)
+    if not infoFrame.Visible then
+        PlayInfoOpen()
+    end
 end
 
 --[[
@@ -650,8 +970,29 @@ local function SetupCardClickLogic(cardFrame, itemData)
                 print(LOG_PREFIX, "展开购买按钮:", itemData.UnitId, "价格:", itemData.Price)
             end
         end
+
+        -- V6.6：点击卡片时同步打开详情面板
+        OpenInformationPanel(itemData)
     end)
     table.insert(purchaseConnections[cardId], clickConnection)
+
+    -- V6.6：详情按钮点击
+    local iconBg = cardFrame:FindFirstChild("IconBg")
+    local infoButton = iconBg and iconBg:FindFirstChild("Information")
+    if infoButton and infoButton:IsA("GuiButton") then
+        if infoButton.ZIndex <= clickButton.ZIndex then
+            infoButton.ZIndex = clickButton.ZIndex + 1
+        end
+
+        local infoConn = infoButton.MouseButton1Click:Connect(function()
+            OpenInformationPanel(itemData)
+        end)
+        table.insert(purchaseConnections[cardId], infoConn)
+
+        if LoadUIHelpers() and ButtonEffectHelper then
+            ButtonEffectHelper.AddClickEffect(infoButton)
+        end
+    end
 
     -- V2.1修复：添加按钮特效（仅为卡片点击添加，购买按钮特效在初始化时统一处理）
     if LoadUIHelpers() and ButtonEffectHelper then
@@ -766,6 +1107,9 @@ local function UpdateShopDisplay()
             child:Destroy()
         end
     end
+
+    -- V6.6：刷新列表时关闭详情面板，避免数据错位
+    HideInformationImmediate()
 
     -- Reset selection and hide buy buttons when list refreshes.
     currentSelectedItem = nil
@@ -1070,9 +1414,21 @@ function ShopDisplay.Initialize()
         end
     end
 
+    -- 设置详情关闭按钮（V6.6）
+    if infoCloseButton and infoCloseButton:IsA("GuiButton") then
+        infoCloseButton.MouseButton1Click:Connect(function()
+            PlayInfoClose()
+        end)
+
+        if LoadUIHelpers() and ButtonEffectHelper then
+            ButtonEffectHelper.AddClickEffect(infoCloseButton)
+        end
+    end
+
     -- V2.1修复：监听shopFrame可见性变化，实现界面打开时实时更新倒计时
     if shopFrame then
         shopFrame:GetPropertyChangedSignal("Visible"):Connect(function()
+            SetShopBackdropVisible(shopFrame.Visible)
             if shopFrame.Visible then
                 -- 开始本地每秒更新标题
                 if titleUpdateConn then
@@ -1100,6 +1456,7 @@ function ShopDisplay.Initialize()
                     titleUpdateConn:Disconnect()
                     titleUpdateConn = nil
                 end
+                HideInformationImmediate()
             end
         end)
     end
@@ -1140,6 +1497,8 @@ end
 ]]
 function ShopDisplay.Cleanup()
     shopData = {}
+    HideInformationImmediate()
+    SetShopBackdropVisible(false)
 
     -- V2.1修复：清理选中状态和全局连接
     currentSelectedItem = nil

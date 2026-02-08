@@ -57,7 +57,7 @@ end
 	@param level number - 兵种等级
 	@return number - 战斗力值
 --]]
-function PowerConfig.CalculateUnitPowerByIdAndLevel(unitId, level)
+function PowerConfig.CalculateUnitPowerByIdAndLevel(unitId, level, multipliers)
 	if not unitId then
 		return 0
 	end
@@ -76,6 +76,26 @@ function PowerConfig.CalculateUnitPowerByIdAndLevel(unitId, level)
 	local attackSpeed = baseConfig.BaseAttackSpeed or 1
 	local attackRange = baseConfig.BaseAttackRange or 0
 
+	if type(multipliers) == "table" then
+		local healthMultiplier = tonumber(multipliers.HealthMultiplier) or 1
+		local attackMultiplier = tonumber(multipliers.AttackMultiplier) or 1
+		local attackSpeedMultiplier = tonumber(multipliers.AttackSpeedMultiplier) or 1
+
+		if healthMultiplier <= 0 then
+			healthMultiplier = 1
+		end
+		if attackMultiplier <= 0 then
+			attackMultiplier = 1
+		end
+		if attackSpeedMultiplier <= 0 then
+			attackSpeedMultiplier = 1
+		end
+
+		hp = hp * healthMultiplier
+		attack = attack * attackMultiplier
+		attackSpeed = attackSpeed / attackSpeedMultiplier
+	end
+
 	local unitData = {
 		HP = hp,
 		Attack = attack,
@@ -86,11 +106,6 @@ function PowerConfig.CalculateUnitPowerByIdAndLevel(unitId, level)
 	return PowerConfig.CalculateUnitPower(unitData)
 end
 
---[[
-	格式化战斗力数值显示
-	@param power number - 战斗力值
-	@return string - 格式化后的战斗力字符串
---]]
 function PowerConfig.FormatPower(power)
 	if not power or power <= 0 then
 		return "0"

@@ -54,6 +54,7 @@ local ShopListEvent = nil
 local PurchaseUnit = nil
 local PurchaseUnitRobux = nil -- Robux购买事件
 local PurchaseResult = nil
+local ShopRefreshTip = nil
 local StockUpdate = nil       -- 库存更新事件 (V2.1库存功能)
 local RefreshTimeUpdate = nil -- 刷新倒计时更新事件 (V2.1库存功能)
 
@@ -126,6 +127,13 @@ local function InitializeEvents()
 	PurchaseResult = ShopEvents:FindFirstChild("PurchaseResult")
 	StockUpdate = ShopEvents:FindFirstChild("StockUpdate")          -- V2.1库存功能
 	RefreshTimeUpdate = ShopEvents:FindFirstChild("RefreshTimeUpdate") -- V2.1库存功能
+	ShopRefreshTip = ShopEvents:FindFirstChild("ShopRefreshTip")
+	if not ShopRefreshTip then
+		local event = Instance.new("RemoteEvent")
+		event.Name = "ShopRefreshTip"
+		event.Parent = ShopEvents
+		ShopRefreshTip = event
+	end
 
 	-- 验证基础事件是否都存在
 	if not (RequestShopList and ShopListEvent and PurchaseUnit and PurchaseResult) then
@@ -455,6 +463,13 @@ local function RefreshShopStock(player, shopId, isFirstRefresh, forceNormal)
 		end)
 	end
 
+
+	-- V6.5: UnitShop stock refresh tip
+	if shopId == "UnitShop" and ShopRefreshTip then
+		pcall(function()
+			ShopRefreshTip:FireClient(player, shopId)
+		end)
+	end
 	return stockData
 end
 

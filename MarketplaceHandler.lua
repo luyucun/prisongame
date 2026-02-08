@@ -32,6 +32,7 @@ local ShopConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild
 local SkillConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("SkillConfig"))
 local SkillShopConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("SkillShopConfig"))
 local LimitPrisonerConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("LimitPrisonerConfig"))
+local UpgradeConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("UpgradeConfig"))
 
 -- 挂机金币10倍购买
 local IDLE_COIN_PRODUCT_ID = 3487946200
@@ -68,6 +69,7 @@ local DataManager = nil
 local IdleCoinSystem = nil
 local SevenDaysSystem = nil
 local TaskSystem = nil
+local UpgradeSystem = nil
 local armyPackEvents = nil
 local armyPackPurchaseResultEvent = nil
 local limitPrisonerEvents = nil
@@ -149,6 +151,21 @@ local function GetTaskSystem()
 		end
 	end
 	return TaskSystem
+end
+
+local function GetUpgradeSystem()
+	if not UpgradeSystem then
+		local upgradeModule = ServerScriptService.Systems:FindFirstChild("UpgradeSystem")
+		if upgradeModule then
+			local success, result = pcall(require, upgradeModule)
+			if success then
+				UpgradeSystem = result
+			else
+				warn("[MarketplaceHandler] UpgradeSystem加载失败:", result)
+			end
+		end
+	end
+	return UpgradeSystem
 end
 
 local function EnsureArmyPackEvents()
@@ -525,11 +542,19 @@ function MarketplaceHandler.ProcessReceipt(receiptInfo)
 		local skillId, skillShopId = FindSkillByDevProductId(receiptInfo.ProductId)
 		local armyPackRewards = ARMY_PACK_PRODUCTS[receiptInfo.ProductId]
 		local isReviveProduct = REVIVE_PRODUCTS[receiptInfo.ProductId]
+		local upgradeTypeId = UpgradeConfig.GetTypeByDevProductId(receiptInfo.ProductId)
 
 		local grantSuccess = false
 		local grantMessage = ""
 
-		if limitUnitId and limitUnitId ~= "" then
+		if upgradeTypeId then
+			local upgradeSystem = GetUpgradeSystem()
+			if not upgradeSystem or not upgradeSystem.ProcessRobuxReceipt then
+				warn("[MarketplaceHandler] UpgradeSystem不可用，稍后重试")
+				return Enum.ProductPurchaseDecision.NotProcessedYet
+			end
+			grantSuccess, grantMessage = upgradeSystem.ProcessRobuxReceipt(player, receiptInfo.ProductId)
+		elseif limitUnitId and limitUnitId ~= "" then
 			grantSuccess, grantMessage = GrantUnitProduct(player, limitUnitId, "LimitPrisoner")
 			if grantSuccess then
 				SendLimitPrisonerPurchaseResult(player, true, "Purchase successful.", limitUnitId)

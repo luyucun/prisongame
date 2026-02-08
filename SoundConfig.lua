@@ -73,6 +73,13 @@ SoundConfig.SFX = {
 		Looped = false,
 		-- SoundService路径: SoundService/Audio/Common/Error Sound 1
 	},
+	ShopRefresh = {
+		SoundId = "rbxassetid://105818371386904",
+		Name = "ShopRefreshTip",
+		Volume = 0.8,
+		Looped = false,
+		-- SoundService path: SoundService/Audio/Common/ShopRefreshTip
+	},
 }
 
 -- ==================== 音效类型枚举 ====================

@@ -61,8 +61,19 @@ local currentNPC = nil
 local currentPrompt = nil
 local promptConnection = nil
 local SetupPrompt = nil
+local CloseTalkList = nil
+local CloseDialog = nil
 local currentDialogues = {}
 local currentDialogIndex = 0
+
+-- PrisonerTouch触发
+local prisonerTouchPart = nil
+local prisonerTouchConn = nil
+local prisonerTouchEndedConn = nil
+local prisonerTouchingParts = {}
+local prisonerTouchActive = false
+local lastTouchResolve = 0
+local TOUCH_RESOLVE_INTERVAL = 0.5
 
 local listTween = nil
 local bottomTween = nil
@@ -163,6 +174,33 @@ local function StopArrowFloat()
 	if talkBottomArrow and arrowBasePos then
 		talkBottomArrow.Position = arrowBasePos
 	end
+end
+
+local function IsLocalCharacterPart(part: Instance?)
+	local character = player.Character
+	return character and part and part:IsDescendantOf(character)
+end
+
+local function IsCharacterTouchingPart(part: BasePart)
+	local character = player.Character
+	if not character or not part or not part.Parent then
+		return false
+	end
+
+	local ok, touching = pcall(function()
+		return part:GetTouchingParts()
+	end)
+	if not ok or type(touching) ~= "table" then
+		return false
+	end
+
+	for _, hit in ipairs(touching) do
+		if hit and hit:IsDescendantOf(character) then
+			return true
+		end
+	end
+
+	return false
 end
 
 local function BindPrompt(prompt: ProximityPrompt?)
@@ -374,6 +412,109 @@ SetupPrompt = function(npc)
 	BindPrompt(prompt)
 end
 
+local function FindPrisonerTouchPart()
+	local homeSlot = player:GetAttribute("HomeSlot")
+	if not homeSlot then
+		return nil
+	end
+
+	local homeFolder = workspace:FindFirstChild(GameConfig.HOME_FOLDER_NAME or "Home")
+	if not homeFolder then
+		return nil
+	end
+
+	local playerHome = homeFolder:FindFirstChild((GameConfig.HOME_PREFIX or "PlayerHome") .. homeSlot)
+	if not playerHome then
+		return nil
+	end
+
+	return playerHome:FindFirstChild("PrisonerTouch")
+end
+
+local function ClearPrisonerTouchConnections()
+	if prisonerTouchConn then
+		prisonerTouchConn:Disconnect()
+		prisonerTouchConn = nil
+	end
+	if prisonerTouchEndedConn then
+		prisonerTouchEndedConn:Disconnect()
+		prisonerTouchEndedConn = nil
+	end
+	prisonerTouchingParts = {}
+	prisonerTouchActive = false
+end
+
+local function BindPrisonerTouch(part: BasePart?)
+	if prisonerTouchPart == part then
+		return
+	end
+
+	ClearPrisonerTouchConnections()
+	prisonerTouchPart = part
+	if not part then
+		return
+	end
+
+	prisonerTouchConn = part.Touched:Connect(function(hit)
+		if not IsLocalCharacterPart(hit) then
+			return
+		end
+		prisonerTouchingParts[hit] = true
+		if not prisonerTouchActive then
+			prisonerTouchActive = true
+			TalkController.OpenTalkList(true)
+		end
+	end)
+
+	prisonerTouchEndedConn = part.TouchEnded:Connect(function(hit)
+		if not prisonerTouchingParts[hit] then
+			return
+		end
+		prisonerTouchingParts[hit] = nil
+		if next(prisonerTouchingParts) == nil then
+			prisonerTouchActive = false
+			CloseDialog()
+			CloseTalkList(true)
+		end
+	end)
+end
+
+local function ResolvePrisonerTouch(force: boolean)
+	local now = tick()
+	if not force and (now - lastTouchResolve) < TOUCH_RESOLVE_INTERVAL then
+		return
+	end
+	lastTouchResolve = now
+
+	local part = FindPrisonerTouchPart()
+	if part and not part:IsA("BasePart") then
+		part = nil
+	end
+	if part ~= prisonerTouchPart then
+		BindPrisonerTouch(part)
+	end
+end
+
+local function UpdatePrisonerTouchState()
+	if not prisonerTouchPart or not prisonerTouchPart.Parent then
+		if prisonerTouchActive then
+			prisonerTouchActive = false
+			prisonerTouchingParts = {}
+		end
+		return
+	end
+
+	local touching = IsCharacterTouchingPart(prisonerTouchPart)
+	if touching and not prisonerTouchActive then
+		prisonerTouchActive = true
+		TalkController.OpenTalkList(true)
+	elseif (not touching) and prisonerTouchActive and next(prisonerTouchingParts) == nil then
+		prisonerTouchActive = false
+		CloseDialog()
+		CloseTalkList(true)
+	end
+end
+
 -- ==================== 列表生成 ====================
 
 local function ClearTalkList()
@@ -474,7 +615,7 @@ local function ShowTalkList()
 	SetPromptEnabled(false)
 end
 
-local function CloseTalkList(manual: boolean)
+CloseTalkList = function(manual: boolean)
 	if talkFrame and isListOpen then
 		PlayFrameClose(talkFrame, talkFramePos, talkFrameSize)
 	end
@@ -513,7 +654,7 @@ local function ShowDialog(dialogues: {string})
 	StartArrowFloat()
 end
 
-local function CloseDialog()
+CloseDialog = function()
 	if talkBottomFrame and isDialogOpen then
 		PlayFrameClose(talkBottomFrame, talkBottomPos, talkBottomSize)
 	end
@@ -653,9 +794,12 @@ end
 -- ==================== 距离检测 ====================
 
 local function CheckDistance()
+	ResolvePrisonerTouch(false)
+	UpdatePrisonerTouchState()
+
 	local npc = FindNPC()
 	if not npc then
-		if isNearNPC then
+		if isNearNPC and not prisonerTouchActive then
 			isNearNPC = false
 			CloseDialog()
 			CloseTalkList(false)
@@ -676,12 +820,15 @@ local function CheckDistance()
 	end
 
 	local distance = (rootPart.Position - npcPart.Position).Magnitude
-	local inRange = distance <= ((GameConfig.Shop and GameConfig.Shop.OpenDistance) or 11)
+	local npcInRange = distance <= ((GameConfig.Shop and GameConfig.Shop.OpenDistance) or 11)
+	local inRange = npcInRange or prisonerTouchActive
 
 	if inRange and not isNearNPC then
 		isNearNPC = true
 		manualClosed = false
-		TalkController.OpenTalkList(true)
+		if npcInRange and not prisonerTouchActive then
+			TalkController.OpenTalkList(true)
+		end
 	elseif (not inRange) and isNearNPC then
 		isNearNPC = false
 		CloseDialog()
@@ -712,6 +859,8 @@ function TalkController.Initialize()
 		return false
 	end
 
+	ResolvePrisonerTouch(true)
+
 	SetupVisibilityWatch()
 	ConnectTalkBottomClick()
 
@@ -737,12 +886,18 @@ function TalkController.Initialize()
 		isNearNPC = false
 		currentNPC = nil
 		currentPrompt = nil
+		prisonerTouchActive = false
+		prisonerTouchingParts = {}
 		CloseDialog()
 		CloseTalkList(false)
 	end)
 
 	return true
 end
+
+player:GetAttributeChangedSignal("HomeSlot"):Connect(function()
+	ResolvePrisonerTouch(true)
+end)
 
 TalkController.Initialize()
 

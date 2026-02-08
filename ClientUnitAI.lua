@@ -1377,8 +1377,8 @@ function ClientUnitAI.StartAI(battleId, unitModel, unitId, level, team)
 		-- 单位属性
 		Stat = {
 			AttackRange = UnitConfig.GetAttackRange(unitId),
-			AttackSpeed = UnitConfig.GetAttackSpeed(unitId),
-			MoveSpeed = UnitConfig.GetMoveSpeed(unitId),
+			AttackSpeed = tonumber(unitModel:GetAttribute("BattleAttackSpeed")) or UnitConfig.GetAttackSpeed(unitId),
+			MoveSpeed = tonumber(unitModel:GetAttribute("BattleMoveSpeed")) or UnitConfig.GetMoveSpeed(unitId),
 		},
 
 		-- 动画
@@ -1560,3 +1560,4 @@ function ClientUnitAI.DebugPrintAllStates()
 end
 
 return ClientUnitAI
+

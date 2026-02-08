@@ -19,6 +19,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 -- ==================== 模块引用 ====================
 local PowerConfig = require(ReplicatedStorage.Config.PowerConfig)
 local UnitConfig = require(ReplicatedStorage.Config.UnitConfig)
+local UpgradeConfig = require(ReplicatedStorage.Config.UpgradeConfig)
 
 -- 延迟加载避免循环依赖
 local DataManager
@@ -79,6 +80,44 @@ local function LoadLeaderboardSystem()
 		warn("[PowerSystem] LeaderboardSystem module not found.")
 	end
 	return false
+end
+
+local function GetPlayerUpgradeMultipliers(playerData)
+	local multipliers = {
+		AttackMultiplier = 1,
+		HealthMultiplier = 1,
+		AttackSpeedMultiplier = 1,
+	}
+
+	if type(playerData) ~= "table" then
+		return multipliers
+	end
+
+	local upgradeData = playerData.UpgradeData
+	if type(upgradeData) ~= "table" then
+		return multipliers
+	end
+
+	local function getRatio(typeId)
+		local initialLevel = UpgradeConfig.GetInitialLevel(typeId)
+		local maxLevel = UpgradeConfig.GetMaxLevel(typeId)
+		local rawLevel = tonumber(upgradeData[typeId]) or tonumber(upgradeData[tostring(typeId)])
+		local level = math.floor(rawLevel or initialLevel)
+		if level < initialLevel then
+			level = initialLevel
+		end
+		if maxLevel > 0 and level > maxLevel then
+			level = maxLevel
+		end
+		local cfg = UpgradeConfig.GetLevelConfig(typeId, level)
+		return math.max(0, tonumber(cfg and cfg.BonusRatio) or 0)
+	end
+
+	multipliers.AttackMultiplier = 1 + getRatio(UpgradeConfig.TYPE.ATTACK)
+	multipliers.HealthMultiplier = 1 + getRatio(UpgradeConfig.TYPE.HEALTH)
+	multipliers.AttackSpeedMultiplier = 1 + getRatio(UpgradeConfig.TYPE.ATTACK_SPEED)
+
+	return multipliers
 end
 
 -- ==================== 数据存储 ====================
@@ -325,6 +364,7 @@ function PowerSystem.OnPlayerJoin(player)
 		end
 
 		local unitsArray = playerData.Units or {}
+		local upgradeMultipliers = GetPlayerUpgradeMultipliers(playerData)
 		local totalPower = 0
 
 		for _, unitInfo in ipairs(unitsArray) do
@@ -333,7 +373,7 @@ function PowerSystem.OnPlayerJoin(player)
 				local level = unitInfo.Level or 1
 				local instanceId = unitInfo.InstanceId or ("Unit_" .. tostring(unitId))
 
-				local power = PowerConfig.CalculateUnitPowerByIdAndLevel(unitId, level)
+				local power = PowerConfig.CalculateUnitPowerByIdAndLevel(unitId, level, upgradeMultipliers)
 				cache.UnitPowers[instanceId] = power
 				totalPower = totalPower + power
 			end
@@ -344,7 +384,7 @@ function PowerSystem.OnPlayerJoin(player)
 			local inventory = playerData.Inventory or {}
 			for unitId, count in pairs(inventory) do
 				if count > 0 then
-					local power = PowerConfig.CalculateUnitPowerByIdAndLevel(unitId, 1)
+					local power = PowerConfig.CalculateUnitPowerByIdAndLevel(unitId, 1, upgradeMultipliers)
 					totalPower = totalPower + power * count
 				end
 			end
@@ -353,7 +393,7 @@ function PowerSystem.OnPlayerJoin(player)
 			for _, unitInfo in pairs(placedUnits) do
 				local unitId = unitInfo.UnitId
 				local level = unitInfo.Level or 1
-				local power = PowerConfig.CalculateUnitPowerByIdAndLevel(unitId, level)
+				local power = PowerConfig.CalculateUnitPowerByIdAndLevel(unitId, level, upgradeMultipliers)
 				totalPower = totalPower + power
 			end
 		end
@@ -431,6 +471,7 @@ function PowerSystem.RecalculatePlayerPower(player)
 		end
 
 		local unitsArray = playerData.Units or {}
+		local upgradeMultipliers = GetPlayerUpgradeMultipliers(playerData)
 
 		local cache = playerPowerCache[player]
 		if not cache then
@@ -452,7 +493,7 @@ function PowerSystem.RecalculatePlayerPower(player)
 					local level = unitInfo.Level or 1
 					local instanceId = unitInfo.InstanceId or ("Unit_" .. tostring(unitId))
 
-					local power = PowerConfig.CalculateUnitPowerByIdAndLevel(unitId, level)
+					local power = PowerConfig.CalculateUnitPowerByIdAndLevel(unitId, level, upgradeMultipliers)
 					cache.UnitPowers[instanceId] = power
 					totalPower = totalPower + power
 				end
@@ -462,7 +503,7 @@ function PowerSystem.RecalculatePlayerPower(player)
 			local inventory = playerData.Inventory or {}
 			for unitId, count in pairs(inventory) do
 				if count > 0 then
-					local power = PowerConfig.CalculateUnitPowerByIdAndLevel(unitId, 1)
+					local power = PowerConfig.CalculateUnitPowerByIdAndLevel(unitId, 1, upgradeMultipliers)
 					totalPower = totalPower + power * count
 				end
 			end
@@ -471,7 +512,7 @@ function PowerSystem.RecalculatePlayerPower(player)
 			for _, unitInfo in pairs(placedUnits) do
 				local unitId = unitInfo.UnitId
 				local level = unitInfo.Level or 1
-				local power = PowerConfig.CalculateUnitPowerByIdAndLevel(unitId, level)
+				local power = PowerConfig.CalculateUnitPowerByIdAndLevel(unitId, level, upgradeMultipliers)
 				totalPower = totalPower + power
 			end
 		end

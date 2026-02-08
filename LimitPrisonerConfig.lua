@@ -7,7 +7,7 @@
 
 local LimitPrisonerConfig = {}
 
-LimitPrisonerConfig.RefreshHoursUtc = { 0, 12 }
+LimitPrisonerConfig.RefreshHoursUtc = { 0 }
 LimitPrisonerConfig.Proximity = {
 	OpenDistance = 8,
 	HoldDuration = 0,

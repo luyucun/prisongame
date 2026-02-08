@@ -151,6 +151,13 @@ ReplicatedStorage
         ├──RedeemLimitPrisoner（RemoteEvent） - 客户端→服务器：手铐兑换限时囚犯
         ├──LimitPrisonerPurchaseResult（RemoteEvent） - 服务器→客户端：购买结果(success, message, purchaseType, unitId, newCoins)
         └──LimitPrisonerRedeemResult（RemoteEvent） - 服务器→客户端：兑换结果(success, message, rewardInfo)
+    └──UpgradeEvents（Folder）/  【V6.7新增 - 养成系统】
+        ├──RequestUpgradeData（RemoteEvent） - 客户端→服务器：请求养成数据
+        ├──UpgradeData（RemoteEvent） - 服务器→客户端：养成数据同步(entries, levels, serverTime)
+        ├──PurchaseUpgradeByCoin（RemoteEvent） - 客户端→服务器：金币升级(typeId)
+        ├──PurchaseUpgradeByRobux（RemoteEvent） - 客户端→服务器：Robux升级(typeId)
+        └──UpgradePurchaseResult（RemoteEvent） - 服务器→客户端：升级结果(payload)
+
 
 
 如果需要补充新的RemoteEvent或者Remotefunction，请在这里列出来，我会自己去创建

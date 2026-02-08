@@ -27,11 +27,13 @@ local TweenService = game:GetService("TweenService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
+local SetPrisonerStoreVisibility = nil
 
 -- UI元素引用
 local mainGui = nil
 local returnToHomeButton = nil
 local unlockMoveButton = nil
+local prisonerStoreButton = nil
 local topRightGui = nil
 local optionsGui = nil
 local optionsBg = nil
@@ -531,8 +533,17 @@ local function InitializeUI()
 		DebugLog("✅ 找到UnlockMove按钮")
 	end
 
+	-- 获取PrisonerStore按钮
+	prisonerStoreButton = mainGui:FindFirstChild("PrisonerStore", true)
+	if not prisonerStoreButton then
+		DebugLog("⚠ 未找到PrisonerStore按钮")
+	else
+		DebugLog("✅ 找到PrisonerStore按钮")
+	end
+
 	-- 初始状态：隐藏按钮
 	SetButtonsVisibility(false)
+	SetPrisonerStoreVisibility(true)
 
 	return true
 end
@@ -553,6 +564,12 @@ function SetButtonsVisibility(visible)
 	end
 
 	DebugLog(string.format("按钮可见性设置为: %s", tostring(visible)))
+end
+
+SetPrisonerStoreVisibility = function(visible)
+	if prisonerStoreButton then
+		prisonerStoreButton.Visible = visible
+	end
 end
 
 -- ==================== 按钮点击处理 ====================
@@ -604,6 +621,21 @@ local function OnReturnToHomeClick()
 	end
 end
 
+--[[
+处理PrisonerStore按钮点击
+传送玩家到自家PrisonerTouch位置
+]]
+local function OnPrisonerStoreClick()
+	DebugLog("🚪 PrisonerStore按钮被点击")
+
+	if returnToHomeEvent then
+		returnToHomeEvent:FireServer("PrisonerTouch")
+		DebugLog("✅ 已发送传送到PrisonerTouch请求")
+	else
+		DebugLog("❌ ReturnToHome事件不可用")
+	end
+end
+
 -- ==================== 事件处理 ====================
 
 --[[
@@ -626,6 +658,8 @@ local function OnCampaignStateUpdate(state, stageNum)
 	elseif state == "StageClear" then
 		-- 保持当前状态
 	end
+
+	SetPrisonerStoreVisibility(state == "Idle")
 end
 
 -- ==================== 初始化 ====================
@@ -691,6 +725,16 @@ local function ConnectButtonEvents()
 				pcall(OnReturnToHomeClick)
 			end)
 			DebugLog("✅ ReturnToHome按钮事件已连接")
+		end
+	end
+
+	-- 连接PrisonerStore按钮
+	if prisonerStoreButton then
+		if prisonerStoreButton:IsA("TextButton") or prisonerStoreButton:IsA("ImageButton") then
+			prisonerStoreButton.MouseButton1Click:Connect(function()
+				pcall(OnPrisonerStoreClick)
+			end)
+			DebugLog("✅ PrisonerStore按钮事件已连接")
 		end
 	end
 end
