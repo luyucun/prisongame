@@ -75,6 +75,8 @@ local popupInputConnection = nil
 local campaignEventsBound = false
 local isBattleBlocked = false
 local CloseShop = nil
+local shopOpenSource = nil
+local reopenArmyStoreOnClose = false
 
 local POPUP_BG_OFFSET = 0.08
 local POPUP_TWEEN_DURATION = 0.3
@@ -504,7 +506,7 @@ local function UpdateEntryVisibility()
 	if not entryVisible then
 		UpdateFreeIcon(false)
 		if shopBg and shopBg.Visible then
-			CloseShop()
+			CloseShop("Auto")
 		end
 		return
 	end
@@ -804,7 +806,7 @@ local function OnCampaignStateUpdate(state)
 
 	isBattleBlocked = battle
 	if isBattleBlocked then
-		CloseShop()
+		CloseShop("Auto")
 	end
 	UpdateEntryVisibility()
 end
@@ -836,13 +838,16 @@ end
 
 -- ==================== 按钮交互 ====================
 
-local function OpenShop()
+local function OpenShop(source)
 	if not IsShopUnlocked() or isBattleBlocked then
-		return
+		return false
 	end
 	if not PlayShopOpen() then
-		return
+		return false
 	end
+
+	shopOpenSource = source or "Main"
+	reopenArmyStoreOnClose = (shopOpenSource == "ArmyStore")
 	RequestBackpackHide()
 	if requestDataEvent then
 		requestDataEvent:FireServer()
@@ -852,12 +857,26 @@ local function OpenShop()
 		UpdateFreeIcon(cachedData.CanClaim == true)
 	end
 	StartCountdown()
+	return true
 end
 
-CloseShop = function()
+CloseShop = function(reason)
 	PlayShopClose()
 	ReleaseBackpackHide()
 	StopCountdown()
+
+	local shouldReopen = (reason == "User") and reopenArmyStoreOnClose
+	reopenArmyStoreOnClose = false
+	shopOpenSource = nil
+
+	if shouldReopen then
+		task.delay(0.25, function()
+			local shopDisplay = _G.ShopDisplay
+			if shopDisplay and shopDisplay.PlayOpen then
+				shopDisplay.PlayOpen()
+			end
+		end)
+	end
 end
 
 local function OnClaimButtonClicked()
@@ -900,9 +919,13 @@ local function BindButtons()
 	if shopCloseButton and (shopCloseButton:IsA("TextButton") or shopCloseButton:IsA("ImageButton")) then
 		if not boundButtons[shopCloseButton] then
 			if ButtonEffectHelper then
-				ButtonEffectHelper.AddClickEffect(shopCloseButton, { OnClick = CloseShop })
+				ButtonEffectHelper.AddClickEffect(shopCloseButton, { OnClick = function()
+					CloseShop("User")
+				end })
 			else
-				shopCloseButton.MouseButton1Click:Connect(CloseShop)
+				shopCloseButton.MouseButton1Click:Connect(function()
+					CloseShop("User")
+				end)
 			end
 			boundButtons[shopCloseButton] = true
 		end
@@ -970,6 +993,13 @@ local function TryInitialize()
 
 	return eventsReady and uiReady
 end
+
+DailyRewardDisplay.OpenShop = OpenShop
+DailyRewardDisplay.CloseShop = CloseShop
+DailyRewardDisplay.IsShopOpen = function()
+	return shopBg and shopBg.Visible or false
+end
+_G.DailyRewardDisplay = DailyRewardDisplay
 
 function DailyRewardDisplay.Initialize()
 	if TryInitialize() then

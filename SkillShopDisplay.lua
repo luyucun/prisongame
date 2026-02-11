@@ -27,6 +27,7 @@ local RunService = game:GetService("RunService")
 -- 引用配置
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
 local SkillConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("SkillConfig"))
+local RobuxPriceHelper = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("RobuxPriceHelper"))
 
 -- 本地玩家
 local player = Players.LocalPlayer
@@ -141,6 +142,27 @@ end
 
 local function IsNotEnoughCashMessage(message)
 	return message and string.find(message, "金币不足")
+end
+
+local function UpdateRobuxBuyPriceLabel(priceLabel, devProductId)
+	if not priceLabel then
+		return
+	end
+	RobuxPriceHelper.UpdateProductLabel(priceLabel, devProductId, "suffix")
+end
+
+local function PrimeRobuxPricesFromShopData()
+	if type(shopData) ~= "table" then
+		return
+	end
+	local seen = {}
+	for _, itemData in ipairs(shopData) do
+		local devProductId = tonumber(itemData and itemData.DevProductId) or 0
+		if devProductId > 0 and not seen[devProductId] then
+			seen[devProductId] = true
+			RobuxPriceHelper.GetProductPrice(devProductId)
+		end
+	end
 end
 
 local function MergeStockData(stockData)
@@ -580,11 +602,12 @@ local function SetupCardClickLogic(cardFrame, itemData)
 			end
 
 			if robuxBuy then
+				local devProductId = tonumber(itemData.DevProductId) or 0
 				local robuxPrice = robuxBuy:FindFirstChild("Price")
-				if robuxPrice and robuxPrice:IsA("TextLabel") then
-					robuxPrice.Text = "R$ " .. tostring(itemData.RobuxPrice or 0)
+				if robuxPrice and (robuxPrice:IsA("TextLabel") or robuxPrice:IsA("TextButton")) then
+					UpdateRobuxBuyPriceLabel(robuxPrice, devProductId)
 				end
-				robuxBuy.Visible = (itemData.RobuxPrice and itemData.RobuxPrice > 0)
+				robuxBuy.Visible = devProductId > 0
 			end
 
 			buyButtonFrame.Visible = true
@@ -641,8 +664,9 @@ local function InitializeGlobalBuyButtons()
 					return
 				end
 
-				-- 检查是否有Robux价格
-				if not currentSelectedItem.RobuxPrice or currentSelectedItem.RobuxPrice <= 0 then
+				local devProductId = tonumber(currentSelectedItem.DevProductId) or 0
+				-- 检查是否有DevProductId
+				if devProductId <= 0 then
 					warn(LOG_PREFIX, "该技能不支持Robux购买:", currentSelectedItem.SkillId)
 					return
 				end
@@ -656,7 +680,7 @@ local function InitializeGlobalBuyButtons()
 				end
 
 				if DEBUG_MODE then
-					print(LOG_PREFIX, "尝试Robux购买技能:", currentSelectedItem.SkillId, "价格: R$", currentSelectedItem.RobuxPrice)
+					print(LOG_PREFIX, "尝试Robux购买技能:", currentSelectedItem.SkillId, "DevProductId:", devProductId)
 				end
 
 				-- 设置购买状态
@@ -741,6 +765,7 @@ local function OnShopListReceived(shopList)
 	end
 
 	shopData = shopList
+	PrimeRobuxPricesFromShopData()
 	UpdateShopDisplay()
 end
 

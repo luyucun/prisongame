@@ -29,6 +29,7 @@ local Lighting = game:GetService("Lighting")
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
 local UnitConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("UnitConfig"))  -- V2.1修复：用于读取兵种属性
 local PowerConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("PowerConfig"))
+local RobuxPriceHelper = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("RobuxPriceHelper"))
 
 -- 引用格式化工具
 local FormatHelper = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("FormatHelper"))
@@ -53,6 +54,19 @@ local shopBg = nil               -- 商店背景遮罩
 local infoFrame = nil            -- 兵种详情面板
 local infoCloseButton = nil      -- 详情关闭按钮
 local blurEffect = nil           -- Lighting下的Blur
+local fasterRestockContainer = nil -- 快速补货入口容器
+local fasterRestockButton = nil    -- 快速补货按钮
+local fasterRestockBoundButton = nil
+local fasterRestockPriceLabel = nil
+local FIRST_OPEN_UNIT_ID = "10001"
+
+local FAST_RESTOCK_PRODUCT_ID = 0
+do
+    local fastConfig = GameConfig.Shop and GameConfig.Shop.FastRestock
+    if fastConfig and fastConfig.ProductId then
+        FAST_RESTOCK_PRODUCT_ID = tonumber(fastConfig.ProductId) or 0
+    end
+end
 
 -- 购买状态管理
 local isPurchasing = false       -- V2.1修复：防止重复购买
@@ -167,6 +181,50 @@ local function IsNotEnoughCashMessage(message)
     return message and string.find(message, "金币不足")
 end
 
+local function ResolveButton(container)
+    if not container then
+        return nil
+    end
+    if container:IsA("TextButton") or container:IsA("ImageButton") then
+        return container
+    end
+
+    local button = container:FindFirstChild("Button")
+    if button and (button:IsA("TextButton") or button:IsA("ImageButton")) then
+        return button
+    end
+
+    return container:FindFirstChildWhichIsA("TextButton")
+        or container:FindFirstChildWhichIsA("ImageButton")
+end
+
+local function UpdateFasterRestockPrice()
+    if fasterRestockPriceLabel and FAST_RESTOCK_PRODUCT_ID > 0 then
+        RobuxPriceHelper.UpdateProductLabel(fasterRestockPriceLabel, FAST_RESTOCK_PRODUCT_ID, nil)
+    end
+end
+
+local function UpdateRobuxBuyPriceLabel(priceLabel, devProductId)
+    if not priceLabel then
+        return
+    end
+    RobuxPriceHelper.UpdateProductLabel(priceLabel, devProductId, "suffix")
+end
+
+local function PrimeRobuxPricesFromShopData()
+    if type(shopData) ~= "table" then
+        return
+    end
+    local seen = {}
+    for _, itemData in ipairs(shopData) do
+        local devProductId = tonumber(itemData and itemData.DevProductId) or 0
+        if devProductId > 0 and not seen[devProductId] then
+            seen[devProductId] = true
+            RobuxPriceHelper.GetProductPrice(devProductId)
+        end
+    end
+end
+
 --[[
 初始化UI引用
 @return boolean - 是否成功
@@ -190,7 +248,7 @@ local function InitializeUI()
             shopBg = shopUI:FindFirstChild("Bg")
         end
         if not infoFrame then
-            infoFrame = shopUI:FindFirstChild("Information")
+            infoFrame = shopFrame:FindFirstChild("Information") or shopUI:FindFirstChild("Information")
         end
         if infoFrame and not infoCloseButton then
             infoCloseButton = infoFrame:FindFirstChild("CloseButton")
@@ -198,6 +256,16 @@ local function InitializeUI()
         if not blurEffect then
             blurEffect = Lighting:FindFirstChild("Blur")
         end
+        if not fasterRestockContainer then
+            fasterRestockContainer = shopFrame:FindFirstChild("FasterRestock")
+        end
+        if not fasterRestockButton then
+            fasterRestockButton = ResolveButton(fasterRestockContainer)
+        end
+        if not fasterRestockPriceLabel and fasterRestockContainer then
+            fasterRestockPriceLabel = fasterRestockContainer:FindFirstChild("RightPrice", true)
+        end
+        UpdateFasterRestockPrice()
         return true -- 已初始化
     end
 
@@ -220,9 +288,13 @@ local function InitializeUI()
     titleLabel = shopFrame:FindFirstChild("TitleLabel") or shopFrame:FindFirstChild("Title")
     coinDisplay = shopFrame:FindFirstChild("CoinDisplay")
     shopBg = shopUI:FindFirstChild("Bg")
-    infoFrame = shopUI:FindFirstChild("Information")
+    infoFrame = shopFrame:FindFirstChild("Information") or shopUI:FindFirstChild("Information")
     infoCloseButton = infoFrame and infoFrame:FindFirstChild("CloseButton") or nil
     blurEffect = Lighting:FindFirstChild("Blur")
+    fasterRestockContainer = shopFrame:FindFirstChild("FasterRestock")
+    fasterRestockButton = ResolveButton(fasterRestockContainer)
+    fasterRestockPriceLabel = fasterRestockContainer and fasterRestockContainer:FindFirstChild("RightPrice", true) or nil
+    UpdateFasterRestockPrice()
 
     if not itemContainer then
         warn(LOG_PREFIX, "找不到 ItemContainer 或 ScrollingFrame")
@@ -955,12 +1027,13 @@ local function SetupCardClickLogic(cardFrame, itemData)
             end
 
             if robuxBuy then
+                local devProductId = tonumber(itemData.DevProductId) or 0
                 local robuxPrice = robuxBuy:FindFirstChild("Price")
-                if robuxPrice and robuxPrice:IsA("TextLabel") then
-                    robuxPrice.Text = "R$ " .. tostring(itemData.RobuxPrice or 0)
+                if robuxPrice and (robuxPrice:IsA("TextLabel") or robuxPrice:IsA("TextButton")) then
+                    UpdateRobuxBuyPriceLabel(robuxPrice, devProductId)
                 end
-                -- 如果没有Robux价格，隐藏Robux按钮
-                robuxBuy.Visible = (itemData.RobuxPrice and itemData.RobuxPrice > 0)
+                -- 如果没有DevProductId，隐藏Robux按钮
+                robuxBuy.Visible = devProductId > 0
             end
 
             buyButtonFrame.Visible = true
@@ -1049,8 +1122,9 @@ local function InitializeGlobalBuyButtons()
                     return
                 end
 
-                -- 检查是否有Robux价格
-                if not currentSelectedItem.RobuxPrice or currentSelectedItem.RobuxPrice <= 0 then
+                local devProductId = tonumber(currentSelectedItem.DevProductId) or 0
+                -- 检查是否有DevProductId
+                if devProductId <= 0 then
                     warn(LOG_PREFIX, "该商品不支持Robux购买:", currentSelectedItem.UnitId)
                     return
                 end
@@ -1064,7 +1138,7 @@ local function InitializeGlobalBuyButtons()
                 end
 
                 if DEBUG_MODE then
-                    print(LOG_PREFIX, "尝试Robux购买:", currentSelectedItem.UnitId, "价格: R$", currentSelectedItem.RobuxPrice)
+                    print(LOG_PREFIX, "尝试Robux购买:", currentSelectedItem.UnitId, "DevProductId:", devProductId)
                 end
 
                 -- 设置购买状态
@@ -1143,6 +1217,60 @@ local function UpdateShopDisplay()
     end
 end
 
+local function IsFirstOpenShopList()
+    if not shopData or #shopData ~= 1 then
+        return false
+    end
+    local item = shopData[1]
+    return tostring(item.UnitId or "") == FIRST_OPEN_UNIT_ID
+end
+
+local function UpdateFasterRestockVisibility()
+    if not fasterRestockContainer and not fasterRestockButton then
+        return
+    end
+
+    local visible = not IsFirstOpenShopList()
+    if fasterRestockContainer then
+        fasterRestockContainer.Visible = visible
+    end
+    if fasterRestockButton and fasterRestockButton ~= fasterRestockContainer then
+        fasterRestockButton.Visible = visible
+    end
+end
+
+local function OnFasterRestockClicked()
+    local opened = false
+    local shopController = _G.DailyRewardDisplay
+    if shopController and shopController.OpenShop then
+        opened = shopController.OpenShop("ArmyStore") == true
+    else
+        local shopGui = playerGui:FindFirstChild("Shop")
+        local shopPanel = shopGui and shopGui:FindFirstChild("ShopBg")
+        if shopPanel then
+            shopPanel.Visible = true
+            opened = true
+        end
+    end
+
+    if opened then
+        ShopDisplay.PlayClose()
+    end
+end
+
+local function BindFasterRestockButton()
+    if not fasterRestockButton or fasterRestockButton == fasterRestockBoundButton then
+        return
+    end
+
+    fasterRestockBoundButton = fasterRestockButton
+    if LoadUIHelpers() and ButtonEffectHelper then
+        ButtonEffectHelper.AddClickEffect(fasterRestockButton, { OnClick = OnFasterRestockClicked })
+    else
+        fasterRestockButton.MouseButton1Click:Connect(OnFasterRestockClicked)
+    end
+end
+
 --[[
 处理商店列表事件
 @param shopList table - 商店商品列表
@@ -1177,7 +1305,9 @@ local function OnShopListReceived(shopList)
     end
 
     shopData = shopList
+    PrimeRobuxPricesFromShopData()
     UpdateShopDisplay()
+    UpdateFasterRestockVisibility()
 end
 
 --[[
@@ -1424,6 +1554,8 @@ function ShopDisplay.Initialize()
             ButtonEffectHelper.AddClickEffect(infoCloseButton)
         end
     end
+
+    BindFasterRestockButton()
 
     -- V2.1修复：监听shopFrame可见性变化，实现界面打开时实时更新倒计时
     if shopFrame then

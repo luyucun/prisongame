@@ -202,6 +202,14 @@ GameConfig.Shop = {
 	DefaultRefreshInterval = 300,        -- 默认库存刷新间隔(秒) 5分钟
 	RefreshTimerUpdateInterval = 1,      -- 刷新倒计时更新间隔(秒)
 	EnableStockSystem = true,            -- 是否启用库存系统
+
+	-- V6.8 快速补货配置（囚犯商店）
+	FastRestock = {
+		ProductId = 3530358099,           -- 开发者商品ID
+		ReducedInterval = 180,            -- 加速后刷新间隔(秒) 3分钟
+		DurationSeconds = 900,            -- 持续时长(秒) 15分钟
+		AdjustSeconds = 120,              -- 购买/到期时对倒计时的加减秒数(2分钟)
+	},
 }
 
 -- ==================== UI配置 (V2.1) ====================

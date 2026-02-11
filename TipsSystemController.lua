@@ -65,6 +65,29 @@ if refreshTips then
 	refreshTips.Visible = false
 end
 
+local buyTips = tipsGui:FindFirstChild("BuyTips")
+if not buyTips then
+	warn("[TipsSystemController] BuyTips node missing")
+end
+
+local buyTargetPosition = buyTips and buyTips.Position or nil
+local buyShowDuration = 2.5
+local buyTweenDurationA = refreshTweenDurationA
+local buyTweenDurationB = refreshTweenDurationB
+local buyToken = 0
+local buyTweenA = nil
+local buyTweenB = nil
+local buyTipLabel = buyTips and (
+	buyTips:FindFirstChild("TipText", true)
+	or buyTips:FindFirstChild("Text", true)
+	or buyTips:FindFirstChild("ErrorText", true)
+	or buyTips:FindFirstChildWhichIsA("TextLabel", true)
+) or nil
+
+if buyTips then
+	buyTips.Visible = false
+end
+
 local targetPosition = frame.Position
 local startPosition = UDim2.new(0.5, 0, 0.5, 0)
 local showDuration = 1
@@ -120,6 +143,23 @@ local function StopRefreshTip()
 		refreshTips.Visible = false
 		if refreshTargetPosition then
 			refreshTips.Position = refreshTargetPosition
+		end
+	end
+end
+
+local function StopBuyTip()
+	if buyTweenA then
+		buyTweenA:Cancel()
+		buyTweenA = nil
+	end
+	if buyTweenB then
+		buyTweenB:Cancel()
+		buyTweenB = nil
+	end
+	if buyTips then
+		buyTips.Visible = false
+		if buyTargetPosition then
+			buyTips.Position = buyTargetPosition
 		end
 	end
 end
@@ -217,6 +257,70 @@ local function ShowTip(text, color)
 	end)
 end
 
+local function ShowBuyTip(text)
+	if not text or text == "" then
+		return
+	end
+
+	if not buyTips or not buyTargetPosition then
+		ShowTip(text, Color3.fromRGB(0, 255, 0))
+		return
+	end
+
+	buyToken = buyToken + 1
+	local token = buyToken
+
+	StopBuyTip()
+
+	if buyTipLabel and buyTipLabel:IsA("TextLabel") then
+		buyTipLabel.Text = text
+	end
+
+	local startPos = UDim2.new(
+		buyTargetPosition.X.Scale, buyTargetPosition.X.Offset,
+		buyTargetPosition.Y.Scale, buyTargetPosition.Y.Offset + refreshStartOffset
+	)
+	local overshootPos = UDim2.new(
+		buyTargetPosition.X.Scale, buyTargetPosition.X.Offset,
+		buyTargetPosition.Y.Scale, buyTargetPosition.Y.Offset - refreshOvershootOffset
+	)
+
+	buyTips.Position = startPos
+	buyTips.Visible = true
+
+	buyTweenA = TweenService:Create(
+		buyTips,
+		TweenInfo.new(buyTweenDurationA, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ Position = overshootPos }
+	)
+	buyTweenB = TweenService:Create(
+		buyTips,
+		TweenInfo.new(buyTweenDurationB, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ Position = buyTargetPosition }
+	)
+
+	buyTweenA.Completed:Connect(function(state)
+		if token ~= buyToken then
+			return
+		end
+		if state == Enum.PlaybackState.Completed and buyTweenB then
+			buyTweenB:Play()
+		end
+	end)
+
+	buyTweenA:Play()
+
+	task.delay(buyShowDuration, function()
+		if token ~= buyToken then
+			return
+		end
+		if buyTips then
+			buyTips.Visible = false
+			buyTips.Position = buyTargetPosition
+		end
+	end)
+end
+
 local function BuildPowerText(basePower, deltaValue, isIncrease)
 	local sign = isIncrease and "+" or "-"
 	local arrow = isIncrease and "↑" or "↓"
@@ -297,6 +401,10 @@ function TipsSystemController.ShowPowerChange(oldPower, newPower)
 	powerTween:Play()
 end
 
+function TipsSystemController.ShowBuyTip(text)
+	ShowBuyTip(text)
+end
+
 function TipsSystemController.ShowRefreshTip()
 	ShowRefreshTip()
 end
@@ -335,3 +443,4 @@ BindRefreshTipEvent()
 _G.TipsSystem = TipsSystemController
 
 return TipsSystemController
+

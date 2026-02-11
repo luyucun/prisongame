@@ -42,6 +42,14 @@ local player = Players.LocalPlayer
 local mouse = player:GetMouse()
 local camera = Workspace.CurrentCamera
 
+local function IsPointerOnBackpackUnit(screenPosition)
+	local backpackDisplay = _G.BackpackDisplay
+	if backpackDisplay and backpackDisplay.IsScreenPositionOnUnitButton then
+		return backpackDisplay.IsScreenPositionOnUnitButton(screenPosition)
+	end
+	return false
+end
+
 -- 触发拖动的最小位移（像素）
 local DRAG_START_MOVE_PX_MOUSE = 8
 local DRAG_START_MOVE_PX_TOUCH = 18
@@ -389,6 +397,10 @@ function ConnectMouseEvents()
 			return
 		end
 
+		if IsPointerOnBackpackUnit(input.Position) then
+			return
+		end
+
 		ClearPendingDrag()
 
 		-- 创建射线检测
@@ -460,6 +472,10 @@ function ConnectMobileEvents()
 	-- 触摸开始 - 检测是否触摸到已放置的兵种
 	UserInputService.TouchStarted:Connect(function(touch, gameProcessed)
 		if gameProcessed then
+			return
+		end
+
+		if IsPointerOnBackpackUnit(touch.Position) then
 			return
 		end
 

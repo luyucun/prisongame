@@ -72,6 +72,14 @@ local placementState = {
 	mobileCancelButton = nil,    -- PutConfirm/ButtonBg/Cancel
 }
 
+local function IsPointerOnBackpackUnit(screenPosition)
+	local backpackDisplay = _G.BackpackDisplay
+	if backpackDisplay and backpackDisplay.IsScreenPositionOnUnitButton then
+		return backpackDisplay.IsScreenPositionOnUnitButton(screenPosition)
+	end
+	return false
+end
+
 -- ==================== 初始化 ====================
 
 --[[
@@ -576,6 +584,10 @@ function ConnectPCInput()
 
 		-- 左键确认
 		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			if IsPointerOnBackpackUnit(input.Position) then
+				return
+			end
+
 			if not placementState.idleFloor then
 				PlacementController.CancelPlacement()
 				return
@@ -711,6 +723,10 @@ function ConnectMobileInput()
 		end
 
 		-- 避免点击移动端确认/取消按钮时误移动预览
+		if IsPointerOnBackpackUnit(touch.Position) then
+			return
+		end
+
 		local startScreenPos = ToScreenVector2(touch.Position)
 		if IsTouchOnMobileConfirmUI(startScreenPos) then
 			return

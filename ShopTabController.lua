@@ -9,6 +9,7 @@ Responsibility: Handle shop tab clicks and align scroll position based on starte
 local ShopTabController = {}
 
 local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -25,6 +26,7 @@ local tabNewPlayer = nil
 local tabDailyGift = nil
 local tabVip = nil
 local tabHeroPack = nil
+local tabLukcy = nil
 
 -- State
 local boundButtons = {}
@@ -94,24 +96,57 @@ local function ResolveButton(container)
 		or container:FindFirstChildWhichIsA("ImageButton")
 end
 
-local function IsStarterPackPurchased()
-	return player:GetAttribute("StarterPackPurchased") == true
+local function GetDeviceType()
+	-- Desktop: keyboard+mouse
+	if UserInputService.KeyboardEnabled and UserInputService.MouseEnabled then
+		return "Desktop"
+	end
+
+	-- Touch devices: split phone/tablet by viewport size
+	if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled then
+		local camera = workspace.CurrentCamera
+		if camera then
+			local size = camera.ViewportSize
+			local minAxis = math.min(size.X, size.Y)
+			if minAxis >= 700 then
+				return "Tablet"
+			end
+		end
+		return "Mobile"
+	end
+
+	return "Desktop"
 end
 
 local function GetCanvasPosition(tabName)
-	local purchased = IsStarterPackPurchased()
-
 	if tabName == "NewPlayer" then
 		return Vector2.new(0, 0)
 	end
 	if tabName == "DailyGift" then
-		return Vector2.new(0, 0)
+		return Vector2.new(0, 100)
 	end
 	if tabName == "Vip" then
-		return purchased and Vector2.new(0, 130) or Vector2.new(0, 280)
+		local device = GetDeviceType()
+		if device == "Mobile" then
+			return Vector2.new(0, 200)
+		end
+		if device == "Tablet" then
+			return Vector2.new(0, 300)
+		end
+		return Vector2.new(0, 400)
 	end
 	if tabName == "HeroPack" then
-		return purchased and Vector2.new(0, 410) or Vector2.new(0, 550)
+		local device = GetDeviceType()
+		if device == "Mobile" then
+			return Vector2.new(0, 400)
+		end
+		if device == "Tablet" then
+			return Vector2.new(0, 600)
+		end
+		return Vector2.new(0, 700)
+	end
+	if tabName == "Lukcy" then
+		return Vector2.new(0, 0)
 	end
 
 	return Vector2.new(0, 0)
@@ -149,6 +184,7 @@ local function InitializeUI()
 	tabDailyGift = tabList and tabList:FindFirstChild("DailyGift")
 	tabVip = tabList and tabList:FindFirstChild("Vip")
 	tabHeroPack = tabList and tabList:FindFirstChild("HeroPack")
+	tabLukcy = tabList and tabList:FindFirstChild("Lukcy")
 
 	return scrollingFrame ~= nil and tabList ~= nil
 end
@@ -182,6 +218,7 @@ local function BindButtons()
 	BindTabButton(tabDailyGift, "DailyGift")
 	BindTabButton(tabVip, "Vip")
 	BindTabButton(tabHeroPack, "HeroPack")
+	BindTabButton(tabLukcy, "Lukcy")
 end
 
 local function TryInitialize()

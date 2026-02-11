@@ -17,6 +17,7 @@ local playerGui = player:WaitForChild("PlayerGui")
 
 local UpgradeConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("UpgradeConfig"))
 local FormatHelper = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("FormatHelper"))
+local RobuxPriceHelper = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("RobuxPriceHelper"))
 
 local ButtonEffectHelper = nil
 local boundButtons = {}
@@ -360,6 +361,25 @@ local function RenderAll()
 	end
 end
 
+local function UpdateRobuxPriceLabels()
+	if not scrollingFrame then
+		return
+	end
+
+	for index, typeId in ipairs(UpgradeConfig.GetTypeIds()) do
+		local optionName = string.format("Option%02d", index)
+		local option = scrollingFrame:FindFirstChild(optionName)
+		if option then
+			local rbxBuy = option:FindFirstChild("RbxBuy")
+			local priceLabel = rbxBuy and rbxBuy:FindFirstChild("Price")
+			local productId = UpgradeConfig.GetDevProductId(typeId)
+			if priceLabel and productId then
+				RobuxPriceHelper.UpdateProductLabel(priceLabel, productId, nil)
+			end
+		end
+	end
+end
+
 local function OnUpgradeData(payload)
 	entryByType = {}
 	if type(payload) == "table" and type(payload.Entries) == "table" then
@@ -491,6 +511,7 @@ local function TryInitialize()
 	if uiReady then
 		BindButtons()
 		RenderAll()
+		UpdateRobuxPriceLabels()
 	end
 
 	if eventsReady then

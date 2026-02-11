@@ -19,6 +19,7 @@ local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
 local SevenDaysConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("SevenDaysConfig"))
+local RobuxPriceHelper = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("RobuxPriceHelper"))
 
 local sevenDaysEvents = nil
 local requestDataEvent = nil
@@ -60,6 +61,7 @@ local blackBg = nil
 local closeButton = nil
 local nextRewardLabel = nil
 local unlockAllButton = nil
+local unlockAllPriceLabel = nil
 
 local rewardFrames = {}
 local boundRewardButtons = {}
@@ -391,6 +393,10 @@ local function InitializeUI()
 	closeButton = title and title:FindFirstChild("CloseButton")
 	nextRewardLabel = sevenDaysBg:FindFirstChild("NextReward")
 	unlockAllButton = sevenDaysBg:FindFirstChild("UnlockAll")
+	unlockAllPriceLabel = unlockAllButton and unlockAllButton:FindFirstChild("Price", true) or nil
+	if unlockAllPriceLabel then
+		RobuxPriceHelper.UpdateProductLabel(unlockAllPriceLabel, SevenDaysConfig.UnlockAllProductId, nil)
+	end
 
 	rewardFrames = {}
 	for day = 1, SevenDaysConfig.MaxDays do

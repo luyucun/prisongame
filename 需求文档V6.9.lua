@@ -2200,3 +2200,54 @@ StarterGui - TopRightGui - Bg - Online - Time是一个textlabel，用于显示�
 4	生命值
 
 你需要给我补充对应的gm命令：重置我的养成等级
+
+
+需求文档V6.8 限时缩短囚犯商店补货时长
+
+概述：目前游戏内的囚犯商店是5分钟补货一次，我需要加一个功能，玩家可以付费在一定时间段内缩短补货时长
+
+详细规则：
+
+1.目前的囚犯商店常规状态是5分钟刷新一次，玩家可以通过购买开发者商品：3530358099，来将囚犯商店的刷新时间改成3分钟一次
+2.注意：这个效果只会持续15分钟（这里走个配置，暂定15分钟），具体的生效逻辑是：
+    1）购买后，立刻在当前的刷新倒计时上减少2分钟，如果剩余时间已经不足2分钟，就立刻刷新，然后下一次倒计时开始就按3分钟倒计时计算
+    2）在15分钟持续时间结束后，立刻在当前正在倒计时的基础上加2分钟，比如现在还剩2分30秒刷新，就立刻变成4分钟30秒刷新，然后下一轮就恢复5分钟
+    3）这个开发者商品是可以重复叠加购买的，每次购买后，就在当前剩余时间上加15分钟的生效时间
+3.相关客户端规则是：
+    1）玩家点击StarterGui - ArmyStore - StoreBg - FasterRestock按钮，可以打开Shop界面（把StarterGui - Shop - ShopBg的Visible属性改成true）
+    2）如果玩家是通过StarterGui - ArmyStore - StoreBg - FasterRestock打开的shop界面，打开后需要暂时把兵种商店界面关闭（相当于点商店界面的关闭按钮一样的效果），然后点击关闭Shop按钮后，需要再把兵种商店界面显示出来
+    3）如果玩家只是在主界面用Main - Shop按钮打开的商店界面，则关闭时不要打开兵种商店界面，直接打开即可
+    4）玩家点击StarterGui - Shop - ShopBg - ScrollingFrame - Lukcy - BuyButton，触发对开发者商品：3530358099的购买，购买成功后，进入上面说的15分钟的持续流程中
+    5）玩家多次购买可以叠加持续时间
+    6）当玩家购买成功后，需要有对应的变化：
+        a.把StarterGui - Shop - ShopBg - ScrollingFrame - Lukcy - LastTime的visible改成true，这是个textlabel，用于显示剩余的时间，格式是xx:yy,xx是分钟，yy是秒，注意：哪怕时间大于60分钟，xx也固定显示分钟，比如9999:12,代表还剩9999分钟12秒
+        b.当生效倒计时结束后，需要把StarterGui - Shop - ShopBg - ScrollingFrame - Lukcy - LastTime隐藏
+        c.当玩家购买成功后，需要弹出系统提示：Prisoner Shop restock time reduced: 5 → 3 min，效果和我们的商店补货时候的提示一致，我是指滑出动效一致，但是使用的是StarterGui - TipsSystem - BuyTips，出现后保持的时间是2.5秒，然后消失
+    7）补充一些细节：新手玩家进来第一次打开囚犯商店（只显示兵种10001的那种状态）时，不显示StarterGui - ArmyStore - StoreBg - FasterRestock，后面常规状态下再显示
+    8）玩家点击StarterGui - Shop - ShopBg - TabList - Lukcy按钮，立刻把ShopBg - ScrollingFrame的CanvasSize改成0, 0
+
+
+需求V6.9 将罗布币价格从当前的ui写死改成动态根据后台价格调整
+
+在我们目前的游戏逻辑中，关于开发者商品价格的显示有两种，一种是我在ui上直接写死了，一种是在表中动态读取我配置的价格，总之都是一套无法变化的值
+现在我们需要改成：给每个显示开发者商品或者通行证商品价格的ui配置文本显示路径，然后根据这个开发者商品的id去动态显示开发者商品价格
+相关的逻辑是官方有提供方法，相关文档在这里：https://devforum.roblox.com/t/introducing-regional-pricing-for-developer-products/3971235，你需要根据文档中的方法为我实现这个功能
+
+以下的开发者商品及通行证需要来动态显示价格，最终的节点都是一个textlabel，我强调了格式的都按格式来，没强调格式的就显示价格数字即可：
+开发者商品：3530358099，路径：StarterGui - ArmyStore - StoreBg - FasterRestock - RightPrice；
+通行证：1658798778，路径：StarterGui - MainGui - StarterPack - Price，格式是R$xx，xx是价格；
+开发者商品：3489888670，路径：StarterGui - SevenDays - Bg - UnlockAll - Price；
+开发者商品：3530358099，路径：StarterGui - Shop - ShopBg - ScrollingFrame - Lukcy - BuyButton - RightPrice；
+通行证：1661725726，路径：StarterGui - Shop - ShopBg - ScrollingFrame - Vip - BuyButton - RightPrice；
+开发者商品：3511148249，路径：StarterGui - Shop - ShopBg - ScrollingFrame - ArmyPack01 - BuyButton - RightPrice；
+开发者商品：3511148622，路径：StarterGui - Shop - ShopBg - ScrollingFrame - ArmyPack02 - BuyButton - RightPrice；
+通行证：1658798778，路径：StarterGui - StarterPack - Bg - BuyButton - RightPrice；
+开发者商品：3531774125，路径：StarterGui - Upgrade - LevelUpBg - ScrollingFrame - Option01 - RbxBuy - Price；
+开发者商品：3531774364，路径：StarterGui - Upgrade - LevelUpBg - ScrollingFrame - Option02 - RbxBuy - Price；
+开发者商品：3531774660，路径：StarterGui - Upgrade - LevelUpBg - ScrollingFrame - Option03 - RbxBuy - Price；
+开发者商品：3531774899，路径：StarterGui - Upgrade - LevelUpBg - ScrollingFrame - Option04 - RbxBuy - Price；
+
+以上是直接显示在ui上的价格，另外一类是：兵种和技能在对应的商店显示时，目前是读取的兵种表或者技能表中配置的罗布币价格，但是其实我在每个兵种或者每个兵信息中有配置的对应的开发者商品id
+兵种商店是：StarterGui - ArmyStore - StoreBg - ScrollingFrame - BuyButtonFrame - RobuxBuy - Price，这是一个textlabel，格式是：xxR$,xx是对应的开发者商品价格，比如兵种10001，就去读这个兵种对应的开发者商品id，然后用开发者商品去获取罗布币价格然后显示在这里
+技能商店是：StarterGui - SkillStore - StoreBg - ScrollingFrame - BuyButtonFrame - RobuxBuy - Price，这是一个textlabel，格式是：xxR$,xx是对应的开发者商品价格，这里根据技能的开发者商品价格去对应显示出来即可
+限时兵种购买是：StarterGui - LimitPrisoner - StoreBg - BuyButtonFrame - RobuxBuy - Price，这是一个textlabel，格式是：xxR$,xx是对应的开发者商品价格，比如兵种10001，就去读这个兵种对应的开发者商品id，然后用开发者商品去获取罗布币价格然后显示在这里

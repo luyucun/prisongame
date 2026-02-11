@@ -20,7 +20,9 @@ local playerGui = player:WaitForChild("PlayerGui")
 
 local UnitConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("UnitConfig"))
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
+local LimitPrisonerConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("LimitPrisonerConfig"))
 local FormatHelper = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("FormatHelper"))
+local RobuxPriceHelper = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("RobuxPriceHelper"))
 
 local ButtonEffectHelper = nil
 
@@ -149,6 +151,13 @@ end
 
 local function FormatCoins(amount)
 	return FormatHelper.FormatCoinsShort(amount or 0, true)
+end
+
+local function UpdateRobuxBuyPriceLabel(priceLabel, devProductId)
+	if not priceLabel then
+		return
+	end
+	RobuxPriceHelper.UpdateProductLabel(priceLabel, devProductId, "suffix")
 end
 
 local function GetQualityColor(quality)
@@ -541,11 +550,16 @@ local function UpdateBuyButtons(data)
 	end
 
 	if robuxBuy then
-		local priceLabel = robuxBuy:FindFirstChild("Price")
-		if priceLabel and priceLabel:IsA("TextLabel") then
-			priceLabel.Text = "R$ " .. tostring(data.RobuxPrice or 0)
+		local devProductId = 0
+		if data and data.UnitId and data.UnitId ~= "" then
+			local config = LimitPrisonerConfig.GetPrisonerByUnitId(data.UnitId)
+			devProductId = tonumber(config and config.DevProductId) or 0
 		end
-		robuxBuy.Visible = (tonumber(data.RobuxPrice) or 0) > 0
+		local priceLabel = robuxBuy:FindFirstChild("Price")
+		if priceLabel and (priceLabel:IsA("TextLabel") or priceLabel:IsA("TextButton")) then
+			UpdateRobuxBuyPriceLabel(priceLabel, devProductId)
+		end
+		robuxBuy.Visible = devProductId > 0
 	end
 
 	if data.GoldPurchased then

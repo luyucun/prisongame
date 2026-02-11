@@ -14,6 +14,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
+local VipConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("VipConfig"))
+local RobuxPriceHelper = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("RobuxPriceHelper"))
+
 local ButtonEffectHelper = nil
 
 -- Events
@@ -30,6 +33,7 @@ local vipFrame = nil
 local buyButton = nil
 local buyButtonContainer = nil
 local buyButtonText = nil
+local rightPriceLabel = nil
 local purchasedLabel = nil
 local defaultBuyButtonText = nil
 local defaultButtonText = nil
@@ -140,6 +144,11 @@ local function InitializeUI()
 
 	if buyButton then
 		buyButtonText = buyButton:FindFirstChild("Text") or buyButton:FindFirstChildWhichIsA("TextLabel")
+	end
+
+	rightPriceLabel = buyButtonContainer and buyButtonContainer:FindFirstChild("RightPrice", true) or nil
+	if rightPriceLabel then
+		RobuxPriceHelper.UpdateGamePassLabel(rightPriceLabel, VipConfig.GAMEPASS_ID, nil)
 	end
 
 	purchasedLabel = vipFrame:FindFirstChild("Purchased")

@@ -119,6 +119,75 @@ local function RefreshHasUnitsCache()
 	end
 end
 
+local function NormalizeScreenPosition(screenPosition)
+	if not screenPosition then
+		return nil, nil
+	end
+
+	local valueType = typeof(screenPosition)
+	if valueType == "Vector2" or valueType == "Vector3" then
+		return screenPosition.X, screenPosition.Y
+	end
+
+	return nil, nil
+end
+
+local function FindUnitIdFromBackpackGui(guiObject)
+	if not guiObject or not guiObject:IsA("GuiObject") then
+		return nil
+	end
+
+	if not guiObject:IsDescendantOf(backpackFrame) then
+		return nil
+	end
+
+	local current = guiObject
+	while current and current ~= backpackFrame.Parent do
+		if current:IsA("GuiObject") then
+			local unitId = current:GetAttribute("UnitId")
+			if unitId ~= nil then
+				return tostring(unitId)
+			end
+		end
+		current = current.Parent
+	end
+
+	return nil
+end
+
+local function GetUnitIdAtScreenPosition(screenPosition)
+	if not backpackFrame.Visible then
+		return nil
+	end
+
+	local x, y = NormalizeScreenPosition(screenPosition)
+	if not x or not y then
+		return nil
+	end
+
+	local hitObjects = playerGui:GetGuiObjectsAtPosition(x, y)
+	for _, gui in ipairs(hitObjects) do
+		local unitId = FindUnitIdFromBackpackGui(gui)
+		if unitId then
+			return unitId
+		end
+	end
+
+	-- Fallback: absolute position hit-test to avoid missing buttons under unusual layering.
+	for unitId, button in pairs(itemButtons) do
+		if button and button.Parent and button.Visible then
+			local absPos = button.AbsolutePosition
+			local absSize = button.AbsoluteSize
+			if x >= absPos.X and x <= absPos.X + absSize.X
+				and y >= absPos.Y and y <= absPos.Y + absSize.Y then
+				return tostring(unitId)
+			end
+		end
+	end
+
+	return nil
+end
+
 -- ==================== 私有函数 ====================
 
 --[[
@@ -350,16 +419,11 @@ local function CreateItemButton(unitId, unitName, count, iconId)
 				return
 			end
 
-			local pos = input.Position
-			-- 修复：使用playerGui而非GuiService
-			local hitObjects = playerGui:GetGuiObjectsAtPosition(pos.X, pos.Y)
-			for _, gui in ipairs(hitObjects) do
-				local unitId = gui:GetAttribute("UnitId")
-				if unitId then
-					local unitName = (inventoryDataCache[unitId] and inventoryDataCache[unitId].Name) or unitId
-					OnUnitItemClicked(unitId, unitName)
-					return
-				end
+			local unitId = GetUnitIdAtScreenPosition(input.Position)
+			if unitId then
+				local unitName = (inventoryDataCache[unitId] and inventoryDataCache[unitId].Name) or unitId
+				OnUnitItemClicked(unitId, unitName)
+				return
 			end
 		end
 
@@ -552,6 +616,14 @@ end
 ]]
 function BackpackDisplay.HasAvailableUnits()
 	return hasAvailableUnitsCache
+end
+
+function BackpackDisplay.GetUnitIdAtScreenPosition(screenPosition)
+	return GetUnitIdAtScreenPosition(screenPosition)
+end
+
+function BackpackDisplay.IsScreenPositionOnUnitButton(screenPosition)
+	return GetUnitIdAtScreenPosition(screenPosition) ~= nil
 end
 
 --[[

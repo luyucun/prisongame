@@ -35,7 +35,11 @@ local LastPurchaseTime = {}   -- 最后购买时间（冷却机制）
 local PlayerStockData = {}    -- 玩家库存数据: [player] = {[shopId] = {[unitId] = stock, LastRefreshTime = tick()}}
 local RefreshTimers = {}      -- 刷新定时器: [player] = timer
 local TimerUpdateConnections = {} -- 倒计时更新连接: [player] = connection
-local LastTimerUpdate = {}    -- V2.1修复：定时器更新时间戳，移出Player实例 [player] = timestamp
+local LastTimerUpdate = {}    -- V2.1 timer update timestamp cache [player] = timestamp
+local FastRestockExpiryTimers = {} -- V6.8 fast restock expiry timer [player] = thread
+
+local FAST_RESTOCK_SHOP_ID = "UnitShop"
+local FAST_RESTOCK_ATTR = "UnitShopFastRestockEndTime"
 
 local FIRST_OPEN_UNIT_ID = "10001"
 local FIRST_OPEN_STOCK = 2
@@ -59,6 +63,94 @@ local StockUpdate = nil       -- 库存更新事件 (V2.1库存功能)
 local RefreshTimeUpdate = nil -- 刷新倒计时更新事件 (V2.1库存功能)
 
 -- ==================== 私有辅助函数 ====================
+
+local function GetFastRestockServerNow()
+	local ok, serverNow = pcall(function()
+		return workspace:GetServerTimeNow()
+	end)
+	if ok and type(serverNow) == "number" and serverNow > 0 then
+		return serverNow
+	end
+	return os.time()
+end
+
+local function GetFastRestockConfig()
+	local shopCfg = GameConfig.Shop
+	if type(shopCfg) ~= "table" then
+		return nil
+	end
+	local fastCfg = shopCfg.FastRestock
+	if type(fastCfg) ~= "table" then
+		return nil
+	end
+	return fastCfg
+end
+
+local function GetFastRestockEndTime(player)
+	if not DataManager then
+		return 0
+	end
+
+	local endTime = tonumber(DataManager.GetShopFastRestockEndTime(player, FAST_RESTOCK_SHOP_ID)) or 0
+	if endTime < 0 then
+		endTime = 0
+	end
+	return endTime
+end
+
+local function SetFastRestockEndTime(player, endTime)
+	local safeEndTime = tonumber(endTime) or 0
+	if safeEndTime < 0 then
+		safeEndTime = 0
+	end
+
+	if DataManager then
+		DataManager.SetShopFastRestockEndTime(player, FAST_RESTOCK_SHOP_ID, safeEndTime)
+	end
+
+	if player and player:IsDescendantOf(Players) then
+		pcall(function()
+			player:SetAttribute(FAST_RESTOCK_ATTR, safeEndTime)
+		end)
+	end
+
+	return safeEndTime
+end
+
+local function IsFastRestockActive(player, now)
+	now = now or GetFastRestockServerNow()
+	return GetFastRestockEndTime(player) > now
+end
+
+local function GetEffectiveRefreshInterval(player, shopId)
+	local refreshInterval = ShopConfig.GetRefreshInterval(shopId)
+	if type(refreshInterval) ~= "number" or refreshInterval <= 0 then
+		refreshInterval = 300
+	end
+
+	if shopId ~= FAST_RESTOCK_SHOP_ID then
+		return refreshInterval
+	end
+
+	local fastCfg = GetFastRestockConfig()
+	local reducedInterval = fastCfg and tonumber(fastCfg.ReducedInterval) or 0
+	if reducedInterval <= 0 then
+		return refreshInterval
+	end
+
+	if IsFastRestockActive(player) then
+		return reducedInterval
+	end
+
+	return refreshInterval
+end
+
+local function StopFastRestockExpiryTimer(player)
+	if FastRestockExpiryTimers[player] then
+		task.cancel(FastRestockExpiryTimers[player])
+		FastRestockExpiryTimers[player] = nil
+	end
+end
 
 --[[ 初始化依赖模块（延迟加载） ]]
 local function InitializeDependencies()
@@ -545,6 +637,8 @@ local function StartRefreshTimer(player, shopId)
 		return
 	end
 
+	StopFastRestockExpiryTimer(player)
+
 	if RefreshTimers[player] then
 		task.cancel(RefreshTimers[player])
 		RefreshTimers[player] = nil
@@ -554,17 +648,58 @@ local function StartRefreshTimer(player, shopId)
 		TimerUpdateConnections[player] = nil
 	end
 
-	local refreshInterval = ShopConfig.GetRefreshInterval(shopId)
+	local refreshInterval = GetEffectiveRefreshInterval(player, shopId)
 	if not refreshInterval or type(refreshInterval) ~= "number" or refreshInterval <= 0 then
-		warn(string.format("%s [ShopSystem] 无效的刷新间隔，使用默认值300秒", GameConfig.LOG_PREFIX))
+		warn(string.format("%s [ShopSystem] invalid refresh interval, fallback to 300s", GameConfig.LOG_PREFIX))
 		refreshInterval = 300
+	end
+
+	if shopId == FAST_RESTOCK_SHOP_ID then
+		local now = GetFastRestockServerNow()
+		local endTime = GetFastRestockEndTime(player)
+		if endTime <= now then
+			if endTime > 0 then
+				SetFastRestockEndTime(player, 0)
+			else
+				pcall(function()
+					player:SetAttribute(FAST_RESTOCK_ATTR, 0)
+				end)
+			end
+		else
+			SetFastRestockEndTime(player, endTime)
+
+			local expireDelay = math.max(0, endTime - now)
+			FastRestockExpiryTimers[player] = task.delay(expireDelay, function()
+				FastRestockExpiryTimers[player] = nil
+				if not player or not player:IsDescendantOf(Players) then
+					return
+				end
+
+				local latestNow = GetFastRestockServerNow()
+				local latestEnd = GetFastRestockEndTime(player)
+				if latestEnd > latestNow then
+					StartRefreshTimer(player, shopId)
+					return
+				end
+
+				if latestEnd > 0 then
+					SetFastRestockEndTime(player, 0)
+				end
+
+				if GameConfig.Shop.EnableStockSystem then
+					StartRefreshTimer(player, shopId)
+				end
+			end)
+		end
+
+		refreshInterval = GetEffectiveRefreshInterval(player, shopId)
 	end
 
 	InitializePlayerStock(player, shopId)
 	local stockData = PlayerStockData[player][shopId]
 	local lastRefreshTime = stockData.LastRefreshTime
 
-	-- 检查是否有恢复的库存数据（防止误判首次进入）
+	-- Check whether restored stock exists (avoid first-open mis-detection)
 	local hasRestoredStock = false
 	for unitId, stock in pairs(stockData) do
 		if unitId ~= "LastRefreshTime" and type(stock) == "number" then
@@ -575,7 +710,7 @@ local function StartRefreshTimer(player, shopId)
 
 	local nextRefreshTime
 	if lastRefreshTime == 0 and not hasRestoredStock then
-		-- 首次进入，传递isFirstRefresh=true
+		-- First enter, force first refresh
 		RefreshShopStock(player, shopId, true)
 		nextRefreshTime = tick() + refreshInterval
 	elseif lastRefreshTime == 0 and hasRestoredStock then
@@ -584,7 +719,7 @@ local function StartRefreshTimer(player, shopId)
 
 		if DEBUG_MODE then
 			print(string.format(
-				"%s [ShopSystem] ??老数据迁移 - 玩家:%s 保留现有库存，设置时间戳",
+				"%s [ShopSystem] migrated old stock data - player:%s",
 				GameConfig.LOG_PREFIX,
 				player.Name
 			))
@@ -593,6 +728,7 @@ local function StartRefreshTimer(player, shopId)
 		local offlineTime = tick() - lastRefreshTime
 		if offlineTime >= refreshInterval then
 			RefreshShopStock(player, shopId)
+			refreshInterval = GetEffectiveRefreshInterval(player, shopId)
 			nextRefreshTime = tick() + refreshInterval
 		else
 			nextRefreshTime = lastRefreshTime + refreshInterval
@@ -603,12 +739,14 @@ local function StartRefreshTimer(player, shopId)
 		local remainingTime = nextRefreshTime - tick()
 		if remainingTime <= 0 then
 			RefreshShopStock(player, shopId)
+			refreshInterval = GetEffectiveRefreshInterval(player, shopId)
 			nextRefreshTime = tick() + refreshInterval
 			remainingTime = refreshInterval
 		end
 
 		RefreshTimers[player] = task.delay(remainingTime, function()
 			RefreshShopStock(player, shopId)
+			refreshInterval = GetEffectiveRefreshInterval(player, shopId)
 			nextRefreshTime = tick() + refreshInterval
 			scheduleRefresh()
 		end)
@@ -631,7 +769,7 @@ local function StartRefreshTimer(player, shopId)
 
 	if DEBUG_MODE then
 		print(string.format(
-			"%s [ShopSystem] 启动刷新定时器 - 玩家:%s 商店:%s 间隔:%ds",
+			"%s [ShopSystem] start refresh timer - player:%s shop:%s interval:%ds",
 			GameConfig.LOG_PREFIX,
 			player.Name,
 			shopId,
@@ -640,8 +778,9 @@ local function StartRefreshTimer(player, shopId)
 	end
 end
 
---[[ 停止玩家的库存刷新定时器 ]]
 local function StopRefreshTimer(player)
+	StopFastRestockExpiryTimer(player)
+
 	if RefreshTimers[player] then
 		task.cancel(RefreshTimers[player])
 		RefreshTimers[player] = nil
@@ -1286,6 +1425,65 @@ function ShopSystem.ClearPlayerLock(player)
 	end
 end
 
+--[[
+V6.8 apply fast restock developer product
+@param player Player - player instance
+@param productId number - developer product id
+@return boolean, string - success, message
+]]
+function ShopSystem.ApplyFastRestockPurchase(player, productId)
+	if not player or not player:IsA("Player") then
+		return false, "Invalid player"
+	end
+
+	if not InitializeDependencies() then
+		return false, "System not initialized"
+	end
+
+	local fastCfg = GetFastRestockConfig()
+	if not fastCfg then
+		return false, "FastRestock config missing"
+	end
+
+	local expectedProductId = tonumber(fastCfg.ProductId) or 0
+	if expectedProductId <= 0 then
+		return false, "FastRestock product id invalid"
+	end
+
+	if tonumber(productId) ~= expectedProductId then
+		return false, "Product id mismatch"
+	end
+
+	local durationSeconds = tonumber(fastCfg.DurationSeconds) or 0
+	if durationSeconds <= 0 then
+		return false, "FastRestock duration invalid"
+	end
+
+	local now = GetFastRestockServerNow()
+	local currentEnd = GetFastRestockEndTime(player)
+	if currentEnd < now then
+		currentEnd = now
+	end
+
+	local newEndTime = currentEnd + durationSeconds
+	SetFastRestockEndTime(player, newEndTime)
+
+	if GameConfig.Shop.EnableStockSystem then
+		StartRefreshTimer(player, FAST_RESTOCK_SHOP_ID)
+	end
+
+	if DEBUG_MODE then
+		print(string.format(
+			"%s [ShopSystem] Fast restock applied - player:%s end:%.3f",
+			GameConfig.LOG_PREFIX,
+			player.Name,
+			newEndTime
+		))
+	end
+
+	return true, "Purchase successful"
+end
+
 --[[ V2.1库存系统：初始化玩家商店定时器 ]]
 function ShopSystem.InitializePlayerShopTimer(player, shopId)
 	if not GameConfig.Shop.EnableStockSystem then
@@ -1293,6 +1491,20 @@ function ShopSystem.InitializePlayerShopTimer(player, shopId)
 	end
 
 	shopId = shopId or "UnitShop"
+
+	if shopId == FAST_RESTOCK_SHOP_ID then
+		local now = GetFastRestockServerNow()
+		local endTime = GetFastRestockEndTime(player)
+		if endTime > now then
+			SetFastRestockEndTime(player, endTime)
+		elseif endTime > 0 then
+			SetFastRestockEndTime(player, 0)
+		else
+			pcall(function()
+				player:SetAttribute(FAST_RESTOCK_ATTR, 0)
+			end)
+		end
+	end
 
 	InitializePlayerStock(player, shopId)
 	StartRefreshTimer(player, shopId)

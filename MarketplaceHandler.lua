@@ -38,6 +38,11 @@ local UpgradeConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForCh
 local IDLE_COIN_PRODUCT_ID = 3487946200
 local IDLE_COIN_MULTIPLIER = 10
 local SEVEN_DAYS_UNLOCK_PRODUCT_ID = 3489888670
+local FAST_RESTOCK_PRODUCT_ID = nil
+do
+	local fastConfig = GameConfig.Shop and GameConfig.Shop.FastRestock
+	FAST_RESTOCK_PRODUCT_ID = fastConfig and tonumber(fastConfig.ProductId) or nil
+end
 local ARMY_PACK_PRODUCTS = {
 	[3511148249] = {
 		{ Type = "Unit", UnitId = "10016", Count = 4 },
@@ -70,6 +75,7 @@ local IdleCoinSystem = nil
 local SevenDaysSystem = nil
 local TaskSystem = nil
 local UpgradeSystem = nil
+local ShopSystem = nil
 local armyPackEvents = nil
 local armyPackPurchaseResultEvent = nil
 local limitPrisonerEvents = nil
@@ -166,6 +172,21 @@ local function GetUpgradeSystem()
 		end
 	end
 	return UpgradeSystem
+end
+
+local function GetShopSystem()
+	if not ShopSystem then
+		local shopModule = ServerScriptService.Systems:FindFirstChild("ShopSystem")
+		if shopModule then
+			local success, result = pcall(require, shopModule)
+			if success then
+				ShopSystem = result
+			else
+				warn("[MarketplaceHandler] ShopSystem加载失败:", result)
+			end
+		end
+	end
+	return ShopSystem
 end
 
 local function EnsureArmyPackEvents()
@@ -638,6 +659,25 @@ function MarketplaceHandler.ProcessReceipt(receiptInfo)
 					"[MarketplaceHandler] 七日奖励解锁失败 - 玩家:%s 原因:%s",
 					player.Name,
 					ok and tostring(unlockMessage) or "异常"
+				))
+				return Enum.ProductPurchaseDecision.NotProcessedYet
+			end
+		elseif FAST_RESTOCK_PRODUCT_ID and receiptInfo.ProductId == FAST_RESTOCK_PRODUCT_ID then
+			-- V6.8 快速补货购买
+			local shopSystem = GetShopSystem()
+			if not shopSystem or not shopSystem.ApplyFastRestockPurchase then
+				warn("[MarketplaceHandler] ShopSystem不可用，稍后重试")
+				return Enum.ProductPurchaseDecision.NotProcessedYet
+			end
+
+			local ok, message = shopSystem.ApplyFastRestockPurchase(player, receiptInfo.ProductId)
+			if ok then
+				grantSuccess, grantMessage = true, message or "购买成功"
+			else
+				warn(string.format(
+					"[MarketplaceHandler] 快速补货发放失败 - 玩家:%s 原因:%s",
+					player.Name,
+					tostring(message)
 				))
 				return Enum.ProductPurchaseDecision.NotProcessedYet
 			end

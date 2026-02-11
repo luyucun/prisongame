@@ -19,6 +19,7 @@ local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
 local UnitConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("UnitConfig"))
+local RobuxPriceHelper = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("RobuxPriceHelper"))
 
 local ButtonEffectHelper = nil
 
@@ -42,6 +43,7 @@ local shopGui = nil
 local shopBg = nil
 local scrollingFrame = nil
 local buyButtons = {}
+local priceLabels = {}
 local boundButtons = {}
 local dataBound = false
 
@@ -162,12 +164,19 @@ local function InitializeUI()
 	scrollingFrame = shopBg and shopBg:FindFirstChild("ScrollingFrame")
 
 	buyButtons = {}
+	priceLabels = {}
 	if scrollingFrame then
 		for _, config in ipairs(PACK_CONFIGS) do
 			local packFrame = scrollingFrame:FindFirstChild(config.FrameName)
-			local buyButton = ResolveButton(packFrame and packFrame:FindFirstChild("BuyButton"))
+			local buyContainer = packFrame and packFrame:FindFirstChild("BuyButton")
+			local buyButton = ResolveButton(buyContainer)
 			if buyButton then
 				buyButtons[config.ProductId] = buyButton
+			end
+			local priceLabel = buyContainer and buyContainer:FindFirstChild("RightPrice", true)
+			if priceLabel then
+				priceLabels[config.ProductId] = priceLabel
+				RobuxPriceHelper.UpdateProductLabel(priceLabel, config.ProductId, nil)
 			end
 		end
 	end

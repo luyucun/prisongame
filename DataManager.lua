@@ -1298,6 +1298,14 @@ function DataManager.InitializePlayerData(player)
             if not shopData.Stock then
                 shopData.Stock = {}
             end
+            -- V6.8：快速补货结束时间字段（仅UnitShop）
+            if shopId == "UnitShop" then
+                local endTime = tonumber(shopData.FastRestockEndTime) or 0
+                if endTime < 0 then
+                    endTime = 0
+                end
+                shopData.FastRestockEndTime = endTime
+            end
         end
 
         -- 🔥修复持久化：确保PlacedUnits字段存在（向后兼容）
@@ -1657,10 +1665,14 @@ function DataManager.GetShopData(player, shopId)
     end
 
     if not playerData.ShopData[shopId] then
-        playerData.ShopData[shopId] = {
+        local shopEntry = {
             LastRefreshTime = 0,  -- 默认为0表示首次进入
             Stock = {}           -- 🔥修复库存售罄：添加Stock字段存储库存数据
         }
+        if shopId == "UnitShop" then
+            shopEntry.FastRestockEndTime = 0 -- V6.8：快速补货结束时间
+        end
+        playerData.ShopData[shopId] = shopEntry
     end
 
     return playerData.ShopData[shopId]
@@ -1742,6 +1754,47 @@ function DataManager.GetShopStock(player, shopId)
     end
 
     return playerData.ShopData[shopId].Stock or {}
+end
+
+--[[
+V6.8：获取商店快速补货结束时间
+@param player Player - 玩家对象
+@param shopId string - 商店ID（仅UnitShop生效）
+@return number - 结束时间戳（秒）
+]]
+function DataManager.GetShopFastRestockEndTime(player, shopId)
+    local shopData = DataManager.GetShopData(player, shopId)
+    if not shopData then
+        return 0
+    end
+    local endTime = tonumber(shopData.FastRestockEndTime) or 0
+    if endTime < 0 then
+        endTime = 0
+    end
+    return endTime
+end
+
+--[[
+V6.8：设置商店快速补货结束时间
+@param player Player - 玩家对象
+@param shopId string - 商店ID（仅UnitShop生效）
+@param endTime number - 结束时间戳（秒）
+@return boolean - 是否设置成功
+]]
+function DataManager.SetShopFastRestockEndTime(player, shopId, endTime)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData then
+        warn(GameConfig.LOG_PREFIX, "SetShopFastRestockEndTime: 找不到玩家数据")
+        return false
+    end
+    if not playerData.ShopData[shopId] then
+        playerData.ShopData[shopId] = {
+            LastRefreshTime = 0,
+            Stock = {},
+        }
+    end
+    playerData.ShopData[shopId].FastRestockEndTime = tonumber(endTime) or 0
+    return true
 end
 
 --[[

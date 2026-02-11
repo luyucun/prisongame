@@ -19,8 +19,11 @@ local playerGui = player:WaitForChild("PlayerGui")
 
 local UnitConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("UnitConfig"))
 local SkillConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("SkillConfig"))
+local RobuxPriceHelper = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("RobuxPriceHelper"))
 
 local ButtonEffectHelper = nil
+
+local STARTER_PACK_GAMEPASS_ID = 1658798778
 
 -- Events
 local starterPackEvents = nil
@@ -37,11 +40,14 @@ local starterPackLight = nil
 local starterPackIcon = nil
 local starterPackNameLabel = nil
 local starterPackNameGradient = nil
+local starterPackEntryPriceLabel = nil
 
 local starterPackGui = nil
 local starterPackBg = nil
 local starterPackCloseButton = nil
+local starterPackBuyButtonContainer = nil
 local starterPackBuyButton = nil
+local starterPackBuyRightPriceLabel = nil
 
 local shopGui = nil
 local shopBg = nil
@@ -489,6 +495,10 @@ local function InitializeUI()
 		end
 	end
 	starterPackNameGradient = starterPackNameLabel and starterPackNameLabel:FindFirstChildWhichIsA("UIGradient", true)
+	starterPackEntryPriceLabel = starterPackContainer and starterPackContainer:FindFirstChild("Price", true) or nil
+	if starterPackEntryPriceLabel then
+		RobuxPriceHelper.UpdateGamePassLabel(starterPackEntryPriceLabel, STARTER_PACK_GAMEPASS_ID, "prefix")
+	end
 
 	starterPackGui = SafeWaitForChild(playerGui, "StarterPack", 5)
 	starterPackBg = starterPackGui and starterPackGui:FindFirstChild("Bg")
@@ -496,7 +506,8 @@ local function InitializeUI()
 		local title = starterPackBg:FindFirstChild("Title")
 		starterPackCloseButton = title and title:FindFirstChild("CloseButton")
 
-		starterPackBuyButton = starterPackBg:FindFirstChild("BuyButton", true)
+		starterPackBuyButtonContainer = starterPackBg:FindFirstChild("BuyButton", true)
+		starterPackBuyButton = starterPackBuyButtonContainer
 		if starterPackBuyButton and not (starterPackBuyButton:IsA("TextButton") or starterPackBuyButton:IsA("ImageButton")) then
 			local innerBuy = starterPackBuyButton:FindFirstChild("Button")
 				or starterPackBuyButton:FindFirstChildWhichIsA("TextButton")
@@ -504,6 +515,10 @@ local function InitializeUI()
 			if innerBuy then
 				starterPackBuyButton = innerBuy
 			end
+		end
+		starterPackBuyRightPriceLabel = starterPackBuyButtonContainer and starterPackBuyButtonContainer:FindFirstChild("RightPrice", true) or nil
+		if starterPackBuyRightPriceLabel then
+			RobuxPriceHelper.UpdateGamePassLabel(starterPackBuyRightPriceLabel, STARTER_PACK_GAMEPASS_ID, nil)
 		end
 
 		local scale = EnsureStarterPackScale()

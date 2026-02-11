@@ -34,6 +34,9 @@ local HOME_OWNER_ATTR = "HomeOwnerUserId"
 -- 玩家角色事件连接 [UserId] = Connection (用于清理)
 local playerCharacterConnections = {}
 
+local FAST_RESTOCK_SHOP_ID = "UnitShop"
+local FAST_RESTOCK_ATTR = "UnitShopFastRestockEndTime"
+
 -- 初始化基地占用表
 for i = GameConfig.MIN_HOME_SLOT, GameConfig.MAX_HOME_SLOT do
 	homeOccupancy[i] = nil
@@ -536,6 +539,16 @@ end
 处理玩家加入游戏
 @param player Player - 玩家对象
 ]]
+local function GetServerNow()
+	local ok, serverNow = pcall(function()
+		return workspace:GetServerTimeNow()
+	end)
+	if ok and type(serverNow) == "number" and serverNow > 0 then
+		return serverNow
+	end
+	return os.time()
+end
+
 function PlayerManager.OnPlayerAdded(player)
 	-- 修复：首先检查player对象是否有效
 	if not player or not player:IsA("Player") or not player:IsDescendantOf(Players) then
@@ -559,6 +572,20 @@ function PlayerManager.OnPlayerAdded(player)
 
 	if not player or not player:IsDescendantOf(Players) then
 		return
+	end
+
+	-- V6.8 sync fast restock absolute end time (offline countdown)
+	do
+		local endTime = tonumber(DataManager.GetShopFastRestockEndTime(player, FAST_RESTOCK_SHOP_ID)) or 0
+		if endTime < 0 then
+			endTime = 0
+		end
+		local now = GetServerNow()
+		if endTime > 0 and endTime <= now then
+			DataManager.SetShopFastRestockEndTime(player, FAST_RESTOCK_SHOP_ID, 0)
+			endTime = 0
+		end
+		player:SetAttribute(FAST_RESTOCK_ATTR, endTime)
 	end
 
 	-- V4.8七日登录奖励：同步功能解锁状态（通关第一章后解锁）
