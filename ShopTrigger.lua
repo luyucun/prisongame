@@ -2,12 +2,9 @@
 脚本名称: ShopTrigger
 脚本类型: LocalScript (客户端脚本)
 脚本位置: StarterPlayerScripts/UI/ShopTrigger
-版本: V2.1
-职责: 检测玩家靠近商店NPC并自动打开/关闭商店UI
+版本: V6.10
+职责: 通过玩家触碰自家 PrisonerTouch 来打开/关闭兵种商店
 ]]
-
--- V4.5：对话系统接管KeepShoper01交互，旧的自动商店触发停用
-local DISABLE_SHOP_TRIGGER = true
 
 local ShopTrigger = {}
 
@@ -19,7 +16,7 @@ local RunService = game:GetService("RunService")
 -- 引用配置
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
 
--- 收敛调试print，避免刷屏（仅在DEBUG_MODE开启时输出）
+-- 收敛调试 print，避免刷屏（仅在 DEBUG_MODE 开启时输出）
 local DEBUG_MODE = GameConfig.DEBUG_MODE
 local _print = print
 local function DebugPrint(...)
@@ -31,31 +28,33 @@ local print = DebugPrint
 
 -- 本地玩家
 local player = Players.LocalPlayer
-local character = player.Character or player.CharacterAdded:Wait()
-local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
 
 -- 状态变量
-local isNearShop = false          -- 是否靠近商店
-local currentNPC = nil            -- 当前靠近的NPC
-local isShopOpen = false          -- 商店是否已打开
-local manualClosed = false        -- 是否手动关闭（通过Close按钮）
-local checkConnection = nil       -- 距离检测连接
+local isNearShop = false
+local isShopOpen = false
+local blockReopenUntilLeave = false
+local checkConnection = nil
+local closeButtonConnection = nil
+local lastResolveTime = 0
+
+-- PrisonerTouch 触发
+local prisonerTouchPart = nil
+local prisonerTouchConn = nil
+local prisonerTouchEndedConn = nil
+local prisonerTouchingParts = {}
+local prisonerTouchActive = false
 
 -- UI引用（延迟加载）
 local shopUI = nil
 local shopFrame = nil
 local BACKPACK_HIDE_KEY = "Shop"
+local TOUCH_RESOLVE_INTERVAL = 0.5
 
 -- 事件引用
 local RequestShopList = nil
-local ShopListEvent = nil
 
 -- ==================== 私有函数 ====================
 
---[[
-初始化UI引用
-@return boolean - 是否成功
-]]
 local function RequestBackpackHide()
 	local trigger = _G.BackpackTrigger
 	if trigger and trigger.IsOnIdleFloor and trigger.IsOnIdleFloor() then
@@ -75,20 +74,20 @@ local function ReleaseBackpackHide()
 		trigger.RefreshVisibility()
 	end
 end
+
 local function InitializeUI()
-	if shopUI then
-		return true -- 已初始化
+	if shopUI and shopFrame then
+		return true
 	end
 
 	local playerGui = player:WaitForChild("PlayerGui")
-	shopUI = playerGui:FindFirstChild("ArmyStore")
-
+	shopUI = playerGui:WaitForChild("ArmyStore", 10)
 	if not shopUI then
 		warn("[ShopTrigger] 找不到 ArmyStore ScreenGui")
 		return false
 	end
 
-	shopFrame = shopUI:FindFirstChild("StoreBg")
+	shopFrame = shopUI:WaitForChild("StoreBg", 5)
 	if not shopFrame then
 		warn("[ShopTrigger] 找不到 StoreBg Frame")
 		return false
@@ -97,114 +96,84 @@ local function InitializeUI()
 	return true
 end
 
---[[
-初始化事件引用
-@return boolean - 是否成功
-]]
 local function InitializeEvents()
-	if RequestShopList and ShopListEvent then
-		return true -- 已初始化
+	if RequestShopList then
+		return true
 	end
 
 	local events = ReplicatedStorage:FindFirstChild("Events")
 	if not events then
-		warn("[ShopTrigger] Events文件夹未找到")
+		warn("[ShopTrigger] Events 文件夹未找到")
 		return false
 	end
 
 	local shopEvents = events:FindFirstChild("ShopEvents")
 	if not shopEvents then
-		warn("[ShopTrigger] ShopEvents文件夹未找到")
+		warn("[ShopTrigger] ShopEvents 文件夹未找到")
 		return false
 	end
 
 	RequestShopList = shopEvents:FindFirstChild("RequestShopList")
-	ShopListEvent = shopEvents:FindFirstChild("ShopList")
-
-	if not (RequestShopList and ShopListEvent) then
-		warn("[ShopTrigger] 商店事件不完整")
+	if not RequestShopList then
+		warn("[ShopTrigger] 找不到 RequestShopList 事件")
 		return false
 	end
 
 	return true
 end
 
---[[
-查找玩家家园中的商店NPC
-@return Instance|nil - NPC实例
-]]
-local function FindShopNPC()
+local function IsLocalCharacterPart(part)
+	local character = player.Character
+	return character and part and part:IsDescendantOf(character)
+end
+
+local function IsCharacterTouchingPart(part)
+	local character = player.Character
+	if not character or not part or not part.Parent then
+		return false
+	end
+
+	local ok, touching = pcall(function()
+		return part:GetTouchingParts()
+	end)
+	if not ok or type(touching) ~= "table" then
+		return false
+	end
+
+	for _, hit in ipairs(touching) do
+		if hit and hit:IsDescendantOf(character) then
+			return true
+		end
+	end
+
+	return false
+end
+
+local function FindPrisonerTouchPart()
 	local homeSlot = player:GetAttribute("HomeSlot")
 	if not homeSlot then
 		return nil
 	end
 
-	local home = workspace:FindFirstChild("Home")
+	local home = workspace:FindFirstChild(GameConfig.HOME_FOLDER_NAME or "Home")
 	if not home then
 		return nil
 	end
 
-	local playerHome = home:FindFirstChild("PlayerHome" .. homeSlot)
+	local playerHome = home:FindFirstChild((GameConfig.HOME_PREFIX or "PlayerHome") .. homeSlot)
 	if not playerHome then
 		return nil
 	end
 
-	-- 查找KeepShoper01
-	local npc = playerHome:FindFirstChild(GameConfig.Shop.NPCName)
-	return npc
+	local touchPart = playerHome:FindFirstChild("PrisonerTouch")
+	if touchPart and touchPart:IsA("BasePart") then
+		return touchPart
+	end
+	return nil
 end
 
---[[
-获取NPC的中心Part
-@param npc Instance - NPC模型
-@return BasePart|nil - 中心Part
-]]
-local function GetNPCCenterPart(npc)
-	if not npc then return nil end
-
-	return npc:FindFirstChild("HumanoidRootPart")
-	    or npc.PrimaryPart
-	    or npc:FindFirstChildWhichIsA("BasePart")
-end
-
---[[
-检查是否靠近NPC
-@return boolean - 是否靠近
-@return Instance|nil - NPC实例（如果靠近）
-]]
-local function CheckDistanceToNPC()
-	local npc = FindShopNPC()
-	if not npc then
-		return false, nil
-	end
-
-	local npcPart = GetNPCCenterPart(npc)
-	if not npcPart then
-		return false, nil
-	end
-
-	-- 重新获取HumanoidRootPart（可能角色重生了）
-	if not character or not character.Parent then
-		character = player.Character
-		if character then
-			humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
-		end
-	end
-
-	-- 检查HumanoidRootPart是否存在且有效（Parent存在表示仍在场景中）
-	if not humanoidRootPart or not humanoidRootPart.Parent then
-		return false, nil
-	end
-
-	local distance = (humanoidRootPart.Position - npcPart.Position).Magnitude
-	return distance <= GameConfig.Shop.OpenDistance, npc
-end
-
---[[
-打开商店
-]]
 local function OpenShop()
-	if isShopOpen or manualClosed then
+	if isShopOpen or blockReopenUntilLeave then
 		return
 	end
 
@@ -212,49 +181,45 @@ local function OpenShop()
 		return
 	end
 
-	-- 显示商店UI
 	if _G.ShopDisplay and _G.ShopDisplay.PlayOpen then
 		_G.ShopDisplay.PlayOpen()
 	else
 		shopFrame.Visible = true
 	end
-    RequestBackpackHide()
+
+	RequestBackpackHide()
 	isShopOpen = true
+	isNearShop = true
 
-	-- 请求商店列表
-	if RequestShopList then
-		RequestShopList:FireServer()
-		print("[ShopTrigger] 请求商店列表")
+	RequestShopList:FireServer()
+	print("[ShopTrigger] 触碰 PrisonerTouch，已请求商店列表")
 
-		-- V2.1修复：兜底重试机制，防止竞态丢消息
-		task.delay(0.5, function()
-			if not shopFrame then return end
+	-- 兜底重试机制，防止竞态丢消息
+	task.delay(0.5, function()
+		if not shopFrame or not shopFrame.Visible then
+			return
+		end
 
-			-- 检查是否有商品卡片生成
-			local scrollingFrame = shopFrame:FindFirstChild("ItemContainer") or shopFrame:FindFirstChild("ScrollingFrame")
-			if not scrollingFrame then return end
+		local scrollingFrame = shopFrame:FindFirstChild("ItemContainer") or shopFrame:FindFirstChild("ScrollingFrame")
+		if not scrollingFrame then
+			return
+		end
 
-			local hasCards = false
-			for _, child in ipairs(scrollingFrame:GetChildren()) do
-				if child:IsA("Frame") and string.find(child.Name, "ItemCard_") then
-					hasCards = true
-					break
-				end
+		local hasCards = false
+		for _, child in ipairs(scrollingFrame:GetChildren()) do
+			if child:IsA("Frame") and string.find(child.Name, "ItemCard_") then
+				hasCards = true
+				break
 			end
+		end
 
-			-- 如果没有卡片且商店仍然打开，重试请求
-			if not hasCards and shopFrame.Visible then
-				print("[ShopTrigger] 未检测到商品卡片，重试请求商店列表")
-				RequestShopList:FireServer()
-			end
-		end)
-	end
+		if not hasCards then
+			print("[ShopTrigger] 未检测到商品卡片，重试请求商店列表")
+			RequestShopList:FireServer()
+		end
+	end)
 end
 
---[[
-关闭商店
-@param manual boolean - 是否手动关闭
-]]
 local function CloseShop(manual)
 	if not isShopOpen then
 		return
@@ -264,72 +229,150 @@ local function CloseShop(manual)
 		return
 	end
 
-	-- 隐藏商店UI
 	if _G.ShopDisplay and _G.ShopDisplay.PlayClose then
 		_G.ShopDisplay.PlayClose()
 	else
 		shopFrame.Visible = false
 	end
-    ReleaseBackpackHide()
+
+	ReleaseBackpackHide()
 	isShopOpen = false
 
 	if manual then
-		manualClosed = true
-		print("[ShopTrigger] 手动关闭商店")
+		blockReopenUntilLeave = true
+		print("[ShopTrigger] 手动关闭商店，离开 PrisonerTouch 前不再自动打开")
 	else
-		print("[ShopTrigger] 自动关闭商店（离开范围）")
+		print("[ShopTrigger] 离开 PrisonerTouch，自动关闭商店")
 	end
 end
 
---[[
-距离检测循环
-]]
-local function CheckDistanceLoop()
-	local nearNow, npc = CheckDistanceToNPC()
-
-	if nearNow and not isNearShop then
-		-- 进入商店范围
-		isNearShop = true
-		currentNPC = npc
-		manualClosed = false -- 重置手动关闭标记
-		print("[ShopTrigger] 进入商店范围")
-		OpenShop()
-
-	elseif not nearNow and isNearShop then
-		-- 离开商店范围
-		isNearShop = false
-		currentNPC = nil
-		print("[ShopTrigger] 离开商店范围")
-		CloseShop(false)
+local function ClearPrisonerTouchConnections()
+	if prisonerTouchConn then
+		prisonerTouchConn:Disconnect()
+		prisonerTouchConn = nil
 	end
+
+	if prisonerTouchEndedConn then
+		prisonerTouchEndedConn:Disconnect()
+		prisonerTouchEndedConn = nil
+	end
+
+	prisonerTouchingParts = {}
+	prisonerTouchActive = false
+end
+
+local function OnLeavePrisonerTouch()
+	prisonerTouchActive = false
+	isNearShop = false
+	blockReopenUntilLeave = false
+	CloseShop(false)
+end
+
+local function BindPrisonerTouch(part)
+	if prisonerTouchPart == part then
+		return
+	end
+
+	ClearPrisonerTouchConnections()
+	prisonerTouchPart = part
+	if not part then
+		return
+	end
+
+	prisonerTouchConn = part.Touched:Connect(function(hit)
+		if not IsLocalCharacterPart(hit) then
+			return
+		end
+
+		prisonerTouchingParts[hit] = true
+		if prisonerTouchActive then
+			return
+		end
+
+		prisonerTouchActive = true
+		if not blockReopenUntilLeave then
+			OpenShop()
+		end
+	end)
+
+	prisonerTouchEndedConn = part.TouchEnded:Connect(function(hit)
+		if not prisonerTouchingParts[hit] then
+			return
+		end
+
+		prisonerTouchingParts[hit] = nil
+		if next(prisonerTouchingParts) == nil then
+			OnLeavePrisonerTouch()
+		end
+	end)
+end
+
+local function ResolvePrisonerTouch(force)
+	local now = tick()
+	if not force and (now - lastResolveTime) < TOUCH_RESOLVE_INTERVAL then
+		return
+	end
+	lastResolveTime = now
+
+	local part = FindPrisonerTouchPart()
+	if part ~= prisonerTouchPart then
+		BindPrisonerTouch(part)
+	end
+end
+
+local function UpdatePrisonerTouchState()
+	if not prisonerTouchPart or not prisonerTouchPart.Parent then
+		if prisonerTouchActive or isShopOpen then
+			OnLeavePrisonerTouch()
+		end
+		return
+	end
+
+	local touching = IsCharacterTouchingPart(prisonerTouchPart)
+
+	if touching and not prisonerTouchActive then
+		prisonerTouchActive = true
+		if not blockReopenUntilLeave then
+			OpenShop()
+		end
+	elseif (not touching) and prisonerTouchActive and next(prisonerTouchingParts) == nil then
+		OnLeavePrisonerTouch()
+	elseif (not touching) and (not prisonerTouchActive) and next(prisonerTouchingParts) == nil then
+		-- 防止手动关闭后永久锁死，离开触碰面后恢复可自动开启状态
+		blockReopenUntilLeave = false
+	end
+end
+
+local function BindCloseButton()
+	if closeButtonConnection then
+		closeButtonConnection:Disconnect()
+		closeButtonConnection = nil
+	end
+
+	if not shopFrame then
+		return
+	end
+
+	local closeButton = shopFrame:FindFirstChild("CloseButton")
+	if not closeButton then
+		warn("[ShopTrigger] 找不到 CloseButton")
+		return
+	end
+
+	closeButtonConnection = closeButton.MouseButton1Click:Connect(function()
+		CloseShop(true)
+	end)
+
+	print("[ShopTrigger] 关闭按钮已绑定")
 end
 
 -- ==================== 公共接口 ====================
 
---[[
-初始化ShopTrigger
-]]
 function ShopTrigger.Initialize()
-	if DISABLE_SHOP_TRIGGER then
-		print("[ShopTrigger] 已停用（对话系统接管KeepShoper01）")
-		return
-	end
+	print("[ShopTrigger] 初始化触碰商店触发器...")
 
-	print("[ShopTrigger] 初始化商店触发器...")
-
-	-- 等待角色加载
-	if not character or not character.Parent then
-		player.CharacterAdded:Wait()
-		character = player.Character
-		humanoidRootPart = character:WaitForChild("HumanoidRootPart")
-	end
-
-	-- 延迟启动，确保其他系统初始化完成
-	task.wait(1)
-
-	-- 初始化UI和事件
 	if not InitializeUI() then
-		warn("[ShopTrigger] UI初始化失败")
+		warn("[ShopTrigger] UI 初始化失败")
 		return
 	end
 
@@ -338,50 +381,56 @@ function ShopTrigger.Initialize()
 		return
 	end
 
-	-- 绑定关闭按钮
-	local closeButton = shopFrame:FindFirstChild("CloseButton")
-	if closeButton then
-		closeButton.MouseButton1Click:Connect(function()
-			CloseShop(true)
-		end)
-		print("[ShopTrigger] 关闭按钮已绑定")
-	else
-		warn("[ShopTrigger] 找不到CloseButton")
+	BindCloseButton()
+	ResolvePrisonerTouch(true)
+
+	if checkConnection then
+		checkConnection:Disconnect()
 	end
 
-	-- 启动距离检测
 	checkConnection = RunService.Heartbeat:Connect(function()
-		-- 按间隔检测（节省性能）
 		local now = tick()
 		if not ShopTrigger._lastCheckTime or (now - ShopTrigger._lastCheckTime) >= GameConfig.Shop.CheckInterval then
 			ShopTrigger._lastCheckTime = now
-			CheckDistanceLoop()
+			ResolvePrisonerTouch(false)
+			UpdatePrisonerTouchState()
 		end
 	end)
 
-	-- 监听角色重生
-	player.CharacterAdded:Connect(function(newCharacter)
-		character = newCharacter
-		humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+	player.CharacterAdded:Connect(function()
+		task.wait(0.3)
+		prisonerTouchingParts = {}
+		prisonerTouchActive = false
 		isNearShop = false
-		currentNPC = nil
-		if isShopOpen then
-			CloseShop(false)
-		end
-		print("[ShopTrigger] 角色重生，重置状态")
+		blockReopenUntilLeave = false
+		CloseShop(false)
+		ResolvePrisonerTouch(true)
 	end)
 
-	print("[ShopTrigger] ✅ 商店触发器已就绪")
+	player:GetAttributeChangedSignal("HomeSlot"):Connect(function()
+		prisonerTouchingParts = {}
+		prisonerTouchActive = false
+		isNearShop = false
+		blockReopenUntilLeave = false
+		CloseShop(false)
+		ResolvePrisonerTouch(true)
+	end)
+
+	print("[ShopTrigger] ✅ 触碰商店触发器已就绪")
 end
 
---[[
-清理ShopTrigger
-]]
 function ShopTrigger.Cleanup()
 	if checkConnection then
 		checkConnection:Disconnect()
 		checkConnection = nil
 	end
+
+	if closeButtonConnection then
+		closeButtonConnection:Disconnect()
+		closeButtonConnection = nil
+	end
+
+	ClearPrisonerTouchConnections()
 	print("[ShopTrigger] 已清理")
 end
 

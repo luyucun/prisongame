@@ -295,9 +295,6 @@ local function LoadFromDataStore(player)
 			if data.GuideData then
 				data.GuideData = RestoreFromDataStore(data.GuideData)  -- V3.5：恢复引导数据
 			end
-			if data.TalkData then
-				data.TalkData = RestoreFromDataStore(data.TalkData)  -- V4.5对话数据
-			end
 			if data.SevenDayData then
 				data.SevenDayData = RestoreFromDataStore(data.SevenDayData)  -- V4.8七日登录奖励
 			end
@@ -387,7 +384,6 @@ local function SaveToDataStore(player, playerData, userId)
 		SkillInventory = SanitizeForDataStore(playerData.SkillInventory),  -- V3.0：保存技能背包
 		TaskData = SanitizeForDataStore(playerData.TaskData),  -- V3.3：保存任务数据
 		GuideData = SanitizeForDataStore(playerData.GuideData),  -- V3.5：保存引导数据
-		TalkData = SanitizeForDataStore(playerData.TalkData),  -- V4.5对话数据
 		SevenDayData = SanitizeForDataStore(playerData.SevenDayData),  -- V4.8七日登录奖励
 		DailyRewardData = SanitizeForDataStore(playerData.DailyRewardData),  -- V5.3每日免费奖励
 		StarterPackData = SanitizeForDataStore(playerData.StarterPackData),  -- V5.4新手礼包
@@ -724,9 +720,6 @@ local function CreateDefaultData(player)
         },
         GuideData = {  -- V3.5新手引导系统：初始化
             CompletedGuides = {},
-        },
-        TalkData = {  -- V4.5对话系统：初始化
-            CompletedTalks = {},
         },
         SevenDayData = BuildDefaultSevenDayData(os.time()), -- V4.8七日登录奖励
         DailyRewardData = BuildDefaultDailyRewardData(os.time()), -- V5.3每日免费奖励
@@ -1344,13 +1337,6 @@ function DataManager.InitializePlayerData(player)
         if not playerData.GuideData then
             playerData.GuideData = {
                 CompletedGuides = {},
-            }
-        end
-
-        -- V4.5对话系统：确保TalkData字段存在（向后兼容）
-        if not playerData.TalkData then
-            playerData.TalkData = {
-                CompletedTalks = {},
             }
         end
 

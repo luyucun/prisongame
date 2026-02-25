@@ -49,11 +49,6 @@ ReplicatedStorage
         ├──PurchaseResult（RemoteEvent） - 服务器→客户端：返回购买结果(success,message,unitId,newCoins)
         ├──StockUpdate（RemoteEvent） 【V2.1库存系统】✅已实现 - 服务器→客户端：库存更新通知(shopId, stockData)
         └──RefreshTimeUpdate（RemoteEvent） 【V2.1库存系统】✅已实现 - 服务器→客户端：刷新倒计时更新(remainingTime)
-    └──TalkEvents（Folder）/  【V4.5新增】
-        ├──RequestTalkList（RemoteEvent） - 客户端→服务器：请求对话列表
-        ├──TalkList（RemoteEvent） - 服务器→客户端：返回对话列表
-        ├──SelectTalkOption（RemoteEvent） - 客户端→服务器：选择对话选项(talkId)
-        └──TalkResponse（RemoteEvent） - 服务器→客户端：返回对话结果(success, action, talkId, dialogues)
     └──IdleCoinEvents（Folder）/  【V2.6新增】
         ├──CollectIdleCoins（RemoteEvent） - 客户端→服务器：请求领取挂机金币
         └──SyncIdleCoins（RemoteEvent） - 服务器→客户端：同步待领取金币数量(coins)
@@ -161,29 +156,6 @@ ReplicatedStorage
 
 
 如果需要补充新的RemoteEvent或者Remotefunction，请在这里列出来，我会自己去创建
-
-【V4.5对话系统RemoteEvent创建说明】
-位置：ReplicatedStorage/Events/TalkEvents/ （新建文件夹）
-🆕 RequestTalkList (RemoteEvent) - 需在Studio中手动创建
-🆕 TalkList (RemoteEvent) - 需在Studio中手动创建
-🆕 SelectTalkOption (RemoteEvent) - 需在Studio中手动创建
-🆕 TalkResponse (RemoteEvent) - 需在Studio中手动创建
-
-创建步骤：
-1. 打开Roblox Studio
-2. 导航到 ReplicatedStorage > Events
-3. 右键点击 Events 文件夹
-4. 选择 "Insert Object" > "Folder"
-5. 将新建的 Folder 重命名为 "TalkEvents"
-6. 右键点击 TalkEvents 文件夹
-7. 选择 "Insert Object" > "RemoteEvent"
-8. 将新建的 RemoteEvent 重命名为 "RequestTalkList"
-9. 重复步骤7-8，创建 "TalkList"
-10. 重复步骤7-8，创建 "SelectTalkOption"
-11. 重复步骤7-8，创建 "TalkResponse"
-12. 保存游戏
-
-注意：TalkSystem.lua 初始化时会自动创建这些事件（如果不存在），但建议手动创建以确保事件在系统初始化前就存在。
 
 【V4.8七日登录奖励RemoteEvent创建说明】
 位置：ReplicatedStorage/Events/SevenDaysEvents/ （新建文件夹）
