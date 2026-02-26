@@ -73,7 +73,6 @@ local InventorySystem = nil
 local DataManager = nil
 local IdleCoinSystem = nil
 local SevenDaysSystem = nil
-local TaskSystem = nil
 local UpgradeSystem = nil
 local ShopSystem = nil
 local armyPackEvents = nil
@@ -142,21 +141,6 @@ local function GetSevenDaysSystem()
 		end
 	end
 	return SevenDaysSystem
-end
-
-local function GetTaskSystem()
-	if not TaskSystem then
-		local taskModule = ServerScriptService.Systems:FindFirstChild("TaskSystem")
-		if taskModule and taskModule:IsA("ModuleScript") then
-			local ok, result = pcall(require, taskModule)
-			if ok then
-				TaskSystem = result
-			else
-				warn("[MarketplaceHandler] TaskSystem妯″潡鍔犺浇澶辫触:", result)
-			end
-		end
-	end
-	return TaskSystem
 end
 
 local function GetUpgradeSystem()
@@ -389,14 +373,6 @@ local function GrantUnitProduct(player, unitId, shopId)
 	local addSuccess, instanceData = InventorySystem.AddUnit(player, unitId)
 	if not addSuccess then
 		return false, "兵种发放失败: " .. tostring(instanceData)
-	end
-
-	-- 扣除库存（如果启用库存系统）
-	if tostring(shopId) == "LimitPrisoner" then
-		local taskSystem = GetTaskSystem()
-		if taskSystem and taskSystem.OnPurchaseUnit then
-			taskSystem.OnPurchaseUnit(player, unitId)
-		end
 	end
 
 	if GameConfig.Shop.EnableStockSystem then

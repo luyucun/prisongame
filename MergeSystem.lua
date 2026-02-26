@@ -31,7 +31,6 @@ local InventorySystem = require(ServerScriptService.Systems.InventorySystem)
 local PlacementSystem = require(ServerScriptService.Systems.PlacementSystem)
 
 -- 延迟加载系统模块（避免循环依赖）
-local TaskSystem = nil
 local SoundSystem = nil  -- V3.8新增
 local PowerSystem = nil  -- V3.9.2新增
 
@@ -301,19 +300,6 @@ function MergeSystem.MergeUnits(player, instanceIdA, instanceIdB)
             newInstance.InstanceId,
             newLevel
         ))
-    end)
-
-    -- V3.3新增：通知任务系统（合成2级兵种任务）
-    task.spawn(function()
-        if not TaskSystem then
-            local taskModule = ServerScriptService.Systems:FindFirstChild("TaskSystem")
-            if taskModule then
-                TaskSystem = require(taskModule)
-            end
-        end
-        if TaskSystem and TaskSystem.OnMergeLevel2Unit then
-            TaskSystem.OnMergeLevel2Unit(player, newInstance.UnitId, newLevel)
-        end
     end)
 
     -- V3.8新增：播放合成音效

@@ -803,14 +803,6 @@ local function OnPurchaseSkill(player, skillId)
 
 		SendSuccess(player, "购买成功", skillId, newCoins)
 
-		-- V3.3任务系统：通知购买技能
-		local TaskSystem = nil
-		local taskModule = ServerScriptService.Systems:FindFirstChild("TaskSystem")
-		if taskModule then
-			TaskSystem = require(taskModule)
-			TaskSystem.OnPurchaseSkill(player, skillId)
-		end
-
 		-- 14. 同步技能背包到客户端
 		local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
 		if eventsFolder then

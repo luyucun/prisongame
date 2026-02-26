@@ -1190,12 +1190,6 @@ local function OnPurchaseUnit(player, unitId)
 		local instanceId = type(instanceData) == "table" and instanceData.InstanceId or "unknown"
 		SendSuccess(player, "购买成功", unitId, newCoins, instanceId)
 
-		local taskModule = ServerScriptService.Systems:FindFirstChild("TaskSystem")
-		if taskModule then
-			local TaskSystem = require(taskModule)
-			TaskSystem.OnPurchaseUnit(player, unitId)
-		end
-
 		-- 触发引导检查（购买第一个兵种后引导到IdleFloor）
 		task.delay(0.5, function()
 			if player and player.Parent then

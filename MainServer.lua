@@ -72,8 +72,6 @@ local LimitPrisonerSystem = require(ServerScriptService.Systems.LimitPrisonerSys
 local SkillSystem = require(ServerScriptService.Systems.SkillSystem)
 -- V3.2新增 - Loading系统
 local LoadingSystem = require(ServerScriptService.Systems.LoadingSystem)
--- V3.3新增 - 任务系统
-local TaskSystem = require(ServerScriptService.Systems.TaskSystem)
 -- V3.5新增 - 新手引导系统
 local GuideSystem = require(ServerScriptService.Systems.GuideSystem)
 -- V4.8新增 - 七日登录奖励
@@ -408,16 +406,6 @@ local function InitializeServer()
         warn(GameConfig.LOG_PREFIX, "Loading系统初始化失败(返回false)")
     end
 
-    -- 12. 初始化任务系统 (V3.3新增)
-    success, result = pcall(function()
-        return TaskSystem.Initialize()
-    end)
-    if not success then
-        warn(GameConfig.LOG_PREFIX, "任务系统初始化失败(异常):", result)
-    elseif result == false then
-        warn(GameConfig.LOG_PREFIX, "任务系统初始化失败(返回false)")
-    end
-
     -- 13. 初始化新手引导系统 (V3.5新增)
     success, result = pcall(function()
         return GuideSystem.Initialize()
@@ -686,10 +674,6 @@ Players.PlayerAdded:Connect(function(player)
 		end)
 		LoadingSystem.NotifyDataSync(player, 0.5)
 
-		-- V3.3新增：初始化玩家任务数据并同步到客户端
-		pcall(function()
-			TaskSystem.InitializePlayerTask(player)
-		end)
 		LoadingSystem.NotifyDataSync(player, 0.75)
 
 		-- V3.5新增：初始化玩家新手引导

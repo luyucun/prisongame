@@ -72,11 +72,6 @@ ReplicatedStorage
         ├──LoadingStageUpdate（RemoteEvent） - 服务器→客户端：加载阶段更新(stage)
         ├──LoadingComplete（RemoteEvent） - 服务器→客户端：加载完成通知
         └──ClientPreloadComplete（RemoteEvent） - 客户端→服务器：客户端预加载完成通知
-    └──TaskEvents（Folder）/  【V3.3新增】
-        ├──TaskProgress（RemoteEvent） - 服务器→客户端：任务进度更新(taskData)
-        ├──TaskComplete（RemoteEvent） - 服务器→客户端：任务完成通知(taskInfo)
-        ├──ClaimTaskReward（RemoteEvent） - 客户端→服务器：领取任务奖励
-        └──ClaimRewardResult（RemoteEvent） - 服务器→客户端：领取结果(success, message, rewardCoins)
     └──GuideEvents（Folder）/  【V3.5新增 / V3.9.1增强】
         ├──StartGuide（RemoteEvent） - 服务器→客户端：开始引导(guideId, targetPosition)
         ├──CompleteGuide（RemoteEvent） - 服务器→客户端：完成引导(guideId)
@@ -629,74 +624,6 @@ UI配置说明（MainGui）：
    - AnimationPreloader.lua: 检测到LoadingController后跳过独立预加载
    - IconPreloader.lua: 检测到LoadingController后跳过独立预加载
    - 保留原有脚本作为备份，当LoadingController未正常加载时自动启用
-
-
-【V3.3任务系统RemoteEvent创建说明】
-位置：ReplicatedStorage/Events/TaskEvents/ （新建文件夹）
-🆕 TaskProgress (RemoteEvent) - 服务器→客户端：任务进度更新
-🆕 TaskComplete (RemoteEvent) - 服务器→客户端：任务完成通知
-🆕 ClaimTaskReward (RemoteEvent) - 客户端→服务器：领取任务奖励
-🆕 ClaimRewardResult (RemoteEvent) - 服务器→客户端：领取结果
-
-注意：服务端TaskSystem.lua会在初始化时自动创建这些事件（如果不存在），
-但建议手动创建以确保事件在系统初始化前就存在。
-
-创建步骤：
-1. 打开Roblox Studio
-2. 导航到 ReplicatedStorage > Events
-3. 右键点击 Events 文件夹
-4. 选择 "Insert Object" > "Folder"
-5. 将新建的 Folder 重命名为 "TaskEvents"
-6. 右键点击 TaskEvents 文件夹
-7. 选择 "Insert Object" > "RemoteEvent"
-8. 将新建的 RemoteEvent 重命名为 "TaskProgress"
-9. 重复步骤7-8，创建 "TaskComplete"
-10. 重复步骤7-8，创建 "ClaimTaskReward"
-11. 重复步骤7-8，创建 "ClaimRewardResult"
-12. 保存游戏
-
-功能说明：
-- TaskProgress：服务器→客户端：任务进度更新
-  参数：(taskData: table) 任务数据 {CurrentTaskId, CurrentProgress, RequiredCount, Description, RewardCoins, IsCompleted, AllTasksCompleted}
-- TaskComplete：服务器→客户端：任务完成通知
-  参数：(taskInfo: table) 完成的任务信息 {TaskId, Description, RewardCoins}
-- ClaimTaskReward：客户端→服务器：领取任务奖励
-  参数：无（服务器根据玩家当前任务处理）
-- ClaimRewardResult：服务器→客户端：领取结果
-  参数：(success: boolean, message: string, rewardCoins: number) 是否成功、消息和奖励金币数
-
-
-【V3.3任务系统其他资源创建说明】
-
-1. 任务配置模块位置：ReplicatedStorage/Config/TaskConfig
-
-2. 服务端系统位置：ServerScriptService/Systems/TaskSystem
-
-3. 客户端控制器位置：StarterPlayer/StarterPlayerScripts/UI/TaskDisplay
-
-4. 任务UI结构：StarterGui/MainGui/TaskPanel/
-   └── TaskPanel (Frame) - 任务面板
-       ├── TaskDescription (TextLabel) - 任务描述文本
-       ├── ProgressText (TextLabel) - 进度文本（如 "2/3"）
-       ├── ProgressBar (Frame) - 进度条背景
-       │   └── Fill (Frame) - 进度条填充
-       ├── RewardText (TextLabel) - 奖励显示（如 "奖励: 100金币"）
-       ├── ClaimButton (TextButton) - 领取按钮
-       └── CompletedLabel (TextLabel) - 全部完成标签（可选）
-
-5. 任务类型说明：
-   - 类型1 PURCHASE_UNIT: 购买N次兵种
-   - 类型2 PLACE_UNIT: 将N个兵布置到战场
-   - 类型3 PURCHASE_SKILL: 购买N次技能
-   - 类型4 COMPLETE_BATTLE: 完成一场战斗（点击attack后到弹出结算界面）
-   - 类型5 COLLECT_IDLE_COIN: 领取一次挂机金币奖励
-
-6. 任务进度触发点：
-   - 购买兵种: ShopSystem.OnPurchaseUnit()
-   - 布置兵种: PlacementSystem.OnConfirmPlacement()
-   - 购买技能: SkillShopSystem.OnPurchaseSkill()
-   - 完成战斗: CampaignManager.OnCampaignEnd()
-   - 领取挂机金币: IdleCoinSystem.OnCollectRequest()
 
 
 【V3.4.1战斗金币表现系统RemoteEvent创建说明】

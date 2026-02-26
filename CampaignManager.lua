@@ -2123,18 +2123,6 @@ function CampaignManager.OnBattleEnd(campaignData, stageNum, result)
 		end
 	end
 
-	-- V3.3新增：通知任务系统完成战斗（战斗真正结束才算完成，中途退出不算）
-	local TaskSystem = nil
-	pcall(function()
-		TaskSystem = require(SystemsFolder:WaitForChild("TaskSystem"))
-	end)
-	if TaskSystem and campaignData.Player then
-		pcall(function()
-			TaskSystem.OnCompleteBattle(campaignData.Player)
-			DebugLog(string.format("✅ 已通知TaskSystem完成战斗，玩家: %s", campaignData.Player.Name))
-		end)
-	end
-
 	-- 更新所有单位血量
 	local aliveCount = 0
 	local deadCount = 0

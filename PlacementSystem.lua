@@ -1728,15 +1728,7 @@ local function OnConfirmPlacement(player, instanceId, position)
 
 	local success, message = PlacementSystem.PlaceUnit(player, instanceId, position)
 
-	-- V3.3任务系统：放置成功时通知任务系统
 	if success then
-		local TaskSystem = nil
-		local taskModule = ServerScriptService.Systems:FindFirstChild("TaskSystem")
-		if taskModule then
-			TaskSystem = require(taskModule)
-			TaskSystem.OnPlaceUnit(player, instanceId)
-		end
-
 		-- V3.9.1引导系统：首次摆放兵种后触发引导检查
 		task.delay(0.5, function()
 			if player and player.Parent then

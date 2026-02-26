@@ -261,14 +261,6 @@ function SoundSystem.OnCollectIdleCoins(player)
 end
 
 --[[
-玩家领取任务奖励时调用
-@param player Player - 玩家对象
-]]
-function SoundSystem.OnClaimTaskReward(player)
-	SoundSystem.PlaySFX(player, "CoinsTrigger")
-end
-
---[[
 显示胜利结算界面时调用
 @param player Player - 玩家对象
 ]]

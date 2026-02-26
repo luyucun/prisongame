@@ -121,12 +121,6 @@ PlayerData = {
     SkillInventory = {         -- V3.0技能系统
         [skillId] = count,     -- 技能ID: 数量
     },
-    TaskData = {               -- V3.3任务系统
-        CurrentTaskId = number,    -- 当前任务ID
-        CurrentProgress = number,  -- 当前任务进度
-        CompletedTaskIds = {},     -- 已完成的任务ID列表
-        AllTasksCompleted = boolean, -- 是否全部任务完成
-    },
     GuideData = {              -- V3.5新手引导系统
         CompletedGuides = {},  -- 已完成的引导 {[guideId] = true}
     },
@@ -289,9 +283,6 @@ local function LoadFromDataStore(player)
 			if data.SkillInventory then
 				data.SkillInventory = RestoreFromDataStore(data.SkillInventory)  -- V3.0：恢复技能背包数据
 			end
-			if data.TaskData then
-				data.TaskData = RestoreFromDataStore(data.TaskData)  -- V3.3：恢复任务数据
-			end
 			if data.GuideData then
 				data.GuideData = RestoreFromDataStore(data.GuideData)  -- V3.5：恢复引导数据
 			end
@@ -382,7 +373,6 @@ local function SaveToDataStore(player, playerData, userId)
 		PowerRankData = SanitizeForDataStore(playerData.PowerRankData),  -- V4.7：保存排行榜数据
 		ChapterProgress = SanitizeForDataStore(playerData.ChapterProgress),  -- V2.8：保存章节进度数据
 		SkillInventory = SanitizeForDataStore(playerData.SkillInventory),  -- V3.0：保存技能背包
-		TaskData = SanitizeForDataStore(playerData.TaskData),  -- V3.3：保存任务数据
 		GuideData = SanitizeForDataStore(playerData.GuideData),  -- V3.5：保存引导数据
 		SevenDayData = SanitizeForDataStore(playerData.SevenDayData),  -- V4.8七日登录奖励
 		DailyRewardData = SanitizeForDataStore(playerData.DailyRewardData),  -- V5.3每日免费奖励
@@ -712,12 +702,6 @@ local function CreateDefaultData(player)
             MaxClearedStage = 0,
         },
         SkillInventory = {},  -- V3.0技能系统：初始化空技能背包
-        TaskData = {  -- V3.3任务系统：初始化
-            CurrentTaskId = 1001,     -- 默认从第一个任务开始（需要与TaskConfig.GetFirstTaskId()同步）
-            CurrentProgress = 0,
-            CompletedTaskIds = {},
-            AllTasksCompleted = false,
-        },
         GuideData = {  -- V3.5新手引导系统：初始化
             CompletedGuides = {},
         },
@@ -1321,16 +1305,6 @@ function DataManager.InitializePlayerData(player)
         -- V3.0技能系统：确保SkillInventory字段存在（向后兼容）
         if not playerData.SkillInventory then
             playerData.SkillInventory = {}
-        end
-
-        -- V3.3任务系统：确保TaskData字段存在（向后兼容）
-        if not playerData.TaskData then
-            playerData.TaskData = {
-                CurrentTaskId = 1001,  -- 默认从第一个任务开始
-                CurrentProgress = 0,
-                CompletedTaskIds = {},
-                AllTasksCompleted = false,
-            }
         end
 
         -- V3.5新手引导系统：确保GuideData字段存在（向后兼容）

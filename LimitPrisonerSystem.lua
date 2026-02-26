@@ -23,7 +23,6 @@ local InventorySystem = nil
 local CurrencySystem = nil
 local PlayerManager = nil
 local PlacementSystem = nil
-local TaskSystem = nil
 
 local limitPrisonerEvents = nil
 local requestDataEvent = nil
@@ -135,22 +134,8 @@ local function InitializeEvents()
 	return true
 end
 
-local function NotifyPurchaseTask(player, unitId)
-	if not TaskSystem then
-		local taskModule = ServerScriptService.Systems:FindFirstChild("TaskSystem")
-		if taskModule and taskModule:IsA("ModuleScript") then
-			local ok, result = pcall(require, taskModule)
-			if ok then
-				TaskSystem = result
-			else
-				warn("[LimitPrisonerSystem] TaskSystem妯″潡鍔犺浇澶辫触:", result)
-			end
-		end
-	end
-
-	if TaskSystem and TaskSystem.OnPurchaseUnit then
-		TaskSystem.OnPurchaseUnit(player, unitId)
-	end
+local function NotifyPurchaseTask(_player, _unitId)
+	return
 end
 
 local function GetPlayerHomeId(player)
