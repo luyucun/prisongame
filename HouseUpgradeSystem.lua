@@ -274,7 +274,7 @@ EnsureInitialized = function()
 	isInitialized = true
 end
 
-function HouseUpgradeSystem.WaitForPopupClosed(player, timeoutSeconds)
+function HouseUpgradeSystem.WaitForPopupClosed(player, timeoutSeconds, startSignalCallback)
 	EnsureInitialized()
 
 	if not player then
@@ -285,10 +285,11 @@ function HouseUpgradeSystem.WaitForPopupClosed(player, timeoutSeconds)
 		return false
 	end
 
-	local popupClosedEvent = HouseUpgradeEvents and HouseUpgradeEvents:FindFirstChild('HouseUpgradePopupClosed')
-	if not popupClosedEvent then
+	local popupClosedInstance = HouseUpgradeEvents and HouseUpgradeEvents:FindFirstChild("HouseUpgradePopupClosed")
+	if not popupClosedInstance or not popupClosedInstance:IsA("RemoteEvent") then
 		return false
 	end
+	local popupClosedEvent = popupClosedInstance :: RemoteEvent
 
 	local timeout = tonumber(timeoutSeconds) or 12
 	local closed = false
@@ -299,6 +300,13 @@ function HouseUpgradeSystem.WaitForPopupClosed(player, timeoutSeconds)
 			closed = true
 		end
 	end)
+
+	if type(startSignalCallback) == "function" then
+		local ok, err = pcall(startSignalCallback)
+		if not ok then
+			warn("[HouseUpgradeSystem] start signal callback failed:", err)
+		end
+	end
 
 	local startTime = tick()
 	while not closed and (tick() - startTime) < timeout do
@@ -591,18 +599,24 @@ function HouseUpgradeSystem.ReplaceHouseModelWithCinematic(player, newModelName)
 		newModelName
 	))
 
-	-- 1. 通知客户端开始镜头表现
+	-- 1. 通知客户端开始镜头表现（先建立关闭监听，避免丢失快速回调）
+	local startEvent = nil
 	if InitializeEvents() then
-		local startEvent = HouseUpgradeEvents:FindFirstChild("StartUpgradeSequence")
-		if startEvent then
+		local startEventInstance = HouseUpgradeEvents:FindFirstChild("StartUpgradeSequence")
+		if startEventInstance and startEventInstance:IsA("RemoteEvent") then
+			startEvent = startEventInstance
+		end
+	end
+	if startEvent then
+		local popupClosed = HouseUpgradeSystem.WaitForPopupClosed(player, 12, function()
 			startEvent:FireClient(player, validHomeSlot, DataManager.GetCurrentHouseModel(player), newModelName)
+		end)
+		if not popupClosed then
+			warn(string.format("[HouseUpgradeSystem] Popup close wait timeout, player=%s", player.Name))
 		end
 	end
 
-	-- 2. Wait for upgrade popup close
-	HouseUpgradeSystem.WaitForPopupClosed(player, 12)
-
-	-- 3. 执行房屋替换
+	-- 2. 执行房屋替换
 	local success = HouseUpgradeSystem.ReplaceHouseModel(player, newModelName)
 
 	if not success then

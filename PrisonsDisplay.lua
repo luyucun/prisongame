@@ -10,6 +10,7 @@ Version: V5.0
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local Lighting = game:GetService("Lighting")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -21,6 +22,8 @@ local ButtonEffectHelper = nil
 local mainGui = nil
 local targetButton = nil
 local BACKPACK_HIDE_KEY = "Prisons"
+local BLUR_LOCK_ID = "Prisons"
+local BLUR_LOCKS_KEY = "__PopupBlurLocks"
 
 local prisonsGui = nil
 local prisonsBg = nil
@@ -37,9 +40,11 @@ local houseStatus = nil
 local houseEntries = {}
 local initialized = false
 local boundButtons = {}
+local attributeSignalsBound = false
 local BindHouseEntry
 
 -- 弹框动画配置（仅Bg）
+local POPUP_OPEN_START_SCALE = 0.86
 local POPUP_OPEN_START_SCALE = 0.86
 local POPUP_OPEN_OVERSHOOT_SCALE = 1.10
 local POPUP_OPEN_DURATION_A = 0.18
@@ -73,6 +78,25 @@ local function ReleaseBackpackHide()
 		trigger.PopHideLock(BACKPACK_HIDE_KEY)
 	elseif trigger and trigger.RefreshVisibility then
 		trigger.RefreshVisibility()
+	end
+end
+
+local function SetBlurLock(enabled)
+	local locks = _G[BLUR_LOCKS_KEY]
+	if type(locks) ~= "table" then
+		locks = {}
+		_G[BLUR_LOCKS_KEY] = locks
+	end
+
+	if enabled then
+		locks[BLUR_LOCK_ID] = true
+	else
+		locks[BLUR_LOCK_ID] = nil
+	end
+
+	local blur = Lighting:FindFirstChild("Blur")
+	if blur and blur:IsA("BlurEffect") then
+		blur.Enabled = next(locks) ~= nil
 	end
 end
 local function SafeWaitForChild(parent, childName, timeout)
@@ -151,10 +175,12 @@ local function PlayPopupOpen()
 	local scale = EnsurePopupScale()
 	if not scale then
 		prisonsBg.Visible = true
+		SetBlurLock(true)
 		return true
 	end
 
 	if prisonsBg.Visible and not popupAnimating then
+		SetBlurLock(true)
 		return true
 	end
 
@@ -188,6 +214,7 @@ local function PlayPopupOpen()
 		connB:Disconnect()
 		popupAnimating = false
 		scale.Scale = 1
+		SetBlurLock(true)
 	end)
 
 	popupOpenTweenA:Play()
@@ -202,10 +229,12 @@ local function PlayPopupClose()
 	local scale = EnsurePopupScale()
 	if not scale then
 		prisonsBg.Visible = false
+		SetBlurLock(false)
 		return true
 	end
 
 	if not prisonsBg.Visible and not popupAnimating then
+		SetBlurLock(false)
 		return true
 	end
 
@@ -237,6 +266,7 @@ local function PlayPopupClose()
 		prisonsBg.Visible = false
 		scale.Scale = 1
 		popupAnimating = false
+		SetBlurLock(false)
 	end)
 
 	popupCloseTweenA:Play()
@@ -251,18 +281,64 @@ local function GetCompletedChapters()
 	return 0
 end
 
+local function GetRebirthCount()
+	local rebirthCount = player:GetAttribute("RebirthCount")
+	if type(rebirthCount) == "number" then
+		return math.max(0, math.floor(rebirthCount))
+	end
+	return 0
+end
+
+local function GetHouseRank(modelName)
+	if type(modelName) ~= "string" or modelName == "" then
+		return 0
+	end
+	if HouseConfig.GetHouseRank then
+		return math.max(0, tonumber(HouseConfig.GetHouseRank(modelName)) or 0)
+	end
+	return 0
+end
+
 local function GetCurrentHouseModel()
 	local modelName = player:GetAttribute("CurrentHouseModel")
 	if type(modelName) == "string" and modelName ~= "" then
 		return modelName
 	end
 
-	local completedChapters = GetCompletedChapters()
-	local house = HouseConfig.GetHouseByChapter(completedChapters)
+	local house = nil
+	if HouseConfig.GetHouseByRebirthCount then
+		house = HouseConfig.GetHouseByRebirthCount(GetRebirthCount())
+	else
+		local completedChapters = GetCompletedChapters()
+		house = HouseConfig.GetHouseByChapter(completedChapters)
+	end
+
 	return house and house.ModelName or nil
 end
 
-local function GetHouseStatus(house, completedChapters, currentModel)
+local function GetEffectiveUnlockedHouseRank(rebirthCount, currentModel)
+	local bestRank = 0
+	if HouseConfig.GetHouseByRebirthCount then
+		local rebirthHouse = HouseConfig.GetHouseByRebirthCount(rebirthCount)
+		if rebirthHouse and rebirthHouse.ModelName then
+			bestRank = GetHouseRank(rebirthHouse.ModelName)
+		end
+	else
+		local chapterHouse = HouseConfig.GetHouseByChapter(GetCompletedChapters())
+		if chapterHouse and chapterHouse.ModelName then
+			bestRank = GetHouseRank(chapterHouse.ModelName)
+		end
+	end
+
+	local currentRank = GetHouseRank(currentModel)
+	if currentRank > bestRank then
+		bestRank = currentRank
+	end
+
+	return bestRank
+end
+
+local function GetHouseStatus(house, rebirthCount, currentModel)
 	if not house then
 		return "LOCKED", Color3.fromRGB(255, 0, 0)
 	end
@@ -271,7 +347,17 @@ local function GetHouseStatus(house, completedChapters, currentModel)
 		return "ACTIVE", Color3.fromRGB(0, 255, 0)
 	end
 
-	if completedChapters >= (house.RequiredChapter or 0) then
+	local houseRank = GetHouseRank(house.ModelName)
+	local unlockedRank = GetEffectiveUnlockedHouseRank(rebirthCount, currentModel)
+	if houseRank > 0 and unlockedRank >= houseRank then
+		return "UNLOCKED", Color3.fromRGB(255, 255, 255)
+	end
+
+	local requiredRebirth = tonumber(house.RequiredRebirth)
+	if requiredRebirth == nil then
+		requiredRebirth = tonumber(house.RequiredChapter) or 0
+	end
+	if rebirthCount >= requiredRebirth then
 		return "UNLOCKED", Color3.fromRGB(255, 255, 255)
 	end
 
@@ -301,9 +387,9 @@ local function ApplyHouseInfo(house)
 		houseIdleTime.Text = string.format("%dH", maxHours)
 	end
 	if houseStatus and houseStatus:IsA("TextLabel") then
-		local completedChapters = GetCompletedChapters()
+		local rebirthCount = GetRebirthCount()
 		local currentModel = GetCurrentHouseModel()
-		local statusText, statusColor = GetHouseStatus(house, completedChapters, currentModel)
+		local statusText, statusColor = GetHouseStatus(house, rebirthCount, currentModel)
 		houseStatus.Text = statusText
 		houseStatus.TextColor3 = statusColor
 	end
@@ -359,8 +445,10 @@ local function OpenPrisons()
 	RefreshHouseEntries()
 
 	local currentModel = GetCurrentHouseModel()
-	local completedChapters = GetCompletedChapters()
-	local defaultHouse = HouseConfig.GetHouseByModel(currentModel) or HouseConfig.GetHouseByChapter(completedChapters)
+	local rebirthCount = GetRebirthCount()
+	local defaultHouse = HouseConfig.GetHouseByModel(currentModel)
+		or (HouseConfig.GetHouseByRebirthCount and HouseConfig.GetHouseByRebirthCount(rebirthCount))
+		or HouseConfig.GetHouseByChapter(GetCompletedChapters())
 	if not defaultHouse and #HouseConfig.GetAllHouses() > 0 then
 		defaultHouse = HouseConfig.GetAllHouses()[1]
 	end
@@ -482,6 +570,7 @@ local function InitializeUI()
 		scale.Scale = 1
 	end
 	prisonsBg.Visible = false
+	SetBlurLock(false)
 	return true
 end
 
@@ -494,6 +583,35 @@ local function TryInitialize()
 	return true
 end
 
+local function BindAttributeSignals()
+	if attributeSignalsBound then
+		return
+	end
+	attributeSignalsBound = true
+
+	local function RefreshVisibleSelection()
+		if not (prisonsBg and prisonsBg.Visible) then
+			return
+		end
+
+		RefreshHouseEntries()
+		local currentModel = GetCurrentHouseModel()
+		local rebirthCount = GetRebirthCount()
+		local selectedHouse = HouseConfig.GetHouseByModel(currentModel)
+			or (HouseConfig.GetHouseByRebirthCount and HouseConfig.GetHouseByRebirthCount(rebirthCount))
+			or HouseConfig.GetHouseByChapter(GetCompletedChapters())
+		SelectHouse(selectedHouse)
+	end
+
+	player:GetAttributeChangedSignal("RebirthCount"):Connect(function()
+		RefreshVisibleSelection()
+	end)
+
+	player:GetAttributeChangedSignal("CurrentHouseModel"):Connect(function()
+		RefreshVisibleSelection()
+	end)
+end
+
 local function Initialize()
 	if initialized then
 		return
@@ -501,14 +619,20 @@ local function Initialize()
 
 	if TryInitialize() then
 		initialized = true
+		BindAttributeSignals()
 		return
 	end
 
 	task.spawn(function()
 		local attempts = 0
-		while attempts < 5 and not TryInitialize() do
+		local ready = TryInitialize()
+		while attempts < 5 and not ready do
 			attempts += 1
 			task.wait(2)
+			ready = TryInitialize()
+		end
+		if ready then
+			BindAttributeSignals()
 		end
 		initialized = true
 	end)
@@ -519,7 +643,9 @@ local function Initialize()
 		end
 		task.spawn(function()
 			task.wait()
-			TryInitialize()
+			if TryInitialize() then
+				BindAttributeSignals()
+			end
 		end)
 	end)
 end

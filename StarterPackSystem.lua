@@ -227,7 +227,7 @@ local function GrantRewards(player)
 				Count = count,
 			})
 		elseif reward.Type == "Coins" then
-			local success = CurrencySystem.AddCoins(player, count, "StarterPack")
+			local success = CurrencySystem.AddCoins(player, count, "StarterPack", { ApplyRebirthBonus = false })
 			if not success then
 				RollbackRewards(player, grantedUnits, grantedSkills, grantedCoins)
 				return false, "Coin grant failed"

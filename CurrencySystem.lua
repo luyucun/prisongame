@@ -272,6 +272,66 @@ local function ApplyFriendBonus(player, amount, options)
     return total, bonus
 end
 
+local function ShouldApplyRebirthBonus(player, options)
+    if not player then
+        return false
+    end
+    if options and (options.ApplyRebirthBonus == false or options.NoRebirthBonus == true) then
+        return false
+    end
+    return true
+end
+
+local function GetRebirthBonusRate(player, options)
+    if not ShouldApplyRebirthBonus(player, options) then
+        return 0
+    end
+    if not DataManager or not DataManager.GetRebirthCoinBonusRate then
+        return 0
+    end
+    return math.max(0, tonumber(DataManager.GetRebirthCoinBonusRate(player)) or 0)
+end
+
+local function GetVipBonusRate(player, options)
+    if not ShouldApplyVipBonus(player, options) then
+        return 0
+    end
+
+    if not player then
+        return 0
+    end
+
+    local isVip = false
+    if player:GetAttribute("VipPurchased") == true then
+        isVip = true
+    elseif LoadVipSystem() and VipSystem.IsVip then
+        isVip = (VipSystem.IsVip(player) == true)
+    end
+
+    if not isVip then
+        return 0
+    end
+
+    local configFolder = ReplicatedStorage:FindFirstChild("Config")
+    local vipConfigModule = configFolder and configFolder:FindFirstChild("VipConfig")
+    if vipConfigModule and vipConfigModule:IsA("ModuleScript") then
+        local ok, vipConfig = pcall(require, vipConfigModule)
+        if ok and vipConfig and vipConfig.GetBonusRate then
+            return math.max(0, tonumber(vipConfig.GetBonusRate()) or 0)
+        end
+    end
+
+    return 0.5
+end
+
+local function RoundCurrencyGain(value)
+    local numeric = tonumber(value) or 0
+    if numeric <= 0 then
+        return 0
+    end
+    return math.ceil(numeric - 1e-6)
+end
+
 local function RefreshAllFriendBonuses()
     for _, player in ipairs(Players:GetPlayers()) do
         RefreshFriendBonus(player)
@@ -419,19 +479,24 @@ end
 @return boolean, number - 是否成功, 新的金币数量
 ]]
 function CurrencySystem.AddCoins(player, amount, reason, options)
-    local finalAmount = amount
+    local baseAmount = tonumber(amount) or 0
+    local finalAmount = baseAmount
     local vipBonus = 0
-    if type(amount) == "number" and amount > 0 then
-        local amountAfterFriends = amount
-        if ShouldApplyFriendBonus(player, options) then
-            amountAfterFriends = ApplyFriendBonus(player, amount, options)
-        end
 
-        if ShouldApplyVipBonus(player, options) then
-            finalAmount, vipBonus = ApplyVipBonus(player, amountAfterFriends, options)
-        else
-            finalAmount = math.ceil(amountAfterFriends)
+    if baseAmount > 0 then
+        local friendRate = 0
+        if ShouldApplyFriendBonus(player, options) then
+            friendRate = select(1, GetFriendBonusRate(player)) or 0
         end
+        friendRate = math.max(0, tonumber(friendRate) or 0)
+
+        local vipRate = GetVipBonusRate(player, options)
+        local rebirthRate = GetRebirthBonusRate(player, options)
+        local totalRate = friendRate + vipRate + rebirthRate
+
+        finalAmount = RoundCurrencyGain(baseAmount * (1 + totalRate))
+        local withoutVipAmount = RoundCurrencyGain(baseAmount * (1 + friendRate + rebirthRate))
+        vipBonus = math.max(0, finalAmount - withoutVipAmount)
     end
 
     local success, newAmount = CurrencySystem.AddCurrency(player, GameConfig.CurrencyType.COINS, finalAmount, reason)

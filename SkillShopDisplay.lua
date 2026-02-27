@@ -23,6 +23,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
+local Lighting = game:GetService("Lighting")
 
 -- 引用配置
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
@@ -36,6 +37,8 @@ local playerGui = player:WaitForChild("PlayerGui")
 -- 调试和日志
 local DEBUG_MODE = false
 local LOG_PREFIX = "[SkillShopDisplay]"
+local BLUR_LOCK_ID = "SkillShop"
+local BLUR_LOCKS_KEY = "__PopupBlurLocks"
 
 -- 状态变量
 local shopData = {}              -- 技能商店商品数据
@@ -136,6 +139,25 @@ local function PlayPurchaseErrorSound()
 	end
 end
 
+local function SetBlurLock(enabled)
+	local locks = _G[BLUR_LOCKS_KEY]
+	if type(locks) ~= "table" then
+		locks = {}
+		_G[BLUR_LOCKS_KEY] = locks
+	end
+
+	if enabled then
+		locks[BLUR_LOCK_ID] = true
+	else
+		locks[BLUR_LOCK_ID] = nil
+	end
+
+	local blur = Lighting:FindFirstChild("Blur")
+	if blur and blur:IsA("BlurEffect") then
+		blur.Enabled = next(locks) ~= nil
+	end
+end
+
 local function IsOutOfStockMessage(message)
 	return message and string.find(message, "库存不足")
 end
@@ -183,6 +205,7 @@ end
 ]]
 local function InitializeUI()
 	if shopUI and shopFrame then
+		SetBlurLock(shopFrame.Visible == true)
 		return true
 	end
 
@@ -209,6 +232,7 @@ local function InitializeUI()
 		return false
 	end
 
+	SetBlurLock(shopFrame.Visible == true)
 	if DEBUG_MODE then
 		print(LOG_PREFIX, "UI引用初始化成功")
 	end
@@ -287,10 +311,12 @@ function SkillShopDisplay.PlayOpen()
 
 	local scale = EnsurePopupScale()
 	if not scale then
+		SetBlurLock(true)
 		return
 	end
 
 	if shopFrame.Visible and not popupAnimating then
+		SetBlurLock(true)
 		return
 	end
 
@@ -322,6 +348,7 @@ function SkillShopDisplay.PlayOpen()
 		connB:Disconnect()
 		popupAnimating = false
 		scale.Scale = 1
+		SetBlurLock(true)
 	end)
 
 	popupOpenTweenA:Play()
@@ -334,10 +361,12 @@ function SkillShopDisplay.PlayClose()
 
 	local scale = EnsurePopupScale()
 	if not scale then
+		SetBlurLock(false)
 		return
 	end
 
 	if not shopFrame.Visible and not popupAnimating then
+		SetBlurLock(false)
 		return
 	end
 
@@ -367,6 +396,7 @@ function SkillShopDisplay.PlayClose()
 		shopFrame.Visible = false
 		scale.Scale = 1
 		popupAnimating = false
+		SetBlurLock(false)
 	end)
 
 	popupCloseTweenA:Play()
@@ -996,6 +1026,7 @@ function SkillShopDisplay.Initialize()
 	if shopFrame then
 		shopFrame:GetPropertyChangedSignal("Visible"):Connect(function()
 			if shopFrame.Visible then
+				SetBlurLock(true)
 				if titleUpdateConn then
 					titleUpdateConn:Disconnect()
 					titleUpdateConn = nil
@@ -1015,12 +1046,14 @@ function SkillShopDisplay.Initialize()
 
 				UpdateTitleText()
 			else
+				SetBlurLock(false)
 				if titleUpdateConn then
 					titleUpdateConn:Disconnect()
 					titleUpdateConn = nil
 				end
 			end
 		end)
+		SetBlurLock(shopFrame.Visible == true)
 	end
 
 	if DEBUG_MODE then

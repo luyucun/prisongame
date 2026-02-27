@@ -88,6 +88,23 @@ if buyTips then
 	buyTips.Visible = false
 end
 
+local rebirthTips = tipsGui:FindFirstChild("RebirthTips")
+if not rebirthTips then
+	warn("[TipsSystemController] RebirthTips node missing")
+end
+
+local rebirthTargetPosition = rebirthTips and rebirthTips.Position or nil
+local rebirthShowDuration = 2
+local rebirthTweenDurationA = refreshTweenDurationA
+local rebirthTweenDurationB = refreshTweenDurationB
+local rebirthToken = 0
+local rebirthTweenA = nil
+local rebirthTweenB = nil
+
+if rebirthTips then
+	rebirthTips.Visible = false
+end
+
 local targetPosition = frame.Position
 local startPosition = UDim2.new(0.5, 0, 0.5, 0)
 local showDuration = 1
@@ -160,6 +177,23 @@ local function StopBuyTip()
 		buyTips.Visible = false
 		if buyTargetPosition then
 			buyTips.Position = buyTargetPosition
+		end
+	end
+end
+
+local function StopRebirthTip()
+	if rebirthTweenA then
+		rebirthTweenA:Cancel()
+		rebirthTweenA = nil
+	end
+	if rebirthTweenB then
+		rebirthTweenB:Cancel()
+		rebirthTweenB = nil
+	end
+	if rebirthTips then
+		rebirthTips.Visible = false
+		if rebirthTargetPosition then
+			rebirthTips.Position = rebirthTargetPosition
 		end
 	end
 end
@@ -321,6 +355,61 @@ local function ShowBuyTip(text)
 	end)
 end
 
+local function ShowRebirthTip()
+	if not rebirthTips or not rebirthTargetPosition then
+		return
+	end
+
+	rebirthToken = rebirthToken + 1
+	local token = rebirthToken
+
+	StopRebirthTip()
+
+	local startPos = UDim2.new(
+		rebirthTargetPosition.X.Scale, rebirthTargetPosition.X.Offset,
+		rebirthTargetPosition.Y.Scale, rebirthTargetPosition.Y.Offset + refreshStartOffset
+	)
+	local overshootPos = UDim2.new(
+		rebirthTargetPosition.X.Scale, rebirthTargetPosition.X.Offset,
+		rebirthTargetPosition.Y.Scale, rebirthTargetPosition.Y.Offset - refreshOvershootOffset
+	)
+
+	rebirthTips.Position = startPos
+	rebirthTips.Visible = true
+
+	rebirthTweenA = TweenService:Create(
+		rebirthTips,
+		TweenInfo.new(rebirthTweenDurationA, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ Position = overshootPos }
+	)
+	rebirthTweenB = TweenService:Create(
+		rebirthTips,
+		TweenInfo.new(rebirthTweenDurationB, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ Position = rebirthTargetPosition }
+	)
+
+	rebirthTweenA.Completed:Connect(function(state)
+		if token ~= rebirthToken then
+			return
+		end
+		if state == Enum.PlaybackState.Completed and rebirthTweenB then
+			rebirthTweenB:Play()
+		end
+	end)
+
+	rebirthTweenA:Play()
+
+	task.delay(rebirthShowDuration, function()
+		if token ~= rebirthToken then
+			return
+		end
+		if rebirthTips then
+			rebirthTips.Visible = false
+			rebirthTips.Position = rebirthTargetPosition
+		end
+	end)
+end
+
 local function BuildPowerText(basePower, deltaValue, isIncrease)
 	local sign = isIncrease and "+" or "-"
 	local arrow = isIncrease and "↑" or "↓"
@@ -409,6 +498,10 @@ function TipsSystemController.ShowRefreshTip()
 	ShowRefreshTip()
 end
 
+function TipsSystemController.ShowRebirthTip()
+	ShowRebirthTip()
+end
+
 local function BindRefreshTipEvent()
 	local eventsFolder = ReplicatedStorage:WaitForChild("Events", 10)
 	if not eventsFolder then
@@ -438,7 +531,37 @@ local function BindRefreshTipEvent()
 	end
 end
 
+local function BindRebirthTipEvent()
+	local eventsFolder = ReplicatedStorage:WaitForChild("Events", 10)
+	if not eventsFolder then
+		warn("[TipsSystemController] Events folder missing for rebirth tip")
+		return
+	end
+
+	local rebirthEvents = eventsFolder:WaitForChild("RebirthEvents", 10)
+	if not rebirthEvents then
+		warn("[TipsSystemController] RebirthEvents folder missing")
+		return
+	end
+
+	local rebirthResultEvent = rebirthEvents:FindFirstChild("RebirthResult")
+	if not rebirthResultEvent then
+		rebirthResultEvent = rebirthEvents:WaitForChild("RebirthResult", 10)
+	end
+
+	if rebirthResultEvent and rebirthResultEvent:IsA("RemoteEvent") then
+		rebirthResultEvent.OnClientEvent:Connect(function(success)
+			if success == true then
+				ShowRebirthTip()
+			end
+		end)
+	else
+		warn("[TipsSystemController] RebirthResult event missing")
+	end
+end
+
 BindRefreshTipEvent()
+BindRebirthTipEvent()
 
 _G.TipsSystem = TipsSystemController
 

@@ -596,6 +596,21 @@ function PlayerManager.OnPlayerAdded(player)
 	local currentHouseModel = DataManager.GetCurrentHouseModel(player)
 	player:SetAttribute("CurrentHouseModel", currentHouseModel)
 
+	local rebirthCount = 0
+	local rebirthCoinBonusRate = 0
+	local rebirthAttackBonusRate = 0
+	if DataManager.GetRebirthData then
+		local rebirthData = DataManager.GetRebirthData(player)
+		if rebirthData then
+			rebirthCount = tonumber(rebirthData.Count) or 0
+			rebirthCoinBonusRate = tonumber(rebirthData.CoinBonusRate) or 0
+			rebirthAttackBonusRate = tonumber(rebirthData.AttackBonusRate) or 0
+		end
+	end
+	player:SetAttribute("RebirthCount", rebirthCount)
+	player:SetAttribute("RebirthCoinBonusRate", rebirthCoinBonusRate)
+	player:SetAttribute("RebirthAttackBonusRate", rebirthAttackBonusRate)
+
 	-- V4.9加入群组奖励：同步领取状态
 	local groupRewardData = DataManager.GetGroupRewardData(player)
 	player:SetAttribute("GroupRewardClaimed", groupRewardData and groupRewardData.Claimed == true)

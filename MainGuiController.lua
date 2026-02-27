@@ -24,6 +24,7 @@ V2.11新功能:
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local Lighting = game:GetService("Lighting")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -61,6 +62,8 @@ local isInitialized = false
 local settingsBound = false
 local currentMusicEnabled = true
 local currentSfxEnabled = true
+local BLUR_LOCK_ID = "Options"
+local BLUR_LOCKS_KEY = "__PopupBlurLocks"
 
 local ButtonEffectHelper = nil
 
@@ -139,6 +142,25 @@ local function LoadButtonEffectHelper()
 	return false
 end
 
+local function SetBlurLock(enabled)
+	local locks = _G[BLUR_LOCKS_KEY]
+	if type(locks) ~= "table" then
+		locks = {}
+		_G[BLUR_LOCKS_KEY] = locks
+	end
+
+	if enabled then
+		locks[BLUR_LOCK_ID] = true
+	else
+		locks[BLUR_LOCK_ID] = nil
+	end
+
+	local blur = Lighting:FindFirstChild("Blur")
+	if blur and blur:IsA("BlurEffect") then
+		blur.Enabled = next(locks) ~= nil
+	end
+end
+
 local function EnsureOptionsScale()
 	if not optionsBg then
 		return nil
@@ -174,10 +196,12 @@ local function PlayOptionsOpen()
 	local scale = EnsureOptionsScale()
 	if not scale then
 		optionsBg.Visible = true
+		SetBlurLock(true)
 		return true
 	end
 
 	if optionsBg.Visible and not optionsAnimating then
+		SetBlurLock(true)
 		return true
 	end
 
@@ -211,6 +235,7 @@ local function PlayOptionsOpen()
 		connB:Disconnect()
 		optionsAnimating = false
 		scale.Scale = 1
+		SetBlurLock(true)
 	end)
 
 	optionsOpenTweenA:Play()
@@ -225,10 +250,12 @@ local function PlayOptionsClose()
 	local scale = EnsureOptionsScale()
 	if not scale then
 		optionsBg.Visible = false
+		SetBlurLock(false)
 		return true
 	end
 
 	if not optionsBg.Visible and not optionsAnimating then
+		SetBlurLock(false)
 		return true
 	end
 
@@ -260,6 +287,7 @@ local function PlayOptionsClose()
 		optionsBg.Visible = false
 		scale.Scale = 1
 		optionsAnimating = false
+		SetBlurLock(false)
 	end)
 
 	optionsCloseTweenA:Play()
@@ -451,6 +479,7 @@ local function InitializeSettingsUI()
 		scale.Scale = 1
 	end
 	optionsBg.Visible = false
+	SetBlurLock(false)
 	return true
 end
 

@@ -13,6 +13,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
+local Lighting = game:GetService("Lighting")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -45,6 +46,8 @@ local countdownConnection = nil
 local countdownAccumulator = 0
 local templateClones = {}
 local avatarCache = {}
+local BLUR_LOCK_ID = "Leaderboard"
+local BLUR_LOCKS_KEY = "__PopupBlurLocks"
 
 local ButtonEffectHelper = nil
 local buttonsBound = false
@@ -109,6 +112,25 @@ local function LoadButtonEffectHelper()
 	return false
 end
 
+local function SetBlurLock(enabled)
+	local locks = _G[BLUR_LOCKS_KEY]
+	if type(locks) ~= "table" then
+		locks = {}
+		_G[BLUR_LOCKS_KEY] = locks
+	end
+
+	if enabled then
+		locks[BLUR_LOCK_ID] = true
+	else
+		locks[BLUR_LOCK_ID] = nil
+	end
+
+	local blur = Lighting:FindFirstChild("Blur")
+	if blur and blur:IsA("BlurEffect") then
+		blur.Enabled = next(locks) ~= nil
+	end
+end
+
 local function EnsurePopupScale()
 	if not leaderboardBg then
 		return nil
@@ -144,10 +166,12 @@ local function PlayPopupOpen()
 	local scale = EnsurePopupScale()
 	if not scale then
 		leaderboardBg.Visible = true
+		SetBlurLock(true)
 		return true
 	end
 
 	if leaderboardBg.Visible and not popupAnimating then
+		SetBlurLock(true)
 		return true
 	end
 
@@ -181,6 +205,7 @@ local function PlayPopupOpen()
 		connB:Disconnect()
 		popupAnimating = false
 		scale.Scale = 1
+		SetBlurLock(true)
 	end)
 
 	popupOpenTweenA:Play()
@@ -195,10 +220,12 @@ local function PlayPopupClose()
 	local scale = EnsurePopupScale()
 	if not scale then
 		leaderboardBg.Visible = false
+		SetBlurLock(false)
 		return true
 	end
 
 	if not leaderboardBg.Visible and not popupAnimating then
+		SetBlurLock(false)
 		return true
 	end
 
@@ -230,6 +257,7 @@ local function PlayPopupClose()
 		leaderboardBg.Visible = false
 		scale.Scale = 1
 		popupAnimating = false
+		SetBlurLock(false)
 	end)
 
 	popupCloseTweenA:Play()
@@ -311,6 +339,7 @@ local function InitializeUI()
 
 	countDownLabel = leaderboardBg:FindFirstChild("CountDownTime")
 	leaderboardBg.Visible = false
+	SetBlurLock(false)
 	return true
 end
 

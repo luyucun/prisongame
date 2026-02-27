@@ -580,6 +580,7 @@ local function RefreshLimitPrisoner(player, forceRefresh)
 	local nextRefresh = tonumber(data.NextRefreshTime) or 0
 	-- 配置变更对齐：如果下一次刷新时间与当前配置不一致且仍在未来，则按最新配置重算
 	local scheduledNext = GetNextRefreshTimeUtc(now)
+	local scheduledNext = GetNextRefreshTimeUtc(now)
 	if scheduledNext > 0 and nextRefresh > now and math.abs(nextRefresh - scheduledNext) > 60 then
 		nextRefresh = scheduledNext
 		data.NextRefreshTime = scheduledNext
@@ -767,7 +768,7 @@ local function HandlePurchaseGold(player)
 
 	local addSuccess, instanceData = InventorySystem.AddUnit(player, unitId)
 	if not addSuccess then
-		CurrencySystem.AddCoins(player, price, "LimitPrisonerGoldRefund")
+		CurrencySystem.AddCoins(player, price, "LimitPrisonerGoldRefund", { ApplyVipBonus = false, ApplyFriendBonus = false, ApplyRebirthBonus = false })
 		purchaseLocks[player] = nil
 		SendPurchaseResult(player, false, "发放失败", "Gold")
 		return
@@ -964,7 +965,7 @@ HandlePurchaseGold = function(player)
 
 	local addSuccess = InventorySystem.AddUnit(player, unitId)
 	if not addSuccess then
-		CurrencySystem.AddCoins(player, price, "LimitPrisonerGoldRefund")
+		CurrencySystem.AddCoins(player, price, "LimitPrisonerGoldRefund", { ApplyVipBonus = false, ApplyFriendBonus = false, ApplyRebirthBonus = false })
 		purchaseLocks[player] = nil
 		SendPurchaseResult(player, false, "Failed to grant unit.", "Gold")
 		return

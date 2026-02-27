@@ -20,6 +20,7 @@ local ProximityPromptService = game:GetService("ProximityPromptService")
 local TweenService = game:GetService("TweenService")
 local MarketplaceService = game:GetService("MarketplaceService")
 local Workspace = game:GetService("Workspace")
+local Lighting = game:GetService("Lighting")
 
 -- 引用配置
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
@@ -31,6 +32,9 @@ local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
 local IDLE_COIN_PRODUCT_ID = 3487946200
+local BLUR_LOCK_ID = "IdleEarning"
+local BLUR_LOCKS_KEY = "__PopupBlurLocks"
+local currentPrompt = nil
 
 -- 状态变量
 local currentPrompt = nil
@@ -38,6 +42,7 @@ local promptConnections = {}
 local mailPromptResolveInProgress = false
 local mailPromptReady = false
 local pendingIdleCoins = 0
+local autoPopupShown = false
 local cachedHomeId = nil  -- 缓存HomeId，避免重复查询
 local autoPopupShown = false
 local hasReceivedInitialSync = false
@@ -62,6 +67,7 @@ local idleScale = nil
 
 -- 弹框动画配置（仅Bg）
 local POPUP_OPEN_START_SCALE = 0.86
+local POPUP_OPEN_START_SCALE = 0.86
 local POPUP_OPEN_OVERSHOOT_SCALE = 1.10
 local POPUP_OPEN_DURATION_A = 0.18
 local POPUP_OPEN_DURATION_B = 0.10
@@ -71,6 +77,7 @@ local POPUP_CLOSE_DURATION_A = 0.08
 local POPUP_CLOSE_DURATION_B = 0.12
 
 -- UI状态
+local idleOpenTweenA = nil
 local idleOpenTweenA = nil
 local idleOpenTweenB = nil
 local idleCloseTweenA = nil
@@ -126,6 +133,25 @@ local function LoadButtonEffectHelper()
 	return false
 end
 
+local function SetBlurLock(enabled)
+	local locks = _G[BLUR_LOCKS_KEY]
+	if type(locks) ~= "table" then
+		locks = {}
+		_G[BLUR_LOCKS_KEY] = locks
+	end
+
+	if enabled then
+		locks[BLUR_LOCK_ID] = true
+	else
+		locks[BLUR_LOCK_ID] = nil
+	end
+
+	local blur = Lighting:FindFirstChild("Blur")
+	if blur and blur:IsA("BlurEffect") then
+		blur.Enabled = next(locks) ~= nil
+	end
+end
+
 local function FormatIdleTime(totalMinutes)
 	local minutes = math.max(0, math.floor(tonumber(totalMinutes) or 0))
 	local hours = math.floor(minutes / 60)
@@ -141,9 +167,70 @@ local function GetCompletedChapters()
 	return 0
 end
 
+local function GetRebirthCount()
+	local rebirthCount = player:GetAttribute("RebirthCount")
+	if type(rebirthCount) == "number" then
+		return math.max(0, math.floor(rebirthCount))
+	end
+	return 0
+end
+
+local function GetCurrentHouseModel()
+	local modelName = player:GetAttribute("CurrentHouseModel")
+	if type(modelName) == "string" and modelName ~= "" then
+		return modelName
+	end
+	return nil
+end
+
+local function GetHouseRankByModel(modelName)
+	if type(modelName) ~= "string" or modelName == "" then
+		return 0
+	end
+	if HouseConfig.GetHouseRank then
+		return math.max(0, tonumber(HouseConfig.GetHouseRank(modelName)) or 0)
+	end
+	return 0
+end
+
+local function BuildIdleConfigFromHouse(house)
+	if type(house) ~= "table" then
+		return nil
+	end
+
+	local maxHours = tonumber(house.IdleMaxHours) or 0
+	local maxMinutes = maxHours > 0 and (maxHours * 60) or 0
+
+	return {
+		CoinsPerMinute = tonumber(house.IdleCoinsPerMinute) or 0,
+		MaxHours = maxHours,
+		MaxMinutes = maxMinutes,
+		House = house,
+	}
+end
+
 local function GetIdleConfigForPlayer()
-	local completedChapters = GetCompletedChapters()
-	local houseConfig = HouseConfig.GetIdleConfigByCompletedChapters(completedChapters)
+	local houseConfig = nil
+	if HouseConfig.GetIdleConfigByRebirthCount then
+		houseConfig = HouseConfig.GetIdleConfigByRebirthCount(GetRebirthCount())
+	end
+
+	local currentModel = GetCurrentHouseModel()
+	if HouseConfig.GetHouseByModel and currentModel then
+		local currentHouseConfig = BuildIdleConfigFromHouse(HouseConfig.GetHouseByModel(currentModel))
+		if currentHouseConfig then
+			local currentRank = GetHouseRankByModel(currentModel)
+			local rebirthRank = GetHouseRankByModel(houseConfig and houseConfig.House and houseConfig.House.ModelName)
+			if currentRank > rebirthRank then
+				houseConfig = currentHouseConfig
+			end
+		end
+	end
+
+	if not houseConfig then
+		local completedChapters = GetCompletedChapters()
+		houseConfig = HouseConfig.GetIdleConfigByCompletedChapters(completedChapters)
+	end
 
 	local coinsPerMinute = houseConfig and tonumber(houseConfig.CoinsPerMinute) or 0
 	local maxMinutes = houseConfig and tonumber(houseConfig.MaxMinutes) or 0
@@ -271,6 +358,7 @@ local function InitializeIdleEarningUI()
 		idleScale.Parent = idleEarningBg
 	end
 	idleScale.Scale = 1
+	SetBlurLock(idleEarningBg.Visible == true)
 
 	return true
 end
@@ -292,6 +380,7 @@ local function ShowIdleEarningUI()
 	UpdateIdleEarningUI()
 
 	if idleEarningBg.Visible and not idleAnimating then
+		SetBlurLock(true)
 		return
 	end
 
@@ -300,6 +389,7 @@ local function ShowIdleEarningUI()
 
 	idleScale.Scale = POPUP_OPEN_START_SCALE
 	idleEarningBg.Visible = true
+	SetBlurLock(true)
 
 	idleOpenTweenA = TweenService:Create(
 		idleScale,
@@ -325,6 +415,7 @@ local function ShowIdleEarningUI()
 		connB:Disconnect()
 		idleAnimating = false
 		idleScale.Scale = 1
+		SetBlurLock(true)
 	end)
 
 	idleOpenTweenA:Play()
@@ -336,6 +427,7 @@ local function HideIdleEarningUI()
 	end
 
 	if not idleEarningBg.Visible and not idleAnimating then
+		SetBlurLock(false)
 		return
 	end
 
@@ -367,6 +459,7 @@ local function HideIdleEarningUI()
 		idleEarningBg.Visible = false
 		idleScale.Scale = 1
 		idleAnimating = false
+		SetBlurLock(false)
 	end)
 
 	idleCloseTweenA:Play()
@@ -813,6 +906,18 @@ local function Initialize()
 	end)
 
 	player:GetAttributeChangedSignal("VipPurchased"):Connect(function()
+		if InitializeIdleEarningUI() then
+			UpdateIdleEarningUI()
+		end
+	end)
+
+	player:GetAttributeChangedSignal("RebirthCount"):Connect(function()
+		if InitializeIdleEarningUI() then
+			UpdateIdleEarningUI()
+		end
+	end)
+
+	player:GetAttributeChangedSignal("CurrentHouseModel"):Connect(function()
 		if InitializeIdleEarningUI() then
 			UpdateIdleEarningUI()
 		end

@@ -302,7 +302,7 @@ local function GrantReward(player, reward)
 		if amount <= 0 then
 			return false, "奖励配置错误"
 		end
-		local success = CurrencySystem.AddCoins(player, amount, "七日登录奖励")
+		local success = CurrencySystem.AddCoins(player, amount, "七日登录奖励", { ApplyRebirthBonus = false })
 		if not success then
 			return false, "金币发放失败"
 		end

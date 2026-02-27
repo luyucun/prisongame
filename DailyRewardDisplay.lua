@@ -13,6 +13,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
+local Lighting = game:GetService("Lighting")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -53,6 +54,8 @@ local itemTemplate = nil
 local lightBg = nil
 local lightImage = nil
 local BACKPACK_HIDE_KEY = "ShopBg"
+local BLUR_LOCK_ID = "Shop"
+local BLUR_LOCKS_KEY = "__PopupBlurLocks"
 
 -- 状态缓存
 local cachedData = nil
@@ -100,6 +103,25 @@ local function ReleaseBackpackHide()
 		trigger.PopHideLock(BACKPACK_HIDE_KEY)
 	elseif trigger and trigger.RefreshVisibility then
 		trigger.RefreshVisibility()
+	end
+end
+
+local function SetBlurLock(enabled)
+	local locks = _G[BLUR_LOCKS_KEY]
+	if type(locks) ~= "table" then
+		locks = {}
+		_G[BLUR_LOCKS_KEY] = locks
+	end
+
+	if enabled then
+		locks[BLUR_LOCK_ID] = true
+	else
+		locks[BLUR_LOCK_ID] = nil
+	end
+
+	local blur = Lighting:FindFirstChild("Blur")
+	if blur and blur:IsA("BlurEffect") then
+		blur.Enabled = next(locks) ~= nil
 	end
 end
 
@@ -202,10 +224,12 @@ local function PlayShopOpen()
 	local scale = EnsureShopScale()
 	if not scale then
 		shopBg.Visible = true
+		SetBlurLock(true)
 		return true
 	end
 
 	if shopBg.Visible and not shopAnimating then
+		SetBlurLock(true)
 		return true
 	end
 
@@ -239,6 +263,7 @@ local function PlayShopOpen()
 		connB:Disconnect()
 		shopAnimating = false
 		scale.Scale = 1
+		SetBlurLock(true)
 	end)
 
 	shopOpenTweenA:Play()
@@ -253,10 +278,12 @@ local function PlayShopClose()
 	local scale = EnsureShopScale()
 	if not scale then
 		shopBg.Visible = false
+		SetBlurLock(false)
 		return true
 	end
 
 	if not shopBg.Visible and not shopAnimating then
+		SetBlurLock(false)
 		return true
 	end
 
@@ -288,6 +315,7 @@ local function PlayShopClose()
 		shopBg.Visible = false
 		scale.Scale = 1
 		shopAnimating = false
+		SetBlurLock(false)
 	end)
 
 	shopCloseTweenA:Play()
@@ -972,13 +1000,18 @@ local function TryInitialize()
 			end
 			shopVisibleConn = shopBg:GetPropertyChangedSignal("Visible"):Connect(function()
 				if shopBg.Visible then
+					SetBlurLock(true)
 					StartCountdown()
 				else
+					SetBlurLock(false)
 					StopCountdown()
 				end
 			end)
 			if shopBg.Visible then
+				SetBlurLock(true)
 				StartCountdown()
+			else
+				SetBlurLock(false)
 			end
 		end
 	end

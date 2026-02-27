@@ -7,7 +7,37 @@
 ]]
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UnitConfig = require(script.Parent.UnitConfig)
+local RebirthConfig = require(script.Parent.RebirthConfig)
 local ShopConfig = {}
+
+local function GetPlayerRebirthCount(player)
+	if not player or not player:IsA("Player") then
+		return 0
+	end
+	return math.max(0, math.floor(tonumber(player:GetAttribute("RebirthCount")) or 0))
+end
+
+local function GetItemRebirthUnlockCount(itemConfig)
+	if type(itemConfig) ~= "table" then
+		return 0
+	end
+
+	local configuredCount = tonumber(itemConfig.RebirthUnlockCount)
+	if configuredCount ~= nil then
+		return math.max(0, math.floor(configuredCount))
+	end
+
+	local unitId = tostring(itemConfig.UnitId or "")
+	if unitId == "" then
+		return 0
+	end
+
+	if RebirthConfig and RebirthConfig.GetRequiredRebirthForUnit then
+		return math.max(0, math.floor(tonumber(RebirthConfig.GetRequiredRebirthForUnit(unitId)) or 0))
+	end
+
+	return 0
+end
 
 -- ==================== 商店配置表 ====================
 --[[
@@ -408,7 +438,7 @@ ShopConfig.Shops = {
 				DevProductId = "3472104793", -- 同步监狱数据表开发者商品ID
 				Icon = "rbxassetid://102001177844916", -- 同步监狱数据表Icon
 				Sort = 210,
-				Enabled = false,
+				Enabled = true,
 				Show = false,              -- 是否在商店中显示
 				RefreshProbability = 0.1,
 				StockMin = 1,
@@ -426,7 +456,7 @@ ShopConfig.Shops = {
 				DevProductId = "3472105103", -- 同步监狱数据表开发者商品ID
 				Icon = "rbxassetid://86449419798698", -- 同步监狱数据表Icon
 				Sort = 220,
-				Enabled = false,
+				Enabled = true,
 				Show = false,              -- 是否在商店中显示
 				RefreshProbability = 0.15,
 				StockMin = 1,
@@ -444,7 +474,7 @@ ShopConfig.Shops = {
 				DevProductId = "3472104998", -- 同步监狱数据表开发者商品ID
 				Icon = "rbxassetid://96284212262078", -- 同步监狱数据表Icon
 				Sort = 230,
-				Enabled = false,
+				Enabled = true,
 				Show = false,              -- 是否在商店中显示
 				RefreshProbability = 0.15,
 				StockMin = 1,
@@ -462,7 +492,7 @@ ShopConfig.Shops = {
 				DevProductId = "3472105858", -- 同步监狱数据表开发者商品ID
 				Icon = "rbxassetid://102620601082371", -- 同步监狱数据表Icon
 				Sort = 240,
-				Enabled = false,
+				Enabled = true,
 				Show = false,              -- 是否在商店中显示
 				RefreshProbability = 0.15,
 				StockMin = 1,
@@ -524,7 +554,7 @@ function ShopConfig.GetShopItems(shopId, player)
 	local items = {}
 	for _, itemConfig in ipairs(shopData.Items) do
 		-- V3.9.2新增：对UnitShop检查Show字段
-		if shopId == "UnitShop" and itemConfig.Show == false then
+		if shopId == "UnitShop" and itemConfig.Show == false and GetItemRebirthUnlockCount(itemConfig) <= 0 then
 			-- 跳过不显示的商品
 			continue
 		end
@@ -538,6 +568,8 @@ function ShopConfig.GetShopItems(shopId, player)
 					if price and price > 0 then
 						-- 补充DevProductId到返回数据中
 						local icon = itemConfig.Icon or unitData.Icon or "rbxassetid://0"
+						local rebirthUnlockCount = GetItemRebirthUnlockCount(itemConfig)
+						local rebirthUnlocked = GetPlayerRebirthCount(player) >= rebirthUnlockCount
 						table.insert(items, {
 							UnitId = unitId,
 							Name = unitData.Name,
@@ -556,6 +588,8 @@ function ShopConfig.GetShopItems(shopId, player)
 							DevProductId = itemConfig.DevProductId, -- 新增返回DevProductId
 							LimitPerDay = itemConfig.LimitPerDay,
 							LimitTotal = itemConfig.LimitTotal,
+							RebirthUnlockCount = rebirthUnlockCount,
+							RebirthUnlocked = rebirthUnlocked,
 						})
 					else
 						warn(string.format("[ShopConfig] 商品[%s]价格配置无效: %s", unitId, tostring(price)))
@@ -576,21 +610,44 @@ end
 function ShopConfig.IsUnitOnSale(shopId, unitId, player)
 	local shopData = ShopConfig.Shops[shopId]
 	if not shopData then
-		return false, "商店不存在"
+		return false, "SHOP_NOT_FOUND"
 	end
+
 	for _, itemConfig in ipairs(shopData.Items) do
 		if itemConfig.ItemType == "Unit" and itemConfig.UnitId == unitId then
 			if not itemConfig.Enabled then
-				return false, "商品未上架"
+				return false, "NOT_ENABLED"
 			end
-			-- V3.9.2新增：对UnitShop检查Show字段
-			if shopId == "UnitShop" and itemConfig.Show == false then
-				return false, "商品不在售"
+
+			if shopId == "UnitShop" and itemConfig.Show == false and GetItemRebirthUnlockCount(itemConfig) <= 0 then
+				return false, "NOT_VISIBLE"
 			end
-			return true, "在售"
+
+			local rebirthUnlockCount = GetItemRebirthUnlockCount(itemConfig)
+			if rebirthUnlockCount > 0 and GetPlayerRebirthCount(player) < rebirthUnlockCount then
+				return false, "NOT_ENOUGH_REBIRTH"
+			end
+
+			return true, "ON_SALE"
 		end
 	end
-	return false, "商品不存在"
+
+	return false, "UNIT_NOT_FOUND"
+end
+
+function ShopConfig.GetUnitRebirthUnlockCount(shopId, unitId)
+	local shopData = ShopConfig.Shops[shopId]
+	if not shopData then
+		return 0
+	end
+
+	for _, itemConfig in ipairs(shopData.Items) do
+		if itemConfig.ItemType == "Unit" and itemConfig.UnitId == unitId then
+			return GetItemRebirthUnlockCount(itemConfig)
+		end
+	end
+
+	return 0
 end
 
 -- 获取商品价格（新增：可同时获取DevProductId）

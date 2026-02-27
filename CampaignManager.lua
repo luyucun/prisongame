@@ -2572,26 +2572,8 @@ function CampaignManager.OnVictory(campaignData)
 				end
 			end
 
-			-- V5.1: show upgrade popup before replacing house
-			-- 只有真的要换房子且不是最后一章才设置pending标记，避免触发镜头效果
-			local HouseConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("HouseConfig"))
-			local currentHouseModel = DataManager.GetCurrentHouseModel(player)
-			local shouldUpgrade, newModelName = HouseConfig.ShouldUpgradeHouse(currentHouseModel, newCompletedChapters)
-			local isLastChapter = StageConfig.IsLastChapter(currentChapter)
-
-			if shouldUpgrade and not isLastChapter then
-				DebugLog(string.format("[OnVictory] 检测到需要房屋升级: %s -> %s", currentHouseModel, newModelName))
-				campaignData.PendingHouseUpgrade = {
-					chapterId = currentChapter,
-					shouldUpgrade = true,
-					targetModel = newModelName
-				}
-			else
-				DebugLog(string.format("[OnVictory] 不需要房屋升级 (shouldUpgrade=%s, isLastChapter=%s)",
-					tostring(shouldUpgrade), tostring(isLastChapter)))
-			end
-
-			-- Roblox后台埋点：章节通关（便于后台统计章节完成人数）
+			-- V7.0：章节通关不再挂起监狱升级，由重生系统统一处理
+			campaignData.PendingHouseUpgrade = nil
 			pcall(function()
 				local maxChapter, maxStage = DataManager.GetMaxClearedProgress(player)
 				FireMainlineProgressEvent(player, "ChapterClear", currentChapter, campaignData.TotalStages or 0, maxChapter, maxStage)
@@ -2808,96 +2790,11 @@ function CampaignManager.CompleteCampaignEnd(campaignData)
 
 	-- =================================================================
 
-	-- V5.1: show upgrade popup before replacing house
-	-- 加入二次校验：确保真的需要升级且不是最后一章
-	local player = campaignData.Player
-	local pendingUpgrade = campaignData.PendingHouseUpgrade
-	local shouldUpgradeHouse = false
-
-	if pendingUpgrade and pendingUpgrade.shouldUpgrade then
-		-- 二次校验：用最新数据判断是否真的需要升级
-		local HouseConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("HouseConfig"))
-		local completedChapters = DataManager.GetCompletedChapters(player)
-		local currentHouseModel = DataManager.GetCurrentHouseModel(player)
-		local shouldUpgrade, newModelName = HouseConfig.ShouldUpgradeHouse(currentHouseModel, completedChapters)
-		local isLastChapter = StageConfig.IsLastChapter(pendingUpgrade.chapterId)
-
-		if shouldUpgrade and not isLastChapter then
-			shouldUpgradeHouse = true
-			-- 更新目标模型（以二次校验的结果为准）
-			pendingUpgrade.targetModel = newModelName
-			DebugLog(string.format("✅ 二次校验通过，确认需要房屋升级: %s -> %s", currentHouseModel, newModelName))
-		else
-			DebugLog(string.format("⚠️ 二次校验未通过，取消房屋升级 (shouldUpgrade=%s, isLastChapter=%s)",
-				tostring(shouldUpgrade), tostring(isLastChapter)))
-			-- 清除标记，不触发镜头
-			campaignData.PendingHouseUpgrade = nil
-		end
-	end
-
-	if shouldUpgradeHouse then
-		DebugLog(string.format("✅ 检测到待处理的房屋升级，立即启动镜头表现..."))
-	end
-
-	-- 传送玩家回出生点
-	if player and player.Character then
-		local homeId = campaignData.HomeId
-		local homeFolder = Workspace.Home:FindFirstChild("PlayerHome" .. homeId)
-		if homeFolder then
-			local spawnLocation = homeFolder:FindFirstChild("SpawnLocation")
-			if spawnLocation and player.Character:FindFirstChild("HumanoidRootPart") then
-				DebugLog(string.format("✅ 正在传送玩家 %s 回出生点", player.Name))
-				player.Character.HumanoidRootPart.CFrame = spawnLocation.CFrame + Vector3.new(0, 5, 0)
-			end
-		end
-	end
-
-	-- V5.1: show upgrade popup before replacing house
-	if shouldUpgradeHouse then
-		-- 等待镜头移动到位（1秒移动 + 1秒观看）
-
-		-- 执行房屋替换
-		local HouseUpgradeSystem = nil
-		pcall(function()
-			HouseUpgradeSystem = require(SystemsFolder:WaitForChild("HouseUpgradeSystem"))
-		end)
-
-		if HouseUpgradeSystem then
-			local chapterId = campaignData.PendingHouseUpgrade.chapterId
-			DebugLog(string.format("✅ 开始替换房屋，章节=%d", chapterId))
-
-			-- 直接调用房屋替换（不再需要镜头表现，因为已经在上面处理了）
-			local completedChapters = DataManager.GetCompletedChapters(player)
-			local currentHouseModel = DataManager.GetCurrentHouseModel(player)
-			local shouldUpgrade, newModelName = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("HouseConfig")).ShouldUpgradeHouse(currentHouseModel, completedChapters)
-
-			if shouldUpgrade then
-				local homeSlot = DataManager.GetPlayerHomeSlot(player)
-				if homeSlot and homeSlot > 0 then
-					local validHomeSlot = homeSlot :: number
-					local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
-					if eventsFolder then
-						local houseUpgradeEvents = eventsFolder:FindFirstChild("HouseUpgradeEvents")
-						if houseUpgradeEvents then
-							local startEvent = houseUpgradeEvents:FindFirstChild("StartUpgradeSequence")
-							if startEvent then
-								startEvent:FireClient(player, validHomeSlot, currentHouseModel, newModelName)
-							end
-						end
-					end
-				end
-
-				HouseUpgradeSystem.WaitForPopupClosed(player, 12)
-				HouseUpgradeSystem.ReplaceHouseModel(player, newModelName)
-				DebugLog(string.format("✅ 房屋替换完成: %s", newModelName))
-			end
-		end
-
-		-- 清除标记
-		campaignData.PendingHouseUpgrade = nil
-	end
+	-- V7.0：章节胜利后不再触发监狱升级链路，重生系统负责升级表现
+	campaignData.PendingHouseUpgrade = nil
 
 	-- 关闭家园大门
+	campaignData.PendingHouseUpgrade = nil
 	pcall(function()
 		DoorControlService.CloseDoor(campaignData.HomeId)
 	end)

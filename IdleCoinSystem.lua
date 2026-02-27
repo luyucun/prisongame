@@ -102,11 +102,63 @@ local function ApplyFriendBonusToIdleCoins(player, baseCoins)
 	return math.ceil(total)
 end
 
+local function GetHouseRankByModel(modelName)
+	if type(modelName) ~= "string" or modelName == "" then
+		return 0
+	end
+	if HouseConfig.GetHouseRank then
+		return math.max(0, tonumber(HouseConfig.GetHouseRank(modelName)) or 0)
+	end
+	return 0
+end
+
+local function BuildIdleConfigFromHouse(house)
+	if type(house) ~= "table" then
+		return nil
+	end
+
+	local maxHours = tonumber(house.IdleMaxHours) or 0
+	local maxMinutes = maxHours > 0 and (maxHours * 60) or 0
+
+	return {
+		CoinsPerMinute = tonumber(house.IdleCoinsPerMinute) or 0,
+		MaxHours = maxHours,
+		MaxMinutes = maxMinutes,
+		House = house,
+	}
+end
+
 local function GetIdleConfigForPlayer(player)
 	LoadModules()
 
-	local completedChapters = DataManager.GetCompletedChapters(player) or 0
-	local houseConfig = HouseConfig.GetIdleConfigByCompletedChapters(completedChapters)
+	local houseConfig = nil
+	local rebirthCount = 0
+	if DataManager.GetRebirthCount then
+		rebirthCount = DataManager.GetRebirthCount(player) or 0
+	end
+
+	if HouseConfig.GetIdleConfigByRebirthCount then
+		houseConfig = HouseConfig.GetIdleConfigByRebirthCount(rebirthCount)
+	end
+
+	local currentHouseModel = DataManager.GetCurrentHouseModel(player)
+	local currentHouseConfig = nil
+	if HouseConfig.GetHouseByModel and type(currentHouseModel) == "string" and currentHouseModel ~= "" then
+		currentHouseConfig = BuildIdleConfigFromHouse(HouseConfig.GetHouseByModel(currentHouseModel))
+	end
+
+	if currentHouseConfig then
+		local currentRank = GetHouseRankByModel(currentHouseModel)
+		local rebirthRank = GetHouseRankByModel(houseConfig and houseConfig.House and houseConfig.House.ModelName)
+		if currentRank > rebirthRank then
+			houseConfig = currentHouseConfig
+		end
+	end
+
+	if not houseConfig then
+		local completedChapters = DataManager.GetCompletedChapters(player) or 0
+		houseConfig = HouseConfig.GetIdleConfigByCompletedChapters(completedChapters)
+	end
 
 	local coinsPerMinute = houseConfig and tonumber(houseConfig.CoinsPerMinute) or 0
 	local maxMinutes = houseConfig and tonumber(houseConfig.MaxMinutes) or 0
@@ -312,11 +364,13 @@ local function CalculateOfflineCoins(player, lastLogoutTime)
 
 	local currentTime = os.time()
 	local offlineSeconds = currentTime - lastLogoutTime
+	local offlineMinutes = math.floor(offlineSeconds / 60)
 
 	-- 转换为分钟
 	local offlineMinutes = math.floor(offlineSeconds / 60)
 
 	-- 限制最大离线时间
+	local idleConfig = GetIdleConfigForPlayer(player)
 	local idleConfig = GetIdleConfigForPlayer(player)
 	local maxMinutes = idleConfig.MaxMinutes or 0
 	if offlineMinutes > maxMinutes then
@@ -468,6 +522,7 @@ local function ProcessIdleCoinCollect(player, multiplier, source, productId)
 
 	-- 获取待领取金币
 	local idleCoinData = DataManager.GetIdleCoinData(player)
+	local idleCoinData = DataManager.GetIdleCoinData(player)
 	local pendingCoins = idleCoinData.PendingCoins or 0
 
 	if pendingCoins <= 0 then
@@ -515,6 +570,7 @@ local function ProcessIdleCoinCollect(player, multiplier, source, productId)
 	end
 
 	if success then
+		DataManager.ClearPendingIdleCoins(player)
 		-- 清空待领取金币
 		DataManager.ClearPendingIdleCoins(player)
 
@@ -527,6 +583,7 @@ local function ProcessIdleCoinCollect(player, multiplier, source, productId)
 		IdleCoinSystem.SyncIdleCoinsToClient(player, 0)
 
 		-- 保存数据
+		IdleCoinSystem.SyncIdleCoinsToClient(player, 0)
 		DataManager.SavePlayerDataThrottled(player)
 
 		print(string.format(
@@ -658,6 +715,7 @@ function IdleCoinSystem.OnPlayerJoin(player)
 
 	-- 计算离线产生的金币
 	local offlineCoins = CalculateOfflineCoins(player, lastLogoutTime)
+	local offlineCoins = CalculateOfflineCoins(player, lastLogoutTime)
 	offlineCoins = ApplyFriendBonusToIdleCoins(player, offlineCoins)
 
 	-- 累加到待领取金币
@@ -731,6 +789,7 @@ function IdleCoinSystem.StartOnlineAccumulation(player)
 	-- 创建定时器协程
 	onlineTimers[player] = true  -- 标记定时器已启动
 
+	onlineTimers[player] = true
 	task.spawn(function()
 		while onlineTimers[player] and player and player:IsDescendantOf(Players) do
 			task.wait(interval)
@@ -743,6 +802,7 @@ function IdleCoinSystem.StartOnlineAccumulation(player)
 			local idleConfig = GetIdleConfigForPlayer(player)
 			local coinsPerMinute = idleConfig.CoinsPerMinute or 0
 			-- 计算这个间隔产生的金币
+			local coinsToAdd = math.floor(coinsPerMinute * (interval / 60))
 			local coinsToAdd = math.floor(coinsPerMinute * (interval / 60))
 			coinsToAdd = ApplyFriendBonusToIdleCoins(player, coinsToAdd)
 			if coinsToAdd > 0 then

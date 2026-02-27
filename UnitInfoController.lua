@@ -214,8 +214,10 @@ local function ShowUnitInfo(unitModel)
 		return
 	end
 
-	local attack = UnitConfig.CalculateAttack(unitId, level) * (upgradeMultipliers.AttackMultiplier or 1)
-	attack = math.max(1, math.floor(attack + 0.5))
+	local rebirthAttackBonusRate = math.max(0, tonumber(player:GetAttribute("RebirthAttackBonusRate")) or 0)
+	local attackMultiplier = (upgradeMultipliers.AttackMultiplier or 1) + rebirthAttackBonusRate
+	local attack = UnitConfig.CalculateAttack(unitId, level) * attackMultiplier
+	attack = math.max(1, math.ceil(attack - 1e-6))
 
 	local health = UnitConfig.CalculateHealth(unitId, level) * (upgradeMultipliers.HealthMultiplier or 1)
 	health = math.max(1, math.floor(health + 0.5))

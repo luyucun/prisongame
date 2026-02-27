@@ -28,6 +28,7 @@ local DoorControlService = require(ServerScriptService.Systems.DoorControlServic
 -- V2.8.2新增：延迟加载HouseConfig和HouseUpgradeSystem避免循环依赖
 local HouseConfig
 local HouseUpgradeSystem
+type HouseModelNameSet = {[string]: boolean}
 
 -- 家园归属标记属性名（写在PlayerHome上）
 local HOME_OWNER_ATTR = "HomeOwnerUserId"
@@ -44,6 +45,27 @@ local function EnsureHouseModulesLoaded()
 	end
 end
 
+local function GetHouseRank(modelName)
+	EnsureHouseModulesLoaded()
+	if not HouseConfig or not HouseConfig.GetHouseRank then
+		return 0
+	end
+	return math.max(0, tonumber(HouseConfig.GetHouseRank(modelName)) or 0)
+end
+
+local function PickHigherRankModel(baseModel, candidateModel)
+	if type(candidateModel) ~= "string" or candidateModel == "" then
+		return baseModel
+	end
+	if type(baseModel) ~= "string" or baseModel == "" then
+		return candidateModel
+	end
+	if GetHouseRank(candidateModel) > GetHouseRank(baseModel) then
+		return candidateModel
+	end
+	return baseModel
+end
+
 -- 存储每个玩家的基地信息 [UserId] = HomeData
 local playerHomes = {}
 
@@ -53,7 +75,7 @@ local houseYRotationByHome = {}
 local defaultHouseBottomOffset = nil
 local defaultHouseYRotation = nil
 local GetCachedHousePlacement
-local cachedValidHouseModelNames = nil
+local cachedValidHouseModelNames: HouseModelNameSet? = nil
 
 --[[
 基地数据结构:
@@ -71,7 +93,7 @@ HomeData = {
 -- Information面板的默认文本缓存（来自Studio初始值）
 local informationDefaultTexts = nil -- { [SurfaceGuiName] = { NameText = string, PowerText = string } }
 
-local function GetValidHouseModelNameSet()
+local function GetValidHouseModelNameSet(): HouseModelNameSet?
 	if cachedValidHouseModelNames then
 		return cachedValidHouseModelNames
 	end
@@ -81,7 +103,7 @@ local function GetValidHouseModelNameSet()
 		return nil
 	end
 
-	local set = {}
+	local set: HouseModelNameSet = {}
 	for _, house in ipairs(HouseConfig.GetAllHouses()) do
 		if house and house.ModelName then
 			set[house.ModelName] = true
@@ -361,13 +383,17 @@ local function ResetMailDisplay(homeFolder)
     end
 end
 
-local function FindHouseModelInFolder(houseFolder, preferredModelName, validModelNames)
+local function FindHouseModelInFolder(
+	houseFolder: Instance?,
+	preferredModelName: string?,
+	validModelNames: HouseModelNameSet?
+): Model?
 	if not houseFolder then
 		return nil
 	end
 
-	local firstModel = nil
-	local firstValidModel = nil
+	local firstModel: Model? = nil
+	local firstValidModel: Model? = nil
 
 	for _, child in ipairs(houseFolder:GetChildren()) do
 		if child:IsA("Model") then
@@ -484,7 +510,8 @@ local function ResetHouseModelToDefault(homeFolder, homeId, spawnLocation)
 		return
 	end
 
-	local defaultModelName = HouseConfig.GetHouseModelByChapter(0)
+	local defaultModelName = (HouseConfig.GetHouseModelByRebirthCount and HouseConfig.GetHouseModelByRebirthCount(0))
+		or HouseConfig.GetHouseModelByChapter(0)
 	if not defaultModelName or defaultModelName == "" then
 		return
 	end
@@ -624,16 +651,35 @@ function HomeSystem.InitializePlayerHome(homeId, player)
         return false
     end
 
-    -- V2.8.2新增：立即替换正确等级的房屋（无延迟）
-    EnsureHouseModulesLoaded()
-    if HouseConfig and HouseUpgradeSystem then
-        local completedChapters = DataManager.GetCompletedChapters(player)
-        local targetModelName = HouseConfig.GetHouseModelByChapter(completedChapters)
+	-- V2.8.2新增：立即替换正确等级的房屋（无延迟）
+	EnsureHouseModulesLoaded()
+	if HouseConfig and HouseUpgradeSystem then
+        local rebirthCount = 0
+        if DataManager.GetRebirthCount then
+            rebirthCount = DataManager.GetRebirthCount(player) or 0
+        end
 
-        -- 获取场景中当前的房屋模型
-        local houseFolder = homeFolder:FindFirstChild("House")
-        local validHouseModelNames = GetValidHouseModelNameSet()
-        local currentHouseModel = FindHouseModelInFolder(houseFolder, targetModelName, validHouseModelNames)
+        local targetModelName = nil
+        if HouseConfig.GetHouseModelByRebirthCount then
+            targetModelName = HouseConfig.GetHouseModelByRebirthCount(rebirthCount)
+		else
+			local completedChapters = DataManager.GetCompletedChapters(player)
+			targetModelName = HouseConfig.GetHouseModelByChapter(completedChapters)
+		end
+
+		-- V7.0兼容：历史玩家若已有更高监狱，不应被重生维度降级
+		local savedModelName = DataManager.GetCurrentHouseModel(player)
+		targetModelName = PickHigherRankModel(targetModelName, savedModelName)
+		if type(targetModelName) ~= "string" or targetModelName == "" then
+			targetModelName = (HouseConfig.GetHouseModelByRebirthCount and HouseConfig.GetHouseModelByRebirthCount(0))
+				or HouseConfig.GetHouseModelByChapter(0)
+				or "PrisonLv1"
+		end
+
+		-- 获取场景中当前的房屋模型
+		local houseFolder = homeFolder:FindFirstChild("House")
+        local validHouseModelNames: HouseModelNameSet? = GetValidHouseModelNameSet()
+        local currentHouseModel: Model? = FindHouseModelInFolder(houseFolder, targetModelName, validHouseModelNames)
         if not currentHouseModel then
             ResetHouseModelToDefault(homeFolder, homeId, spawnLocation)
             currentHouseModel = FindHouseModelInFolder(houseFolder, targetModelName, validHouseModelNames)
@@ -649,19 +695,25 @@ function HomeSystem.InitializePlayerHome(homeId, player)
             end
             CacheHousePlacement(homeId, spawnLocation, currentHouseModel, {homeFolder = homeFolder})
         end
-        CleanupExtraHouseModels(houseFolder, currentHouseModel, validHouseModelNames)
+		CleanupExtraHouseModels(houseFolder, currentHouseModel, validHouseModelNames)
 
-        local actualModelName = currentHouseModel.Name
+		-- 再次收窄类型，避免 Script Analysis 将 currentHouseModel 视为可空。
+		if not currentHouseModel then
+			return false
+		end
+		local ensuredCurrentHouseModel: Model = currentHouseModel
+		local currentModelName = tostring(ensuredCurrentHouseModel.Name)
+		targetModelName = PickHigherRankModel(targetModelName, currentModelName)
 
-        -- 如果当前房屋不是目标房屋，立即替换
-        if actualModelName ~= targetModelName then
-            print(string.format(
-                "%s [HomeSystem] V2.8.2 立即替换房屋: %s -> %s (玩家: %s, 通关章节: %d)",
-                GameConfig.LOG_PREFIX,
-                actualModelName,
-                targetModelName,
+		-- 如果当前房屋不是目标房屋，立即替换
+		if currentModelName ~= targetModelName then
+			print(string.format(
+				"%s [HomeSystem] V2.8.2 立即替换房屋: %s -> %s (玩家: %s, 重生次数: %d)",
+				GameConfig.LOG_PREFIX,
+				tostring(currentModelName),
+				targetModelName,
                 player.Name,
-                completedChapters
+                rebirthCount
             ))
 
             -- 立即执行替换，不使用延迟
@@ -694,17 +746,17 @@ function HomeSystem.InitializePlayerHome(homeId, player)
                 print(string.format(
                     "%s [HomeSystem] V2.8.2 房屋已是正确等级: %s",
                     GameConfig.LOG_PREFIX,
-                    actualModelName
+                    tostring(currentModelName)
                 ))
             end
-        end
+		end
 
-        -- 更新存档中的房屋模型名称
-        local savedModelName = DataManager.GetCurrentHouseModel(player)
-        if savedModelName ~= targetModelName then
-            DataManager.SetCurrentHouseModel(player, targetModelName)
-        end
-    end
+		-- 更新存档中的房屋模型名称
+		local latestSavedModelName = DataManager.GetCurrentHouseModel(player)
+		if latestSavedModelName ~= targetModelName then
+			DataManager.SetCurrentHouseModel(player, targetModelName)
+		end
+	end
 
     -- 创建基地数据
     local homeData = {
@@ -870,7 +922,10 @@ function HomeSystem.Initialize()
     else
         EnsureHouseModulesLoaded()
         local validHouseModelNames = GetValidHouseModelNameSet()
-        local defaultModelName = HouseConfig and HouseConfig.GetHouseModelByChapter(0) or nil
+        local defaultModelName = HouseConfig and (
+            (HouseConfig.GetHouseModelByRebirthCount and HouseConfig.GetHouseModelByRebirthCount(0))
+            or HouseConfig.GetHouseModelByChapter(0)
+        ) or nil
         -- 检查所有基地是否存在
         for i = GameConfig.MIN_HOME_SLOT, GameConfig.MAX_HOME_SLOT do
             local playerHomeName = GameConfig.HOME_PREFIX .. i

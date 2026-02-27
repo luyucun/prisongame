@@ -13,6 +13,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
+local Lighting = game:GetService("Lighting")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -35,6 +36,8 @@ local openButton = nil
 local redPoint = nil
 local onlineTimeLabel = nil
 local BACKPACK_HIDE_KEY = "OnlineReward"
+local BLUR_LOCK_ID = "OnlineReward"
+local BLUR_LOCKS_KEY = "__PopupBlurLocks"
 
 local onlineRewardGui = nil
 local onlineRewardBg = nil
@@ -93,6 +96,8 @@ local panelOpenTweenB = nil
 local panelCloseTweenA = nil
 local panelCloseTweenB = nil
 local panelAnimating = false
+local onlineRewardBlurConn = nil
+local SetBlurLock = nil
 
 local RewardPathCandidates = {
 	[1] = { { "Bg01", "Reward01" } },
@@ -253,6 +258,11 @@ local function InitializeUI()
 	end
 
 	if not rewardValid then
+		if onlineRewardBlurConn then
+			onlineRewardBlurConn:Disconnect()
+			onlineRewardBlurConn = nil
+		end
+		SetBlurLock(false)
 		onlineRewardGui = nil
 		onlineRewardBg = nil
 		closeButton = nil
@@ -296,6 +306,16 @@ local function InitializeUI()
 		warn("[OnlineRewardDisplay] OnlineReward Bg not found")
 		return false
 	end
+
+	if onlineRewardBlurConn then
+		onlineRewardBlurConn:Disconnect()
+		onlineRewardBlurConn = nil
+	end
+	local boundBg = onlineRewardBg
+	onlineRewardBlurConn = boundBg:GetPropertyChangedSignal("Visible"):Connect(function()
+		SetBlurLock(boundBg.Visible == true)
+	end)
+	SetBlurLock(onlineRewardBg.Visible == true)
 
 	local title = onlineRewardBg:FindFirstChild("Title")
 	closeButton = title and title:FindFirstChild("CloseButton")
@@ -409,6 +429,7 @@ local function ForceHidePanel()
 	end
 	onlineRewardBg.Visible = false
 	panelAnimating = false
+	SetBlurLock(false)
 end
 
 local function PlayPanelOpen()
@@ -419,10 +440,12 @@ local function PlayPanelOpen()
 	local scale = EnsurePanelScale()
 	if not scale then
 		onlineRewardBg.Visible = true
+		SetBlurLock(true)
 		return true
 	end
 
 	if onlineRewardBg.Visible and not panelAnimating then
+		SetBlurLock(true)
 		return true
 	end
 
@@ -456,6 +479,7 @@ local function PlayPanelOpen()
 		connB:Disconnect()
 		panelAnimating = false
 		scale.Scale = 1
+		SetBlurLock(true)
 	end)
 
 	panelOpenTweenA:Play()
@@ -470,10 +494,12 @@ local function PlayPanelClose()
 	local scale = EnsurePanelScale()
 	if not scale then
 		onlineRewardBg.Visible = false
+		SetBlurLock(false)
 		return true
 	end
 
 	if not onlineRewardBg.Visible and not panelAnimating then
+		SetBlurLock(false)
 		return true
 	end
 
@@ -505,6 +531,7 @@ local function PlayPanelClose()
 		onlineRewardBg.Visible = false
 		scale.Scale = 1
 		panelAnimating = false
+		SetBlurLock(false)
 	end)
 
 	panelCloseTweenA:Play()
@@ -834,6 +861,25 @@ local function RequestBackpackHide()
 		elseif _G.BackpackDisplay and _G.BackpackDisplay.HideBackpack then
 			_G.BackpackDisplay.HideBackpack()
 		end
+	end
+end
+
+SetBlurLock = function(enabled)
+	local locks = _G[BLUR_LOCKS_KEY]
+	if type(locks) ~= "table" then
+		locks = {}
+		_G[BLUR_LOCKS_KEY] = locks
+	end
+
+	if enabled then
+		locks[BLUR_LOCK_ID] = true
+	else
+		locks[BLUR_LOCK_ID] = nil
+	end
+
+	local blur = Lighting:FindFirstChild("Blur")
+	if blur and blur:IsA("BlurEffect") then
+		blur.Enabled = next(locks) ~= nil
 	end
 end
 

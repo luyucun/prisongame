@@ -41,6 +41,8 @@ local playerGui = player:WaitForChild("PlayerGui")
 -- 调试和日志
 local DEBUG_MODE = false  -- 默认关闭，需要排查时再手动开启
 local LOG_PREFIX = "[ShopDisplay]"
+local BLUR_LOCK_ID = "ArmyStore"
+local BLUR_LOCKS_KEY = "__PopupBlurLocks"
 
 -- 状态变量
 local shopData = {}              -- 商店商品数据
@@ -173,12 +175,79 @@ local function PlayPurchaseErrorSound()
     end
 end
 
+local function GetPlayerRebirthCount()
+    return math.max(0, math.floor(tonumber(player:GetAttribute("RebirthCount")) or 0))
+end
+
+local function IsItemLockedByRebirth(itemData)
+    if type(itemData) ~= "table" then
+        return false
+    end
+
+    local requiredCount = math.max(0, math.floor(tonumber(itemData.RebirthUnlockCount) or 0))
+    if requiredCount <= 0 then
+        return false
+    end
+
+    if GetPlayerRebirthCount() >= requiredCount then
+        return false
+    end
+
+    if itemData.RebirthUnlocked == nil then
+        return true
+    end
+
+    return itemData.RebirthUnlocked ~= true
+end
+
+local function RefreshShopItemsRebirthState()
+    if type(shopData) ~= "table" then
+        return false
+    end
+
+    local changed = false
+    local rebirthCount = GetPlayerRebirthCount()
+    for _, item in ipairs(shopData) do
+        local requiredCount = math.max(0, math.floor(tonumber(item.RebirthUnlockCount) or 0))
+        item.RebirthUnlockCount = requiredCount
+        local unlocked = rebirthCount >= requiredCount
+        if item.RebirthUnlocked ~= unlocked then
+            item.RebirthUnlocked = unlocked
+            changed = true
+        end
+    end
+
+    return changed
+end
+
 local function IsOutOfStockMessage(message)
     return message and string.find(message, "库存不足")
 end
 
 local function IsNotEnoughCashMessage(message)
     return message and string.find(message, "金币不足")
+end
+
+local function SetBlurLock(enabled)
+    local locks = _G[BLUR_LOCKS_KEY]
+    if type(locks) ~= "table" then
+        locks = {}
+        _G[BLUR_LOCKS_KEY] = locks
+    end
+
+    if enabled then
+        locks[BLUR_LOCK_ID] = true
+    else
+        locks[BLUR_LOCK_ID] = nil
+    end
+
+    if not blurEffect then
+        blurEffect = Lighting:FindFirstChild("Blur")
+    end
+
+    if blurEffect and blurEffect:IsA("BlurEffect") then
+        blurEffect.Enabled = next(locks) ~= nil
+    end
 end
 
 local function ResolveButton(container)
@@ -353,16 +422,11 @@ local function SetShopBackdropVisible(visible)
     if not shopBg and shopUI then
         shopBg = shopUI:FindFirstChild("Bg")
     end
-    if not blurEffect then
-        blurEffect = Lighting:FindFirstChild("Blur")
-    end
 
     if shopBg then
         shopBg.Visible = visible
     end
-    if blurEffect then
-        blurEffect.Enabled = visible
-    end
+    SetBlurLock(visible == true)
 end
 
 local function EnsureInfoPopupScale()
@@ -873,17 +937,31 @@ local function CreateItemCard(itemData, index)
             ))
         end
     end
-
     local quality = cardFrame:FindFirstChild("Quality")
     if quality and quality:IsA("TextLabel") then
         quality.Text = itemData.Quality or "Common"
         quality.TextColor3 = GetQualityColor(itemData.Quality)
     end
 
-    -- 存储商品数据到卡片（用于点击事件）
+    local lockedByRebirth = IsItemLockedByRebirth(itemData)
+    local unlockBg = cardFrame:FindFirstChild("UnlockBg")
+    if unlockBg and unlockBg:IsA("GuiObject") then
+        unlockBg.Visible = lockedByRebirth
+    end
+
+    local unlockText = cardFrame:FindFirstChild("UnlockText")
+    if unlockText and unlockText:IsA("TextLabel") then
+        local requiredCount = math.max(0, math.floor(tonumber(itemData.RebirthUnlockCount) or 0))
+        unlockText.Text = string.format("You Need %d Rebirths!", requiredCount)
+        unlockText.Visible = lockedByRebirth
+    end
+
+    -- ?????????????????
     cardFrame:SetAttribute("UnitId", itemData.UnitId)
     cardFrame:SetAttribute("Price", itemData.Price)
     cardFrame:SetAttribute("Stock", itemData.Stock or 999)
+    cardFrame:SetAttribute("RebirthUnlockCount", math.max(0, math.floor(tonumber(itemData.RebirthUnlockCount) or 0)))
+    cardFrame:SetAttribute("RebirthUnlocked", not lockedByRebirth)
 
     if DEBUG_MODE then
         print(LOG_PREFIX, "创建商品卡片:", itemData.UnitId, itemData.Name)
@@ -910,6 +988,10 @@ function OnPurchaseButtonClick(itemData)
         if DEBUG_MODE then
             print(LOG_PREFIX, "商品数据无效:", itemData)
         end
+        return
+    end
+
+    if IsItemLockedByRebirth(itemData) then
         return
     end
 
@@ -1001,6 +1083,10 @@ local function SetupCardClickLogic(cardFrame, itemData)
 
     -- 点击卡片展开/收起
     local clickConnection = clickButton.MouseButton1Click:Connect(function()
+        if IsItemLockedByRebirth(itemData) then
+            return
+        end
+
         -- 如果当前卡片已展开，则收起
         if buyButtonFrame.Visible and buyButtonFrame:GetAttribute("CurrentCardId") == itemData.UnitId then
             -- 收起
@@ -1058,6 +1144,9 @@ local function SetupCardClickLogic(cardFrame, itemData)
         end
 
         local infoConn = infoButton.MouseButton1Click:Connect(function()
+            if IsItemLockedByRebirth(itemData) then
+                return
+            end
             OpenInformationPanel(itemData)
         end)
         table.insert(purchaseConnections[cardId], infoConn)
@@ -1117,6 +1206,10 @@ local function InitializeGlobalBuyButtons()
         local robuxConnection = robuxBuy.MouseButton1Click:Connect(function()
             -- Robux购买逻辑
             if currentSelectedItem then
+                if IsItemLockedByRebirth(currentSelectedItem) then
+                    return
+                end
+
                 if not PurchaseUnitRobux then
                     warn(LOG_PREFIX, "PurchaseUnitRobux事件未找到，无法进行Robux购买")
                     return
@@ -1305,6 +1398,7 @@ local function OnShopListReceived(shopList)
     end
 
     shopData = shopList
+    RefreshShopItemsRebirthState()
     PrimeRobuxPricesFromShopData()
     UpdateShopDisplay()
     UpdateFasterRestockVisibility()
@@ -1592,6 +1686,14 @@ function ShopDisplay.Initialize()
             end
         end)
     end
+
+    player:GetAttributeChangedSignal("RebirthCount"):Connect(function()
+        local changed = RefreshShopItemsRebirthState()
+        if changed and shopFrame and shopFrame.Visible then
+            UpdateShopDisplay()
+            UpdateFasterRestockVisibility()
+        end
+    end)
 
     if DEBUG_MODE then
         print(LOG_PREFIX, "商店显示系统初始化完成")

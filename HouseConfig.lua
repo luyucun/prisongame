@@ -23,6 +23,7 @@ HouseConfig.Houses = {
 	-- 初始房屋 (通关0章，即一开始就有)
 	{
 		RequiredChapter = 0,
+		RequiredRebirth = 0,
 		ModelName = "PrisonLv1",
 		Name = "The Stone Vault",
 		IdleCoinsPerMinute = 8,
@@ -34,6 +35,7 @@ HouseConfig.Houses = {
 	-- 通关第1章后解锁
 	{
 		RequiredChapter = 1,
+		RequiredRebirth = 1,
 		ModelName = "PrisonLv2",
 		Name = "The Steel Perimeter",
 		IdleCoinsPerMinute = 10,
@@ -45,6 +47,7 @@ HouseConfig.Houses = {
 	-- 通关第2章后解锁
 	{
 		RequiredChapter = 2,
+		RequiredRebirth = 5,
 		ModelName = "PrisonLv3",
 		Name = "The Elite Ward",
 		IdleCoinsPerMinute = 12,
@@ -56,6 +59,7 @@ HouseConfig.Houses = {
 	-- 通关第3章后解锁
 	{
 		RequiredChapter = 3,
+		RequiredRebirth = 10,
 		ModelName = "PrisonLv4",
 		Name = "Underground Arena",
 		IdleCoinsPerMinute = 14,
@@ -76,6 +80,56 @@ HouseConfig.Houses = {
 function HouseConfig.GetHouseModelByChapter(completedChapters)
 	local houseConfig = HouseConfig.GetHouseByChapter(completedChapters)
 	return houseConfig and houseConfig.ModelName or "PrisonLv1"
+end
+
+function HouseConfig.GetHouseRank(modelName)
+	if type(modelName) ~= "string" or modelName == "" then
+		return 0
+	end
+
+	for index, house in ipairs(HouseConfig.Houses) do
+		if house.ModelName == modelName then
+			return index
+		end
+	end
+
+	return 0
+end
+
+function HouseConfig.GetHouseByRebirthCount(rebirthCount)
+	rebirthCount = math.max(0, math.floor(tonumber(rebirthCount) or 0))
+
+	local bestHouse = HouseConfig.Houses[1]
+	for _, house in ipairs(HouseConfig.Houses) do
+		local required = tonumber(house.RequiredRebirth)
+		if required == nil then
+			required = tonumber(house.RequiredChapter) or 0
+		end
+		if rebirthCount >= required then
+			local bestRequired = tonumber(bestHouse.RequiredRebirth)
+			if bestRequired == nil then
+				bestRequired = tonumber(bestHouse.RequiredChapter) or 0
+			end
+			if required >= bestRequired then
+				bestHouse = house
+			end
+		end
+	end
+
+	return bestHouse
+end
+
+function HouseConfig.GetHouseModelByRebirthCount(rebirthCount)
+	local houseConfig = HouseConfig.GetHouseByRebirthCount(rebirthCount)
+	return houseConfig and houseConfig.ModelName or "PrisonLv1"
+end
+
+function HouseConfig.ShouldUpgradeHouseByRebirth(currentModelName, rebirthCount)
+	local targetModel = HouseConfig.GetHouseModelByRebirthCount(rebirthCount)
+	if targetModel ~= currentModelName then
+		return true, targetModel
+	end
+	return false, currentModelName
 end
 
 --[[
@@ -166,6 +220,23 @@ end
 ]]
 function HouseConfig.GetIdleConfigByCompletedChapters(completedChapters)
 	local house = HouseConfig.GetHouseByChapter(completedChapters)
+	if not house then
+		return nil
+	end
+
+	local maxHours = tonumber(house.IdleMaxHours) or 0
+	local maxMinutes = maxHours > 0 and (maxHours * 60) or 0
+
+	return {
+		CoinsPerMinute = tonumber(house.IdleCoinsPerMinute) or 0,
+		MaxHours = maxHours,
+		MaxMinutes = maxMinutes,
+		House = house,
+	}
+end
+
+function HouseConfig.GetIdleConfigByRebirthCount(rebirthCount)
+	local house = HouseConfig.GetHouseByRebirthCount(rebirthCount)
 	if not house then
 		return nil
 	end

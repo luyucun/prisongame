@@ -259,7 +259,7 @@ local function GrantReward(player, reward)
 		if count <= 0 then
 			return false, "Reward config invalid."
 		end
-		local success = CurrencySystem.AddCoins(player, count, "Online reward")
+		local success = CurrencySystem.AddCoins(player, count, "Online reward", { ApplyRebirthBonus = false })
 		if not success then
 			return false, "Failed to grant coins."
 		end

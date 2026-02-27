@@ -27,7 +27,8 @@ local PlayerManager = require(ServerScriptService.Core.PlayerManager)
 
 -- 引用系统模块
 local CurrencySystem = require(ServerScriptService.Systems.CurrencySystem)
-local HomeSystem = require(ServerScriptService.Systems.HomeSystem)
+local HomeSystemModule = ServerScriptService.Systems:WaitForChild("HomeSystem") :: ModuleScript
+local HomeSystem = require(HomeSystemModule)
 local InventorySystem = require(ServerScriptService.Systems.InventorySystem)
 local PlacementSystem = require(ServerScriptService.Systems.PlacementSystem)
 local MergeSystem = nil -- V1.4新增
@@ -62,7 +63,8 @@ local DoorControlService = require(ServerScriptService.Systems.DoorControlServic
 -- V2.1新增 - 商店系统
 local ShopSystem = require(ServerScriptService.Systems.ShopSystem)
 -- V3.1新增 - 技能商店系统
-local SkillShopSystem = require(ServerScriptService.Systems.SkillShopSystem)
+local SkillShopSystemModule = ServerScriptService.Systems:WaitForChild("SkillShopSystem") :: ModuleScript
+local SkillShopSystem = require(SkillShopSystemModule)
 -- V2.5新增 - 碰撞系统（寻路性能优化）
 local CollisionSystem = require(ServerScriptService.Systems.CollisionSystem)
 -- V2.6新增 - 挂机金币系统
@@ -82,6 +84,7 @@ local DailyRewardSystem = require(ServerScriptService.Systems.DailyRewardSystem)
 local OnlineRewardSystem = require(ServerScriptService.Systems.OnlineRewardSystem)
 -- V6.7新增 - 养成系统
 local UpgradeSystem = require(ServerScriptService.Systems.UpgradeSystem)
+local RebirthSystem = require(ServerScriptService.Systems.RebirthSystem)
 -- V5.4新增 - 新手礼包
 local StarterPackSystem = require(ServerScriptService.Systems.StarterPackSystem)
 -- V5.5新增 - VIP礼包
@@ -484,6 +487,16 @@ local function InitializeServer()
         warn(GameConfig.LOG_PREFIX, "养成系统初始化失败(异常):", result)
     elseif result == false then
         warn(GameConfig.LOG_PREFIX, "养成系统初始化失败(返回false)")
+    end
+
+    -- 14.6 初始化重生系统 (V7.0新增)
+    success, result = pcall(function()
+        return RebirthSystem.Initialize()
+    end)
+    if not success then
+        warn(GameConfig.LOG_PREFIX, "重生系统初始化失败(异常):", result)
+    elseif result == false then
+        warn(GameConfig.LOG_PREFIX, "重生系统初始化失败(返回false)")
     end
 
     -- 15. 初始化Robux购买处理器 (MarketplaceHandler)

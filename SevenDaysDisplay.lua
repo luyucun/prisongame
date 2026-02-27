@@ -14,6 +14,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local MarketplaceService = game:GetService("MarketplaceService")
+local Lighting = game:GetService("Lighting")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -31,6 +32,8 @@ local topRightGui = nil
 local sevenDaysButtonContainer = nil
 local openButton = nil
 local BACKPACK_HIDE_KEY = "SevenDays"
+local BLUR_LOCK_ID = "SevenDays"
+local BLUR_LOCKS_KEY = "__PopupBlurLocks"
 local redPoint = nil
 local redPointOriginalPos = nil
 local redPointShakeToken = nil
@@ -52,6 +55,25 @@ local function ReleaseBackpackHide()
 		trigger.PopHideLock(BACKPACK_HIDE_KEY)
 	elseif trigger and trigger.RefreshVisibility then
 		trigger.RefreshVisibility()
+	end
+end
+
+local function SetBlurLock(enabled)
+	local locks = _G[BLUR_LOCKS_KEY]
+	if type(locks) ~= "table" then
+		locks = {}
+		_G[BLUR_LOCKS_KEY] = locks
+	end
+
+	if enabled then
+		locks[BLUR_LOCK_ID] = true
+	else
+		locks[BLUR_LOCK_ID] = nil
+	end
+
+	local blur = Lighting:FindFirstChild("Blur")
+	if blur and blur:IsA("BlurEffect") then
+		blur.Enabled = next(locks) ~= nil
 	end
 end
 
@@ -101,6 +123,7 @@ local panelOpenTweenB = nil
 local panelCloseTweenA = nil
 local panelCloseTweenB = nil
 local panelAnimating = false
+local sevenDaysBlurConn = nil
 
 local function SafeWaitForChild(parent, childName, timeout)
 	timeout = timeout or 3
@@ -201,10 +224,12 @@ local function PlayPanelOpen()
 		if blackBg then
 			blackBg.Visible = true
 		end
+		SetBlurLock(true)
 		return true
 	end
 
 	if sevenDaysBg.Visible and not panelAnimating then
+		SetBlurLock(true)
 		return true
 	end
 
@@ -242,6 +267,7 @@ local function PlayPanelOpen()
 		connB:Disconnect()
 		panelAnimating = false
 		scale.Scale = 1
+		SetBlurLock(true)
 	end)
 
 	panelOpenTweenA:Play()
@@ -259,10 +285,12 @@ local function PlayPanelClose()
 		if blackBg then
 			blackBg.Visible = false
 		end
+		SetBlurLock(false)
 		return true
 	end
 
 	if not sevenDaysBg.Visible and not panelAnimating then
+		SetBlurLock(false)
 		return true
 	end
 
@@ -297,6 +325,7 @@ local function PlayPanelClose()
 		end
 		scale.Scale = 1
 		panelAnimating = false
+		SetBlurLock(false)
 	end)
 
 	panelCloseTweenA:Play()
@@ -353,6 +382,11 @@ local function InitializeUI()
 	end
 
 	if not sevenDaysValid then
+		if sevenDaysBlurConn then
+			sevenDaysBlurConn:Disconnect()
+			sevenDaysBlurConn = nil
+		end
+		SetBlurLock(false)
 		sevenDaysGui = nil
 		sevenDaysBg = nil
 		blackBg = nil
@@ -388,6 +422,18 @@ local function InitializeUI()
 		warn("[SevenDaysDisplay] SevenDays Bg未找到")
 		return false
 	end
+
+	if sevenDaysBg ~= previousSevenDaysBg then
+		if sevenDaysBlurConn then
+			sevenDaysBlurConn:Disconnect()
+			sevenDaysBlurConn = nil
+		end
+		local boundBg = sevenDaysBg
+		sevenDaysBlurConn = boundBg:GetPropertyChangedSignal("Visible"):Connect(function()
+			SetBlurLock(boundBg.Visible == true)
+		end)
+	end
+	SetBlurLock(sevenDaysBg.Visible == true)
 
 	local title = sevenDaysBg:FindFirstChild("Title")
 	closeButton = title and title:FindFirstChild("CloseButton")
@@ -708,9 +754,8 @@ local function OpenSevenDays()
 		return
 	end
 
-	sevenDaysBg.Visible = true
-	if blackBg then
-		blackBg.Visible = true
+	if not PlayPanelOpen() then
+		return
 	end
     RequestBackpackHide()
 

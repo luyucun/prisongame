@@ -159,19 +159,33 @@ local function BuildPlayerMultipliers(player)
 
     local result = BuildDefaultMultipliers()
 
-    for _, typeId in ipairs(UpgradeConfig.GetTypeIds()) do
-        local level = GetSafeLevel(playerData, typeId)
-        local ratio = GetLevelBonusRatio(typeId, level)
-        result.Levels[typeId] = level
-        result.Ratios[typeId] = ratio
-    end
+	for _, typeId in ipairs(UpgradeConfig.GetTypeIds()) do
+		local level = GetSafeLevel(playerData, typeId)
+		local ratio = GetLevelBonusRatio(typeId, level)
+		result.Levels[typeId] = level
+		result.Ratios[typeId] = ratio
+	end
 
-    result.MoveSpeedMultiplier = 1 + (result.Ratios[UpgradeConfig.TYPE.MOVE_SPEED] or 0)
-    result.AttackSpeedMultiplier = 1 + (result.Ratios[UpgradeConfig.TYPE.ATTACK_SPEED] or 0)
-    result.AttackMultiplier = 1 + (result.Ratios[UpgradeConfig.TYPE.ATTACK] or 0)
-    result.HealthMultiplier = 1 + (result.Ratios[UpgradeConfig.TYPE.HEALTH] or 0)
+	local rebirthAttackBonusRate = 0
+	if DataManager and DataManager.GetRebirthAttackBonusRate then
+		rebirthAttackBonusRate = math.max(0, tonumber(DataManager.GetRebirthAttackBonusRate(player)) or 0)
+	end
 
-    return result
+	result.MoveSpeedMultiplier = 1 + (result.Ratios[UpgradeConfig.TYPE.MOVE_SPEED] or 0)
+	result.AttackSpeedMultiplier = 1 + (result.Ratios[UpgradeConfig.TYPE.ATTACK_SPEED] or 0)
+	result.AttackMultiplier = 1 + (result.Ratios[UpgradeConfig.TYPE.ATTACK] or 0) + rebirthAttackBonusRate
+	result.HealthMultiplier = 1 + (result.Ratios[UpgradeConfig.TYPE.HEALTH] or 0)
+	result.RebirthAttackBonusRate = rebirthAttackBonusRate
+
+	return result
+end
+
+local function RoundUpIfDecimal(value)
+	local numeric = tonumber(value) or 0
+	if numeric <= 0 then
+		return 0
+	end
+	return math.ceil(numeric - 1e-6)
 end
 
 local function BuildTypePayload(upgradeData, typeId)
@@ -362,7 +376,7 @@ local function HandlePurchaseUpgradeByCoin(player, rawTypeId)
     })
 
     if not commitSuccess then
-        CurrencySystem.AddCoins(player, price, "UpgradeCoinRefund")
+        CurrencySystem.AddCoins(player, price, "UpgradeCoinRefund", { ApplyVipBonus = false, ApplyFriendBonus = false, ApplyRebirthBonus = false })
         SendPurchaseResult(player, false, commitMessage, typeId, "Coin")
         purchaseLocks[player] = nil
         return
@@ -492,12 +506,12 @@ function UpgradeSystem.ApplyMultipliersToStats(baseStats, multipliers)
     if attackSpeedMultiplier <= 0 then attackSpeedMultiplier = 1 end
     if moveSpeedMultiplier <= 0 then moveSpeedMultiplier = 1 end
 
-    local result = {
-        Attack = math.max(1, attack * attackMultiplier),
-        MaxHealth = math.max(1, maxHealth * healthMultiplier),
-        AttackSpeed = math.max(0.05, attackSpeed / attackSpeedMultiplier),
-        MoveSpeed = math.max(1, moveSpeed * moveSpeedMultiplier),
-    }
+	local result = {
+		Attack = math.max(1, RoundUpIfDecimal(attack * attackMultiplier)),
+		MaxHealth = math.max(1, maxHealth * healthMultiplier),
+		AttackSpeed = math.max(0.05, attackSpeed / attackSpeedMultiplier),
+		MoveSpeed = math.max(1, moveSpeed * moveSpeedMultiplier),
+	}
 
     return result
 end

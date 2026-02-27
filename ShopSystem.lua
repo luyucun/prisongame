@@ -447,7 +447,9 @@ local function RefreshShopStock(player, shopId, isFirstRefresh, forceNormal)
 			local unitId = itemConfig.UnitId
 
 			-- V3.9.2新增：对UnitShop检查Show字段，隐藏的商品直接置0库存并跳过
-			if shopId == "UnitShop" and itemConfig.Show == false then
+			if shopId == "UnitShop"
+				and itemConfig.Show == false
+				and (tonumber(ShopConfig.GetUnitRebirthUnlockCount(shopId, unitId)) or 0) <= 0 then
 				stockData[unitId] = 0
 				if DEBUG_MODE then
 					print(string.format(
@@ -863,6 +865,33 @@ local function GetDistanceToShopNPC(player)
 	return (rootPart.Position - npcPart.Position).Magnitude
 end
 
+local function BuildOnSaleFailMessage(shopId, unitId, reason)
+	if reason == "NOT_ENOUGH_REBIRTH" then
+		local requiredCount = 0
+		if ShopConfig.GetUnitRebirthUnlockCount then
+			requiredCount = math.max(0, tonumber(ShopConfig.GetUnitRebirthUnlockCount(shopId, unitId)) or 0)
+		end
+		if requiredCount > 0 then
+			return string.format("You Need %d Rebirths!", requiredCount)
+		end
+		return "You Need More Rebirths!"
+	end
+
+	if reason == "NOT_ENABLED" or reason == "NOT_VISIBLE" then
+		return "商品未上架"
+	end
+
+	if reason == "UNIT_NOT_FOUND" then
+		return "商品不存在"
+	end
+
+	if reason == "SHOP_NOT_FOUND" then
+		return "商店不存在"
+	end
+
+	return reason or "商品未上架"
+end
+
 -- ==================== 事件处理函数 ====================
 
 --[[ 处理客户端请求商店列表 ]]
@@ -1077,7 +1106,7 @@ local function OnPurchaseUnit(player, unitId)
 		local onSale, reason = ShopConfig.IsUnitOnSale(shopId, unitId, player)
 		if not onSale then
 			PurchaseLocks[player] = false
-			SendFailure(player, reason or "商品未上架")
+			SendFailure(player, BuildOnSaleFailMessage(shopId, unitId, reason))
 			return
 		end
 
@@ -1157,7 +1186,7 @@ local function OnPurchaseUnit(player, unitId)
 
 		local addSuccess, instanceData = InventorySystem.AddUnit(player, unitId)
 		if not addSuccess then
-			CurrencySystem.AddCoins(player, price, "购买失败退款: " .. unitId, { ApplyVipBonus = false, ApplyFriendBonus = false })
+			CurrencySystem.AddCoins(player, price, "购买失败退款: " .. unitId, { ApplyVipBonus = false, ApplyFriendBonus = false, ApplyRebirthBonus = false })
 			PurchaseLocks[player] = false
 			SendFailure(player, "兵种发放失败: " .. tostring(instanceData))
 			return
@@ -1166,7 +1195,7 @@ local function OnPurchaseUnit(player, unitId)
 		if GameConfig.Shop.EnableStockSystem then
 			local deductStockSuccess = DeductStock(player, shopId, unitId, 1)
 			if not deductStockSuccess then
-				CurrencySystem.AddCoins(player, price, "库存扣除失败退款: " .. unitId, { ApplyVipBonus = false, ApplyFriendBonus = false })
+				CurrencySystem.AddCoins(player, price, "库存扣除失败退款: " .. unitId, { ApplyVipBonus = false, ApplyFriendBonus = false, ApplyRebirthBonus = false })
 				if instanceData and instanceData.InstanceId then
 					InventorySystem.RemoveUnit(player, instanceData.InstanceId)
 				end
@@ -1246,7 +1275,7 @@ local function OnPurchaseUnitRobux(player, unitId)
 		local onSale, reason = ShopConfig.IsUnitOnSale(shopId, unitId, player)
 		if not onSale then
 			PurchaseLocks[player] = false
-			SendFailure(player, reason or "商品未上架")
+			SendFailure(player, BuildOnSaleFailMessage(shopId, unitId, reason))
 			return
 		end
 
@@ -1407,6 +1436,85 @@ function ShopSystem.GetShopStats()
 end
 
 --[[ 强制清理玩家购买锁（管理员工具） ]]
+
+
+--[[
+V7.0: ?????????????????????????
+@param player Player - ????
+@param shopId string - ??ID???UnitShop?
+@param unitId string - ??ID
+@return boolean, number|string - ????, ???????
+]]
+function ShopSystem.TryRefreshSingleUnitStock(player, shopId, unitId)
+	if not player or not player:IsA("Player") then
+		return false, "INVALID_PLAYER"
+	end
+
+	shopId = tostring(shopId or "UnitShop")
+	unitId = tostring(unitId or "")
+	if unitId == "" then
+		return false, "INVALID_UNIT_ID"
+	end
+
+	if not GameConfig.Shop.EnableStockSystem then
+		return false, "STOCK_DISABLED"
+	end
+
+	if not InitializeDependencies() then
+		return false, "DEPENDENCY_NOT_READY"
+	end
+
+	local shopData = ShopConfig.Shops[shopId]
+	if not shopData then
+		return false, "SHOP_NOT_FOUND"
+	end
+
+	local stockConfig = ShopConfig.GetStockConfig(shopId, unitId)
+	if not stockConfig then
+		return false, "STOCK_CONFIG_NOT_FOUND"
+	end
+
+	InitializePlayerStock(player, shopId)
+	local playerShopStock = PlayerStockData[player] and PlayerStockData[player][shopId]
+	if not playerShopStock then
+		return false, "PLAYER_STOCK_NOT_FOUND"
+	end
+
+	local probability = tonumber(stockConfig.RefreshProbability) or 1
+	if probability < 0 then
+		probability = 0
+	elseif probability > 1 then
+		probability = 1
+	end
+
+	local stockMin = math.max(1, math.floor(tonumber(stockConfig.StockMin) or 1))
+	local stockMax = math.max(stockMin, math.floor(tonumber(stockConfig.StockMax) or stockMin))
+
+	local hasStock = math.random() <= probability
+	local newStock = 0
+	if hasStock then
+		newStock = math.random(stockMin, stockMax)
+	end
+	playerShopStock[unitId] = newStock
+
+	if DataManager then
+		task.spawn(function()
+			local playerData = DataManager.WaitForPlayerData(player, 10)
+			if playerData then
+				DataManager.SetShopStock(player, shopId, playerShopStock)
+			end
+		end)
+	end
+
+	if StockUpdate then
+		pcall(function()
+			local stockToSend = GetPlayerStock(player, shopId)
+			StockUpdate:FireClient(player, shopId, stockToSend)
+		end)
+	end
+
+	return true, newStock
+end
 function ShopSystem.ClearPlayerLock(player)
 	PurchaseLocks[player] = nil
 	LastPurchaseTime[player] = nil
@@ -1505,9 +1613,9 @@ function ShopSystem.InitializePlayerShopTimer(player, shopId)
 
 	-- V3.1新增：同时初始化技能商店定时器（共享刷新周期）
 	local skillSystemModule = ServerScriptService.Systems:FindFirstChild("SkillShopSystem")
-	if skillSystemModule then
+	if skillSystemModule and skillSystemModule:IsA("ModuleScript") then
 		local success, result = pcall(function()
-			return require(skillSystemModule)
+			return require(skillSystemModule :: ModuleScript)
 		end)
 		if success then
 			local SkillShopSystem = result

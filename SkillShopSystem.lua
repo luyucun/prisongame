@@ -777,7 +777,7 @@ local function OnPurchaseSkill(player, skillId)
 		local addSuccess, newCount = DataManager.AddSkill(player, skillId, 1)
 		if not addSuccess then
 			-- 失败时回滚金币
-			CurrencySystem.AddCoins(player, validPrice, "购买失败退款: " .. skillId, { ApplyVipBonus = false, ApplyFriendBonus = false })
+			CurrencySystem.AddCoins(player, validPrice, "购买失败退款: " .. skillId, { ApplyVipBonus = false, ApplyFriendBonus = false, ApplyRebirthBonus = false })
 			PurchaseLocks[player] = false
 			SendFailure(player, "技能发放失败")
 			return
@@ -787,7 +787,7 @@ local function OnPurchaseSkill(player, skillId)
 		local stockDeductSuccess = DeductSkillStock(player, shopId, skillId, 1)
 		if not stockDeductSuccess then
 			-- 回滚金币和技能
-			CurrencySystem.AddCoins(player, validPrice, "库存扣除失败退款: " .. skillId, { ApplyVipBonus = false, ApplyFriendBonus = false })
+			CurrencySystem.AddCoins(player, validPrice, "库存扣除失败退款: " .. skillId, { ApplyVipBonus = false, ApplyFriendBonus = false, ApplyRebirthBonus = false })
 			DataManager.RemoveSkill(player, skillId, 1)
 			PurchaseLocks[player] = false
 			SendFailure(player, "库存扣除失败，已退款")
