@@ -9,6 +9,8 @@
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+local ProximityPromptService = game:GetService("ProximityPromptService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -100,6 +102,13 @@ local rebirthTweenDurationB = refreshTweenDurationB
 local rebirthToken = 0
 local rebirthTweenA = nil
 local rebirthTweenB = nil
+local rebirthTipLabel = rebirthTips and (
+	rebirthTips:FindFirstChild("TipText", true)
+	or rebirthTips:FindFirstChild("Text", true)
+	or rebirthTips:FindFirstChild("ErrorText", true)
+	or rebirthTips:FindFirstChildWhichIsA("TextLabel", true)
+) or nil
+local rebirthTipDefaultText = (rebirthTipLabel and rebirthTipLabel:IsA("TextLabel")) and rebirthTipLabel.Text or nil
 
 if rebirthTips then
 	rebirthTips.Visible = false
@@ -120,6 +129,67 @@ local powerConnection = nil
 local powerAnimDuration = 0.8
 
 frame.Visible = false
+
+local LIKE_HOME_ID_ATTR = "LikeHomeId"
+local LIKE_OWNER_ATTR = "LikeOwnerUserId"
+
+local function IsValidLikeOwnerUserId(userId)
+	return type(userId) == "number" and userId ~= 0 and userId == math.floor(userId)
+end
+
+local watchedLikePrompts = {}
+local likedOwnerUserIdSet = {}
+
+local function NormalizeLikeOwnerUserId(userId)
+	if not IsValidLikeOwnerUserId(userId) then
+		return nil
+	end
+	return math.floor(userId)
+end
+
+local function HasLikedOwner(userId)
+	local normalizedUserId = NormalizeLikeOwnerUserId(userId)
+	if not normalizedUserId then
+		return false
+	end
+
+	return likedOwnerUserIdSet[normalizedUserId] == true
+end
+
+local function AddLikedOwner(userId)
+	local normalizedUserId = NormalizeLikeOwnerUserId(userId)
+	if not normalizedUserId then
+		return false
+	end
+	if likedOwnerUserIdSet[normalizedUserId] then
+		return false
+	end
+
+	likedOwnerUserIdSet[normalizedUserId] = true
+	return true
+end
+
+local function ReplaceLikedOwners(payload)
+	for key in pairs(likedOwnerUserIdSet) do
+		likedOwnerUserIdSet[key] = nil
+	end
+
+	if type(payload) ~= "table" then
+		return
+	end
+
+	for _, rawUserId in ipairs(payload) do
+		AddLikedOwner(rawUserId)
+	end
+
+	if #payload == 0 then
+		for rawUserId, state in pairs(payload) do
+			if state == true then
+				AddLikedOwner(rawUserId)
+			end
+		end
+	end
+end
 
 local function StopCurrentTip()
 	if activeTween then
@@ -355,7 +425,7 @@ local function ShowBuyTip(text)
 	end)
 end
 
-local function ShowRebirthTip()
+local function ShowRebirthTip(customText)
 	if not rebirthTips or not rebirthTargetPosition then
 		return
 	end
@@ -364,6 +434,14 @@ local function ShowRebirthTip()
 	local token = rebirthToken
 
 	StopRebirthTip()
+
+	if rebirthTipLabel and rebirthTipLabel:IsA("TextLabel") then
+		if type(customText) == "string" and customText ~= "" then
+			rebirthTipLabel.Text = customText
+		elseif type(rebirthTipDefaultText) == "string" then
+			rebirthTipLabel.Text = rebirthTipDefaultText
+		end
+	end
 
 	local startPos = UDim2.new(
 		rebirthTargetPosition.X.Scale, rebirthTargetPosition.X.Offset,
@@ -406,6 +484,125 @@ local function ShowRebirthTip()
 		if rebirthTips then
 			rebirthTips.Visible = false
 			rebirthTips.Position = rebirthTargetPosition
+		end
+		end)
+end
+
+local function ShowLikeTip(likerName)
+	local safeName = tostring(likerName or "")
+	if safeName == "" then
+		safeName = "Someone"
+	end
+	local text = string.format("%s gave you a like!", safeName)
+	if rebirthTips and rebirthTargetPosition then
+		ShowRebirthTip(text)
+	else
+		ShowBuyTip(text)
+	end
+end
+
+local function ApplyLikePromptVisibility(prompt)
+	if not prompt or not prompt:IsA("ProximityPrompt") then
+		return
+	end
+
+	local homeId = tonumber(prompt:GetAttribute(LIKE_HOME_ID_ATTR))
+	if not homeId then
+		return
+	end
+
+	local ownerUserId = prompt:GetAttribute(LIKE_OWNER_ATTR)
+	local shouldEnable = IsValidLikeOwnerUserId(ownerUserId)
+		and ownerUserId ~= player.UserId
+		and not HasLikedOwner(ownerUserId)
+	if prompt.Enabled ~= shouldEnable then
+		prompt.Enabled = shouldEnable
+	end
+end
+
+local function RefreshAllLikePromptVisibility()
+	for prompt in pairs(watchedLikePrompts) do
+		ApplyLikePromptVisibility(prompt)
+	end
+end
+
+local function WatchLikePrompt(prompt)
+	if not prompt or not prompt:IsA("ProximityPrompt") then
+		return
+	end
+	if watchedLikePrompts[prompt] then
+		return
+	end
+
+	local ownerConn = prompt:GetAttributeChangedSignal(LIKE_OWNER_ATTR):Connect(function()
+		ApplyLikePromptVisibility(prompt)
+	end)
+	local homeConn = prompt:GetAttributeChangedSignal(LIKE_HOME_ID_ATTR):Connect(function()
+		ApplyLikePromptVisibility(prompt)
+	end)
+	local ancestryConn = prompt.AncestryChanged:Connect(function(_, parent)
+		if parent == nil then
+			local state = watchedLikePrompts[prompt]
+			watchedLikePrompts[prompt] = nil
+			if state then
+				if state.ownerConn then
+					state.ownerConn:Disconnect()
+				end
+				if state.homeConn then
+					state.homeConn:Disconnect()
+				end
+				if state.ancestryConn then
+					state.ancestryConn:Disconnect()
+				end
+			end
+		end
+	end)
+
+	watchedLikePrompts[prompt] = {
+		ownerConn = ownerConn,
+		homeConn = homeConn,
+		ancestryConn = ancestryConn,
+	}
+
+	ApplyLikePromptVisibility(prompt)
+end
+
+local function StartLikePromptVisibilitySync()
+	for _, descendant in ipairs(Workspace:GetDescendants()) do
+		if descendant:IsA("ProximityPrompt") then
+			WatchLikePrompt(descendant)
+		end
+	end
+
+	Workspace.DescendantAdded:Connect(function(descendant)
+		if descendant:IsA("ProximityPrompt") then
+			WatchLikePrompt(descendant)
+		end
+	end)
+end
+
+local function ShouldShowLikePrompt(prompt)
+	if not prompt or not prompt:IsA("ProximityPrompt") then
+		return true
+	end
+
+	local homeId = tonumber(prompt:GetAttribute(LIKE_HOME_ID_ATTR))
+	if not homeId then
+		return true
+	end
+
+	local ownerUserId = prompt:GetAttribute(LIKE_OWNER_ATTR)
+	if not IsValidLikeOwnerUserId(ownerUserId) then
+		return false
+	end
+
+	return ownerUserId ~= player.UserId and not HasLikedOwner(ownerUserId)
+end
+
+local function BindLikePromptShownGuard()
+	ProximityPromptService.PromptShown:Connect(function(prompt)
+		if not ShouldShowLikePrompt(prompt) then
+			prompt.Enabled = false
 		end
 	end)
 end
@@ -502,6 +699,10 @@ function TipsSystemController.ShowRebirthTip()
 	ShowRebirthTip()
 end
 
+function TipsSystemController.ShowLikeTip(likerName)
+	ShowLikeTip(likerName)
+end
+
 local function BindRefreshTipEvent()
 	local eventsFolder = ReplicatedStorage:WaitForChild("Events", 10)
 	if not eventsFolder then
@@ -560,8 +761,73 @@ local function BindRebirthTipEvent()
 	end
 end
 
+local function BindLikeTipEvent()
+	local eventsFolder = ReplicatedStorage:WaitForChild("Events", 10)
+	if not eventsFolder then
+		warn("[TipsSystemController] Events folder missing for like tip")
+		return
+	end
+
+	local likeEvents = eventsFolder:WaitForChild("LikeEvents", 10)
+	if not likeEvents then
+		warn("[TipsSystemController] LikeEvents folder missing")
+		return
+	end
+
+	local likeToastEvent = likeEvents:FindFirstChild("LikeToast")
+	if not likeToastEvent then
+		likeToastEvent = likeEvents:WaitForChild("LikeToast", 10)
+	end
+
+	if likeToastEvent and likeToastEvent:IsA("RemoteEvent") then
+		likeToastEvent.OnClientEvent:Connect(function(likerName)
+			ShowLikeTip(likerName)
+		end)
+	else
+		warn("[TipsSystemController] LikeToast event missing")
+	end
+end
+
+local function BindLikeStateEvent()
+	local eventsFolder = ReplicatedStorage:WaitForChild("Events", 10)
+	if not eventsFolder then
+		warn("[TipsSystemController] Events folder missing for like state")
+		return
+	end
+
+	local likeEvents = eventsFolder:WaitForChild("LikeEvents", 10)
+	if not likeEvents then
+		warn("[TipsSystemController] LikeEvents folder missing for like state")
+		return
+	end
+
+	local likeStateEvent = likeEvents:FindFirstChild("LikeStateSync")
+	if not likeStateEvent then
+		likeStateEvent = likeEvents:WaitForChild("LikeStateSync", 10)
+	end
+
+	if likeStateEvent and likeStateEvent:IsA("RemoteEvent") then
+		likeStateEvent.OnClientEvent:Connect(function(mode, payload)
+			if mode == "full" then
+				ReplaceLikedOwners(payload)
+				RefreshAllLikePromptVisibility()
+			elseif mode == "add" then
+				if AddLikedOwner(payload) then
+					RefreshAllLikePromptVisibility()
+				end
+			end
+		end)
+	else
+		warn("[TipsSystemController] LikeStateSync event missing")
+	end
+end
+
 BindRefreshTipEvent()
 BindRebirthTipEvent()
+BindLikeTipEvent()
+BindLikeStateEvent()
+StartLikePromptVisibilitySync()
+BindLikePromptShownGuard()
 
 _G.TipsSystem = TipsSystemController
 

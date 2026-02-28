@@ -85,6 +85,7 @@ local OnlineRewardSystem = require(ServerScriptService.Systems.OnlineRewardSyste
 -- V6.7新增 - 养成系统
 local UpgradeSystem = require(ServerScriptService.Systems.UpgradeSystem)
 local RebirthSystem = require(ServerScriptService.Systems.RebirthSystem)
+local LikeSystem = require(ServerScriptService.Systems.LikeSystem)
 -- V5.4新增 - 新手礼包
 local StarterPackSystem = require(ServerScriptService.Systems.StarterPackSystem)
 -- V5.5新增 - VIP礼包
@@ -498,6 +499,16 @@ local function InitializeServer()
     elseif result == false then
         warn(GameConfig.LOG_PREFIX, "重生系统初始化失败(返回false)")
     end
+    -- 14.7 Initialize like system (V7.2)
+    success, result = pcall(function()
+        return LikeSystem.Initialize()
+    end)
+    if not success then
+        warn(GameConfig.LOG_PREFIX, "Like system initialize failed (error):", result)
+    elseif result == false then
+        warn(GameConfig.LOG_PREFIX, "Like system initialize failed (returned false)")
+    end
+
 
     -- 15. 初始化Robux购买处理器 (MarketplaceHandler)
     success, result = pcall(function()

@@ -164,8 +164,13 @@ end
 Play按钮点击事件
 ]]
 playButton.MouseButton1Click:Connect(function()
-	-- 开战点击后立刻隐藏背包
-	HideBackpackForBattle()
+	-- V7.1: Play按钮改为打开地图选择界面
+	if _G.MapDisplay and _G.MapDisplay.OpenMap then
+		local opened = _G.MapDisplay.OpenMap()
+		if opened then
+			return
+		end
+	end
 
 	-- V5.7修复：移除此处的BattleCameraController.Start()调用
 	-- 原因：在点击按钮时，玩家可能在别人家溜达，此时：

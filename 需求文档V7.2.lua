@@ -2398,3 +2398,28 @@ StarterGui - TopRightGui - Bg - Online - Time是一个textlabel，用于显示�
 2.关于自动挑战：现在开启自动挑战，流程需要更改为：先自动打开地图界面，自动选择默认选中的地图，然后默认点击AttackButton，然后再开始战斗
 
 我的关于地图的数据表配置是：
+
+章节Id	地图名字	地图icon	解锁所需勋章数	通关奖励的勋章数
+1	Wasteland Perimeter	rbxassetid://80497998763714	0	5
+2	Desert Ironhold	rbxassetid://80497998763714	5	10
+3	Lockdown Riot Campus	rbxassetid://80497998763714	10	15
+4	The Prison Mess	rbxassetid://80497998763714	20	20
+5	Terminal Lock	rbxassetid://74616087643793	40	25
+6	Urban Lockdown	rbxassetid://91358542710671	80	30
+7	Darkbay Prison	rbxassetid://86616141514937	160	35
+8	Galactic Prison Transit	rbxassetid://133384519931604	250	40
+
+需求文档V7.2 点赞系统
+
+概述：玩家可以给其他玩家进行点赞
+
+详细规则：
+1.每个玩家家园都有一个叫Information的模型，其中Information的子节点有个叫InfoPart的，其下挂载了一个叫ProximityPrompt的节点，用于触发交互按钮
+2.玩家靠近其他玩家的InfoPart时，就出现交互按钮
+3.玩家与交互按钮完成交互，即可对InfoPart所属家园的玩家进行一次点赞
+
+注意：
+1.点赞是永久的数值，不会被重生而重置
+2.玩家靠近自己家园的InfoPart，不会出现交互按钮，以及靠近一个没有玩家的空基地的时候，也不会出现交互按钮
+
+另外：点赞完成后，需要在被点赞的玩家的界面弹出提示：[PlayerName] gave you a like!，其中PlayerName要是点赞者的游戏名字。在弹出时要有出现动效，参考重生成功时的弹出动效，以及停留时长和消失效果都保持一致

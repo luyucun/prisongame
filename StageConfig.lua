@@ -2,15 +2,14 @@
 脚本名称: StageConfig
 脚本类型: ModuleScript (配置模块)
 脚本位置: ReplicatedStorage/Config/StageConfig
-版本: V3.10
+版本: V7.1
 ]]
 
 --[[
 关卡配置模块
-职责: 存储关卡相关的配置参数
-V2.8新增: 章节概念，每个章节包含多个小关
-V3.7新增: 章节关卡地图替换功能，每个章节可配置不同的StageTemplateStyle
-V3.10重构: 引用EnemyConfig的章节配置，实现配置统一管理
+职责:
+1. 存储章节战斗配置（关卡数、模板风格、敌人引用、金币奖励）
+2. 存储V7.1地图系统配置（地图名、icon、解锁勋章、通关勋章奖励）
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -18,192 +17,116 @@ local EnemyConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChil
 
 local StageConfig = {}
 
--- ==================== 章节配置 (V2.8新增, V3.7增强, V3.10重构) ====================
--- 章节列表配置
--- ChapterId: 章节ID (从1开始)
--- EnemyChapterRef: 引用EnemyConfig中的章节ID (V3.10新增)
--- StagesPerChapter: 该章节的关卡数量 (V3.10: 自动从EnemyConfig读取)
--- StageTemplateStyle: 该章节使用的关卡模板风格 (如 "Style01", "Style02" 等)
--- Rewards: 该章节每关的奖励
+local DEFAULT_CHAPTER_STYLE = "Style01"
+local DEFAULT_REWARD_COINS = 10
 
+local function BuildCoinRewards(stageCount, coinAmount)
+	local rewards = {}
+	local total = math.max(0, math.floor(tonumber(stageCount) or 0))
+	local coins = math.max(0, math.floor(tonumber(coinAmount) or 0))
+	for i = 1, total do
+		rewards[i] = { Coins = coins }
+	end
+	return rewards
+end
+
+-- 章节地图配置（V7.1）
+-- 注意：Chapter 6~8 当前复用第5章敌人与模板，后续补充新章节敌人配置后仅需修改EnemyChapterRef/Style。
 StageConfig.Chapters = {
-	-- 第一章
 	[1] = {
 		ChapterId = 1,
-		ChapterName = "Chapter 1",
-		EnemyChapterRef = 1,  -- V3.10: 引用EnemyConfig.Chapters[1]
-		StagesPerChapter = 5,  -- 🔥修复：显式指定关卡数，防止读取失败时回退到默认值3
-		StageTemplateStyle = "Style01",  -- V3.7: 使用Style01风格的关卡模板
-		Rewards = {
-			[1] = {Coins = 10},
-			[2] = {Coins = 10},
-			[3] = {Coins = 10},
-			[4] = {Coins = 10},
-			[5] = {Coins = 10},
-		}
+		ChapterName = "Wasteland Perimeter",
+		MapIcon = "rbxassetid://136889564745361",
+		UnlockMedals = 0,
+		RewardMedals = 5,
+		EnemyChapterRef = 1,
+		StagesPerChapter = 5,
+		StageTemplateStyle = "Style01",
 	},
-	-- 第二章
 	[2] = {
 		ChapterId = 2,
-		ChapterName = "Chapter 2",
-		EnemyChapterRef = 2,  -- V3.10: 引用EnemyConfig.Chapters[2]
-		StagesPerChapter = 10,  -- 🔥修复：显式指定关卡数，防止读取失败时回退到默认值3
-		StageTemplateStyle = "Style02",  -- V3.7: 使用Style02风格
-		Rewards = {
-			[1] = {Coins = 10},
-			[2] = {Coins = 10},
-			[3] = {Coins = 10},
-			[4] = {Coins = 10},
-			[5] = {Coins = 10},
-			[6] = {Coins = 10},
-			[7] = {Coins = 10},
-			[8] = {Coins = 10},
-			[9] = {Coins = 10},
-			[10] = {Coins = 10},
-		}
+		ChapterName = "Desert Ironhold",
+		MapIcon = "rbxassetid://107529700261477",
+		UnlockMedals = 5,
+		RewardMedals = 10,
+		EnemyChapterRef = 2,
+		StagesPerChapter = 10,
+		StageTemplateStyle = "Style02",
 	},
-
-	-- 第三章
 	[3] = {
 		ChapterId = 3,
-		ChapterName = "Chapter 3",
-		EnemyChapterRef = 3,  -- V3.10: 引用EnemyConfig.Chapters[3]
-		StagesPerChapter = 20,  -- 🔥修复：显式指定关卡数，防止读取失败时回退到默认值3
-		StageTemplateStyle = "Style03",  -- V3.7: 使用Style02风格
-		Rewards = {
-			[1] = {Coins = 10},
-			[2] = {Coins = 10},
-			[3] = {Coins = 10},
-			[4] = {Coins = 10},
-			[5] = {Coins = 10},
-			[6] = {Coins = 10},
-			[7] = {Coins = 10},
-			[8] = {Coins = 10},
-			[9] = {Coins = 10},
-			[10] = {Coins = 10},
-			[11] = {Coins = 10},
-			[12] = {Coins = 10},
-			[13] = {Coins = 10},
-			[14] = {Coins = 10},
-			[15] = {Coins = 10},
-			[16] = {Coins = 10},
-			[17] = {Coins = 10},
-			[18] = {Coins = 10},
-			[19] = {Coins = 10},
-			[20] = {Coins = 10},
-		}
+		ChapterName = "Lockdown Riot Campus",
+		MapIcon = "rbxassetid://99918795164776",
+		UnlockMedals = 10,
+		RewardMedals = 15,
+		EnemyChapterRef = 3,
+		StagesPerChapter = 20,
+		StageTemplateStyle = "Style03",
 	},
-
-	-- Chapter 4
 	[4] = {
 		ChapterId = 4,
-		ChapterName = "Chapter 4",
-		EnemyChapterRef = 4,  -- V3.10: reference EnemyConfig.Chapters[4]
+		ChapterName = "The Prison Mess",
+		MapIcon = "rbxassetid://77586065205533",
+		UnlockMedals = 20,
+		RewardMedals = 20,
+		EnemyChapterRef = 4,
 		StagesPerChapter = 30,
 		StageTemplateStyle = "Style04",
-		Rewards = {
-			[1] = {Coins = 10},
-			[2] = {Coins = 10},
-			[3] = {Coins = 10},
-			[4] = {Coins = 10},
-			[5] = {Coins = 10},
-			[6] = {Coins = 10},
-			[7] = {Coins = 10},
-			[8] = {Coins = 10},
-			[9] = {Coins = 10},
-			[10] = {Coins = 10},
-			[11] = {Coins = 10},
-			[12] = {Coins = 10},
-			[13] = {Coins = 10},
-			[14] = {Coins = 10},
-			[15] = {Coins = 10},
-			[16] = {Coins = 10},
-			[17] = {Coins = 10},
-			[18] = {Coins = 10},
-			[19] = {Coins = 10},
-			[20] = {Coins = 10},
-			[21] = {Coins = 10},
-			[22] = {Coins = 10},
-			[23] = {Coins = 10},
-			[24] = {Coins = 10},
-			[25] = {Coins = 10},
-			[26] = {Coins = 10},
-			[27] = {Coins = 10},
-			[28] = {Coins = 10},
-			[29] = {Coins = 10},
-			[30] = {Coins = 10},
-		}
 	},
-
 	[5] = {
 		ChapterId = 5,
-		ChapterName = "Chapter 5",
+		ChapterName = "Terminal Lock",
+		MapIcon = "rbxassetid://74616087643793",
+		UnlockMedals = 40,
+		RewardMedals = 25,
 		EnemyChapterRef = 5,
 		StagesPerChapter = 50,
 		StageTemplateStyle = "Style05",
-		Rewards = {
-			[1] = {Coins = 10},
-			[2] = {Coins = 10},
-			[3] = {Coins = 10},
-			[4] = {Coins = 10},
-			[5] = {Coins = 10},
-			[6] = {Coins = 10},
-			[7] = {Coins = 10},
-			[8] = {Coins = 10},
-			[9] = {Coins = 10},
-			[10] = {Coins = 10},
-			[11] = {Coins = 10},
-			[12] = {Coins = 10},
-			[13] = {Coins = 10},
-			[14] = {Coins = 10},
-			[15] = {Coins = 10},
-			[16] = {Coins = 10},
-			[17] = {Coins = 10},
-			[18] = {Coins = 10},
-			[19] = {Coins = 10},
-			[20] = {Coins = 10},
-			[21] = {Coins = 10},
-			[22] = {Coins = 10},
-			[23] = {Coins = 10},
-			[24] = {Coins = 10},
-			[25] = {Coins = 10},
-			[26] = {Coins = 10},
-			[27] = {Coins = 10},
-			[28] = {Coins = 10},
-			[29] = {Coins = 10},
-			[30] = {Coins = 10},
-			[31] = {Coins = 10},
-			[32] = {Coins = 10},
-			[33] = {Coins = 10},
-			[34] = {Coins = 10},
-			[35] = {Coins = 10},
-			[36] = {Coins = 10},
-			[37] = {Coins = 10},
-			[38] = {Coins = 10},
-			[39] = {Coins = 10},
-			[40] = {Coins = 10},
-			[41] = {Coins = 10},
-			[42] = {Coins = 10},
-			[43] = {Coins = 10},
-			[44] = {Coins = 10},
-			[45] = {Coins = 10},
-			[46] = {Coins = 10},
-			[47] = {Coins = 10},
-			[48] = {Coins = 10},
-			[49] = {Coins = 10},
-			[50] = {Coins = 10},
-		}
+	},
+	[6] = {
+		ChapterId = 6,
+		ChapterName = "Urban Lockdown",
+		MapIcon = "rbxassetid://99114216606110",
+		UnlockMedals = 80,
+		RewardMedals = 30,
+		EnemyChapterRef = 5,
+		StagesPerChapter = 50,
+		StageTemplateStyle = "Style05",
+	},
+	[7] = {
+		ChapterId = 7,
+		ChapterName = "Darkbay Prison",
+		MapIcon = "rbxassetid://86616141514937",
+		UnlockMedals = 160,
+		RewardMedals = 35,
+		EnemyChapterRef = 5,
+		StagesPerChapter = 50,
+		StageTemplateStyle = "Style05",
+	},
+	[8] = {
+		ChapterId = 8,
+		ChapterName = "Galactic Prison Transit",
+		MapIcon = "rbxassetid://133384519931604",
+		UnlockMedals = 250,
+		RewardMedals = 40,
+		EnemyChapterRef = 5,
+		StagesPerChapter = 50,
+		StageTemplateStyle = "Style05",
 	},
 }
 
--- 总章节数
-StageConfig.TotalChapters = 5
+for chapterId, chapter in pairs(StageConfig.Chapters) do
+	if not chapter.Rewards then
+		chapter.Rewards = BuildCoinRewards(chapter.StagesPerChapter, DEFAULT_REWARD_COINS)
+	end
+	chapter.ChapterId = chapterId
+end
 
--- ==================== Style01关卡配置 (保留兼容) ====================
+StageConfig.TotalChapters = 8
+
+-- 兼容旧逻辑保留
 StageConfig.Style01 = {
-	TotalStages = 20,  -- 总关卡数（兼容旧配置）
-
-	-- 关卡奖励（预留，后续完善）
+	TotalStages = 20,
 	Rewards = {
 		[1] = {Coins = 100},
 		[2] = {Coins = 150},
@@ -214,89 +137,119 @@ StageConfig.Style01 = {
 		[7] = {Coins = 400},
 		[8] = {Coins = 450},
 		[9] = {Coins = 500},
-		[10] = {Coins = 1000},  -- 最后一关额外奖励
+		[10] = {Coins = 1000},
 	}
 }
 
--- ==================== 工具函数 (V2.8新增) ====================
-
---[[
-获取章节配置
-@param chapterId number - 章节ID
-@return table|nil - 章节配置数据
-]]
 function StageConfig.GetChapterConfig(chapterId)
-	return StageConfig.Chapters[chapterId]
+	local id = tonumber(chapterId)
+	if not id then
+		return nil
+	end
+	return StageConfig.Chapters[id]
 end
 
---[[
-获取章节的关卡数量 (V3.10增强: 从EnemyConfig读取)
-@param chapterId number - 章节ID
-@return number - 关卡数量
-]]
 function StageConfig.GetStagesPerChapter(chapterId)
-	local chapter = StageConfig.Chapters[chapterId]
+	local chapter = StageConfig.GetChapterConfig(chapterId)
 	if chapter then
-		-- V3.10: 优先从配置的StagesPerChapter读取
-		if chapter.StagesPerChapter then
-			return chapter.StagesPerChapter
+		local configuredStages = tonumber(chapter.StagesPerChapter)
+		if configuredStages and configuredStages > 0 then
+			return configuredStages
 		end
 
-		-- V3.10: 如果没有配置，从EnemyConfig自动读取
-		if chapter.EnemyChapterRef then
-			local enemyStageCount = EnemyConfig.GetStageCount(chapter.EnemyChapterRef)
+		local enemyRef = tonumber(chapter.EnemyChapterRef)
+		if enemyRef and EnemyConfig.GetStageCount then
+			local enemyStageCount = tonumber(EnemyConfig.GetStageCount(enemyRef)) or 0
 			if enemyStageCount > 0 then
 				return enemyStageCount
 			end
 		end
 	end
-	return 3  -- 默认3关
+	return 3
 end
 
---[[
-获取章节的模板风格 (V3.7增强)
-@param chapterId number - 章节ID
-@return string - 模板风格名称 (如 "Style01", "Style02")
-说明: 优先读取StageTemplateStyle字段，兼容旧版Style字段
-]]
 function StageConfig.GetChapterStyle(chapterId)
-	local chapter = StageConfig.Chapters[chapterId]
+	local chapter = StageConfig.GetChapterConfig(chapterId)
 	if chapter then
-		-- V3.7: 优先使用新字段名StageTemplateStyle，兼容旧字段Style
-		return chapter.StageTemplateStyle or chapter.Style or "Style01"
+		return chapter.StageTemplateStyle or chapter.Style or DEFAULT_CHAPTER_STYLE
 	end
-	return "Style01"  -- 默认Style01
+	return DEFAULT_CHAPTER_STYLE
 end
 
---[[
-获取章节某关的奖励
-@param chapterId number - 章节ID
-@param stageNum number - 章节内关卡编号
-@return table|nil - 奖励配置
-]]
 function StageConfig.GetStageReward(chapterId, stageNum)
-	local chapter = StageConfig.Chapters[chapterId]
-	if chapter and chapter.Rewards then
-		return chapter.Rewards[stageNum]
+	local chapter = StageConfig.GetChapterConfig(chapterId)
+	local stageId = tonumber(stageNum)
+	if chapter and chapter.Rewards and stageId then
+		return chapter.Rewards[stageId]
 	end
 	return nil
 end
 
---[[
-获取总章节数
-@return number - 总章节数
-]]
+function StageConfig.GetChapterUnlockMedals(chapterId)
+	local chapter = StageConfig.GetChapterConfig(chapterId)
+	if not chapter then
+		return math.huge
+	end
+	return math.max(0, math.floor(tonumber(chapter.UnlockMedals) or 0))
+end
+
+function StageConfig.GetChapterRewardMedals(chapterId)
+	local chapter = StageConfig.GetChapterConfig(chapterId)
+	if not chapter then
+		return 0
+	end
+	return math.max(0, math.floor(tonumber(chapter.RewardMedals) or 0))
+end
+
+function StageConfig.GetChapterDisplayName(chapterId)
+	local chapter = StageConfig.GetChapterConfig(chapterId)
+	if not chapter then
+		return ""
+	end
+	return tostring(chapter.ChapterName or ("Chapter " .. tostring(chapter.ChapterId or chapterId)))
+end
+
+function StageConfig.GetChapterIcon(chapterId)
+	local chapter = StageConfig.GetChapterConfig(chapterId)
+	if not chapter then
+		return ""
+	end
+	return tostring(chapter.MapIcon or "")
+end
+
+function StageConfig.GetChapterList()
+	local chapters = {}
+	for chapterId = 1, StageConfig.TotalChapters do
+		local chapter = StageConfig.Chapters[chapterId]
+		if chapter then
+			table.insert(chapters, {
+				ChapterId = chapterId,
+				ChapterName = StageConfig.GetChapterDisplayName(chapterId),
+				MapIcon = StageConfig.GetChapterIcon(chapterId),
+				UnlockMedals = StageConfig.GetChapterUnlockMedals(chapterId),
+				RewardMedals = StageConfig.GetChapterRewardMedals(chapterId),
+				StagesPerChapter = StageConfig.GetStagesPerChapter(chapterId),
+			})
+		end
+	end
+	return chapters
+end
+
 function StageConfig.GetTotalChapters()
 	return StageConfig.TotalChapters
 end
 
---[[
-判断是否是最后一章
-@param chapterId number - 章节ID
-@return boolean - 是否是最后一章
-]]
 function StageConfig.IsLastChapter(chapterId)
-	return chapterId >= StageConfig.TotalChapters
+	local id = tonumber(chapterId) or 0
+	return id >= StageConfig.TotalChapters
+end
+
+function StageConfig.IsValidChapter(chapterId)
+	local id = tonumber(chapterId)
+	if not id then
+		return false
+	end
+	return StageConfig.Chapters[id] ~= nil
 end
 
 return StageConfig

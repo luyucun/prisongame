@@ -317,6 +317,9 @@ local function LoadFromDataStore(player)
 			if data.RebirthData then
 				data.RebirthData = RestoreFromDataStore(data.RebirthData)
 			end
+			if data.LikeData then
+				data.LikeData = RestoreFromDataStore(data.LikeData)
+			end
 			if data.SoundSettings then
 				data.SoundSettings = RestoreFromDataStore(data.SoundSettings)  -- V4.6：恢复音效设			end
 			end
@@ -388,6 +391,7 @@ local function SaveToDataStore(player, playerData, userId)
 		OnlineRewardData = SanitizeForDataStore(playerData.OnlineRewardData),  -- V6.1在线奖励
 		UpgradeData = SanitizeForDataStore(playerData.UpgradeData),
 		RebirthData = SanitizeForDataStore(playerData.RebirthData),
+		LikeData = SanitizeForDataStore(playerData.LikeData),
 		LastSaveTime = os.time(),
 	}
 
@@ -705,6 +709,61 @@ local function NormalizeRebirthData(data)
 	}
 end
 
+local function BuildDefaultLikeData()
+	return {
+		Count = 0,
+		GivenLikes = {},
+	}
+end
+
+local function NormalizeLikeTargetId(value)
+	local userId = math.floor(tonumber(value) or 0)
+	if userId == 0 then
+		return nil
+	end
+	return userId
+end
+
+local function NormalizeGivenLikesMap(givenLikes)
+	local normalized = {}
+	if type(givenLikes) ~= "table" then
+		return normalized
+	end
+
+	for rawTargetUserId, rawState in pairs(givenLikes) do
+		local targetUserId = NormalizeLikeTargetId(rawTargetUserId)
+		local numericState = tonumber(rawState)
+		if targetUserId and (rawState == true or (numericState and numericState > 0)) then
+			normalized[tostring(targetUserId)] = true
+		end
+	end
+
+	return normalized
+end
+
+local function NormalizeLikeData(data)
+	if type(data) ~= "table" then
+		return BuildDefaultLikeData()
+	end
+
+	local count = tonumber(data.Count)
+	if count == nil then
+		count = tonumber(data.LikeCount)
+	end
+
+	count = math.floor(count or 0)
+	if count < 0 then
+		count = 0
+	end
+
+	local givenLikes = NormalizeGivenLikesMap(data.GivenLikes)
+
+	return {
+		Count = count,
+		GivenLikes = givenLikes,
+	}
+end
+
 --[[
 创建默认玩家数据
 @param player Player - 玩家对象
@@ -740,6 +799,10 @@ local function CreateDefaultData(player)
             CurrentChapter = 1,       -- 默认从第1章开
             CompletedChapters = 0,    -- 未通关任何章节
             CurrentHouseModel = "PrisonLv1",  -- 默认初始房屋
+            MedalCount = 0,           -- V7.1勋章数量（永久累加，不消耗）
+            UnlockedChapters = {      -- V7.1已解锁章节映射（永久解锁）
+                [1] = true,
+            },
             -- 主线最大通关进度（只增不减）：用于“最多打到哪关”统计与展示
             MaxClearedChapter = 1,
             MaxClearedStage = 0,
@@ -758,6 +821,7 @@ local function CreateDefaultData(player)
         OnlineRewardData = BuildDefaultOnlineRewardData(os.time()), -- V6.1在线奖励
         UpgradeData = BuildDefaultUpgradeData(), -- V6.7养成系统
         RebirthData = BuildDefaultRebirthData(), -- V7.0重生系统
+        LikeData = BuildDefaultLikeData(), -- V7.2点赞系统
         LastSaveTime = os.time(),
     }
 end
@@ -1269,6 +1333,127 @@ function DataManager.SetRebirthData(player, count, coinBonusRate, attackBonusRat
 
     return true
 end
+function DataManager.GetLikeData(player)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData then
+        return nil
+    end
+
+    if not playerData.LikeData then
+        playerData.LikeData = NormalizeLikeData({
+            Count = playerData.LikeCount,
+        })
+    else
+        playerData.LikeData = NormalizeLikeData(playerData.LikeData)
+    end
+
+    if player and player:IsA("Player") then
+        player:SetAttribute("LikeCount", playerData.LikeData.Count or 0)
+    end
+
+    return playerData.LikeData
+end
+
+function DataManager.GetLikeCount(player)
+    local likeData = DataManager.GetLikeData(player)
+    if not likeData then
+        return 0
+    end
+
+    return math.max(0, math.floor(tonumber(likeData.Count) or 0))
+end
+
+function DataManager.AddLike(player, amount)
+    local likeData = DataManager.GetLikeData(player)
+    if not likeData then
+        warn(GameConfig.LOG_PREFIX, "AddLike: player data missing")
+        return 0
+    end
+
+    local delta = math.floor(tonumber(amount) or 1)
+    if delta <= 0 then
+        return likeData.Count or 0
+    end
+
+    local currentCount = math.max(0, math.floor(tonumber(likeData.Count) or 0))
+    local newCount = currentCount + delta
+    likeData.Count = newCount
+
+    if player and player:IsA("Player") then
+        player:SetAttribute("LikeCount", newCount)
+    end
+
+    return newCount
+end
+
+function DataManager.HasLikedTarget(player, targetUserId)
+	local likeData = DataManager.GetLikeData(player)
+	if not likeData then
+		return false
+	end
+
+	local normalizedTargetUserId = NormalizeLikeTargetId(targetUserId)
+	if not normalizedTargetUserId then
+		return false
+	end
+
+	local givenLikes = likeData.GivenLikes
+	if type(givenLikes) ~= "table" then
+		return false
+	end
+
+	return givenLikes[tostring(normalizedTargetUserId)] == true
+end
+
+function DataManager.MarkLikedTarget(player, targetUserId)
+	local likeData = DataManager.GetLikeData(player)
+	if not likeData then
+		return false
+	end
+
+	local normalizedTargetUserId = NormalizeLikeTargetId(targetUserId)
+	if not normalizedTargetUserId then
+		return false
+	end
+
+	local givenLikes = likeData.GivenLikes
+	if type(givenLikes) ~= "table" then
+		givenLikes = {}
+		likeData.GivenLikes = givenLikes
+	end
+
+	local key = tostring(normalizedTargetUserId)
+	if givenLikes[key] == true then
+		return false
+	end
+
+	givenLikes[key] = true
+	return true
+end
+
+function DataManager.GetGivenLikeTargetList(player)
+	local likeData = DataManager.GetLikeData(player)
+	if not likeData then
+		return {}
+	end
+
+	local givenLikes = likeData.GivenLikes
+	if type(givenLikes) ~= "table" then
+		return {}
+	end
+
+	local targetList = {}
+	for rawTargetUserId, rawState in pairs(givenLikes) do
+		local targetUserId = NormalizeLikeTargetId(rawTargetUserId)
+		if targetUserId and rawState == true then
+			table.insert(targetList, targetUserId)
+		end
+	end
+
+	table.sort(targetList)
+	return targetList
+end
+
 local function GetStagesPerChapterSafe(chapterId: number): number
     local defaultStages = (GameConfig.Campaign and GameConfig.Campaign.MaxStages) or 10
 
@@ -1276,7 +1461,6 @@ local function GetStagesPerChapterSafe(chapterId: number): number
         return StageConfig.GetChapterConfig and StageConfig.GetChapterConfig(chapterId)
     end)
 
-    -- If chapter exists, prefer StageConfig's unified stage-count accessor (V3.10+ reads from EnemyConfig).
     if ok and chapterConfig and StageConfig.GetStagesPerChapter then
         local ok2, stages = pcall(function()
             return StageConfig.GetStagesPerChapter(chapterId)
@@ -1290,12 +1474,106 @@ local function GetStagesPerChapterSafe(chapterId: number): number
     return defaultStages
 end
 
+local function GetTotalChaptersSafe(): number
+    local total = StageConfig.TotalChapters
+    if StageConfig.GetTotalChapters then
+        local ok, value = pcall(function()
+            return StageConfig.GetTotalChapters()
+        end)
+        if ok and tonumber(value) then
+            total = tonumber(value)
+        end
+    end
+
+    total = math.floor(tonumber(total) or 1)
+    if total < 1 then
+        total = 1
+    end
+    return total
+end
+
+local function NormalizeUnlockedChapters(rawUnlocked, totalChapters)
+    local normalized = {}
+    if type(rawUnlocked) == "table" then
+        for key, unlocked in pairs(rawUnlocked) do
+            if unlocked then
+                local chapterId = tonumber(key)
+                if chapterId then
+                    chapterId = math.floor(chapterId)
+                    if chapterId >= 1 and chapterId <= totalChapters then
+                        normalized[chapterId] = true
+                    end
+                end
+            end
+        end
+    end
+
+    normalized[1] = true
+    return normalized
+end
+
+local function GetLegacyUnlockedChapter(progress, totalChapters)
+    local completed = tonumber(progress.CompletedChapters) or 0
+    local maxClearedChapter = tonumber(progress.MaxClearedChapter) or completed
+    local currentChapter = tonumber(progress.CurrentChapter) or 1
+
+    local legacyUnlocked = math.max(1, completed, maxClearedChapter, currentChapter)
+    if legacyUnlocked > totalChapters then
+        legacyUnlocked = totalChapters
+    end
+    return math.floor(legacyUnlocked)
+end
+
+local function RefreshUnlockedChaptersByMedals(progress, totalChapters)
+    local medals = math.max(0, math.floor(tonumber(progress.MedalCount) or 0))
+    progress.MedalCount = medals
+
+    local unlocked = progress.UnlockedChapters or {}
+    local changed = false
+
+    for chapterId = 1, totalChapters do
+        local requiredMedals = 0
+        if StageConfig.GetChapterUnlockMedals then
+            local ok, value = pcall(function()
+                return StageConfig.GetChapterUnlockMedals(chapterId)
+            end)
+            if ok then
+                requiredMedals = math.max(0, math.floor(tonumber(value) or 0))
+            end
+        end
+
+        if medals >= requiredMedals and not unlocked[chapterId] then
+            unlocked[chapterId] = true
+            changed = true
+        end
+    end
+
+    unlocked[1] = true
+    progress.UnlockedChapters = unlocked
+    return changed
+end
+
+local function GetFirstUnlockedChapter(unlocked, totalChapters)
+    for chapterId = 1, totalChapters do
+        if unlocked[chapterId] then
+            return chapterId
+        end
+    end
+    return 1
+end
+
 local function EnsureChapterProgress(playerData)
+    local totalChapters = GetTotalChaptersSafe()
+
     if not playerData.ChapterProgress then
         playerData.ChapterProgress = {
             CurrentChapter = 1,
             CompletedChapters = 0,
             CurrentHouseModel = "PrisonLv1",
+            MedalCount = 0,
+            UnlockedChapters = {
+                [1] = true,
+            },
             MaxClearedChapter = 1,
             MaxClearedStage = 0,
         }
@@ -1304,48 +1582,58 @@ local function EnsureChapterProgress(playerData)
 
     local progress = playerData.ChapterProgress
 
-    if progress.CurrentChapter == nil then
-        progress.CurrentChapter = 1
-    end
-    if progress.CompletedChapters == nil then
-        progress.CompletedChapters = 0
-    end
-    if progress.CurrentHouseModel == nil then
-        progress.CurrentHouseModel = "PrisonLv1"
-    end
+    local currentChapter = math.floor(tonumber(progress.CurrentChapter) or 1)
+    local completedChapters = math.max(0, math.floor(tonumber(progress.CompletedChapters) or 0))
+    local currentHouseModel = progress.CurrentHouseModel or "PrisonLv1"
 
     local maxChapter = tonumber(progress.MaxClearedChapter)
     local maxStage = tonumber(progress.MaxClearedStage)
 
-    -- 向后兼容：旧存档没有 MaxCleared* 字段时，CompletedChapters 推导最低保底
     if maxChapter == nil and maxStage == nil then
-        local completed = tonumber(progress.CompletedChapters) or 0
-        if completed > 0 then
-            progress.MaxClearedChapter = completed
-            progress.MaxClearedStage = GetStagesPerChapterSafe(completed)
+        if completedChapters > 0 then
+            maxChapter = completedChapters
+            maxStage = GetStagesPerChapterSafe(completedChapters)
         else
-            progress.MaxClearedChapter = 1
-            progress.MaxClearedStage = 0
+            maxChapter = 1
+            maxStage = 0
         end
-        return progress
     end
 
-    if maxChapter == nil then
-        maxChapter = 1
+    maxChapter = math.max(1, math.floor(tonumber(maxChapter) or 1))
+    maxStage = math.max(0, math.floor(tonumber(maxStage) or 0))
+
+    if currentChapter < 1 then
+        currentChapter = 1
     end
-    if maxStage == nil then
-        maxStage = 0
+    if completedChapters > totalChapters then
+        completedChapters = totalChapters
+    end
+    if currentChapter > totalChapters then
+        currentChapter = totalChapters
+    end
+    if maxChapter > totalChapters then
+        maxChapter = totalChapters
     end
 
-    if maxChapter < 1 then
-        maxChapter = 1
-    end
-    if maxStage < 0 then
-        maxStage = 0
-    end
-
+    progress.CurrentChapter = currentChapter
+    progress.CompletedChapters = completedChapters
+    progress.CurrentHouseModel = currentHouseModel
     progress.MaxClearedChapter = maxChapter
     progress.MaxClearedStage = maxStage
+    progress.MedalCount = math.max(0, math.floor(tonumber(progress.MedalCount) or 0))
+
+    progress.UnlockedChapters = NormalizeUnlockedChapters(progress.UnlockedChapters, totalChapters)
+
+    local legacyUnlocked = GetLegacyUnlockedChapter(progress, totalChapters)
+    for chapterId = 1, legacyUnlocked do
+        progress.UnlockedChapters[chapterId] = true
+    end
+
+    RefreshUnlockedChaptersByMedals(progress, totalChapters)
+
+    if not progress.UnlockedChapters[progress.CurrentChapter] then
+        progress.CurrentChapter = GetFirstUnlockedChapter(progress.UnlockedChapters, totalChapters)
+    end
 
     return progress
 end
@@ -1507,6 +1795,14 @@ function DataManager.InitializePlayerData(player)
             playerData.RebirthData = NormalizeRebirthData(playerData.RebirthData)
         end
 
+        if not playerData.LikeData then
+            playerData.LikeData = NormalizeLikeData({
+                Count = playerData.LikeCount,
+            })
+        else
+            playerData.LikeData = NormalizeLikeData(playerData.LikeData)
+        end
+
         -- V4.6设置系统：确保SoundSettings字段存在（向后兼容）
         if not playerData.SoundSettings then
             playerData.SoundSettings = {
@@ -1587,6 +1883,19 @@ function DataManager.InitializePlayerData(player)
     end
 
     playerDataCache[player.UserId] = playerData
+
+    local likeData = playerData.LikeData
+    if type(likeData) ~= "table" then
+        likeData = BuildDefaultLikeData()
+        playerData.LikeData = likeData
+    else
+        likeData = NormalizeLikeData(likeData)
+        playerData.LikeData = likeData
+    end
+
+    if player and player:IsA("Player") then
+        player:SetAttribute("LikeCount", math.max(0, math.floor(tonumber(likeData.Count) or 0)))
+    end
 
     return playerData
 end
@@ -2643,12 +2952,16 @@ function DataManager.ResetAllPlayerData(player)
 
     if player and player:IsA("Player") then
         local chapterProgress = newData.ChapterProgress or {}
+        player:SetAttribute("CurrentChapter", chapterProgress.CurrentChapter or 1)
         player:SetAttribute("CompletedChapters", chapterProgress.CompletedChapters or 0)
+        player:SetAttribute("MedalCount", chapterProgress.MedalCount or 0)
         player:SetAttribute("CurrentHouseModel", chapterProgress.CurrentHouseModel or "PrisonLv1")
         local rebirthData = newData.RebirthData or BuildDefaultRebirthData()
         player:SetAttribute("RebirthCount", rebirthData.Count or 0)
         player:SetAttribute("RebirthCoinBonusRate", rebirthData.CoinBonusRate or 0)
         player:SetAttribute("RebirthAttackBonusRate", rebirthData.AttackBonusRate or 0)
+        local likeData = newData.LikeData or BuildDefaultLikeData()
+        player:SetAttribute("LikeCount", likeData.Count or 0)
     end
 
     -- 立即保存到DataStore
@@ -2685,6 +2998,10 @@ function DataManager.GetChapterProgress(player)
             CurrentChapter = 1,
             CompletedChapters = 0,
             CurrentHouseModel = "PrisonLv1",
+            MedalCount = 0,
+            UnlockedChapters = {
+                [1] = true,
+            },
             MaxClearedChapter = 1,
             MaxClearedStage = 0,
         }
@@ -2702,10 +3019,25 @@ end
 ]]
 function DataManager.GetCurrentChapter(player)
     local progress = DataManager.GetChapterProgress(player)
-    local chapter = progress.CurrentChapter or 1
-    -- V3.7.1修复：确保章节ID不超过配置的最大章节数（兼容已有的错误数据
-    local maxChapters = StageConfig.TotalChapters
-    return math.min(chapter, maxChapters)
+    local chapter = math.floor(tonumber(progress.CurrentChapter) or 1)
+    local maxChapters = GetTotalChaptersSafe()
+    if chapter < 1 then
+        chapter = 1
+    elseif chapter > maxChapters then
+        chapter = maxChapters
+    end
+
+    local unlocked = progress.UnlockedChapters
+    if type(unlocked) ~= "table" or unlocked[chapter] ~= true then
+        for chapterId = 1, maxChapters do
+            if type(unlocked) == "table" and unlocked[chapterId] then
+                chapter = chapterId
+                break
+            end
+        end
+    end
+
+    return chapter
 end
 
 --[[
@@ -2731,9 +3063,29 @@ function DataManager.SetCurrentChapter(player, chapterId)
         return false
     end
 
-    EnsureChapterProgress(playerData)
+    local progress = EnsureChapterProgress(playerData)
 
-    playerData.ChapterProgress.CurrentChapter = chapterId
+    local targetChapter = tonumber(chapterId)
+    if not targetChapter then
+        return false
+    end
+    targetChapter = math.floor(targetChapter)
+
+    local totalChapters = GetTotalChaptersSafe()
+    if targetChapter < 1 or targetChapter > totalChapters then
+        return false
+    end
+
+    if type(progress.UnlockedChapters) == "table" and progress.UnlockedChapters[targetChapter] ~= true then
+        return false
+    end
+
+    progress.CurrentChapter = targetChapter
+
+    if player and player:IsA("Player") then
+        player:SetAttribute("CurrentChapter", targetChapter)
+    end
+
     return true
 end
 
@@ -2750,39 +3102,143 @@ function DataManager.CompleteChapter(player, chapterId)
         return false, 0
     end
 
-    EnsureChapterProgress(playerData)
+    local progress = EnsureChapterProgress(playerData)
 
-    -- 只有通关当前章节才更新进度（防止重复通关刷进度）
-    if chapterId == playerData.ChapterProgress.CurrentChapter then
-        -- 更新已通关章节
-        if chapterId > playerData.ChapterProgress.CompletedChapters then
-            playerData.ChapterProgress.CompletedChapters = chapterId
-        end
-
-        if player and player:IsA("Player") then
-            player:SetAttribute("CompletedChapters", playerData.ChapterProgress.CompletedChapters)
-        end
-
-        -- 同步更新“主线最大通关关卡”（只增不减
-        -- 章节通关等价于该章节最后一关已通关
-        do
-            local stagesPerChapter = GetStagesPerChapterSafe(chapterId)
-            local maxChapter = tonumber(playerData.ChapterProgress.MaxClearedChapter) or 1
-            local maxStage = tonumber(playerData.ChapterProgress.MaxClearedStage) or 0
-
-            if chapterId > maxChapter or (chapterId == maxChapter and stagesPerChapter > maxStage) then
-                playerData.ChapterProgress.MaxClearedChapter = chapterId
-                playerData.ChapterProgress.MaxClearedStage = stagesPerChapter
-            end
-        end
-
-        -- V3.7.1修复：自动进入下一章，但不超过最大章节数
-        -- 如果已打通最后一章，则保持在最后一章继续挑
-        local maxChapters = StageConfig.TotalChapters
-        playerData.ChapterProgress.CurrentChapter = math.min(chapterId + 1, maxChapters)
+    local targetChapter = tonumber(chapterId)
+    if not targetChapter then
+        return false, tonumber(progress.CompletedChapters) or 0
     end
 
-    return true, playerData.ChapterProgress.CompletedChapters
+    local totalChapters = GetTotalChaptersSafe()
+    targetChapter = math.floor(targetChapter)
+    if targetChapter < 1 then
+        targetChapter = 1
+    elseif targetChapter > totalChapters then
+        targetChapter = totalChapters
+    end
+
+    if targetChapter > (tonumber(progress.CompletedChapters) or 0) then
+        progress.CompletedChapters = targetChapter
+    end
+
+    progress.CurrentChapter = targetChapter
+    progress.UnlockedChapters = progress.UnlockedChapters or {}
+    progress.UnlockedChapters[targetChapter] = true
+
+    local stagesPerChapter = GetStagesPerChapterSafe(targetChapter)
+    local maxChapter = tonumber(progress.MaxClearedChapter) or 1
+    local maxStage = tonumber(progress.MaxClearedStage) or 0
+
+    if targetChapter > maxChapter or (targetChapter == maxChapter and stagesPerChapter > maxStage) then
+        progress.MaxClearedChapter = targetChapter
+        progress.MaxClearedStage = stagesPerChapter
+    end
+
+    if player and player:IsA("Player") then
+        player:SetAttribute("CompletedChapters", progress.CompletedChapters)
+        player:SetAttribute("CurrentChapter", progress.CurrentChapter)
+    end
+
+    return true, progress.CompletedChapters
+end
+
+local function CountUnlockedChapters(unlocked, totalChapters)
+    if type(unlocked) ~= "table" then
+        return 0
+    end
+
+    local count = 0
+    for chapterId = 1, totalChapters do
+        if unlocked[chapterId] then
+            count += 1
+        end
+    end
+    return count
+end
+
+function DataManager.GetMedalCount(player)
+    local progress = DataManager.GetChapterProgress(player)
+    return math.max(0, math.floor(tonumber(progress.MedalCount) or 0))
+end
+
+function DataManager.GetUnlockedChapters(player)
+    local progress = DataManager.GetChapterProgress(player)
+    local totalChapters = GetTotalChaptersSafe()
+    local copied = {}
+
+    local unlocked = progress.UnlockedChapters
+    if type(unlocked) == "table" then
+        for chapterId = 1, totalChapters do
+            if unlocked[chapterId] then
+                copied[chapterId] = true
+            end
+        end
+    end
+
+    copied[1] = true
+    return copied
+end
+
+function DataManager.IsChapterUnlocked(player, chapterId)
+    local targetChapter = tonumber(chapterId)
+    if not targetChapter then
+        return false
+    end
+    targetChapter = math.floor(targetChapter)
+    if targetChapter < 1 then
+        return false
+    end
+
+    local unlocked = DataManager.GetUnlockedChapters(player)
+    return unlocked[targetChapter] == true
+end
+
+function DataManager.RefreshChapterUnlocks(player)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData then
+        return false
+    end
+
+    local progress = EnsureChapterProgress(playerData)
+    local totalChapters = GetTotalChaptersSafe()
+    local beforeCount = CountUnlockedChapters(progress.UnlockedChapters, totalChapters)
+    RefreshUnlockedChaptersByMedals(progress, totalChapters)
+    local afterCount = CountUnlockedChapters(progress.UnlockedChapters, totalChapters)
+
+    if player and player:IsA("Player") then
+        player:SetAttribute("CurrentChapter", progress.CurrentChapter or 1)
+        player:SetAttribute("MedalCount", progress.MedalCount or 0)
+        player:SetAttribute("CompletedChapters", progress.CompletedChapters or 0)
+    end
+
+    return afterCount > beforeCount
+end
+
+function DataManager.AddMedals(player, amount)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData then
+        warn(GameConfig.LOG_PREFIX, "AddMedals: 找不到玩家数")
+        return 0, false
+    end
+
+    local addAmount = math.max(0, math.floor(tonumber(amount) or 0))
+    local progress = EnsureChapterProgress(playerData)
+    local totalChapters = GetTotalChaptersSafe()
+    local beforeCount = CountUnlockedChapters(progress.UnlockedChapters, totalChapters)
+
+    if addAmount > 0 then
+        progress.MedalCount = math.max(0, math.floor(tonumber(progress.MedalCount) or 0) + addAmount)
+    end
+
+    RefreshUnlockedChaptersByMedals(progress, totalChapters)
+    local afterCount = CountUnlockedChapters(progress.UnlockedChapters, totalChapters)
+    local unlockedChanged = afterCount > beforeCount
+
+    if player and player:IsA("Player") then
+        player:SetAttribute("MedalCount", progress.MedalCount or 0)
+    end
+
+    return progress.MedalCount or 0, unlockedChanged
 end
 
 --[[
@@ -3093,4 +3549,3 @@ function DataManager.ClearSkillInventory(player)
 end
 
 return DataManager
-

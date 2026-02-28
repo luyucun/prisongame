@@ -589,9 +589,16 @@ function PlayerManager.OnPlayerAdded(player)
 	end
 
 	-- V4.8七日登录奖励：同步功能解锁状态（通关第一章后解锁）
+	local currentChapter = DataManager.GetCurrentChapter(player) or 1
 	local completedChapters = DataManager.GetCompletedChapters(player) or 0
+	local medalCount = 0
+	if DataManager.GetMedalCount then
+		medalCount = DataManager.GetMedalCount(player) or 0
+	end
+	player:SetAttribute("CurrentChapter", currentChapter)
 	player:SetAttribute("SevenDaysUnlocked", completedChapters >= 1)
 	player:SetAttribute("CompletedChapters", completedChapters)
+	player:SetAttribute("MedalCount", medalCount)
 
 	local currentHouseModel = DataManager.GetCurrentHouseModel(player)
 	player:SetAttribute("CurrentHouseModel", currentHouseModel)

@@ -234,6 +234,12 @@ local function ScheduleAutoStart(delaySeconds)
 		if battleControl and not battleControl.Visible then
 			return
 		end
+		if _G.MapDisplay and _G.MapDisplay.AutoStartAttack then
+			local started = _G.MapDisplay.AutoStartAttack()
+			if started then
+				return
+			end
+		end
 		if requestStartEvent then
 			requestStartEvent:FireServer()
 		end

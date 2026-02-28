@@ -95,6 +95,8 @@ end
 
 -- 远程事件引用
 local CampaignEvents = nil
+local RequestMapDataEvent = nil
+local MapDataEvent = nil
 
 -- V5.0新增：行军相关RemoteEvent
 local ClientAIEvents = nil
@@ -511,6 +513,21 @@ local function InitializeEvents()
 		end
 	end
 
+	if CampaignEvents then
+		local function GetOrCreateEvent(eventName)
+			local event = CampaignEvents:FindFirstChild(eventName)
+			if not event then
+				event = Instance.new("RemoteEvent")
+				event.Name = eventName
+				event.Parent = CampaignEvents
+			end
+			return event
+		end
+
+		RequestMapDataEvent = GetOrCreateEvent("RequestMapData")
+		MapDataEvent = GetOrCreateEvent("MapData")
+	end
+
 	-- V5.0新增：初始化行军相关RemoteEvent
 	if not ClientAIEvents then
 		local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
@@ -528,6 +545,62 @@ local function InitializeEvents()
 	end
 
 	return CampaignEvents ~= nil
+end
+
+local function BuildMapDataPayload(player)
+	local currentChapter = DataManager.GetCurrentChapter(player)
+	local medalCount = 0
+	if DataManager.GetMedalCount then
+		medalCount = DataManager.GetMedalCount(player) or 0
+	end
+
+	local unlockedMap = {}
+	if DataManager.GetUnlockedChapters then
+		unlockedMap = DataManager.GetUnlockedChapters(player) or {}
+	end
+
+	local chapterList = {}
+	if StageConfig.GetChapterList then
+		chapterList = StageConfig.GetChapterList()
+	end
+
+	local chapters = {}
+	for _, chapterInfo in ipairs(chapterList) do
+		local chapterId = tonumber(chapterInfo.ChapterId) or 0
+		if chapterId > 0 then
+			local unlocked = unlockedMap[chapterId] == true or unlockedMap[tostring(chapterId)] == true
+			table.insert(chapters, {
+				ChapterId = chapterId,
+				ChapterName = chapterInfo.ChapterName or ("Chapter " .. tostring(chapterId)),
+				MapIcon = chapterInfo.MapIcon or "",
+				UnlockMedals = tonumber(chapterInfo.UnlockMedals) or 0,
+				RewardMedals = tonumber(chapterInfo.RewardMedals) or 0,
+				StagesPerChapter = tonumber(chapterInfo.StagesPerChapter) or 0,
+				Unlocked = unlocked == true,
+			})
+		end
+	end
+
+	return {
+		CurrentChapter = currentChapter,
+		MedalCount = medalCount,
+		Chapters = chapters,
+		ServerTime = os.time(),
+	}
+end
+
+local function SendMapData(player)
+	if not player or not player.Parent then
+		return
+	end
+	if not InitializeEvents() then
+		return
+	end
+	if not MapDataEvent then
+		return
+	end
+
+	MapDataEvent:FireClient(player, BuildMapDataPayload(player))
 end
 
 --[[
@@ -969,12 +1042,38 @@ end
 @param player Player - 玩家
 @return boolean - 是否成功启动
 ]]
-function CampaignManager.StartCampaign(player)
+function CampaignManager.StartCampaign(player, requestedChapter)
 	local playerId = player.UserId
 
 	-- 检查是否已有战役
 	if CampaignManager.ActiveCampaigns[playerId] then
 		return false
+	end
+
+	local selectedChapter = tonumber(requestedChapter)
+	if selectedChapter then
+		selectedChapter = math.floor(selectedChapter)
+	end
+
+	if selectedChapter then
+		local chapterConfig = StageConfig.GetChapterConfig(selectedChapter)
+		if not chapterConfig then
+			SendMapData(player)
+			return false
+		end
+
+		if DataManager.IsChapterUnlocked and not DataManager.IsChapterUnlocked(player, selectedChapter) then
+			SendMapData(player)
+			return false
+		end
+
+		if DataManager.SetCurrentChapter then
+			local setOk = DataManager.SetCurrentChapter(player, selectedChapter)
+			if not setOk then
+				SendMapData(player)
+				return false
+			end
+		end
 	end
 
 	-- 获取玩家HomeId
@@ -1009,6 +1108,13 @@ function CampaignManager.StartCampaign(player)
 
 	-- V2.8新增: 获取玩家当前章节信息
 	local currentChapter = DataManager.GetCurrentChapter(player)
+	if DataManager.IsChapterUnlocked and not DataManager.IsChapterUnlocked(player, currentChapter) then
+		SendMapData(player)
+		return false
+	end
+	if player and player:IsA("Player") then
+		player:SetAttribute("CurrentChapter", currentChapter)
+	end
 	local totalStagesInChapter = StageConfig.GetStagesPerChapter(currentChapter)
 	if not totalStagesInChapter or totalStagesInChapter <= 0 then
 		totalStagesInChapter = GameConfig.Campaign.MaxStages
@@ -2551,10 +2657,21 @@ function CampaignManager.OnVictory(campaignData)
 	local player = campaignData.Player
 	if player then
 		local completedBefore = tonumber(DataManager.GetCompletedChapters(player)) or 0
+		local medalReward = 0
+		if StageConfig.GetChapterRewardMedals then
+			medalReward = tonumber(StageConfig.GetChapterRewardMedals(currentChapter)) or 0
+		end
+
 		local success, newCompletedChapters = DataManager.CompleteChapter(player, currentChapter)
 		if success then
 			DebugLog(string.format("[OnVictory] 玩家 %s 通关章节 %d，已通关章节数: %d",
 				player.Name, currentChapter, newCompletedChapters))
+
+			if medalReward > 0 and DataManager.AddMedals then
+				local medalCount, unlockedChanged = DataManager.AddMedals(player, medalReward)
+				DebugLog(string.format("[OnVictory] 玩家 %s 获得勋章 %d，当前勋章=%d，新增解锁=%s",
+					player.Name, medalReward, tonumber(medalCount) or 0, tostring(unlockedChanged)))
+			end
 
 			-- 保存数据
 			DataManager.SavePlayerDataThrottled(player, true)  -- 强制保存
@@ -2579,6 +2696,8 @@ function CampaignManager.OnVictory(campaignData)
 				FireMainlineProgressEvent(player, "ChapterClear", currentChapter, campaignData.TotalStages or 0, maxChapter, maxStage)
 			end)
 		end
+
+		SendMapData(player)
 	end
 
 	-- 立即进入结束流程（不延迟，让玩家立即看到胜利界面）
@@ -2819,6 +2938,24 @@ function CampaignManager.CompleteCampaignEnd(campaignData)
 
 	-- 清理关卡场景
 	StageService.CleanupStages(campaignData.PlayerId)
+
+	-- Ensure player is back at home after settlement (covers Restart/Retreat path too).
+	local playerForReturn = campaignData.Player
+	if playerForReturn then
+		local returnHomeSuccess = false
+		pcall(function()
+			returnHomeSuccess = CampaignManager.ReturnToHome(playerForReturn) == true
+		end)
+		if not returnHomeSuccess then
+			task.delay(0.2, function()
+				if playerForReturn and playerForReturn.Parent then
+					pcall(function()
+						CampaignManager.ReturnToHome(playerForReturn)
+					end)
+				end
+			end)
+		end
+	end
 
 	-- 执行单位重生（现在是安全的，因为AI和移动都已停止）
 	DebugLog("✅ CompleteCampaignEnd调用RespawnUnits")
@@ -3531,7 +3668,12 @@ function CampaignManager.RequestRetreat(player)
 		return
 	end
 
-	-- Restart/Retreat时跳过延迟直接进入失败流程
+	-- Keep retreat/restart feeling immediate.
+	pcall(function()
+		CampaignManager.ReturnToHome(player)
+	end)
+
+	-- Restart/Retreat: skip delay and enter defeat flow.
 	CampaignManager.OnDefeat(campaignData, { skipDelay = true })
 end
 
@@ -3666,11 +3808,22 @@ function CampaignManager.Initialize()
 	-- 监听开始战役请求
 	local requestStart = CampaignEvents:FindFirstChild("RequestStartCampaign")
 	if requestStart then
-		requestStart.OnServerEvent:Connect(function(player)
+		requestStart.OnServerEvent:Connect(function(player, chapterId)
 			local success, err = pcall(function()
-				CampaignManager.StartCampaign(player)
+				CampaignManager.StartCampaign(player, chapterId)
 			end)
 
+		end)
+	end
+
+	if RequestMapDataEvent then
+		RequestMapDataEvent.OnServerEvent:Connect(function(player)
+			local success, err = pcall(function()
+				SendMapData(player)
+			end)
+			if not success then
+				warn("[CampaignManager] RequestMapData处理失败:", err)
+			end
 		end)
 	end
 
@@ -3682,6 +3835,22 @@ function CampaignManager.Initialize()
 				CampaignManager.RequestRetreat(player)
 			end)
 
+		end)
+	end
+
+	Players.PlayerAdded:Connect(function(player)
+		task.defer(function()
+			if player and player.Parent then
+				SendMapData(player)
+			end
+		end)
+	end)
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		task.defer(function()
+			if player and player.Parent then
+				SendMapData(player)
+			end
 		end)
 	end
 
