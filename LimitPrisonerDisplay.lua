@@ -14,6 +14,7 @@ local RunService = game:GetService("RunService")
 local ProximityPromptService = game:GetService("ProximityPromptService")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
+local Lighting = game:GetService("Lighting")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -83,6 +84,8 @@ local POPUP_BG_OFFSET = 0.08
 local POPUP_TWEEN_DURATION = 0.3
 local POPUP_ALLOW_CLOSE_SECONDS = 1
 local LIGHT_ROTATE_SPEED = 60
+local BLUR_LOCK_ID = "LimitPrisoner"
+local BLUR_LOCKS_KEY = "__PopupBlurLocks"
 
 -- StoreBg弹框动画配置
 local STORE_OPEN_START_SCALE = 0.86
@@ -147,6 +150,33 @@ local function LoadButtonEffectHelper()
 
 	warn("[LimitPrisonerDisplay] ButtonEffectHelper加载失败:", result)
 	return false
+end
+
+local function SetBlurLock(enabled)
+	local locks = _G[BLUR_LOCKS_KEY]
+	if type(locks) ~= "table" then
+		locks = {}
+		_G[BLUR_LOCKS_KEY] = locks
+	end
+
+	if enabled then
+		locks[BLUR_LOCK_ID] = true
+	else
+		locks[BLUR_LOCK_ID] = nil
+	end
+
+	local blur = Lighting:FindFirstChild("Blur")
+	if blur and blur:IsA("BlurEffect") then
+		local hasGlobalLocks = next(locks) ~= nil
+		local lockStr = Lighting:GetAttribute(BLUR_LOCKS_KEY)
+		local hasAttributeLocks = type(lockStr) == "string" and lockStr ~= ""
+		blur.Enabled = hasGlobalLocks or hasAttributeLocks
+	end
+end
+
+local function RefreshBlurLockState()
+	local shouldBlur = popupVisible == true or (storeBg and storeBg.Visible == true)
+	SetBlurLock(shouldBlur)
 end
 
 local function FormatCoins(amount)
@@ -266,6 +296,7 @@ end
 local function InitializeUI()
 	local storeValid = storeBg and storeBg:IsDescendantOf(playerGui)
 	if storeValid then
+		RefreshBlurLockState()
 		return true
 	end
 
@@ -306,6 +337,7 @@ local function InitializeUI()
 	end
 
 	InitializeClaimPopup()
+	RefreshBlurLockState()
 	return true
 end
 
@@ -347,6 +379,7 @@ local function PlayStoreOpen()
 	end
 
 	if storeBg.Visible and not storeAnimating then
+		RefreshBlurLockState()
 		return
 	end
 
@@ -354,6 +387,7 @@ local function PlayStoreOpen()
 	storeAnimating = true
 
 	storeBg.Visible = true
+	RefreshBlurLockState()
 	scale.Scale = STORE_OPEN_START_SCALE
 
 	storeOpenTweenA = TweenService:Create(scale,
@@ -390,10 +424,12 @@ local function PlayStoreClose()
 
 	local scale = EnsureStoreScale()
 	if not scale then
+		RefreshBlurLockState()
 		return
 	end
 
 	if not storeBg.Visible and not storeAnimating then
+		RefreshBlurLockState()
 		return
 	end
 
@@ -421,6 +457,7 @@ local function PlayStoreClose()
 	connB = storeCloseTweenB.Completed:Connect(function()
 		connB:Disconnect()
 		storeBg.Visible = false
+		RefreshBlurLockState()
 		scale.Scale = 1
 		storeAnimating = false
 	end)
@@ -726,6 +763,7 @@ local function CloseClaimPopup()
 
 	StopLightRotation()
 	ClearPopupItems()
+	RefreshBlurLockState()
 end
 
 local function BindPopupInput(token)
@@ -755,6 +793,7 @@ local function ShowClaimPopup(rewardInfo)
 		CloseClaimPopup()
 	end
 
+	popupVisible = true
 	restorePanelAfterPopup = storeBg and storeBg.Visible == true
 	if restorePanelAfterPopup and storeBg then
 		storeBg.Visible = false
@@ -792,7 +831,7 @@ local function ShowClaimPopup(rewardInfo)
 
 	popupToken = popupToken + 1
 	local token = popupToken
-	popupVisible = true
+	RefreshBlurLockState()
 	popupAllowClose = false
 	BindPopupInput(token)
 
@@ -990,11 +1029,13 @@ local function SetupStoreVisibleListener()
 		else
 			StopCountdown()
 		end
+		RefreshBlurLockState()
 	end)
 
 	if storeBg.Visible then
 		StartCountdown()
 	end
+	RefreshBlurLockState()
 
 	visibleBound = true
 end
@@ -1022,6 +1063,10 @@ local function TryInitialize()
 
 	if eventsReady and uiReady then
 		BindPrompt()
+	end
+
+	if uiReady then
+		RefreshBlurLockState()
 	end
 
 	return eventsReady and uiReady

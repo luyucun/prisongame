@@ -42,7 +42,7 @@ local FAST_RESTOCK_SHOP_ID = "UnitShop"
 local FAST_RESTOCK_ATTR = "UnitShopFastRestockEndTime"
 
 local FIRST_OPEN_UNIT_ID = "10001"
-local FIRST_OPEN_STOCK = 2
+local FIRST_OPEN_STOCK = 3
 local FIRST_OPEN_STATE = {
 	NEW = 0,
 	ACTIVE = 1,
@@ -445,21 +445,6 @@ local function RefreshShopStock(player, shopId, isFirstRefresh, forceNormal)
 	for _, itemConfig in ipairs(shopData.Items) do
 		if itemConfig.ItemType == "Unit" and itemConfig.Enabled then
 			local unitId = itemConfig.UnitId
-
-			-- V3.9.2新增：对UnitShop检查Show字段，隐藏的商品直接置0库存并跳过
-			if shopId == "UnitShop"
-				and itemConfig.Show == false
-				and (tonumber(ShopConfig.GetUnitRebirthUnlockCount(shopId, unitId)) or 0) <= 0 then
-				stockData[unitId] = 0
-				if DEBUG_MODE then
-					print(string.format(
-						"  [%s] 商品隐藏，库存置0",
-						unitId
-					))
-				end
-				-- 跳过后续的概率刷新逻辑
-				continue
-			end
 
 			local stockConfig = ShopConfig.GetStockConfig(shopId, unitId)
 

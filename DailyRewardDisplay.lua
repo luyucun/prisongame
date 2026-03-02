@@ -335,7 +335,8 @@ local function IsShopUnlocked()
 end
 
 local function IsShopEntryVisible()
-	return IsShopUnlocked() and (not isBattleBlocked)
+	-- New rule: keep Shop entry visible even during battle.
+	return IsShopUnlocked()
 end
 
 -- ==================== UI初始化 ====================

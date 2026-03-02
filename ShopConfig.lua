@@ -439,7 +439,7 @@ ShopConfig.Shops = {
 				Icon = "rbxassetid://102001177844916", -- 同步监狱数据表Icon
 				Sort = 210,
 				Enabled = true,
-				Show = false,              -- 是否在商店中显示
+				Show = true,              -- 是否在商店中显示
 				RefreshProbability = 0.1,
 				StockMin = 1,
 				StockMax = 2,
@@ -457,7 +457,7 @@ ShopConfig.Shops = {
 				Icon = "rbxassetid://86449419798698", -- 同步监狱数据表Icon
 				Sort = 220,
 				Enabled = true,
-				Show = false,              -- 是否在商店中显示
+				Show = true,              -- 是否在商店中显示
 				RefreshProbability = 0.15,
 				StockMin = 1,
 				StockMax = 2,
@@ -475,7 +475,7 @@ ShopConfig.Shops = {
 				Icon = "rbxassetid://96284212262078", -- 同步监狱数据表Icon
 				Sort = 230,
 				Enabled = true,
-				Show = false,              -- 是否在商店中显示
+				Show = true,              -- 是否在商店中显示
 				RefreshProbability = 0.15,
 				StockMin = 1,
 				StockMax = 2,
@@ -510,7 +510,7 @@ ShopConfig.Shops = {
 				DevProductId = "3472105595", -- 同步监狱数据表开发者商品ID
 				Icon = "rbxassetid://105156254180465", -- 同步监狱数据表Icon
 				Sort = 250,
-				Enabled = false,
+				Enabled = true,
 				Show = false,              -- 是否在商店中显示
 				RefreshProbability = 0.15,
 				StockMin = 1,
@@ -553,8 +553,8 @@ function ShopConfig.GetShopItems(shopId, player)
 	end
 	local items = {}
 	for _, itemConfig in ipairs(shopData.Items) do
-		-- V3.9.2新增：对UnitShop检查Show字段
-		if shopId == "UnitShop" and itemConfig.Show == false and GetItemRebirthUnlockCount(itemConfig) <= 0 then
+		-- Show=false 仅用于前端隐藏，不影响后端可购买性
+		if shopId == "UnitShop" and itemConfig.Show == false then
 			-- 跳过不显示的商品
 			continue
 		end
@@ -617,10 +617,6 @@ function ShopConfig.IsUnitOnSale(shopId, unitId, player)
 		if itemConfig.ItemType == "Unit" and itemConfig.UnitId == unitId then
 			if not itemConfig.Enabled then
 				return false, "NOT_ENABLED"
-			end
-
-			if shopId == "UnitShop" and itemConfig.Show == false and GetItemRebirthUnlockCount(itemConfig) <= 0 then
-				return false, "NOT_VISIBLE"
 			end
 
 			local rebirthUnlockCount = GetItemRebirthUnlockCount(itemConfig)

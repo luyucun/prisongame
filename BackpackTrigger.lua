@@ -261,6 +261,10 @@ end
 player.CharacterAdded:Connect(function(newCharacter)
 	character = newCharacter
 	humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+	-- Clear stale locks after respawn to avoid permanent backpack hidden state.
+	for key in pairs(hideLocks) do
+		hideLocks[key] = nil
+	end
 	isOnIdleFloor = false
 	isBackpackVisible = false
 

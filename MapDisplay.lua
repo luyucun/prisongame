@@ -42,9 +42,13 @@ local closeButton = nil
 local attackButton = nil
 local scrollingFrame = nil
 local mapTemplate = nil
+local mainMedalNumLabel = nil
+local mapMedalNumLabel = nil
 local mapScale = nil
 local mapTemplateBaseSize = nil
 local mapTemplateBaseAutomaticSize = nil
+local mainGuiVisibilitySnapshot = {}
+local mainGuiHiddenByMap = false
 
 local campaignEvents = nil
 local requestMapDataEvent = nil
@@ -65,6 +69,8 @@ local autoAttackPending = false
 local initialized = false
 local Initialize = nil
 local HideBackpackForBattle = nil
+local medalAttrConnection = nil
+local mainGuiChildAddedConnection = nil
 
 local function RequestBackpackHide()
 	local trigger = _G.BackpackTrigger
@@ -110,6 +116,67 @@ local function SafeWaitForChild(parent, childName, timeout)
 	end
 
 	return nil
+end
+
+local function ResolveMainGui()
+	if mainGui and mainGui.Parent then
+		return mainGui
+	end
+	mainGui = playerGui:FindFirstChild("MainGui")
+	return mainGui
+end
+
+local function HideMainGuiForMap()
+	local currentMainGui = ResolveMainGui()
+	if not currentMainGui or mainGuiHiddenByMap then
+		return
+	end
+
+	table.clear(mainGuiVisibilitySnapshot)
+	for _, child in ipairs(currentMainGui:GetChildren()) do
+		if child:IsA("GuiObject") then
+			mainGuiVisibilitySnapshot[child] = child.Visible
+			child.Visible = false
+		end
+	end
+
+	mainGuiHiddenByMap = true
+end
+
+local function RestoreMainGuiAfterMap()
+	if not mainGuiHiddenByMap then
+		return
+	end
+
+	for guiObject, visible in pairs(mainGuiVisibilitySnapshot) do
+		if guiObject and guiObject.Parent and guiObject:IsA("GuiObject") then
+			guiObject.Visible = visible
+		end
+	end
+	table.clear(mainGuiVisibilitySnapshot)
+	mainGuiHiddenByMap = false
+end
+
+local function BindMainGuiChildListener()
+	if mainGuiChildAddedConnection then
+		mainGuiChildAddedConnection:Disconnect()
+		mainGuiChildAddedConnection = nil
+	end
+
+	local currentMainGui = ResolveMainGui()
+	if not currentMainGui then
+		return
+	end
+
+	mainGuiChildAddedConnection = currentMainGui.ChildAdded:Connect(function(child)
+		if not child or not child:IsA("GuiObject") then
+			return
+		end
+		if mainGuiHiddenByMap and mapBg and mapBg.Visible then
+			mainGuiVisibilitySnapshot[child] = child.Visible
+			child.Visible = false
+		end
+	end)
 end
 
 local function LoadButtonEffectHelper()
@@ -210,6 +277,7 @@ local function PlayOpen()
 
 	local scale = EnsureScale()
 	if not scale then
+		HideMainGuiForMap()
 		mapBg.Visible = true
 		if dimBg then
 			dimBg.Visible = true
@@ -220,6 +288,7 @@ local function PlayOpen()
 	end
 
 	if mapBg.Visible and not popupAnimating then
+		HideMainGuiForMap()
 		if dimBg then
 			dimBg.Visible = true
 		end
@@ -230,6 +299,7 @@ local function PlayOpen()
 
 	CancelTweens()
 	popupAnimating = true
+	HideMainGuiForMap()
 	mapBg.Visible = true
 	if dimBg then
 		dimBg.Visible = true
@@ -289,6 +359,7 @@ local function PlayClose()
 		end
 		SetBlurLock(false)
 		ReleaseBackpackHide()
+		RestoreMainGuiAfterMap()
 		return true
 	end
 
@@ -298,6 +369,7 @@ local function PlayClose()
 		end
 		SetBlurLock(false)
 		ReleaseBackpackHide()
+		RestoreMainGuiAfterMap()
 		return true
 	end
 
@@ -340,6 +412,7 @@ local function PlayClose()
 		scale.Scale = 1
 		SetBlurLock(false)
 		ReleaseBackpackHide()
+		RestoreMainGuiAfterMap()
 	end)
 
 	popupCloseTweenA:Play()
@@ -364,6 +437,44 @@ local function IsChapterUnlocked(chapterId)
 		return false
 	end
 	return data.Unlocked == true
+end
+
+local function ResolveMedalLabelRefs()
+	local currentMainGui = playerGui:FindFirstChild("MainGui")
+	local medalRoot = currentMainGui and (currentMainGui:FindFirstChild("Medal") or currentMainGui:FindFirstChild("Medal", true))
+	local medalLabel = medalRoot and (medalRoot:FindFirstChild("MedalHaveNum") or medalRoot:FindFirstChild("MedalHaveNum", true))
+	if medalLabel and (medalLabel:IsA("TextLabel") or medalLabel:IsA("TextButton")) then
+		mainMedalNumLabel = medalLabel
+	else
+		mainMedalNumLabel = nil
+	end
+
+	local currentMapGui = playerGui:FindFirstChild("Map")
+	local currentMapBg = currentMapGui and currentMapGui:FindFirstChild("MapBg")
+	local mapLabel = currentMapBg and (currentMapBg:FindFirstChild("MedalHaveNum") or currentMapBg:FindFirstChild("MedalHaveNum", true))
+	if mapLabel and (mapLabel:IsA("TextLabel") or mapLabel:IsA("TextButton")) then
+		mapMedalNumLabel = mapLabel
+	else
+		mapMedalNumLabel = nil
+	end
+end
+
+local function UpdateMedalCountDisplay(medalCount)
+	ResolveMedalLabelRefs()
+
+	local value = tonumber(medalCount)
+	if value == nil then
+		value = tonumber(player:GetAttribute("MedalCount")) or 0
+	end
+	value = math.max(0, math.floor(value))
+	local text = tostring(value)
+
+	if mainMedalNumLabel then
+		mainMedalNumLabel.Text = text
+	end
+	if mapMedalNumLabel then
+		mapMedalNumLabel.Text = text
+	end
 end
 
 local function RefreshSelectState()
@@ -539,6 +650,7 @@ local function OnMapData(payload)
 	end
 
 	latestPayload = payload
+	UpdateMedalCountDisplay(payload.MedalCount)
 	RebuildCards(payload)
 
 	if autoAttackPending and selectedChapterId and IsChapterUnlocked(selectedChapterId) then
@@ -622,6 +734,7 @@ local function InitializeUI()
 	if not mainGui then
 		return false
 	end
+	BindMainGuiChildListener()
 
 	battleControl = mainGui:FindFirstChild("BattleControl")
 	playButton = battleControl and battleControl:FindFirstChild("Play")
@@ -658,6 +771,7 @@ local function InitializeUI()
 	end
 
 	EnsureScale()
+	UpdateMedalCountDisplay()
 	return true
 end
 
@@ -684,6 +798,14 @@ local function BindEvents()
 	if mapDataEvent then
 		mapDataEvent.OnClientEvent:Connect(OnMapData)
 	end
+
+	if medalAttrConnection then
+		medalAttrConnection:Disconnect()
+		medalAttrConnection = nil
+	end
+	medalAttrConnection = player:GetAttributeChangedSignal("MedalCount"):Connect(function()
+		UpdateMedalCountDisplay(player:GetAttribute("MedalCount"))
+	end)
 
 	if campaignStateUpdateEvent then
 		campaignStateUpdateEvent.OnClientEvent:Connect(function(state)
@@ -748,6 +870,26 @@ task.spawn(function()
 	local ok, err = pcall(Initialize)
 	if not ok then
 		warn("[MapDisplay] 初始化失败:", err)
+	end
+end)
+
+playerGui.ChildAdded:Connect(function(child)
+	if not child then
+		return
+	end
+	if child.Name == "MainGui" or child.Name == "Map" then
+		task.defer(function()
+			if child.Name == "MainGui" then
+				mainGui = child
+				BindMainGuiChildListener()
+				if mapBg and mapBg.Visible then
+					mainGuiHiddenByMap = false
+					table.clear(mainGuiVisibilitySnapshot)
+					HideMainGuiForMap()
+				end
+			end
+			UpdateMedalCountDisplay()
+		end)
 	end
 end)
 

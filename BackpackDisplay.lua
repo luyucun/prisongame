@@ -98,12 +98,96 @@ local REFRESH_DEBOUNCE_TIME = 0.3  -- 防抖时间（秒）
 -- 调试模式
 local DEBUG_MODE = false
 
+local function FindOrWaitChild(parent, childName, timeout)
+	if not parent then
+		return nil
+	end
+	local child = parent:FindFirstChild(childName)
+	if child then
+		return child
+	end
+	if timeout and timeout > 0 then
+		return parent:WaitForChild(childName, timeout)
+	end
+	return nil
+end
+
+local function IsUiReferenceValid()
+	return backpackGui
+		and backpackFrame
+		and itemListFrame
+		and armyItemTemplate
+		and backpackGui.Parent ~= nil
+		and backpackFrame.Parent ~= nil
+		and itemListFrame.Parent ~= nil
+		and armyItemTemplate.Parent ~= nil
+		and backpackGui:IsDescendantOf(playerGui)
+		and backpackFrame:IsDescendantOf(backpackGui)
+		and itemListFrame:IsDescendantOf(backpackFrame)
+		and armyItemTemplate:IsDescendantOf(itemListFrame)
+end
+
+local function ApplyUiDefaults()
+	if not (backpackGui and backpackFrame and itemListFrame and armyItemTemplate) then
+		return
+	end
+
+	armyItemTemplate.Visible = false
+	if itemListFrame:IsA("ScrollingFrame") then
+		itemListFrame.ScrollingEnabled = false
+	end
+
+	backpackGui.Enabled = true
+	backpackGui.DisplayOrder = 50
+	backpackFrame.ZIndex = 10
+	itemListFrame.ZIndex = 11
+	originalBackgroundTransparency = backpackFrame.BackgroundTransparency
+end
+
+local function EnsureUiReference(waitTimeout)
+	if IsUiReferenceValid() then
+		return true
+	end
+
+	local timeout = tonumber(waitTimeout) or 0
+	local gui = FindOrWaitChild(playerGui, "BackpackGui", timeout)
+	if not gui then
+		return false
+	end
+
+	local frame = FindOrWaitChild(gui, "BackpackFrame", timeout)
+	if not frame then
+		return false
+	end
+
+	local listFrame = FindOrWaitChild(frame, "ItemListFrame", timeout)
+	if not listFrame then
+		return false
+	end
+
+	local template = FindOrWaitChild(listFrame, "ArmyTemplate", timeout)
+	if not template then
+		return false
+	end
+
+	backpackGui = gui
+	backpackFrame = frame
+	itemListFrame = listFrame
+	armyItemTemplate = template
+	ApplyUiDefaults()
+	return true
+end
+
 -- ==================== 背包可用状态 ====================
 local hasAvailableUnitsCache = false
 
 local function ComputeHasAvailableUnits()
 	for _, button in pairs(itemButtons) do
-		if button and button.Parent and button.Visible then
+		if button
+			and button.Parent
+			and button.Visible
+			and itemListFrame
+			and button:IsDescendantOf(itemListFrame) then
 			return true
 		end
 	end
@@ -156,6 +240,10 @@ local function FindUnitIdFromBackpackGui(guiObject)
 end
 
 local function GetUnitIdAtScreenPosition(screenPosition)
+	if not EnsureUiReference(0) then
+		return nil
+	end
+
 	if not backpackFrame.Visible then
 		return nil
 	end
@@ -307,6 +395,10 @@ end
 @return TextButton - 创建的条目按钮
 ]]
 local function CreateItemButton(unitId, unitName, count, iconId)
+	if not EnsureUiReference(0.2) then
+		return nil
+	end
+
 	-- 克隆模板
 	local itemButton = armyItemTemplate:Clone()
 	itemButton.Name = "Item_" .. unitId
@@ -469,6 +561,10 @@ local function UpdateItemDisplay(unitId, unitName, count)
 	end
 
 	local itemButton = itemButtons[unitId]
+	if itemButton and (not itemListFrame or not itemButton:IsDescendantOf(itemListFrame)) then
+		itemButtons[unitId] = nil
+		itemButton = nil
+	end
 
 	if count > 0 then
 		-- 获取图标
@@ -484,7 +580,9 @@ local function UpdateItemDisplay(unitId, unitName, count)
 		else
 			-- 创建新条目
 			itemButton = CreateItemButton(unitId, unitName, count, iconId)
-			itemButtons[unitId] = itemButton
+			if itemButton then
+				itemButtons[unitId] = itemButton
+			end
 		end
 	else
 		-- 如果数量为0，删除UI
@@ -502,14 +600,20 @@ end
 @param inventoryData table - 背包数据 {[unitId] = {Name, Count, Instances}}
 ]]
 local function RefreshInventory(inventoryData)
+	-- Cache first; UI may be temporarily recreated during respawn.
+	inventoryDataCache = inventoryData or {}
+
+	if not EnsureUiReference(0.2) then
+		itemButtons = {}
+		RefreshHasUnitsCache()
+		return
+	end
+
 	-- 清空现有UI
 	for _, button in pairs(itemButtons) do
 		button:Destroy()
 	end
 	itemButtons = {}
-
-	-- 缓存背包数据
-	inventoryDataCache = inventoryData or {}
 
 	-- 重新创建所有条目
 	if inventoryData then
@@ -530,7 +634,9 @@ local function RefreshInventory(inventoryData)
 			if availableCount > 0 then
 				local iconId = UnitConfig.GetIcon(unitId)
 				local button = CreateItemButton(unitId, data.Name, availableCount, iconId)
-				itemButtons[unitId] = button
+				if button then
+					itemButtons[unitId] = button
+				end
 			end
 		end
 	end
@@ -582,6 +688,9 @@ local BackpackDisplay = {}
 显示背包
 ]]
 function BackpackDisplay.ShowBackpack()
+	if not EnsureUiReference(0.3) then
+		return
+	end
 	-- ⚠️ V2.0.2修复：确保ScreenGui始终启用
 	backpackGui.Enabled = true
 	backpackFrame.Visible = true
@@ -591,6 +700,9 @@ end
 隐藏背包
 ]]
 function BackpackDisplay.HideBackpack()
+	if not EnsureUiReference(0) then
+		return
+	end
 	-- ⚠️ V2.0.2修复：只隐藏Frame，不禁用ScreenGui
 	backpackFrame.Visible = false
 end
@@ -599,6 +711,9 @@ end
 切换背包显示
 ]]
 function BackpackDisplay.ToggleBackpack()
+	if not EnsureUiReference(0.3) then
+		return
+	end
 	backpackFrame.Visible = not backpackFrame.Visible  -- V2.0.2修复：使用Visible而不是Enabled
 end
 
@@ -631,7 +746,9 @@ end
 @param isPlacing boolean - 是否正在放置兵种
 ]]
 function BackpackDisplay.SetPlacingMode(isPlacing)
-	if not backpackFrame then return end
+	if not EnsureUiReference(0) then
+		return
+	end
 
 	if isPlacing then
 		-- ✅ 放置模式：让BackpackFrame的空白区域不拦截输入
@@ -654,6 +771,43 @@ end
 
 -- 提供全局访问接口
 _G.BackpackDisplay = BackpackDisplay
+
+local function HandleBackpackGuiRecreated(waitTimeout)
+	if not EnsureUiReference(waitTimeout or 0.5) then
+		return
+	end
+	RefreshInventory(inventoryDataCache)
+	if _G.BackpackTrigger and _G.BackpackTrigger.RefreshVisibility then
+		_G.BackpackTrigger.RefreshVisibility()
+	end
+end
+
+playerGui.ChildAdded:Connect(function(child)
+	if child and child.Name == "BackpackGui" and child:IsA("ScreenGui") then
+		task.defer(function()
+			HandleBackpackGuiRecreated(1.5)
+			RequestInventoryRefresh()
+		end)
+	end
+end)
+
+playerGui.ChildRemoved:Connect(function(child)
+	if child and child == backpackGui then
+		backpackGui = nil
+		backpackFrame = nil
+		itemListFrame = nil
+		armyItemTemplate = nil
+		itemButtons = {}
+		RefreshHasUnitsCache()
+	end
+end)
+
+player.CharacterAdded:Connect(function()
+	task.defer(function()
+		HandleBackpackGuiRecreated(1.5)
+		RequestInventoryRefresh()
+	end)
+end)
 
 -- ✅ V2.0.2新增：初始化完成后通知BackpackTrigger刷新显示状态
 -- 延迟执行，确保BackpackTrigger也已加载

@@ -80,6 +80,8 @@ local GuideSystem = require(ServerScriptService.Systems.GuideSystem)
 local SevenDaysSystem = require(ServerScriptService.Systems.SevenDaysSystem)
 -- V5.3新增 - 每日免费奖励
 local DailyRewardSystem = require(ServerScriptService.Systems.DailyRewardSystem)
+-- V7.3新增 - 每日任务
+local DailyTaskSystem = require(ServerScriptService.Systems.DailyTaskSystem)
 -- V6.1鏂板 - 鍦ㄧ嚎濂栧姳
 local OnlineRewardSystem = require(ServerScriptService.Systems.OnlineRewardSystem)
 -- V6.7新增 - 养成系统
@@ -507,6 +509,16 @@ local function InitializeServer()
         warn(GameConfig.LOG_PREFIX, "Like system initialize failed (error):", result)
     elseif result == false then
         warn(GameConfig.LOG_PREFIX, "Like system initialize failed (returned false)")
+    end
+
+    -- 14.8 Initialize daily task system (V7.3)
+    success, result = pcall(function()
+        return DailyTaskSystem.Initialize()
+    end)
+    if not success then
+        warn(GameConfig.LOG_PREFIX, "Daily task system initialize failed (error):", result)
+    elseif result == false then
+        warn(GameConfig.LOG_PREFIX, "Daily task system initialize failed (returned false)")
     end
 
 

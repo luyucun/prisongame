@@ -58,6 +58,7 @@ local UnitManager = nil
 local ProjectileSystem = nil  -- V1.5远程攻击支持
 local WeaponEffectSystem = nil  -- V1.5.4远程武器特效支持
 local UpgradeSystem = nil  -- V6.7养成系统
+local DataManager = require(ServerScriptService:WaitForChild("Core"):WaitForChild("DataManager") :: ModuleScript)
 
 -- V1.5.12新增：集中管理死亡渐隐Tween，用于战役复活时一键取消
 -- [unitModel] = { tweens = {Tween...}, connections = {RBXScriptConnection...} }
@@ -1040,6 +1041,10 @@ function CombatSystem.KillUnit(unitModel, killer)
 				local Players = game:GetService("Players")
 				local player = Players:GetPlayerByUserId(battle.PlayerId)
 				if player then
+					if DataManager and DataManager.AddDailyTaskEnemyDefeats then
+						DataManager.AddDailyTaskEnemyDefeats(player, 1)
+					end
+
 					-- 加载CurrencySystem发放金币
 					local CurrencySystem = nil
 					local csModule = ServerScriptService:FindFirstChild("Systems") and ServerScriptService.Systems:FindFirstChild("CurrencySystem")

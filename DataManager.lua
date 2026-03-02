@@ -161,6 +161,12 @@ PlayerData = {
         TotalOnlineSeconds = number,-- 当日累计在线秒数
         ClaimedRewards = {},        -- 已领取奖{[rewardId] = true}
     },
+    DailyTaskData = {          -- V7.3每日任务
+        LastRefreshDay = number,    -- 上次重置UTC日索
+        MedalProgress = number,     -- 当日勋章累计
+        EnemyDefeatProgress = number,-- 当日击败敌人数累计
+        ClaimedTaskIds = {},        -- 已领取任务ID {[taskId] = true}
+    },
     LastSaveTime = number,     -- 最后保存时
 }
 ]]
@@ -311,6 +317,9 @@ local function LoadFromDataStore(player)
 			if data.OnlineRewardData then
 				data.OnlineRewardData = RestoreFromDataStore(data.OnlineRewardData)  -- V6.1在线奖励
 			end
+			if data.DailyTaskData then
+				data.DailyTaskData = RestoreFromDataStore(data.DailyTaskData)  -- V7.3每日任务
+			end
 			if data.UpgradeData then
 				data.UpgradeData = RestoreFromDataStore(data.UpgradeData)  -- V6.7：恢复养成数			end
 			end
@@ -389,6 +398,7 @@ local function SaveToDataStore(player, playerData, userId)
 		HandcuffData = SanitizeForDataStore(playerData.HandcuffData),  -- V6.0手铐道具
 		LimitPrisonerData = SanitizeForDataStore(playerData.LimitPrisonerData),  -- V6.0限时囚犯
 		OnlineRewardData = SanitizeForDataStore(playerData.OnlineRewardData),  -- V6.1在线奖励
+		DailyTaskData = SanitizeForDataStore(playerData.DailyTaskData),  -- V7.3每日任务
 		UpgradeData = SanitizeForDataStore(playerData.UpgradeData),
 		RebirthData = SanitizeForDataStore(playerData.RebirthData),
 		LikeData = SanitizeForDataStore(playerData.LikeData),
@@ -506,6 +516,72 @@ local function NormalizeDailyRewardData(data)
     return data
 end
 
+local function BuildDefaultDailyTaskData(now)
+    return {
+        LastRefreshDay = GetUtcDayIndex(now),
+        MedalProgress = 0,
+        EnemyDefeatProgress = 0,
+        ClaimedTaskIds = {},
+    }
+end
+
+local function NormalizeDailyTaskData(data)
+    if type(data) ~= "table" then
+        return BuildDefaultDailyTaskData(os.time())
+    end
+
+    local currentDay = GetUtcDayIndex(os.time())
+    local lastRefreshDay = tonumber(data.LastRefreshDay)
+    if not lastRefreshDay or lastRefreshDay < 0 then
+        lastRefreshDay = currentDay
+    end
+
+    local medalProgress = math.floor(tonumber(data.MedalProgress) or 0)
+    if medalProgress < 0 then
+        medalProgress = 0
+    end
+
+    local enemyDefeatProgress = math.floor(tonumber(data.EnemyDefeatProgress) or 0)
+    if enemyDefeatProgress < 0 then
+        enemyDefeatProgress = 0
+    end
+
+    local claimedTaskIds = {}
+    if type(data.ClaimedTaskIds) == "table" then
+        for rawTaskId, rawClaimed in pairs(data.ClaimedTaskIds) do
+            local taskId = math.floor(tonumber(rawTaskId) or 0)
+            if taskId > 0 and rawClaimed == true then
+                claimedTaskIds[taskId] = true
+            end
+        end
+    end
+
+    data.LastRefreshDay = lastRefreshDay
+    data.MedalProgress = medalProgress
+    data.EnemyDefeatProgress = enemyDefeatProgress
+    data.ClaimedTaskIds = claimedTaskIds
+
+    return data
+end
+
+local function RefreshDailyTaskDataByNow(data, now)
+    if type(data) ~= "table" then
+        return false
+    end
+
+    local currentDay = GetUtcDayIndex(now or os.time())
+    local lastRefreshDay = tonumber(data.LastRefreshDay) or currentDay
+    if lastRefreshDay == currentDay then
+        return false
+    end
+
+    data.LastRefreshDay = currentDay
+    data.MedalProgress = 0
+    data.EnemyDefeatProgress = 0
+    data.ClaimedTaskIds = {}
+    return true
+end
+
 local function BuildDefaultStarterPackData()
     return {
         Purchased = false,
@@ -539,6 +615,7 @@ end
 local function BuildDefaultVipData()
     return {
         Purchased = false,
+        ForceDisabled = false, -- true时强制关闭VIP（即使账号拥有通行证）
     }
 end
 
@@ -548,6 +625,7 @@ local function NormalizeVipData(data)
     end
 
     data.Purchased = data.Purchased == true
+    data.ForceDisabled = data.ForceDisabled == true
     return data
 end
 
@@ -777,7 +855,7 @@ local function CreateDefaultData(player)
         IsNewPlayer = true,  -- 新玩家标记（首次进店流程使用
         HomeSlot = 0,  -- 初始,由PlayerManager分配
         Currency = {
-            Coins = GameConfig.INITIAL_COINS,  -- 初始金币100
+            Coins = GameConfig.INITIAL_COINS,  -- 初始金币由GameConfig配置
         },
         Units = {},  -- 后续版本使用
         PlacedUnits = {},  -- 🔥修复持久化：初始化空的放置数
@@ -819,6 +897,7 @@ local function CreateDefaultData(player)
         HandcuffData = BuildDefaultHandcuffData(), -- V6.0手铐道具
         LimitPrisonerData = BuildDefaultLimitPrisonerData(), -- V6.0限时囚犯
         OnlineRewardData = BuildDefaultOnlineRewardData(os.time()), -- V6.1在线奖励
+        DailyTaskData = BuildDefaultDailyTaskData(os.time()), -- V7.3每日任务
         UpgradeData = BuildDefaultUpgradeData(), -- V6.7养成系统
         RebirthData = BuildDefaultRebirthData(), -- V7.0重生系统
         LikeData = BuildDefaultLikeData(), -- V7.2点赞系统
@@ -934,6 +1013,20 @@ function DataManager.SetVipPurchased(player, purchased)
     return true
 end
 
+function DataManager.SetVipForceDisabled(player, forceDisabled)
+    local vipData = DataManager.GetVipData(player)
+    if not vipData then
+        warn(GameConfig.LOG_PREFIX, "SetVipForceDisabled: 找不到玩家数")
+        return false
+    end
+
+    vipData.ForceDisabled = forceDisabled == true
+    if vipData.ForceDisabled then
+        vipData.Purchased = false
+    end
+    return true
+end
+
 function DataManager.ResetVip(player)
     local vipData = DataManager.GetVipData(player)
     if not vipData then
@@ -942,6 +1035,7 @@ function DataManager.ResetVip(player)
     end
 
     vipData.Purchased = false
+    vipData.ForceDisabled = true
     return true
 end
 
@@ -1145,6 +1239,120 @@ function DataManager.ResetOnlineRewardData(player, now)
     data.LastRefreshDay = dayIndex
     data.TotalOnlineSeconds = 0
     data.ClaimedRewards = {}
+    return true
+end
+
+-- ==================== V7.3每日任务接口 ====================
+
+function DataManager.GetDailyTaskData(player)
+    local playerData = DataManager.GetPlayerData(player)
+    if not playerData then
+        return nil
+    end
+
+    if not playerData.DailyTaskData then
+        playerData.DailyTaskData = BuildDefaultDailyTaskData(os.time())
+    else
+        playerData.DailyTaskData = NormalizeDailyTaskData(playerData.DailyTaskData)
+    end
+
+    RefreshDailyTaskDataByNow(playerData.DailyTaskData, os.time())
+    return playerData.DailyTaskData
+end
+
+function DataManager.RefreshDailyTaskData(player, now)
+    local data = DataManager.GetDailyTaskData(player)
+    if not data then
+        warn(GameConfig.LOG_PREFIX, "RefreshDailyTaskData: 找不到玩家数")
+        return false, false, nil
+    end
+
+    local refreshed = RefreshDailyTaskDataByNow(data, now or os.time())
+    return true, refreshed, data
+end
+
+function DataManager.ResetDailyTaskData(player, now)
+    local data = DataManager.GetDailyTaskData(player)
+    if not data then
+        warn(GameConfig.LOG_PREFIX, "ResetDailyTaskData: 找不到玩家数")
+        return false, nil
+    end
+
+    local dayIndex = GetUtcDayIndex(now or os.time())
+    data.LastRefreshDay = dayIndex
+    data.MedalProgress = 0
+    data.EnemyDefeatProgress = 0
+    data.ClaimedTaskIds = {}
+    return true, data
+end
+
+function DataManager.AddDailyTaskMedals(player, amount, now)
+    local data = DataManager.GetDailyTaskData(player)
+    if not data then
+        warn(GameConfig.LOG_PREFIX, "AddDailyTaskMedals: 找不到玩家数")
+        return 0
+    end
+
+    RefreshDailyTaskDataByNow(data, now or os.time())
+
+    local delta = math.max(0, math.floor(tonumber(amount) or 0))
+    if delta > 0 then
+        data.MedalProgress = math.max(0, math.floor(tonumber(data.MedalProgress) or 0) + delta)
+    end
+
+    return tonumber(data.MedalProgress) or 0
+end
+
+function DataManager.AddDailyTaskEnemyDefeats(player, amount, now)
+    local data = DataManager.GetDailyTaskData(player)
+    if not data then
+        warn(GameConfig.LOG_PREFIX, "AddDailyTaskEnemyDefeats: 找不到玩家数")
+        return 0
+    end
+
+    RefreshDailyTaskDataByNow(data, now or os.time())
+
+    local delta = math.max(0, math.floor(tonumber(amount) or 0))
+    if delta > 0 then
+        data.EnemyDefeatProgress = math.max(0, math.floor(tonumber(data.EnemyDefeatProgress) or 0) + delta)
+    end
+
+    return tonumber(data.EnemyDefeatProgress) or 0
+end
+
+function DataManager.IsDailyTaskClaimed(player, taskId)
+    local data = DataManager.GetDailyTaskData(player)
+    if not data then
+        return false
+    end
+
+    local targetTaskId = math.floor(tonumber(taskId) or 0)
+    if targetTaskId <= 0 then
+        return false
+    end
+
+    return data.ClaimedTaskIds and data.ClaimedTaskIds[targetTaskId] == true
+end
+
+function DataManager.SetDailyTaskClaimed(player, taskId, claimed)
+    local data = DataManager.GetDailyTaskData(player)
+    if not data then
+        warn(GameConfig.LOG_PREFIX, "SetDailyTaskClaimed: 找不到玩家数")
+        return false
+    end
+
+    local targetTaskId = math.floor(tonumber(taskId) or 0)
+    if targetTaskId <= 0 then
+        return false
+    end
+
+    data.ClaimedTaskIds = data.ClaimedTaskIds or {}
+    if claimed == true then
+        data.ClaimedTaskIds[targetTaskId] = true
+    else
+        data.ClaimedTaskIds[targetTaskId] = nil
+    end
+
     return true
 end
 
@@ -1780,6 +1988,14 @@ function DataManager.InitializePlayerData(player)
             playerData.OnlineRewardData = BuildDefaultOnlineRewardData(os.time())
         else
             playerData.OnlineRewardData = NormalizeOnlineRewardData(playerData.OnlineRewardData)
+        end
+
+        -- V7.3每日任务：确保DailyTaskData字段存在（向后兼容）
+        if not playerData.DailyTaskData then
+            playerData.DailyTaskData = BuildDefaultDailyTaskData(os.time())
+        else
+            playerData.DailyTaskData = NormalizeDailyTaskData(playerData.DailyTaskData)
+            RefreshDailyTaskDataByNow(playerData.DailyTaskData, os.time())
         end
 
         -- V6.7养成系统：确保UpgradeData字段存在（向后兼容）
@@ -3228,6 +3444,7 @@ function DataManager.AddMedals(player, amount)
 
     if addAmount > 0 then
         progress.MedalCount = math.max(0, math.floor(tonumber(progress.MedalCount) or 0) + addAmount)
+        DataManager.AddDailyTaskMedals(player, addAmount)
     end
 
     RefreshUnlockedChaptersByMedals(progress, totalChapters)

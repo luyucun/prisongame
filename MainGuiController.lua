@@ -64,6 +64,14 @@ local currentMusicEnabled = true
 local currentSfxEnabled = true
 local BLUR_LOCK_ID = "Options"
 local BLUR_LOCKS_KEY = "__PopupBlurLocks"
+local POPUP_UI_MONITOR_INTERVAL = 0.2
+
+local popupMainGuiHidden = false
+local popupMainGuiEnabledBeforeHide = true
+local popupMonitorStarted = false
+local popupMonitorMainGuiChildAddedConn = nil
+local popupMonitorMainGuiChildRemovedConn = nil
+local popupMonitorAttrConn = nil
 
 local ButtonEffectHelper = nil
 
@@ -159,6 +167,91 @@ local function SetBlurLock(enabled)
 	if blur and blur:IsA("BlurEffect") then
 		blur.Enabled = next(locks) ~= nil
 	end
+end
+
+local function ResolveMainGui()
+	if mainGui and mainGui.Parent then
+		return mainGui
+	end
+	mainGui = playerGui:FindFirstChild("MainGui")
+	return mainGui
+end
+
+local function HasPopupLocks()
+	local globalLocks = _G[BLUR_LOCKS_KEY]
+	if type(globalLocks) == "table" and next(globalLocks) ~= nil then
+		return true
+	end
+
+	local lockStr = Lighting:GetAttribute(BLUR_LOCKS_KEY)
+	if type(lockStr) == "string" and lockStr ~= "" then
+		return true
+	end
+
+	local blur = Lighting:FindFirstChild("Blur")
+	return blur and blur:IsA("BlurEffect") and blur.Enabled == true
+end
+
+local function RefreshMainGuiPopupVisibility()
+	local currentMainGui = ResolveMainGui()
+	local shouldHide = HasPopupLocks()
+
+	if shouldHide then
+		if currentMainGui then
+			if not popupMainGuiHidden then
+				popupMainGuiEnabledBeforeHide = currentMainGui.Enabled
+			end
+			currentMainGui.Enabled = false
+		end
+		popupMainGuiHidden = true
+		return
+	end
+
+	if popupMainGuiHidden and currentMainGui then
+		currentMainGui.Enabled = popupMainGuiEnabledBeforeHide
+	end
+	popupMainGuiHidden = false
+	popupMainGuiEnabledBeforeHide = true
+end
+
+local function StartPopupMainGuiMonitor()
+	if popupMonitorStarted then
+		return
+	end
+	popupMonitorStarted = true
+
+	if popupMonitorAttrConn then
+		popupMonitorAttrConn:Disconnect()
+	end
+	popupMonitorAttrConn = Lighting:GetAttributeChangedSignal(BLUR_LOCKS_KEY):Connect(RefreshMainGuiPopupVisibility)
+
+	if popupMonitorMainGuiChildAddedConn then
+		popupMonitorMainGuiChildAddedConn:Disconnect()
+	end
+	popupMonitorMainGuiChildAddedConn = playerGui.ChildAdded:Connect(function(child)
+		if child and child.Name == "MainGui" then
+			mainGui = child
+			RefreshMainGuiPopupVisibility()
+		end
+	end)
+
+	if popupMonitorMainGuiChildRemovedConn then
+		popupMonitorMainGuiChildRemovedConn:Disconnect()
+	end
+	popupMonitorMainGuiChildRemovedConn = playerGui.ChildRemoved:Connect(function(child)
+		if child == mainGui then
+			mainGui = nil
+		end
+	end)
+
+	task.spawn(function()
+		while popupMonitorStarted do
+			RefreshMainGuiPopupVisibility()
+			task.wait(POPUP_UI_MONITOR_INTERVAL)
+		end
+	end)
+
+	RefreshMainGuiPopupVisibility()
 end
 
 local function EnsureOptionsScale()
@@ -540,7 +633,7 @@ local function InitializeUI()
 	DebugLog("开始初始化UI元素...")
 
 	-- 获取MainGui
-	mainGui = SafeWaitForChild(playerGui, "MainGui", 5)
+	mainGui = ResolveMainGui() or SafeWaitForChild(playerGui, "MainGui", 5)
 	if not mainGui then
 		DebugLog("❌ 未找到MainGui")
 		return false
@@ -573,6 +666,7 @@ local function InitializeUI()
 	-- 初始状态：隐藏按钮
 	SetButtonsVisibility(false)
 	SetPrisonerStoreVisibility(true)
+	RefreshMainGuiPopupVisibility()
 
 	return true
 end
@@ -773,6 +867,7 @@ end
 ]]
 local function Initialize()
 	DebugLog("开始初始化MainGuiController...")
+	StartPopupMainGuiMonitor()
 
 	-- 初始化UI
 	if not InitializeUI() then

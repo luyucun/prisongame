@@ -58,6 +58,7 @@ local totalDistance = 0    -- 总距离
 
 local HouseConfig = nil
 local StageConfig = nil
+local GameConfig = nil
 
 -- ==================== 调试函数 ====================
 local function DebugLog(...)
@@ -149,6 +150,71 @@ local function getStageConfig()
 	end
 
 	return StageConfig
+end
+
+local function getGameConfig()
+	if GameConfig then
+		return GameConfig
+	end
+
+	local success, result = pcall(function()
+		return require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
+	end)
+
+	if success then
+		GameConfig = result
+	end
+
+	return GameConfig
+end
+
+local function getChapterTemplateStyle(chapterId)
+	local stageConfig = getStageConfig()
+	if stageConfig and stageConfig.GetChapterStyle then
+		local style = stageConfig.GetChapterStyle(chapterId)
+		if style and style ~= "" then
+			return tostring(style)
+		end
+	end
+	return "Style01"
+end
+
+local function getStageOffsetByStyle(styleName)
+	local gameConfig = getGameConfig()
+	local campaignConfig = gameConfig and gameConfig.Campaign
+	if not campaignConfig then
+		return 170
+	end
+
+	if campaignConfig.StageGenerateOffsetByStyle and styleName then
+		local styleOffset = tonumber(campaignConfig.StageGenerateOffsetByStyle[styleName])
+		if styleOffset and styleOffset > 0 then
+			return styleOffset
+		end
+	end
+
+	return tonumber(campaignConfig.StageGenerateOffset) or 170
+end
+
+local function getStage001PositionByStyle(styleName, homeSlot)
+	local gameConfig = getGameConfig()
+	local campaignConfig = gameConfig and gameConfig.Campaign
+	if not campaignConfig then
+		return nil
+	end
+
+	if campaignConfig.Stage001PositionsByStyle and styleName then
+		local stylePositions = campaignConfig.Stage001PositionsByStyle[styleName]
+		if stylePositions and stylePositions[homeSlot] then
+			return stylePositions[homeSlot]
+		end
+	end
+
+	if campaignConfig.Stage001Positions then
+		return campaignConfig.Stage001Positions[homeSlot]
+	end
+
+	return nil
 end
 
 local function shouldShowTipsForChapter(chapterId)
@@ -418,8 +484,7 @@ local function initializeProgressData(chapter, stages)
 
 	-- 计算终点(最后一关的IdleFloor)
 	-- 由于关卡是动态生成的，我们需要估算终点位置
-	-- 根据GameConfig.Campaign.StageGenerateOffset = 170
-	-- 以及Stage001的初始位置，可以计算出最后一关的预期位置
+	-- 优先按章节风格读取GameConfig中的Stage001坐标和关卡间距
 
 	-- 方法1: 尝试获取已存在的最后一关IdleFloor
 	local lastStageIdleFloor = getStageIdleFloor(totalStages)
@@ -427,16 +492,17 @@ local function initializeProgressData(chapter, stages)
 		lastStageIdleFloorZ = lastStageIdleFloor.Position.Z
 		DebugLog("终点Z坐标(实际):", lastStageIdleFloorZ)
 	else
-		-- 方法2: 根据配置估算
-		-- Stage001位置大约在homeIdleFloorZ - 184的位置(根据GameConfig)
-		-- 每关间距约169 studs(负方向)
-		local stageOffset = -169  -- 每关向Z负方向偏移
-		local stage001OffsetFromHome = -184  -- Stage001相对于Home的偏移
+		-- 方法2: 根据配置估算（按章节模板风格读取起点与关卡间距）
+		local homeSlot = tonumber(player:GetAttribute("HomeSlot")) or 1
+		local templateStyle = getChapterTemplateStyle(currentChapter)
+		local stageOffset = -math.abs(getStageOffsetByStyle(templateStyle))
+		local stage001Position = getStage001PositionByStyle(templateStyle, homeSlot)
+		local stage001OffsetFromHome = stage001Position and (stage001Position.Z - homeIdleFloorZ) or -184
 
 		-- 从Stage001开始，每关偏移stageOffset
 		-- 最后一关的Z = homeIdleFloorZ + stage001OffsetFromHome + (totalStages - 1) * stageOffset
 		lastStageIdleFloorZ = homeIdleFloorZ + stage001OffsetFromHome + (totalStages - 1) * stageOffset
-		DebugLog("终点Z坐标(估算):", lastStageIdleFloorZ)
+		DebugLog("终点Z坐标(估算):", lastStageIdleFloorZ, "style:", templateStyle)
 	end
 
 	-- 计算总距离

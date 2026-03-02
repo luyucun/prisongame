@@ -2799,6 +2799,47 @@ function CampaignManager.OnCampaignEnd(campaignData, isVictory)
 end
 
 --[[
+Attempt to return player to home with bounded retries.
+@param player Player
+@param options table? {maxAttempts:number, retryInterval:number, targetPartName:string?, characterReadyTimeout:number?}
+@return boolean, number
+]]
+local function TryReturnPlayerToHome(player, options)
+	if not player then
+		return false, 0
+	end
+
+	options = options or {}
+	local maxAttempts = math.max(1, tonumber(options.maxAttempts) or 1)
+	local retryInterval = math.max(0, tonumber(options.retryInterval) or 0)
+
+	for attempt = 1, maxAttempts do
+		if not player.Parent then
+			return false, attempt - 1
+		end
+
+		local success = false
+		pcall(function()
+			success = CampaignManager.ReturnToHome(
+				player,
+				options.targetPartName,
+				options.characterReadyTimeout
+			) == true
+		end)
+
+		if success then
+			return true, attempt
+		end
+
+		if attempt < maxAttempts and retryInterval > 0 then
+			task.wait(retryInterval)
+		end
+	end
+
+	return false, maxAttempts
+end
+
+--[[
 完成战役结束清理流程
 @param campaignData table - 战役数据
 ]]
@@ -2939,21 +2980,18 @@ function CampaignManager.CompleteCampaignEnd(campaignData)
 	-- 清理关卡场景
 	StageService.CleanupStages(campaignData.PlayerId)
 
-	-- Ensure player is back at home after settlement (covers Restart/Retreat path too).
+	-- Ensure player returns home after settlement.
 	local playerForReturn = campaignData.Player
 	if playerForReturn then
-		local returnHomeSuccess = false
-		pcall(function()
-			returnHomeSuccess = CampaignManager.ReturnToHome(playerForReturn) == true
-		end)
+		local returnHomeSuccess, returnAttempts = TryReturnPlayerToHome(playerForReturn, {
+			maxAttempts = 5,
+			retryInterval = 0.15,
+			characterReadyTimeout = 0.12,
+		})
+
 		if not returnHomeSuccess then
-			task.delay(0.2, function()
-				if playerForReturn and playerForReturn.Parent then
-					pcall(function()
-						CampaignManager.ReturnToHome(playerForReturn)
-					end)
-				end
-			end)
+			DebugLog(string.format("ReturnToHome retries exhausted: player=%s, attempts=%d",
+				tostring(playerForReturn.Name), returnAttempts))
 		end
 	end
 
@@ -3678,12 +3716,53 @@ function CampaignManager.RequestRetreat(player)
 end
 
 --[[
+Wait for character and HumanoidRootPart with timeout.
+@param player Player
+@param timeoutSeconds number?
+@return Model?, BasePart?
+]]
+local function ResolveCharacterAndRootPart(player, timeoutSeconds)
+	local timeout = math.max(0, tonumber(timeoutSeconds) or 0)
+	local deadline = os.clock() + timeout
+	local lastCharacter = nil
+
+	repeat
+		local character = player.Character
+		if character and character.Parent then
+			lastCharacter = character
+			local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+			if humanoidRootPart and humanoidRootPart:IsA("BasePart") then
+				return character, humanoidRootPart
+			end
+
+			local remain = deadline - os.clock()
+			local waitBudget = math.min(0.1, math.max(0, remain))
+			if waitBudget > 0 then
+				local ok, waited = pcall(function()
+					return character:WaitForChild("HumanoidRootPart", waitBudget)
+				end)
+				if ok and waited and waited:IsA("BasePart") then
+					return character, waited
+				end
+			end
+		end
+
+		if os.clock() >= deadline then
+			break
+		end
+		task.wait(0.05)
+	until false
+
+	return lastCharacter, nil
+end
+
+--[[
 V2.11新增：传送玩家回家园出生点
 在战斗期间允许玩家返回家园
 @param player Player - 玩家
 @return boolean - 是否传送成功
 ]]
-function CampaignManager.ReturnToHome(player, targetPartName)
+function CampaignManager.ReturnToHome(player, targetPartName, characterReadyTimeout)
 	if not player then
 		return false
 	end
@@ -3730,13 +3809,12 @@ function CampaignManager.ReturnToHome(player, targetPartName)
 	end
 
 	-- 传送玩家
-	local character = player.Character
+	local character, humanoidRootPart = ResolveCharacterAndRootPart(player, characterReadyTimeout or 0.25)
 	if not character then
 		DebugLog(string.format("ReturnToHome失败: 玩家 %s 没有角色", player.Name))
 		return false
 	end
 
-	local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
 	if not humanoidRootPart then
 		DebugLog(string.format("ReturnToHome失败: 玩家 %s 角色没有HumanoidRootPart", player.Name))
 		return false

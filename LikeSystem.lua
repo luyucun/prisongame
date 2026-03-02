@@ -33,6 +33,7 @@ local PROMPT_NAME = "ProximityPrompt"
 local LIKE_PROMPT_ATTR = "LikePrompt"
 local LIKE_HOME_ID_ATTR = "LikeHomeId"
 local LIKE_OWNER_ATTR = "LikeOwnerUserId"
+local LIKE_SURFACE_GUIS = { "SurfaceGui01", "SurfaceGui02" }
 
 local likeToastEvent = nil
 local likeStateSyncEvent = nil
@@ -234,6 +235,80 @@ local function GetInfoPart(homeModel)
 	return nil
 end
 
+local function ResolveOwnerLikeCount(ownerUserId, fallbackLikeCount)
+	if type(fallbackLikeCount) == "number" then
+		local forcedCount = math.floor(fallbackLikeCount)
+		if forcedCount < 0 then
+			forcedCount = 0
+		end
+		return forcedCount
+	end
+
+	if not IsValidOwnerUserId(ownerUserId) then
+		return 0
+	end
+
+	local ownerPlayer = nil
+	local ok, result = pcall(function()
+		return Players:GetPlayerByUserId(ownerUserId)
+	end)
+	if ok then
+		ownerPlayer = result
+	end
+	if not ownerPlayer then
+		return 0
+	end
+
+	local attrCount = math.floor(tonumber(ownerPlayer:GetAttribute("LikeCount")) or 0)
+	if attrCount > 0 then
+		return attrCount
+	end
+
+	if DataManager and DataManager.GetLikeCount then
+		local okCount, count = pcall(function()
+			return DataManager.GetLikeCount(ownerPlayer)
+		end)
+		if okCount then
+			local safeCount = math.floor(tonumber(count) or 0)
+			if safeCount > 0 then
+				return safeCount
+			end
+		end
+	end
+
+	return 0
+end
+
+local function UpdateLikeDisplayForHome(homeId, fallbackLikeCount)
+	local homeModel = GetHomeModel(homeId)
+	if not homeModel then
+		return false
+	end
+
+	local infoPart = GetInfoPart(homeModel)
+	if not infoPart then
+		return false
+	end
+
+	local ownerUserId = homeModel:GetAttribute(HOME_OWNER_ATTR)
+	local likeCount = ResolveOwnerLikeCount(ownerUserId, fallbackLikeCount)
+	local likeText = tostring(likeCount)
+
+	for _, guiName in ipairs(LIKE_SURFACE_GUIS) do
+		local surfaceGui = infoPart:FindFirstChild(guiName) or infoPart:FindFirstChild(guiName, true)
+		if surfaceGui and surfaceGui:IsA("SurfaceGui") then
+			local frame = surfaceGui:FindFirstChild("Frame")
+			local playerLike = frame and frame:FindFirstChild("PlayerLike")
+			local numLabel = playerLike and playerLike:FindFirstChild("Num")
+			if numLabel and numLabel:IsA("TextLabel") then
+				numLabel.Text = likeText
+			end
+		end
+	end
+
+	return true
+end
+
 local function GetOrCreatePrompt(homeId, homeModel)
 	local information = homeModel and homeModel:FindFirstChild(INFORMATION_NAME)
 	local prompt = nil
@@ -304,9 +379,15 @@ local function GetOrCreatePrompt(homeId, homeModel)
 end
 
 local function UpdatePromptState(homeId)
-	local prompt = promptsByHomeId[homeId]
 	local homeModel = GetHomeModel(homeId)
-	if not prompt or not prompt.Parent or not homeModel then
+	if not homeModel then
+		return
+	end
+
+	UpdateLikeDisplayForHome(homeId)
+
+	local prompt = promptsByHomeId[homeId]
+	if not prompt or not prompt.Parent then
 		return
 	end
 
@@ -380,6 +461,7 @@ local function HandlePromptTriggered(homeId, likerPlayer)
 	end
 
 	local newLikeCount = DataManager.AddLike(targetPlayer, 1)
+	UpdateLikeDisplayForHome(homeId, newLikeCount)
 
 	if DataManager.SavePlayerDataThrottled then
 		DataManager.SavePlayerDataThrottled(targetPlayer)
@@ -504,6 +586,7 @@ local function StartPromptMaintenance()
 	task.spawn(function()
 		while maintenanceToken == token do
 			for homeId = MIN_HOME_SLOT, MAX_HOME_SLOT do
+				UpdateLikeDisplayForHome(homeId)
 				local prompt = promptsByHomeId[homeId]
 				if not prompt or not prompt.Parent then
 					BindPromptForHome(homeId)

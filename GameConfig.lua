@@ -22,7 +22,7 @@ GameConfig.USE_STUDIO_DATASTORE_SUFFIX = true
 GameConfig.MAX_PLAYERS = 6
 
 -- 玩家初始货币配置
-GameConfig.INITIAL_COINS = 0
+GameConfig.INITIAL_COINS = 300
 
 -- ==================== 基地相关配置 ====================
 -- 基地数量(对应玩家数量)
@@ -94,6 +94,17 @@ GameConfig.PUT_CONFIRM_GUI_NAME = "PutConfirm"
 GameConfig.Campaign = {
 	MaxStages = 30,                       -- 最大关卡数
 	StageGenerateOffset = 170,           -- 关卡Z轴间距(studs)
+	-- 可选：按模板风格覆盖关卡间距；未配置的风格回退到StageGenerateOffset
+	StageGenerateOffsetByStyle = {
+		["Style01"] = 170,
+		["Style02"] = 170,
+		["Style03"] = 170,
+		["Style04"] = 170,
+		["Style05"] = 170,
+		["Style06"] = 170,
+		["Style07"] = 170,
+		["Style08"] = 170,
+	},
 	MoveTimeout = 30,                    -- 移动超时(秒)
 	ArrivalThreshold = 8,                -- 到达阈值(studs) - V2.0修复：放宽到8，避免因敌人存在导致无法到达
 	RespawnEffectDuration = 0.3,         -- 重生特效时长(秒)
@@ -160,6 +171,32 @@ GameConfig.Campaign = {
 
 		-- Style05的坐标（请根据实际模板调整）
 		["Style05"] = {
+			[1] = Vector3.new(-0.316, 0.992, -158.269),
+			[2] = Vector3.new(-120.316, 0.992, -158.269),
+			[3] = Vector3.new(-240.316, 0.992, -158.269),
+			[4] = Vector3.new(-360.316, 0.992, -158.269),
+			[5] = Vector3.new(-480.316, 0.992, -158.269),
+			[6] = Vector3.new(-600.316, 0.992, -158.269),
+		},
+
+		-- Style06~Style08为新增章节模板，先使用与Style05一致的基线坐标
+		["Style06"] = {
+			[1] = Vector3.new(-0.316, 0.992, -158.269),
+			[2] = Vector3.new(-120.316, 0.992, -158.269),
+			[3] = Vector3.new(-240.316, 0.992, -158.269),
+			[4] = Vector3.new(-360.316, 0.992, -158.269),
+			[5] = Vector3.new(-480.316, 0.992, -158.269),
+			[6] = Vector3.new(-600.316, 0.992, -158.269),
+		},
+		["Style07"] = {
+			[1] = Vector3.new(-0.316, 0.992, -158.269),
+			[2] = Vector3.new(-120.316, 0.992, -158.269),
+			[3] = Vector3.new(-240.316, 0.992, -158.269),
+			[4] = Vector3.new(-360.316, 0.992, -158.269),
+			[5] = Vector3.new(-480.316, 0.992, -158.269),
+			[6] = Vector3.new(-600.316, 0.992, -158.269),
+		},
+		["Style08"] = {
 			[1] = Vector3.new(-0.316, 0.992, -158.269),
 			[2] = Vector3.new(-120.316, 0.992, -158.269),
 			[3] = Vector3.new(-240.316, 0.992, -158.269),

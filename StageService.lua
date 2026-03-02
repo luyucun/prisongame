@@ -198,8 +198,18 @@ local function GetTemplateStyle(playerId)
 end
 
 -- V2.7新增：获取关卡Z轴间距（从GameConfig读取）
-local function GetStageOffsetZ()
-	return GameConfigModule.Campaign.StageGenerateOffset or 170  -- 默认170
+local function GetStageOffsetZ(templateStyle)
+	local campaignConfig = GameConfigModule.Campaign or {}
+	local styleName = tostring(templateStyle or "")
+	local offsetByStyle = campaignConfig.StageGenerateOffsetByStyle
+	if styleName ~= "" and type(offsetByStyle) == "table" then
+		local styleOffset = tonumber(offsetByStyle[styleName])
+		if styleOffset and styleOffset > 0 then
+			return styleOffset
+		end
+	end
+
+	return tonumber(campaignConfig.StageGenerateOffset) or 170  -- 默认170
 end
 
 --[[
@@ -810,7 +820,7 @@ function StageService.GenerateStage(playerId, stageNum)
 
         -- V2.0修复：计算新关卡位置（沿世界Z轴负方向偏移，不受Base旋转影响）
         -- V2.7修复：使用GetStageOffsetZ()从GameConfig动态读取间距
-        local stageOffsetZ = GetStageOffsetZ()
+        local stageOffsetZ = GetStageOffsetZ(templateStyle)
         local newBaseCFrame = CFrame.new(previousBase.Position - Vector3.new(0, 0, stageOffsetZ)) * (previousBase.CFrame - previousBase.Position)
 
         -- 克隆模板

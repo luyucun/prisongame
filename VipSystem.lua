@@ -98,11 +98,14 @@ local function EnsureVipData(player)
 end
 
 local function SendData(player, vipData)
-	local purchased = vipData and vipData.Purchased == true
+	local purchased = vipData and vipData.Purchased == true and vipData.ForceDisabled ~= true
 	player:SetAttribute("VipPurchased", purchased)
 
 	if vipDataEvent then
-		vipDataEvent:FireClient(player, { Purchased = purchased })
+		vipDataEvent:FireClient(player, {
+			Purchased = purchased,
+			ForceDisabled = vipData and vipData.ForceDisabled == true or false
+		})
 	end
 end
 
@@ -332,14 +335,16 @@ local function ApplyVipStatus(player, purchased, saveData)
 		return false
 	end
 
-	if vipData.Purchased == purchased then
-		player:SetAttribute("VipPurchased", purchased)
-		ApplyVipIcon(player, purchased)
-		ApplyLegacyChatTag(player, purchased)
+	local effectivePurchased = purchased == true and vipData.ForceDisabled ~= true
+
+	if vipData.Purchased == effectivePurchased then
+		player:SetAttribute("VipPurchased", effectivePurchased)
+		ApplyVipIcon(player, effectivePurchased)
+		ApplyLegacyChatTag(player, effectivePurchased)
 		return true
 	end
 
-	vipData.Purchased = purchased == true
+	vipData.Purchased = effectivePurchased
 	player:SetAttribute("VipPurchased", vipData.Purchased)
 
 	if saveData then
@@ -358,11 +363,14 @@ local function HandlePurchaseSuccess(player)
 		return
 	end
 
-	if vipData.Purchased == true then
+	if vipData.Purchased == true and vipData.ForceDisabled ~= true then
 		SendPurchaseResult(player, false, "Already purchased")
 		return
 	end
 
+	if DataManager.SetVipForceDisabled then
+		DataManager.SetVipForceDisabled(player, false)
+	end
 	DataManager.SetVipPurchased(player, true)
 	DataManager.SavePlayerDataThrottled(player)
 
@@ -426,18 +434,17 @@ function VipSystem.IsVipCached(player)
 		return false
 	end
 
-	if player:GetAttribute("VipPurchased") == true then
-		return true
-	end
-
 	if DataManager and DataManager.GetVipData then
 		local vipData = DataManager.GetVipData(player)
+		if vipData and vipData.ForceDisabled == true then
+			return false
+		end
 		if vipData and vipData.Purchased == true then
 			return true
 		end
 	end
 
-	return false
+	return player:GetAttribute("VipPurchased") == true
 end
 
 function VipSystem.IsVip(player)
@@ -445,16 +452,16 @@ function VipSystem.IsVip(player)
 		return false
 	end
 
-	if player:GetAttribute("VipPurchased") == true then
-		return true
+	local vipData = EnsureVipData(player)
+	if vipData and vipData.ForceDisabled == true then
+		return false
 	end
 
-	local vipData = EnsureVipData(player)
 	if vipData and vipData.Purchased == true then
 		return true
 	end
 
-	return false
+	return player:GetAttribute("VipPurchased") == true
 end
 
 function VipSystem.ApplyCoinBonus(player, amount, options)
@@ -480,11 +487,19 @@ function VipSystem.SyncPlayer(player)
 		return false
 	end
 
-	if vipData.Purchased ~= true then
-		if CheckVipOwnership(player) then
-			DataManager.SetVipPurchased(player, true)
+	if vipData.ForceDisabled == true then
+		if vipData.Purchased == true then
+			DataManager.SetVipPurchased(player, false)
+			vipData.Purchased = false
 			DataManager.SavePlayerDataThrottled(player)
-			vipData.Purchased = true
+		end
+	else
+		if vipData.Purchased ~= true then
+			if CheckVipOwnership(player) then
+				DataManager.SetVipPurchased(player, true)
+				DataManager.SavePlayerDataThrottled(player)
+				vipData.Purchased = true
+			end
 		end
 	end
 
@@ -503,16 +518,20 @@ function VipSystem.GMResetVip(player)
 		return false, "Data load failed"
 	end
 
+	if DataManager.SetVipForceDisabled then
+		DataManager.SetVipForceDisabled(player, true)
+	else
+		vipData.ForceDisabled = true
+	end
 	vipData.Purchased = false
 	player:SetAttribute("VipPurchased", false)
 	purchaseLocks[player] = nil
 
 	DataManager.SavePlayerDataThrottled(player)
-	ApplyVipIcon(player, false)
-	ApplyLegacyChatTag(player, false)
+	ApplyVipStatus(player, false, false)
 	SendData(player, vipData)
 
-	return true, "VIP reset"
+	return true, "VIP reset and disabled"
 end
 
 function VipSystem.Initialize()

@@ -1,12 +1,11 @@
 --[[
 =====================================================
-RemoteEvent 当前清单（V7.2 基线）
+RemoteEvent 当前清单（V7.3 基线）
 =====================================================
 
 更新时间: 2026-02-28
-基线来源: 当前仓库代码（MainServer + 各 System/Display/Controller）
-
-目录结构：
+基线来源: 当前仓库代码（MainServer + System/Display/Controller）
+目录结构:
 ReplicatedStorage
 └── Events (Folder)
 
@@ -44,6 +43,7 @@ ReplicatedStorage
 28) UpgradeEvents (Folder)
 29) RebirthEvents (Folder)
 30) LikeEvents (Folder)
+31) DailyTaskEvents (Folder)  -- V7.3 新增
 
 =====================================================
 二、分组明细
@@ -98,8 +98,8 @@ ReplicatedStorage
 - CampaignStateUpdate (S->C)
 - StageProgress (S->C)
 - LockHomeOperations (S->C)
-- RequestMapData (C->S)   [V7.1]
-- MapData (S->C)          [V7.1]
+- RequestMapData (C->S) [V7.1]
+- MapData (S->C) [V7.1]
 
 【ShopEvents】
 - RequestShopList (C->S)
@@ -248,18 +248,22 @@ ReplicatedStorage
 - LikeToast (S->C, likerName, newLikeCount)
 - LikeStateSync (S->C, mode, payload)
 
+【DailyTaskEvents】(V7.3)
+- RequestDailyTaskData (C->S)
+- DailyTaskData (S->C)
+- ClaimDailyTaskReward (C->S)
+- ClaimDailyTaskResult (S->C)
+
 =====================================================
-三、维护约定
+三、维护约束
 =====================================================
 
 1. 新增业务事件时，必须同步更新：
    - 本文件
    - 架构设计文档.lua
-   - 对应 System/Display 的初始化逻辑
-
-2. 当前版本无 TaskEvents（旧文档残留已移除）。
-
-3. 说明中 C->S / S->C 仅表示常规方向；部分 RemoteEvent 可能双向复用。
+   - 对应 System/Display 初始化逻辑
+2. C->S / S->C 为主要方向，个别 RemoteEvent 可能双向复用。
+3. 当前版本已包含 LikeEvents 与 DailyTaskEvents。
 
 =====================================================
 清单结束
