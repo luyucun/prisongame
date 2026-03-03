@@ -85,7 +85,7 @@ GuideConfig.Guides = {
 		TargetUIPath = "MainGui/BattleControl/Play", -- UI路径
 		TriggerCondition = "TWO_UNITS_PLACED",  -- 触发条件：摆放两个兵种
 		Sort = 5,                             -- 排序
-		Enabled = true,                       -- 是否启用
+		Enabled = false,                      -- 已移除：不再引导点击Attack按钮
 	},
 
 	-- Guide 6: shop guide after house upgrade cinematic

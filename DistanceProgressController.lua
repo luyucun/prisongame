@@ -19,7 +19,6 @@ UI结构:
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local TweenService = game:GetService("TweenService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
@@ -37,17 +36,12 @@ local tipsLabel = progressBg and progressBg:WaitForChild("Tips", 5)
 local PROGRESS_UPDATE_INTERVAL = 0.1  -- 进度更新间隔(秒)
 local PROGRESS_LERP_SPEED = 0.15      -- 进度平滑过渡速度
 local INITIAL_POSITION = UDim2.new(0, 0, 0.5, 0)  -- 初始位置
-local TIP_SWING_ANGLE = 6
-local TIP_SWING_STEP_DURATION = 0.16
-local TIP_SWING_INTERVAL = 2
 
 -- ==================== 状态变量 ====================
 local isActive = false
 local currentProgress = 0  -- 当前显示的进度(0-1)
 local targetProgress = 0   -- 目标进度(0-1)
 local renderConnection = nil
-local tipsSwingToken = nil
-local tipsShouldShow = false
 
 -- 战役数据
 local currentChapter = 1
@@ -56,7 +50,6 @@ local homeIdleFloorZ = 0   -- 家园IdleFloor的Z坐标(起点)
 local lastStageIdleFloorZ = 0  -- 最后一关IdleFloor的Z坐标(终点)
 local totalDistance = 0    -- 总距离
 
-local HouseConfig = nil
 local StageConfig = nil
 local GameConfig = nil
 
@@ -88,52 +81,6 @@ local function getHomeIdleFloor()
 	end
 
 	return playerHome:FindFirstChild("IdleFloor")
-end
-
-local function getCurrentHouseModelName()
-	local homeSlot = player:GetAttribute("HomeSlot")
-	if not homeSlot then
-		return nil
-	end
-
-	local homeFolder = Workspace:FindFirstChild("Home")
-	if not homeFolder then
-		return nil
-	end
-
-	local playerHome = homeFolder:FindFirstChild("PlayerHome" .. tostring(homeSlot))
-	if not playerHome then
-		return nil
-	end
-
-	local houseFolder = playerHome:FindFirstChild("House")
-	if not houseFolder then
-		return nil
-	end
-
-	for _, child in ipairs(houseFolder:GetChildren()) do
-		if child:IsA("Model") then
-			return child.Name
-		end
-	end
-
-	return nil
-end
-
-local function getHouseConfig()
-	if HouseConfig then
-		return HouseConfig
-	end
-
-	local success, result = pcall(function()
-		return require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("HouseConfig"))
-	end)
-
-	if success then
-		HouseConfig = result
-	end
-
-	return HouseConfig
 end
 
 local function getStageConfig()
@@ -217,116 +164,14 @@ local function getStage001PositionByStyle(styleName, homeSlot)
 	return nil
 end
 
-local function shouldShowTipsForChapter(chapterId)
-	chapterId = tonumber(chapterId)
-	if not chapterId then
-		return false
-	end
-
-	local stageConfig = getStageConfig()
-	if stageConfig and stageConfig.IsLastChapter and stageConfig.IsLastChapter(chapterId) then
-		return false
-	end
-
-	local houseConfig = getHouseConfig()
-	if not houseConfig or not houseConfig.ShouldUpgradeHouse then
-		return false
-	end
-
-	local currentModel = getCurrentHouseModelName()
-	if not currentModel and houseConfig.GetHouseModelByChapter then
-		currentModel = houseConfig.GetHouseModelByChapter(math.max(chapterId - 1, 0))
-	end
-	if not currentModel then
-		currentModel = "PrisonLv1"
-	end
-
-	local shouldUpgrade = false
-	local success, result = pcall(function()
-		local upgrade = houseConfig.ShouldUpgradeHouse(currentModel, chapterId)
-		return upgrade
-	end)
-	if success then
-		shouldUpgrade = result == true
-	end
-
-	return shouldUpgrade
-end
-
-local function stopTipsSwing()
-	if tipsSwingToken then
-		tipsSwingToken = nil
-	end
-	if tipsLabel then
-		tipsLabel.Rotation = 0
-	end
-end
-
-local function startTipsSwing()
-	if not tipsLabel or tipsSwingToken or not tipsLabel.Visible then
-		return
-	end
-
-	local token = {}
-	tipsSwingToken = token
-	tipsLabel.Rotation = 0
-
-	task.spawn(function()
-		while tipsLabel and tipsLabel.Visible and tipsSwingToken == token do
-			local tweenLeft = TweenService:Create(
-				tipsLabel,
-				TweenInfo.new(TIP_SWING_STEP_DURATION, Enum.EasingStyle.Sine, Enum.EasingDirection.Out),
-				{ Rotation = -TIP_SWING_ANGLE }
-			)
-			local tweenRight = TweenService:Create(
-				tipsLabel,
-				TweenInfo.new(TIP_SWING_STEP_DURATION, Enum.EasingStyle.Sine, Enum.EasingDirection.Out),
-				{ Rotation = TIP_SWING_ANGLE }
-			)
-			local tweenCenter = TweenService:Create(
-				tipsLabel,
-				TweenInfo.new(TIP_SWING_STEP_DURATION, Enum.EasingStyle.Sine, Enum.EasingDirection.Out),
-				{ Rotation = 0 }
-			)
-
-			tweenLeft:Play()
-			tweenLeft.Completed:Wait()
-			if tipsSwingToken ~= token then
-				break
-			end
-
-			tweenRight:Play()
-			tweenRight.Completed:Wait()
-			if tipsSwingToken ~= token then
-				break
-			end
-
-			tweenCenter:Play()
-			tweenCenter.Completed:Wait()
-			if tipsSwingToken ~= token then
-				break
-			end
-
-			task.wait(TIP_SWING_INTERVAL)
-		end
-
-		if tipsLabel then
-			tipsLabel.Rotation = 0
-		end
-	end)
-end
-
-local function setTipsVisible(visible)
+local function setTipsVisible(_visible)
 	if not tipsLabel then
 		return
 	end
 
-	tipsLabel.Visible = visible
-	if visible then
-		startTipsSwing()
-	else
-		stopTipsSwing()
-	end
+	-- 需求调整：Distance进度条不再展示“新监狱解锁”提示。
+	tipsLabel.Visible = false
+	tipsLabel.Rotation = 0
 end
 
 --[[
@@ -561,7 +406,7 @@ local function showProgressUI()
 
 	-- 显示UI
 	bgFrame.Visible = true
-	setTipsVisible(tipsShouldShow)
+	setTipsVisible(false)
 	DebugLog("进度UI已显示")
 end
 
@@ -594,7 +439,6 @@ local function startProgressTracking(chapter, stages)
 		return
 	end
 
-	tipsShouldShow = shouldShowTipsForChapter(currentChapter)
 	isActive = true
 
 	-- 显示UI

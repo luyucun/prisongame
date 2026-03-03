@@ -130,6 +130,74 @@ local PowerUpdateEvent
 
 -- ==================== 3D信息面板（Information）同步 ====================
 
+local function IsTextGuiObject(instance)
+	return instance
+		and (instance:IsA("TextLabel") or instance:IsA("TextButton") or instance:IsA("TextBox"))
+end
+
+local function FindNamedTextGui(parent, childName)
+	if not parent or type(childName) ~= "string" then
+		return nil
+	end
+
+	local direct = parent:FindFirstChild(childName)
+	if IsTextGuiObject(direct) then
+		return direct
+	end
+
+	local deep = parent:FindFirstChild(childName, true)
+	if IsTextGuiObject(deep) then
+		return deep
+	end
+
+	return nil
+end
+
+local function CollectInformationSurfaceGuis(informationModel)
+	local surfaceGuis = {}
+	local visited = {}
+
+	if not informationModel then
+		return surfaceGuis
+	end
+
+	local function AddSurfaceGui(gui)
+		if gui and gui:IsA("SurfaceGui") and not visited[gui] then
+			visited[gui] = true
+			surfaceGuis[gui.Name] = gui
+		end
+	end
+
+	local function AddNamedSurfaceGui(root, guiName)
+		if not root then
+			return
+		end
+
+		AddSurfaceGui(root:FindFirstChild(guiName))
+		AddSurfaceGui(root:FindFirstChild(guiName, true))
+	end
+
+	for _, guiName in ipairs({"SurfaceGui01", "SurfaceGui02"}) do
+		AddNamedSurfaceGui(informationModel, guiName)
+	end
+
+	local part = informationModel:FindFirstChild("Part")
+	if part then
+		for _, guiName in ipairs({"SurfaceGui01", "SurfaceGui02"}) do
+			AddNamedSurfaceGui(part, guiName)
+		end
+	end
+
+	local infoPart = informationModel:FindFirstChild("InfoPart")
+	if infoPart then
+		for _, guiName in ipairs({"SurfaceGui01", "SurfaceGui02"}) do
+			AddNamedSurfaceGui(infoPart, guiName)
+		end
+	end
+
+	return surfaceGuis
+end
+
 --[[
 	服务端直接更新 Workspace 中的 Information 面板
 	目的：让所有客户端（包含后加入玩家 / StreamingEnabled 延迟加载）都能看到正确的玩家名与战斗力
@@ -157,10 +225,7 @@ local function UpdateWorldInformationDisplay(homeId, playerName, totalPower)
 		return
 	end
 
-	local part = information:FindFirstChild("Part")
-	if not part then
-		return
-	end
+	local surfaceGuis = CollectInformationSurfaceGuis(information)
 
 	local function ApplyToSurfaceGui(surfaceGui)
 		if not surfaceGui then
@@ -173,20 +238,20 @@ local function UpdateWorldInformationDisplay(homeId, playerName, totalPower)
 		end
 
 		local playerNameContainer = frame:FindFirstChild("PlayerName")
-		local nameLabel = playerNameContainer and playerNameContainer:FindFirstChild("Name")
-		if nameLabel and nameLabel:IsA("TextLabel") then
+		local nameLabel = FindNamedTextGui(playerNameContainer, "Name")
+		if nameLabel then
 			nameLabel.Text = tostring(playerName or "")
 		end
 
 		local playerPowerContainer = frame:FindFirstChild("PlayerPower")
-		local numLabel = playerPowerContainer and playerPowerContainer:FindFirstChild("Num")
-		if numLabel and numLabel:IsA("TextLabel") then
+		local numLabel = FindNamedTextGui(playerPowerContainer, "Num")
+		if numLabel then
 			numLabel.Text = tostring(math.floor(tonumber(totalPower) or 0))
 		end
 	end
 
-	ApplyToSurfaceGui(part:FindFirstChild("SurfaceGui01"))
-	ApplyToSurfaceGui(part:FindFirstChild("SurfaceGui02"))
+	ApplyToSurfaceGui(surfaceGuis.SurfaceGui01)
+	ApplyToSurfaceGui(surfaceGuis.SurfaceGui02)
 end
 
 -- ==================== Leaderstats ====================

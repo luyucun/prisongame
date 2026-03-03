@@ -588,7 +588,7 @@ function PlayerManager.OnPlayerAdded(player)
 		player:SetAttribute(FAST_RESTOCK_ATTR, endTime)
 	end
 
-	-- V4.8七日登录奖励：同步功能解锁状态（通关第一章后解锁）
+	-- V4.8七日登录奖励：同步功能解锁状态（首次重生后解锁）
 	local currentChapter = DataManager.GetCurrentChapter(player) or 1
 	local completedChapters = DataManager.GetCompletedChapters(player) or 0
 	local medalCount = 0
@@ -596,7 +596,6 @@ function PlayerManager.OnPlayerAdded(player)
 		medalCount = DataManager.GetMedalCount(player) or 0
 	end
 	player:SetAttribute("CurrentChapter", currentChapter)
-	player:SetAttribute("SevenDaysUnlocked", completedChapters >= 1)
 	player:SetAttribute("CompletedChapters", completedChapters)
 	player:SetAttribute("MedalCount", medalCount)
 
@@ -617,6 +616,7 @@ function PlayerManager.OnPlayerAdded(player)
 	player:SetAttribute("RebirthCount", rebirthCount)
 	player:SetAttribute("RebirthCoinBonusRate", rebirthCoinBonusRate)
 	player:SetAttribute("RebirthAttackBonusRate", rebirthAttackBonusRate)
+	player:SetAttribute("SevenDaysUnlocked", rebirthCount >= 1)
 
 	-- V4.9加入群组奖励：同步领取状态
 	local groupRewardData = DataManager.GetGroupRewardData(player)

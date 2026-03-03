@@ -31,7 +31,6 @@ local ButtonEffectHelper = nil
 local limitEvents = nil
 local requestDataEvent = nil
 local dataEvent = nil
-local purchaseGoldEvent = nil
 local purchaseRobuxEvent = nil
 local redeemEvent = nil
 local purchaseResultEvent = nil
@@ -264,7 +263,6 @@ local function InitializeEvents()
 
 	requestDataEvent = limitEvents:WaitForChild("RequestLimitPrisonerData", 5)
 	dataEvent = limitEvents:WaitForChild("LimitPrisonerData", 5)
-	purchaseGoldEvent = limitEvents:WaitForChild("PurchaseLimitPrisonerGold", 5)
 	purchaseRobuxEvent = limitEvents:WaitForChild("PurchaseLimitPrisonerRobux", 5)
 	redeemEvent = limitEvents:WaitForChild("RedeemLimitPrisoner", 5)
 	purchaseResultEvent = limitEvents:WaitForChild("LimitPrisonerPurchaseResult", 5)
@@ -323,6 +321,9 @@ local function InitializeUI()
 	buyButtonFrame = storeBg:FindFirstChild("BuyButtonFrame", true)
 	goldBuy = buyButtonFrame and buyButtonFrame:FindFirstChild("GoldBuy")
 	robuxBuy = buyButtonFrame and buyButtonFrame:FindFirstChild("RobuxBuy")
+	if goldBuy then
+		goldBuy.Visible = false
+	end
 	if robuxBuy and not defaultRobuxPos then
 		defaultRobuxPos = robuxBuy.Position
 	end
@@ -580,10 +581,7 @@ local function UpdateBuyButtons(data)
 	end
 
 	if goldBuy then
-		local priceLabel = goldBuy:FindFirstChild("Price")
-		if priceLabel and priceLabel:IsA("TextLabel") then
-			priceLabel.Text = FormatCoins(data.GoldPrice or 0)
-		end
+		goldBuy.Visible = false
 	end
 
 	if robuxBuy then
@@ -597,22 +595,8 @@ local function UpdateBuyButtons(data)
 			UpdateRobuxBuyPriceLabel(priceLabel, devProductId)
 		end
 		robuxBuy.Visible = devProductId > 0
-	end
-
-	if data.GoldPurchased then
-		if goldBuy then
-			goldBuy.Visible = false
-		end
-		if robuxBuy then
-			robuxBuy.Position = UDim2.new(0.5, 0, robuxBuy.Position.Y.Scale, robuxBuy.Position.Y.Offset)
-		end
-	else
-		if goldBuy then
-			goldBuy.Visible = true
-		end
-		if robuxBuy and defaultRobuxPos then
-			robuxBuy.Position = defaultRobuxPos
-		end
+		local refPos = defaultRobuxPos or robuxBuy.Position
+		robuxBuy.Position = UDim2.new(0.5, 0, refPos.Y.Scale, refPos.Y.Offset)
 	end
 end
 
@@ -915,22 +899,6 @@ local function BindButtons()
 		end
 		closeButton.MouseButton1Click:Connect(function()
 			PlayStoreClose()
-		end)
-	end
-
-	if goldBuy and (goldBuy:IsA("TextButton") or goldBuy:IsA("ImageButton")) then
-		if ButtonEffectHelper then
-			ButtonEffectHelper.AddClickEffect(goldBuy)
-		end
-		goldBuy.MouseButton1Click:Connect(function()
-			if purchaseLock or not purchaseGoldEvent then
-				return
-			end
-			if not cachedData or cachedData.UnitId == "" then
-				return
-			end
-			purchaseLock = true
-			purchaseGoldEvent:FireServer()
 		end)
 	end
 

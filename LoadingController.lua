@@ -433,6 +433,36 @@ local function PerformClientPreload()
 				end
 			end
 		end
+
+		-- 收集Map界面章节图标
+		local StageConfigModule = Config:FindFirstChild("StageConfig")
+		if StageConfigModule then
+			local success, StageConfig = pcall(require, StageConfigModule)
+			if success and StageConfig then
+				local chapterList = nil
+				if StageConfig.GetChapterList then
+					chapterList = StageConfig.GetChapterList()
+				elseif StageConfig.Chapters then
+					chapterList = {}
+					for _, chapterData in pairs(StageConfig.Chapters) do
+						table.insert(chapterList, chapterData)
+					end
+				end
+
+				for _, chapterData in ipairs(chapterList or {}) do
+					local mapIcon = tostring(chapterData.MapIcon or "")
+					if mapIcon ~= "" then
+						if not string.match(mapIcon, "rbxassetid://") and tonumber(mapIcon) then
+							mapIcon = "rbxassetid://" .. mapIcon
+						end
+						if string.match(mapIcon, "rbxassetid://") then
+							table.insert(assetsToPreload, mapIcon)
+							totalAssets = totalAssets + 1
+						end
+					end
+				end
+			end
+		end
 	end
 
 	-- 预加载Victory UI相关资源

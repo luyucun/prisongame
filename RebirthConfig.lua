@@ -10,7 +10,7 @@ local RebirthConfig = {}
 RebirthConfig.Levels = {
 	{
 		RebirthCount = 1,
-		RequiredCoins = 1000,
+		RequiredCoins = 100,
 		RequiredUnitId = "10001",
 		RequiredUnitCount = 5,
 		RewardCoins = 500,
@@ -23,7 +23,7 @@ RebirthConfig.Levels = {
 	},
 	{
 		RebirthCount = 2,
-		RequiredCoins = 2000,
+		RequiredCoins = 300,
 		RequiredUnitId = "10002",
 		RequiredUnitCount = 5,
 		RewardCoins = 1000,
@@ -36,7 +36,7 @@ RebirthConfig.Levels = {
 	},
 	{
 		RebirthCount = 3,
-		RequiredCoins = 3000,
+		RequiredCoins = 750,
 		RequiredUnitId = "10003",
 		RequiredUnitCount = 5,
 		RewardCoins = 2000,
@@ -49,7 +49,7 @@ RebirthConfig.Levels = {
 	},
 	{
 		RebirthCount = 4,
-		RequiredCoins = 4000,
+		RequiredCoins = 1250,
 		RequiredUnitId = "10004",
 		RequiredUnitCount = 5,
 		RewardCoins = 3000,
@@ -62,7 +62,7 @@ RebirthConfig.Levels = {
 	},
 	{
 		RebirthCount = 5,
-		RequiredCoins = 5000,
+		RequiredCoins = 2700,
 		RequiredUnitId = "10005",
 		RequiredUnitCount = 5,
 		RewardCoins = 5000,
@@ -75,7 +75,7 @@ RebirthConfig.Levels = {
 	},
 	{
 		RebirthCount = 6,
-		RequiredCoins = 6000,
+		RequiredCoins = 5100,
 		RequiredUnitId = "10006",
 		RequiredUnitCount = 8,
 		RewardCoins = 8000,
@@ -88,7 +88,7 @@ RebirthConfig.Levels = {
 	},
 	{
 		RebirthCount = 7,
-		RequiredCoins = 7000,
+		RequiredCoins = 5440,
 		RequiredUnitId = "10007",
 		RequiredUnitCount = 8,
 		RewardCoins = 12000,
@@ -101,7 +101,7 @@ RebirthConfig.Levels = {
 	},
 	{
 		RebirthCount = 8,
-		RequiredCoins = 8000,
+		RequiredCoins = 7650,
 		RequiredUnitId = "10008",
 		RequiredUnitCount = 8,
 		RewardCoins = 15000,
@@ -114,7 +114,7 @@ RebirthConfig.Levels = {
 	},
 	{
 		RebirthCount = 9,
-		RequiredCoins = 9000,
+		RequiredCoins = 8100,
 		RequiredUnitId = "10009",
 		RequiredUnitCount = 8,
 		RewardCoins = 20000,
@@ -127,7 +127,7 @@ RebirthConfig.Levels = {
 	},
 	{
 		RebirthCount = 10,
-		RequiredCoins = 10000,
+		RequiredCoins = 15200,
 		RequiredUnitId = "10010",
 		RequiredUnitCount = 8,
 		RewardCoins = 25000,
@@ -140,7 +140,7 @@ RebirthConfig.Levels = {
 	},
 	{
 		RebirthCount = 11,
-		RequiredCoins = 11000,
+		RequiredCoins = 23000,
 		RequiredUnitId = "10011",
 		RequiredUnitCount = 12,
 		RewardCoins = 30000,
@@ -153,7 +153,7 @@ RebirthConfig.Levels = {
 	},
 	{
 		RebirthCount = 12,
-		RequiredCoins = 12000,
+		RequiredCoins = 33600,
 		RequiredUnitId = "10012",
 		RequiredUnitCount = 12,
 		RewardCoins = 40000,
@@ -166,7 +166,7 @@ RebirthConfig.Levels = {
 	},
 	{
 		RebirthCount = 13,
-		RequiredCoins = 13000,
+		RequiredCoins = 40320,
 		RequiredUnitId = "10013",
 		RequiredUnitCount = 12,
 		RewardCoins = 50000,
@@ -179,7 +179,7 @@ RebirthConfig.Levels = {
 	},
 	{
 		RebirthCount = 14,
-		RequiredCoins = 14000,
+		RequiredCoins = 47520,
 		RequiredUnitId = "10014",
 		RequiredUnitCount = 12,
 		RewardCoins = 60000,
@@ -192,7 +192,7 @@ RebirthConfig.Levels = {
 	},
 	{
 		RebirthCount = 15,
-		RequiredCoins = 15000,
+		RequiredCoins = 58098,
 		RequiredUnitId = "10015",
 		RequiredUnitCount = 12,
 		RewardCoins = 70000,
@@ -205,7 +205,7 @@ RebirthConfig.Levels = {
 	},
 	{
 		RebirthCount = 16,
-		RequiredCoins = 16000,
+		RequiredCoins = 66518,
 		RequiredUnitId = "10016",
 		RequiredUnitCount = 15,
 		RewardCoins = 80000,
@@ -218,7 +218,7 @@ RebirthConfig.Levels = {
 	},
 	{
 		RebirthCount = 17,
-		RequiredCoins = 17000,
+		RequiredCoins = 92400,
 		RequiredUnitId = "10017",
 		RequiredUnitCount = 15,
 		RewardCoins = 90000,
@@ -231,7 +231,7 @@ RebirthConfig.Levels = {
 	},
 	{
 		RebirthCount = 18,
-		RequiredCoins = 18000,
+		RequiredCoins = 102600,
 		RequiredUnitId = "10018",
 		RequiredUnitCount = 15,
 		RewardCoins = 100000,
@@ -244,7 +244,7 @@ RebirthConfig.Levels = {
 	},
 	{
 		RebirthCount = 19,
-		RequiredCoins = 19000,
+		RequiredCoins = 128160,
 		RequiredUnitId = "10019",
 		RequiredUnitCount = 15,
 		RewardCoins = 110000,
@@ -257,7 +257,7 @@ RebirthConfig.Levels = {
 	},
 	{
 		RebirthCount = 20,
-		RequiredCoins = 20000,
+		RequiredCoins = 165600,
 		RequiredUnitId = "10020",
 		RequiredUnitCount = 15,
 		RewardCoins = 120000,

@@ -46,6 +46,74 @@ local defaultDisplayCache = {} -- [SurfaceGui] = { NameText = string, PowerText 
 
 -- ==================== 工具函数 ====================
 
+local function IsTextGuiObject(instance)
+	return instance
+		and (instance:IsA("TextLabel") or instance:IsA("TextButton") or instance:IsA("TextBox"))
+end
+
+local function FindNamedTextGui(parent, childName)
+	if not parent or type(childName) ~= "string" then
+		return nil
+	end
+
+	local direct = parent:FindFirstChild(childName)
+	if IsTextGuiObject(direct) then
+		return direct
+	end
+
+	local deep = parent:FindFirstChild(childName, true)
+	if IsTextGuiObject(deep) then
+		return deep
+	end
+
+	return nil
+end
+
+local function CollectInformationSurfaceGuis(information)
+	local result = {}
+	local visited = {}
+
+	if not information then
+		return result
+	end
+
+	local function AddSurfaceGui(gui)
+		if gui and gui:IsA("SurfaceGui") and not visited[gui] then
+			visited[gui] = true
+			result[gui.Name] = gui
+		end
+	end
+
+	local function AddNamedSurfaceGui(root, guiName)
+		if not root then
+			return
+		end
+
+		AddSurfaceGui(root:FindFirstChild(guiName))
+		AddSurfaceGui(root:FindFirstChild(guiName, true))
+	end
+
+	for _, guiName in ipairs({"SurfaceGui01", "SurfaceGui02"}) do
+		AddNamedSurfaceGui(information, guiName)
+	end
+
+	local part = information:FindFirstChild("Part")
+	if part then
+		for _, guiName in ipairs({"SurfaceGui01", "SurfaceGui02"}) do
+			AddNamedSurfaceGui(part, guiName)
+		end
+	end
+
+	local infoPart = information:FindFirstChild("InfoPart")
+	if infoPart then
+		for _, guiName in ipairs({"SurfaceGui01", "SurfaceGui02"}) do
+			AddNamedSurfaceGui(infoPart, guiName)
+		end
+	end
+
+	return result
+end
+
 --[[
 	获取玩家基地ID（带等待机制）
 	@param waitForAttribute boolean - 是否等待属性被设置
@@ -124,13 +192,18 @@ local function InitializeSurfaceGuis()
 		return false
 	end
 
-	local part = informationModel:WaitForChild("Part", 5)
-	if not part then
-		return false
+	local maxWait = 5
+	local startTime = tick()
+	local surfaceGuiMap = CollectInformationSurfaceGuis(informationModel)
+	local surfaceGui01 = surfaceGuiMap.SurfaceGui01
+
+	while not surfaceGui01 and (tick() - startTime) < maxWait do
+		task.wait(0.2)
+		surfaceGuiMap = CollectInformationSurfaceGuis(informationModel)
+		surfaceGui01 = surfaceGuiMap.SurfaceGui01
 	end
 
-	local surfaceGui01 = part:WaitForChild("SurfaceGui01", 3)
-	local surfaceGui02 = part:WaitForChild("SurfaceGui02", 3)
+	local surfaceGui02 = surfaceGuiMap.SurfaceGui02
 
 	if not surfaceGui01 then
 		return false
@@ -168,14 +241,14 @@ local function GetOrCacheDefaultDisplay(surfaceGui)
 	local frame = surfaceGui:FindFirstChild("Frame")
 	if frame then
 		local playerNameContainer = frame:FindFirstChild("PlayerName")
-		local nameLabel = playerNameContainer and playerNameContainer:FindFirstChild("Name")
-		if nameLabel and nameLabel:IsA("TextLabel") then
+		local nameLabel = FindNamedTextGui(playerNameContainer, "Name")
+		if nameLabel then
 			defaults.NameText = nameLabel.Text
 		end
 
 		local playerPowerContainer = frame:FindFirstChild("PlayerPower")
-		local numLabel = playerPowerContainer and playerPowerContainer:FindFirstChild("Num")
-		if numLabel and numLabel:IsA("TextLabel") then
+		local numLabel = FindNamedTextGui(playerPowerContainer, "Num")
+		if numLabel then
 			defaults.PowerText = numLabel.Text
 		end
 	end
@@ -201,14 +274,14 @@ local function ResetSurfaceGuiToDefault(surfaceGui)
 	end
 
 	local playerNameContainer = frame:FindFirstChild("PlayerName")
-	local nameLabel = playerNameContainer and playerNameContainer:FindFirstChild("Name")
-	if nameLabel and nameLabel:IsA("TextLabel") then
+	local nameLabel = FindNamedTextGui(playerNameContainer, "Name")
+	if nameLabel then
 		nameLabel.Text = defaults.NameText or ""
 	end
 
 	local playerPowerContainer = frame:FindFirstChild("PlayerPower")
-	local numLabel = playerPowerContainer and playerPowerContainer:FindFirstChild("Num")
-	if numLabel and numLabel:IsA("TextLabel") then
+	local numLabel = FindNamedTextGui(playerPowerContainer, "Num")
+	if numLabel then
 		numLabel.Text = defaults.PowerText or "0"
 	end
 end
@@ -234,16 +307,16 @@ local function UpdateSurfaceGui(surfaceGui, playerName, power)
 
 	local playerNameContainer = frame:FindFirstChild("PlayerName")
 	if playerNameContainer then
-		local nameLabel = playerNameContainer:FindFirstChild("Name")
-		if nameLabel and nameLabel:IsA("TextLabel") then
+		local nameLabel = FindNamedTextGui(playerNameContainer, "Name")
+		if nameLabel then
 			nameLabel.Text = playerName
 		end
 	end
 
 	local playerPowerContainer = frame:FindFirstChild("PlayerPower")
 	if playerPowerContainer then
-		local numLabel = playerPowerContainer:FindFirstChild("Num")
-		if numLabel and numLabel:IsA("TextLabel") then
+		local numLabel = FindNamedTextGui(playerPowerContainer, "Num")
+		if numLabel then
 			numLabel.Text = tostring(power)
 		end
 	end
@@ -400,19 +473,13 @@ local function OnPowerUpdate(playerNameOrTotalPower, homeIdOrNil, totalPowerOrNi
 		return
 	end
 
-	local part = information:FindFirstChild("Part")
-	if not part then
-		return
-	end
-
-	-- 更新所有SurfaceGui
-	for _, child in ipairs(part:GetChildren()) do
-		if child:IsA("SurfaceGui") and (child.Name == "SurfaceGui01" or child.Name == "SurfaceGui02") then
+	local surfaceGuiMap = CollectInformationSurfaceGuis(information)
+	for _, guiName in ipairs({"SurfaceGui01", "SurfaceGui02"}) do
+		local gui = surfaceGuiMap[guiName]
+		if gui and playerName ~= "" then
 			-- ⚠️说明：Information面板现在由服务端写入（世界状态复制），客户端在“清空”事件时不应再本地写文本，
 			-- 否则在网络乱序/缓存默认文本不准时，可能把旧玩家信息写回去导致看起来“没清理”。
-			if playerName ~= "" then
-				UpdateSurfaceGui(child, playerName, totalPower)
-			end
+			UpdateSurfaceGui(gui, playerName, totalPower)
 		end
 	end
 

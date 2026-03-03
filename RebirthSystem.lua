@@ -508,6 +508,11 @@ local function GrantRebirthRewards(player, nextConfig)
 		)
 	end
 
+	-- 七日登录奖励：首次重生后解锁
+	if tonumber(nextConfig.RebirthCount) and tonumber(nextConfig.RebirthCount) >= 1 then
+		player:SetAttribute("SevenDaysUnlocked", true)
+	end
+
 	local unlockHouseModel = tostring(nextConfig.UnlockHouseModel or "")
 	local queuedHouse = QueuePendingHouseUpgrade(player, unlockHouseModel)
 

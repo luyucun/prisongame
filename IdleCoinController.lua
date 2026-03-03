@@ -25,6 +25,7 @@ local Lighting = game:GetService("Lighting")
 -- 引用配置
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
 local HouseConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("HouseConfig"))
+local VipConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("VipConfig"))
 local FormatHelper = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("FormatHelper"))
 
 -- 获取本地玩家
@@ -48,6 +49,8 @@ local autoPopupShown = false
 local hasReceivedInitialSync = false
 local promptOpensPopup = true
 local claim10InProgress = false
+local FRIEND_BONUS_ATTR = "FriendCoinBonusPercent"
+local REBIRTH_BONUS_ATTR = "RebirthCoinBonusRate"
 
 -- 事件引用
 local IdleCoinEvents = nil
@@ -227,21 +230,38 @@ local function GetIdleConfigForPlayer()
 		end
 	end
 
-	if not houseConfig then
+	if not houseConfig and HouseConfig.GetIdleConfigByCompletedChapters then
 		local completedChapters = GetCompletedChapters()
 		houseConfig = HouseConfig.GetIdleConfigByCompletedChapters(completedChapters)
+	end
+
+	local fallbackConfig = BuildIdleConfigFromHouse(HouseConfig.Houses and HouseConfig.Houses[1] or nil)
+	if not houseConfig then
+		houseConfig = fallbackConfig
 	end
 
 	local coinsPerMinute = houseConfig and tonumber(houseConfig.CoinsPerMinute) or 0
 	local maxMinutes = houseConfig and tonumber(houseConfig.MaxMinutes) or 0
 	local maxHours = houseConfig and tonumber(houseConfig.MaxHours) or 0
 
+	if coinsPerMinute <= 0 and fallbackConfig then
+		coinsPerMinute = tonumber(fallbackConfig.CoinsPerMinute) or 0
+	end
+
 	if coinsPerMinute <= 0 then
 		coinsPerMinute = tonumber(GameConfig.IdleCoin.CoinsPerMinute) or 0
 	end
 
-	if maxMinutes <= 0 then
-		maxMinutes = tonumber(GameConfig.IdleCoin.MaxOfflineMinutes) or 0
+	if maxMinutes <= 0 and fallbackConfig then
+		maxMinutes = tonumber(fallbackConfig.MaxMinutes) or 0
+	end
+
+	if maxHours <= 0 and fallbackConfig then
+		maxHours = tonumber(fallbackConfig.MaxHours) or 0
+	end
+
+	if maxMinutes <= 0 and maxHours > 0 then
+		maxMinutes = maxHours * 60
 	end
 
 	if maxHours <= 0 then
@@ -271,13 +291,30 @@ local function GetPendingIdleMinutes()
 	return minutes
 end
 
-local function GetVipDisplayAmount(baseCoins)
-	local baseAmount = math.max(0, math.floor(tonumber(baseCoins) or 0))
-	if player:GetAttribute("VipPurchased") == true then
-		local total = math.ceil(baseAmount * 1.5)
-		return total, true
+local function RoundCurrencyGain(value)
+	local numeric = tonumber(value) or 0
+	if numeric <= 0 then
+		return 0
 	end
-	return baseAmount, false
+	return math.ceil(numeric - 1e-6)
+end
+
+local function GetFinalDisplayAmount(baseCoins)
+	local baseAmount = math.max(0, math.floor(tonumber(baseCoins) or 0))
+	if baseAmount <= 0 then
+		return 0
+	end
+
+	local friendPercent = math.max(0, tonumber(player:GetAttribute(FRIEND_BONUS_ATTR)) or 0)
+	local friendRate = friendPercent / 100
+	local rebirthRate = math.max(0, tonumber(player:GetAttribute(REBIRTH_BONUS_ATTR)) or 0)
+	local vipRate = 0
+	if player:GetAttribute("VipPurchased") == true then
+		vipRate = math.max(0, tonumber(VipConfig.GetBonusRate and VipConfig.GetBonusRate() or VipConfig.COIN_BONUS_RATE) or 0)
+	end
+
+	local totalRate = friendRate + rebirthRate + vipRate
+	return RoundCurrencyGain(baseAmount * (1 + totalRate))
 end
 
 local function UpdateIdleEarningUI()
@@ -297,21 +334,11 @@ local function UpdateIdleEarningUI()
 
 	local baseCoins = math.max(0, math.floor(pendingIdleCoins or 0))
 	if idleClaimCash and idleClaimCash:IsA("TextLabel") then
-		local displayAmount, isVip = GetVipDisplayAmount(baseCoins)
-		if isVip then
-			idleClaimCash.Text = FormatHelper.FormatCoins(displayAmount) .. "(Vip+50%)"
-		else
-			idleClaimCash.Text = FormatHelper.FormatCoins(baseCoins)
-		end
+		idleClaimCash.Text = FormatHelper.FormatCoins(GetFinalDisplayAmount(baseCoins))
 	end
 	if idleClaim10Cash and idleClaim10Cash:IsA("TextLabel") then
 		local claim10Base = baseCoins * 10
-		local displayAmount, isVip = GetVipDisplayAmount(claim10Base)
-		if isVip then
-			idleClaim10Cash.Text = FormatHelper.FormatCoins(displayAmount) .. "(Vip+50%)"
-		else
-			idleClaim10Cash.Text = FormatHelper.FormatCoins(claim10Base)
-		end
+		idleClaim10Cash.Text = FormatHelper.FormatCoins(GetFinalDisplayAmount(claim10Base))
 	end
 end
 
@@ -912,6 +939,18 @@ local function Initialize()
 	end)
 
 	player:GetAttributeChangedSignal("RebirthCount"):Connect(function()
+		if InitializeIdleEarningUI() then
+			UpdateIdleEarningUI()
+		end
+	end)
+
+	player:GetAttributeChangedSignal(REBIRTH_BONUS_ATTR):Connect(function()
+		if InitializeIdleEarningUI() then
+			UpdateIdleEarningUI()
+		end
+	end)
+
+	player:GetAttributeChangedSignal(FRIEND_BONUS_ATTR):Connect(function()
 		if InitializeIdleEarningUI() then
 			UpdateIdleEarningUI()
 		end

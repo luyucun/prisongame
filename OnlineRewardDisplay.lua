@@ -52,6 +52,9 @@ local serverTimeOffset = 0
 local countdownConnection = nil
 local countdownAccumulator = 0
 local refreshRequested = false
+local autoOpenFirstRewardDay = nil
+local autoOpenFirstRewardDone = false
+local autoOpenFirstRewardPending = false
 
 local claimLocks = {}
 local ButtonEffectHelper = nil
@@ -98,6 +101,7 @@ local panelCloseTweenB = nil
 local panelAnimating = false
 local onlineRewardBlurConn = nil
 local SetBlurLock = nil
+local TryAutoOpenFirstReward = nil
 
 local RewardPathCandidates = {
 	[1] = { { "Bg01", "Reward01" } },
@@ -191,6 +195,38 @@ end
 
 local function GetServerTimeNow()
 	return os.time() + serverTimeOffset
+end
+
+local function GetCurrentRewardDay()
+	if type(cachedData) == "table" then
+		local day = tonumber(cachedData.LastRefreshDay)
+		if day then
+			return day
+		end
+	end
+	return math.floor(GetServerTimeNow() / 86400)
+end
+
+local function GetFirstRewardConfig()
+	local firstRewardId = nil
+	local firstReward = nil
+	for _, reward in ipairs(OnlineRewardConfig.GetRewards()) do
+		local rewardId = tonumber(reward.Id)
+		if rewardId then
+			if not firstReward then
+				firstRewardId = rewardId
+				firstReward = reward
+			else
+				local currentSeconds = tonumber(firstReward.Seconds) or math.huge
+				local nextSeconds = tonumber(reward.Seconds) or math.huge
+				if nextSeconds < currentSeconds then
+					firstRewardId = rewardId
+					firstReward = reward
+				end
+			end
+		end
+	end
+	return firstRewardId, firstReward
 end
 
 local function GetCurrentOnlineSeconds()
@@ -806,6 +842,13 @@ local function UpdateRewardStates()
 		return
 	end
 
+	local currentDay = GetCurrentRewardDay()
+	if autoOpenFirstRewardDay ~= currentDay then
+		autoOpenFirstRewardDay = currentDay
+		autoOpenFirstRewardDone = false
+		autoOpenFirstRewardPending = false
+	end
+
 	local claimed = NormalizeClaimedRewards(cachedData.ClaimedRewards)
 	local currentSeconds = GetCurrentOnlineSeconds()
 	local nextCountdownId, nextCountdownReward, nextRemaining = GetNextCountdownReward(claimed, currentSeconds)
@@ -833,6 +876,20 @@ local function UpdateRewardStates()
 	UpdateNextRewardLabel(currentSeconds, nextCountdownReward)
 	UpdateTopRightTimeLabel(nextRemaining)
 	UpdateRedPoint(hasClaimable)
+
+	local firstRewardId, firstReward = GetFirstRewardConfig()
+	if firstRewardId and firstReward then
+		local firstClaimed = claimed[firstRewardId] == true
+		local firstReady = currentSeconds >= (tonumber(firstReward.Seconds) or 0)
+		if firstClaimed then
+			autoOpenFirstRewardDone = true
+			autoOpenFirstRewardPending = false
+		elseif firstReady and not autoOpenFirstRewardDone then
+			autoOpenFirstRewardPending = true
+		end
+	end
+
+	TryAutoOpenFirstReward()
 end
 
 local function StartCountdown()
@@ -893,7 +950,7 @@ local function ReleaseBackpackHide()
 end
 local function OpenPanel()
 	if not PlayPanelOpen() then
-		return
+		return false
 	end
     RequestBackpackHide()
 	if requestDataEvent and not refreshRequested then
@@ -902,6 +959,46 @@ local function OpenPanel()
 		task.delay(0.5, function()
 			refreshRequested = false
 		end)
+	end
+	return true
+end
+
+TryAutoOpenFirstReward = function()
+	if not autoOpenFirstRewardPending or autoOpenFirstRewardDone then
+		return
+	end
+
+	if popupVisible then
+		return
+	end
+
+	if onlineRewardBg and onlineRewardBg.Visible then
+		autoOpenFirstRewardPending = false
+		autoOpenFirstRewardDone = true
+		return
+	end
+
+	local locks = _G[BLUR_LOCKS_KEY]
+	if type(locks) == "table" then
+		for lockId in pairs(locks) do
+			if lockId ~= BLUR_LOCK_ID then
+				return
+			end
+		end
+	end
+
+	local lockStr = Lighting:GetAttribute(BLUR_LOCKS_KEY)
+	if type(lockStr) == "string" and lockStr ~= "" then
+		for token in string.gmatch(lockStr, "[^|]+") do
+			if token ~= BLUR_LOCK_ID then
+				return
+			end
+		end
+	end
+
+	if OpenPanel() then
+		autoOpenFirstRewardPending = false
+		autoOpenFirstRewardDone = true
 	end
 end
 

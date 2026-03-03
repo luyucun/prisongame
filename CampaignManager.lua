@@ -1309,7 +1309,14 @@ function CampaignManager.StartCampaign(player, requestedChapter)
 	end)
 
 	-- 预加载Stage002关卡(不阻塞主流程)
-	StageService.GetOrCreateStage(playerId, 2, false)
+	task.spawn(function()
+		local ok, err = pcall(function()
+			StageService.GetOrCreateStage(playerId, 2, false)
+		end)
+		if not ok then
+			warn("[CampaignManager] 预加载Stage002失败:", err)
+		end
+	end)
 
 	-- 保存战役数据
 	CampaignManager.ActiveCampaigns[playerId] = campaignData
@@ -2676,11 +2683,9 @@ function CampaignManager.OnVictory(campaignData)
 			-- 保存数据
 			DataManager.SavePlayerDataThrottled(player, true)  -- 强制保存
 
-			-- V4.8七日登录奖励：通关第一章后解锁按钮
-			local completedChaptersNow = tonumber(DataManager.GetCompletedChapters(player)) or newCompletedChapters or 0
-			if completedChaptersNow >= 1 then
-				player:SetAttribute("SevenDaysUnlocked", true)
-			end
+			-- V4.8七日登录奖励：首次重生后解锁按钮
+			local rebirthCount = tonumber(player:GetAttribute("RebirthCount")) or 0
+			player:SetAttribute("SevenDaysUnlocked", rebirthCount >= 1)
 
 			-- V4.4.3: 首次通关章节徽章
 			if newCompletedChapters and newCompletedChapters > completedBefore then

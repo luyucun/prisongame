@@ -93,6 +93,74 @@ HomeData = {
 -- Information面板的默认文本缓存（来自Studio初始值）
 local informationDefaultTexts = nil -- { [SurfaceGuiName] = { NameText = string, PowerText = string } }
 
+local function IsTextGuiObject(instance)
+	return instance
+		and (instance:IsA("TextLabel") or instance:IsA("TextButton") or instance:IsA("TextBox"))
+end
+
+local function FindNamedTextGui(parent, childName)
+	if not parent or type(childName) ~= "string" then
+		return nil
+	end
+
+	local direct = parent:FindFirstChild(childName)
+	if IsTextGuiObject(direct) then
+		return direct
+	end
+
+	local deep = parent:FindFirstChild(childName, true)
+	if IsTextGuiObject(deep) then
+		return deep
+	end
+
+	return nil
+end
+
+local function CollectInformationSurfaceGuis(informationModel)
+	local surfaceGuis = {}
+	local visited = {}
+
+	if not informationModel then
+		return surfaceGuis
+	end
+
+	local function AddSurfaceGui(gui)
+		if gui and gui:IsA("SurfaceGui") and not visited[gui] then
+			visited[gui] = true
+			surfaceGuis[gui.Name] = gui
+		end
+	end
+
+	local function AddNamedSurfaceGui(root, guiName)
+		if not root then
+			return
+		end
+
+		AddSurfaceGui(root:FindFirstChild(guiName))
+		AddSurfaceGui(root:FindFirstChild(guiName, true))
+	end
+
+	for _, guiName in ipairs({"SurfaceGui01", "SurfaceGui02"}) do
+		AddNamedSurfaceGui(informationModel, guiName)
+	end
+
+	local part = informationModel:FindFirstChild("Part")
+	if part then
+		for _, guiName in ipairs({"SurfaceGui01", "SurfaceGui02"}) do
+			AddNamedSurfaceGui(part, guiName)
+		end
+	end
+
+	local infoPart = informationModel:FindFirstChild("InfoPart")
+	if infoPart then
+		for _, guiName in ipairs({"SurfaceGui01", "SurfaceGui02"}) do
+			AddNamedSurfaceGui(infoPart, guiName)
+		end
+	end
+
+	return surfaceGuis
+end
+
 local function GetValidHouseModelNameSet(): HouseModelNameSet?
 	if cachedValidHouseModelNames then
 		return cachedValidHouseModelNames
@@ -262,28 +330,24 @@ local function CacheInformationDefaultTexts(informationModel)
     end
 
     informationDefaultTexts = {}
-
-    local part = informationModel and informationModel:FindFirstChild("Part")
-    if not part then
-        return
-    end
+	local surfaceGuis = CollectInformationSurfaceGuis(informationModel)
 
     for _, guiName in ipairs({"SurfaceGui01", "SurfaceGui02"}) do
         local defaults = { NameText = "", PowerText = "0" }
 
-        local surfaceGui = part:FindFirstChild(guiName)
+        local surfaceGui = surfaceGuis[guiName]
         if surfaceGui then
             local frame = surfaceGui:FindFirstChild("Frame")
             if frame then
                 local playerNameContainer = frame:FindFirstChild("PlayerName")
-                local nameLabel = playerNameContainer and playerNameContainer:FindFirstChild("Name")
-                if nameLabel and nameLabel:IsA("TextLabel") then
+                local nameLabel = FindNamedTextGui(playerNameContainer, "Name")
+                if nameLabel then
                     defaults.NameText = nameLabel.Text
                 end
 
                 local playerPowerContainer = frame:FindFirstChild("PlayerPower")
-                local numLabel = playerPowerContainer and playerPowerContainer:FindFirstChild("Num")
-                if numLabel and numLabel:IsA("TextLabel") then
+                local numLabel = FindNamedTextGui(playerPowerContainer, "Num")
+                if numLabel then
                     defaults.PowerText = numLabel.Text
                 end
             end
@@ -291,6 +355,26 @@ local function CacheInformationDefaultTexts(informationModel)
 
         informationDefaultTexts[guiName] = defaults
     end
+end
+
+local function UpdateInformationDisplayPlayerName(homeFolder, playerName)
+	local information = homeFolder and homeFolder:FindFirstChild("Information")
+	if not information then
+		return
+	end
+
+	local surfaceGuis = CollectInformationSurfaceGuis(information)
+	for _, guiName in ipairs({"SurfaceGui01", "SurfaceGui02"}) do
+		local surfaceGui = surfaceGuis[guiName]
+		if surfaceGui then
+			local frame = surfaceGui:FindFirstChild("Frame")
+			local playerNameContainer = frame and frame:FindFirstChild("PlayerName")
+			local nameLabel = FindNamedTextGui(playerNameContainer, "Name")
+			if nameLabel then
+				nameLabel.Text = tostring(playerName or "")
+			end
+		end
+	end
 end
 
 --[[
@@ -335,29 +419,26 @@ local function ResetInformationDisplay(homeFolder)
         return
     end
 
-    local part = information:FindFirstChild("Part")
-    if not part then
-        return
-    end
+	local surfaceGuis = CollectInformationSurfaceGuis(information)
 
     -- 先缓存默认文本（来自Studio初始值），用于玩家离线后恢复“默认显示”
     CacheInformationDefaultTexts(information)
 
     for _, guiName in ipairs({"SurfaceGui01", "SurfaceGui02"}) do
-        local surfaceGui = part:FindFirstChild(guiName)
+        local surfaceGui = surfaceGuis[guiName]
         if surfaceGui then
             local frame = surfaceGui:FindFirstChild("Frame")
             if frame then
                 local playerNameContainer = frame:FindFirstChild("PlayerName")
-                local nameLabel = playerNameContainer and playerNameContainer:FindFirstChild("Name")
-                if nameLabel and nameLabel:IsA("TextLabel") then
+                local nameLabel = FindNamedTextGui(playerNameContainer, "Name")
+                if nameLabel then
                     local defaults = informationDefaultTexts and informationDefaultTexts[guiName]
                     nameLabel.Text = (defaults and defaults.NameText) or ""
                 end
 
                 local playerPowerContainer = frame:FindFirstChild("PlayerPower")
-                local numLabel = playerPowerContainer and playerPowerContainer:FindFirstChild("Num")
-                if numLabel and numLabel:IsA("TextLabel") then
+                local numLabel = FindNamedTextGui(playerPowerContainer, "Num")
+                if numLabel then
                     local defaults = informationDefaultTexts and informationDefaultTexts[guiName]
                     numLabel.Text = (defaults and defaults.PowerText) or "0"
                 end
@@ -768,6 +849,9 @@ function HomeSystem.InitializePlayerHome(homeId, player)
     }
 
     playerHomes[player.UserId] = homeData
+
+	-- 立即写入玩家名字，避免Information面板短时间显示模板默认值或上一位玩家信息
+	UpdateInformationDisplayPlayerName(homeFolder, player.Name)
 
     -- V2.0.1新增：初始化基地门状态（确保门关闭）
     pcall(function()

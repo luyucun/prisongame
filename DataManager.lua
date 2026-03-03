@@ -864,6 +864,7 @@ local function CreateDefaultData(player)
             LastLogoutTime = 0,
             PendingCoins = 0,
             GuideEligibleOnLogin = false,
+            SkipNextOfflineReward = false,
         },
         SoundSettings = {  -- V4.6设置系统：初始化
             MusicEnabled = true,
@@ -1916,7 +1917,10 @@ function DataManager.InitializePlayerData(player)
                 LastLogoutTime = 0,
                 PendingCoins = 0,
                 GuideEligibleOnLogin = false,
+                SkipNextOfflineReward = false,
             }
+        elseif playerData.IdleCoinData.SkipNextOfflineReward == nil then
+            playerData.IdleCoinData.SkipNextOfflineReward = false
         end
 
         -- V2.8章节进度：确保ChapterProgress字段存在（向后兼容）
@@ -2881,21 +2885,38 @@ local function GetIdleConfigForPlayer(player)
         end
     end
 
-    if not houseConfig then
+    if not houseConfig and HouseConfig.GetIdleConfigByCompletedChapters then
         local completedChapters = DataManager.GetCompletedChapters(player) or 0
         houseConfig = HouseConfig.GetIdleConfigByCompletedChapters(completedChapters)
+    end
+
+    local fallbackConfig = BuildIdleConfigFromHouse(HouseConfig.Houses and HouseConfig.Houses[1] or nil)
+    if not houseConfig then
+        houseConfig = fallbackConfig
     end
 
     local coinsPerMinute = houseConfig and tonumber(houseConfig.CoinsPerMinute) or 0
     local maxMinutes = houseConfig and tonumber(houseConfig.MaxMinutes) or 0
     local maxHours = houseConfig and tonumber(houseConfig.MaxHours) or 0
 
+    if coinsPerMinute <= 0 and fallbackConfig then
+        coinsPerMinute = tonumber(fallbackConfig.CoinsPerMinute) or 0
+    end
+
     if coinsPerMinute <= 0 then
         coinsPerMinute = tonumber(GameConfig.IdleCoin.CoinsPerMinute) or 0
     end
 
-    if maxMinutes <= 0 then
-        maxMinutes = tonumber(GameConfig.IdleCoin.MaxOfflineMinutes) or 0
+    if maxMinutes <= 0 and fallbackConfig then
+        maxMinutes = tonumber(fallbackConfig.MaxMinutes) or 0
+    end
+
+    if maxHours <= 0 and fallbackConfig then
+        maxHours = tonumber(fallbackConfig.MaxHours) or 0
+    end
+
+    if maxMinutes <= 0 and maxHours > 0 then
+        maxMinutes = maxHours * 60
     end
 
     if maxHours <= 0 then
@@ -2940,6 +2961,26 @@ local function ClampPendingIdleCoins(player, value)
     return amount
 end
 
+local function EnsureIdleCoinData(playerData)
+    if not playerData.IdleCoinData then
+        playerData.IdleCoinData = {
+            LastLogoutTime = 0,
+            PendingCoins = 0,
+            GuideEligibleOnLogin = false,
+            SkipNextOfflineReward = false,
+        }
+    else
+        if playerData.IdleCoinData.GuideEligibleOnLogin == nil then
+            playerData.IdleCoinData.GuideEligibleOnLogin = false
+        end
+        if playerData.IdleCoinData.SkipNextOfflineReward == nil then
+            playerData.IdleCoinData.SkipNextOfflineReward = false
+        end
+    end
+
+    return playerData.IdleCoinData
+end
+
 --[[
 获取玩家挂机金币数据
 @param player Player - 玩家对象
@@ -2952,23 +2993,16 @@ function DataManager.GetIdleCoinData(player)
             LastLogoutTime = 0,
             PendingCoins = 0,
             GuideEligibleOnLogin = false,
+            SkipNextOfflineReward = false,
         }
     end
 
-    if not playerData.IdleCoinData then
-        playerData.IdleCoinData = {
-            LastLogoutTime = 0,
-            PendingCoins = 0,
-            GuideEligibleOnLogin = false,
-        }
-    elseif playerData.IdleCoinData.GuideEligibleOnLogin == nil then
-        playerData.IdleCoinData.GuideEligibleOnLogin = false
-    end
+    local idleCoinData = EnsureIdleCoinData(playerData)
 
     -- 钳制PendingCoins到配置上限，避免超出累积时间上限
-    playerData.IdleCoinData.PendingCoins = ClampPendingIdleCoins(player, playerData.IdleCoinData.PendingCoins)
+    idleCoinData.PendingCoins = ClampPendingIdleCoins(player, idleCoinData.PendingCoins)
 
-    return playerData.IdleCoinData
+    return idleCoinData
 end
 
 --[[
@@ -2984,17 +3018,9 @@ function DataManager.SetPendingIdleCoins(player, coins)
         return false
     end
 
-    if not playerData.IdleCoinData then
-        playerData.IdleCoinData = {
-            LastLogoutTime = 0,
-            PendingCoins = 0,
-            GuideEligibleOnLogin = false,
-        }
-    elseif playerData.IdleCoinData.GuideEligibleOnLogin == nil then
-        playerData.IdleCoinData.GuideEligibleOnLogin = false
-    end
+    local idleCoinData = EnsureIdleCoinData(playerData)
 
-    playerData.IdleCoinData.PendingCoins = ClampPendingIdleCoins(player, coins)
+    idleCoinData.PendingCoins = ClampPendingIdleCoins(player, coins)
     return true
 end
 
@@ -3011,17 +3037,17 @@ function DataManager.SetLastLogoutTime(player, timestamp)
         return false
     end
 
-    if not playerData.IdleCoinData then
-        playerData.IdleCoinData = {
-            LastLogoutTime = 0,
-            PendingCoins = 0,
-            GuideEligibleOnLogin = false,
-        }
-    elseif playerData.IdleCoinData.GuideEligibleOnLogin == nil then
-        playerData.IdleCoinData.GuideEligibleOnLogin = false
+    local idleCoinData = EnsureIdleCoinData(playerData)
+
+    if idleCoinData.SkipNextOfflineReward == true then
+        idleCoinData.SkipNextOfflineReward = false
+        idleCoinData.LastLogoutTime = 0
+        idleCoinData.PendingCoins = 0
+        idleCoinData.GuideEligibleOnLogin = false
+        return true
     end
 
-    playerData.IdleCoinData.LastLogoutTime = timestamp
+    idleCoinData.LastLogoutTime = timestamp
     return true
 end
 
@@ -3038,19 +3064,11 @@ function DataManager.AddPendingIdleCoins(player, amount)
         return false, 0
     end
 
-    if not playerData.IdleCoinData then
-        playerData.IdleCoinData = {
-            LastLogoutTime = 0,
-            PendingCoins = 0,
-            GuideEligibleOnLogin = false,
-        }
-    elseif playerData.IdleCoinData.GuideEligibleOnLogin == nil then
-        playerData.IdleCoinData.GuideEligibleOnLogin = false
-    end
+    local idleCoinData = EnsureIdleCoinData(playerData)
 
-    local newPending = (playerData.IdleCoinData.PendingCoins or 0) + (tonumber(amount) or 0)
-    playerData.IdleCoinData.PendingCoins = ClampPendingIdleCoins(player, newPending)
-    return true, playerData.IdleCoinData.PendingCoins
+    local newPending = (idleCoinData.PendingCoins or 0) + (tonumber(amount) or 0)
+    idleCoinData.PendingCoins = ClampPendingIdleCoins(player, newPending)
+    return true, idleCoinData.PendingCoins
 end
 
 --[[
@@ -3070,15 +3088,16 @@ function DataManager.ClearPendingIdleCoins(player)
             LastLogoutTime = 0,
             PendingCoins = 0,
             GuideEligibleOnLogin = false,
+            SkipNextOfflineReward = false,
         }
         return 0
-    elseif playerData.IdleCoinData.GuideEligibleOnLogin == nil then
-        playerData.IdleCoinData.GuideEligibleOnLogin = false
     end
 
-    local oldAmount = playerData.IdleCoinData.PendingCoins or 0
-    playerData.IdleCoinData.PendingCoins = 0
-    playerData.IdleCoinData.GuideEligibleOnLogin = false
+    local idleCoinData = EnsureIdleCoinData(playerData)
+
+    local oldAmount = idleCoinData.PendingCoins or 0
+    idleCoinData.PendingCoins = 0
+    idleCoinData.GuideEligibleOnLogin = false
     return oldAmount
 end
 
@@ -3162,6 +3181,13 @@ function DataManager.ResetAllPlayerData(player)
 
     -- 创建全新的默认数
     local newData = CreateDefaultData(player)
+    if not newData.IdleCoinData then
+        newData.IdleCoinData = {}
+    end
+    newData.IdleCoinData.LastLogoutTime = 0
+    newData.IdleCoinData.PendingCoins = 0
+    newData.IdleCoinData.GuideEligibleOnLogin = false
+    newData.IdleCoinData.SkipNextOfflineReward = true
 
     -- 更新缓存
     playerDataCache[userId] = newData

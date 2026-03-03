@@ -36,6 +36,17 @@ if not Modules then
 end
 
 local FormatHelper = require(Modules:WaitForChild("FormatHelper", 10))
+local ConfigFolder = ReplicatedStorage:WaitForChild("Config", 10)
+local VipConfig = nil
+if ConfigFolder then
+    local vipConfigModule = ConfigFolder:FindFirstChild("VipConfig")
+    if vipConfigModule and vipConfigModule:IsA("ModuleScript") then
+        local ok, result = pcall(require, vipConfigModule)
+        if ok then
+            VipConfig = result
+        end
+    end
+end
 
 -- V2.1新增：动画工具（延迟加载，避免循环依赖）
 local CoinAnimationHelper = nil
@@ -58,6 +69,7 @@ local MainGui = nil
 local CoinNumLabel = nil
 local CoinEarnLabel = nil  -- V3.5新增：战斗金币累计显示
 local CoinBuffLabel = nil  -- V5.8新增：好友金币加成显示
+local GoldMultiplierLabel = nil -- V8.2新增：金币最终倍率显示
 
 -- 当前金币数量(用于客户端缓存)
 local currentCoins = 0
@@ -69,6 +81,100 @@ local isAnimatingScale = false     -- 是否正在播放放大缩小动画
 local currentScaleTween = nil      -- 当前的缩放Tween
 
 local FRIEND_BONUS_ATTR = "FriendCoinBonusPercent"
+local REBIRTH_BONUS_ATTR = "RebirthCoinBonusRate"
+local VIP_PURCHASED_ATTR = "VipPurchased"
+
+local function IsTextGui(guiObject)
+    return guiObject and (
+        guiObject:IsA("TextLabel")
+        or guiObject:IsA("TextButton")
+    )
+end
+
+local function IsGuiPathVisible(guiObject)
+    if not guiObject then
+        return false
+    end
+
+    local current = guiObject
+    while current and current ~= PlayerGui do
+        if current:IsA("ScreenGui") then
+            if current.Enabled == false then
+                return false
+            end
+        elseif current:IsA("GuiObject") then
+            if current.Visible == false then
+                return false
+            end
+        end
+        current = current.Parent
+    end
+
+    return true
+end
+
+local function FindTextLabelInPlayerGui(labelName)
+    local fallback = nil
+    for _, desc in ipairs(PlayerGui:GetDescendants()) do
+        if IsTextGui(desc) and desc.Name == labelName then
+            if not fallback then
+                fallback = desc
+            end
+            if IsGuiPathVisible(desc) then
+                return desc
+            end
+        end
+    end
+    return fallback
+end
+
+local function FindTextLabelByTextHint(textHint)
+    local fallback = nil
+    for _, desc in ipairs(PlayerGui:GetDescendants()) do
+        if IsTextGui(desc) then
+            local content = tostring(desc.Text or "")
+            if string.find(content, textHint, 1, true) then
+                if not fallback then
+                    fallback = desc
+                end
+                if IsGuiPathVisible(desc) then
+                    return desc
+                end
+            end
+        end
+    end
+    return fallback
+end
+
+local function ResolveBonusLabels()
+    if not CoinBuffLabel or not CoinBuffLabel.Parent then
+        local candidate = nil
+        if MainGui and MainGui.Parent then
+            candidate = MainGui:FindFirstChild("CoinBuff", true)
+        end
+        if not IsTextGui(candidate) then
+            candidate = FindTextLabelInPlayerGui("CoinBuff")
+        end
+        if not IsTextGui(candidate) then
+            candidate = FindTextLabelByTextHint("Friends Bonus")
+        end
+        CoinBuffLabel = IsTextGui(candidate) and candidate or nil
+    end
+
+    if not GoldMultiplierLabel or not GoldMultiplierLabel.Parent then
+        local candidate = nil
+        if MainGui and MainGui.Parent then
+            candidate = MainGui:FindFirstChild("GoldMultiplier", true)
+        end
+        if not IsTextGui(candidate) then
+            candidate = FindTextLabelInPlayerGui("GoldMultiplier")
+        end
+        if not IsTextGui(candidate) then
+            candidate = FindTextLabelByTextHint("Multiplier")
+        end
+        GoldMultiplierLabel = IsTextGui(candidate) and candidate or nil
+    end
+end
 
 -- ==================== 私有函数 ====================
 
@@ -142,9 +248,22 @@ local function RefreshUIReferences()
     end
 
     if not CoinBuffLabel or not CoinBuffLabel.Parent then
-        CoinBuffLabel = MainGui:FindFirstChild("CoinBuff")
+        CoinBuffLabel = MainGui:FindFirstChild("CoinBuff") or MainGui:FindFirstChild("CoinBuff", true)
+        if CoinBuffLabel and not IsTextGui(CoinBuffLabel) then
+            CoinBuffLabel = nil
+        end
         if CoinBuffLabel and DEBUG_MODE then
             print(LOG_PREFIX, "CoinBuffLabel引用已刷新")
+        end
+    end
+
+    if not GoldMultiplierLabel or not GoldMultiplierLabel.Parent then
+        GoldMultiplierLabel = MainGui:FindFirstChild("GoldMultiplier") or MainGui:FindFirstChild("GoldMultiplier", true)
+        if GoldMultiplierLabel and not IsTextGui(GoldMultiplierLabel) then
+            GoldMultiplierLabel = nil
+        end
+        if GoldMultiplierLabel and DEBUG_MODE then
+            print(LOG_PREFIX, "GoldMultiplierLabel引用已刷新")
         end
     end
 
@@ -157,11 +276,67 @@ local function FormatFriendBonusText(percent)
 end
 
 local function UpdateFriendBonusDisplay(percent)
+    ResolveBonusLabels()
+    if (not CoinBuffLabel or not CoinBuffLabel.Parent) and not RefreshUIReferences() then
+        return
+    end
+    ResolveBonusLabels()
     if not CoinBuffLabel or not CoinBuffLabel.Parent then
         return
     end
-    CoinBuffLabel.RichText = true
+    if CoinBuffLabel:IsA("TextLabel") or CoinBuffLabel:IsA("TextButton") then
+        CoinBuffLabel.RichText = true
+    end
     CoinBuffLabel.Text = FormatFriendBonusText(percent)
+end
+
+local function GetVipBonusRate()
+    if LocalPlayer:GetAttribute(VIP_PURCHASED_ATTR) ~= true then
+        return 0
+    end
+
+    if VipConfig then
+        if type(VipConfig.GetBonusRate) == "function" then
+            return math.max(0, tonumber(VipConfig.GetBonusRate()) or 0)
+        end
+        if type(VipConfig.COIN_BONUS_RATE) == "number" then
+            return math.max(0, VipConfig.COIN_BONUS_RATE)
+        end
+    end
+
+    return 0.5
+end
+
+local function GetCurrentCoinMultiplier()
+    local friendPercent = math.max(0, tonumber(LocalPlayer:GetAttribute(FRIEND_BONUS_ATTR)) or 0)
+    local rebirthRate = math.max(0, tonumber(LocalPlayer:GetAttribute(REBIRTH_BONUS_ATTR)) or 0)
+    local vipRate = GetVipBonusRate()
+    return 1 + (friendPercent / 100) + rebirthRate + vipRate
+end
+
+local function FormatMultiplierValue(multiplier)
+    local value = tonumber(multiplier) or 1
+    if value < 1 then
+        value = 1
+    end
+
+    local text = string.format("%.3f", value + 1e-8)
+    text = text:gsub("(%..-)0+$", "%1")
+    text = text:gsub("%.$", "")
+    return text
+end
+
+local function UpdateGoldMultiplierDisplay()
+    ResolveBonusLabels()
+    if (not GoldMultiplierLabel or not GoldMultiplierLabel.Parent) and not RefreshUIReferences() then
+        return
+    end
+    ResolveBonusLabels()
+    if not GoldMultiplierLabel or not GoldMultiplierLabel.Parent then
+        return
+    end
+
+    GoldMultiplierLabel.Text = "Multiplier：*" .. FormatMultiplierValue(GetCurrentCoinMultiplier())
 end
 
 --[[
@@ -209,6 +384,10 @@ local function UpdateCoinDisplay(newAmount, useAnimation)
     if DEBUG_MODE then
         print(LOG_PREFIX, "更新金币显示:", oldAmount, "->", newAmount, useAnimation and "(动画)" or "(直接)")
     end
+
+    -- 保证在金币UI首次就绪时，同步刷新好友加成和总倍率文本
+    UpdateFriendBonusDisplay(LocalPlayer:GetAttribute(FRIEND_BONUS_ATTR) or 0)
+    UpdateGoldMultiplierDisplay()
 end
 
 --[[
@@ -229,6 +408,15 @@ end
 
 local function OnFriendBonusChanged()
     UpdateFriendBonusDisplay(LocalPlayer:GetAttribute(FRIEND_BONUS_ATTR) or 0)
+    UpdateGoldMultiplierDisplay()
+end
+
+local function OnRebirthCoinBonusChanged()
+    UpdateGoldMultiplierDisplay()
+end
+
+local function OnVipPurchasedChanged()
+    UpdateGoldMultiplierDisplay()
 end
 
 -- ==================== V3.5新增：战斗金币累计显示 ====================
@@ -438,6 +626,7 @@ local function Initialize()
         -- 仅在UI就绪时设置初始显示（不使用动画）
         UpdateCoinDisplay(0, false)
         UpdateFriendBonusDisplay(LocalPlayer:GetAttribute(FRIEND_BONUS_ATTR) or 0)
+        UpdateGoldMultiplierDisplay()
     end
 
     if not CurrencyEvents then
@@ -458,6 +647,7 @@ local function Initialize()
             CoinNumLabel = nil
             CoinEarnLabel = nil  -- V3.5新增
             CoinBuffLabel = nil  -- V5.8新增
+            GoldMultiplierLabel = nil -- V8.2新增
 
             -- 等待一帧确保GUI完全加载
             task.wait()
@@ -466,6 +656,7 @@ local function Initialize()
             if RefreshUIReferences() then
                 UpdateCoinDisplay(currentCoins, false)
                 UpdateFriendBonusDisplay(LocalPlayer:GetAttribute(FRIEND_BONUS_ATTR) or 0)
+                UpdateGoldMultiplierDisplay()
 
                 -- V3.5新增：如果当前在战斗中，恢复战斗模式显示
                 if isInBattle then
@@ -492,7 +683,39 @@ local function Initialize()
     end
 
     LocalPlayer:GetAttributeChangedSignal(FRIEND_BONUS_ATTR):Connect(OnFriendBonusChanged)
+    LocalPlayer:GetAttributeChangedSignal(REBIRTH_BONUS_ATTR):Connect(OnRebirthCoinBonusChanged)
+    LocalPlayer:GetAttributeChangedSignal(VIP_PURCHASED_ATTR):Connect(OnVipPurchasedChanged)
     OnFriendBonusChanged()
+    OnRebirthCoinBonusChanged()
+    OnVipPurchasedChanged()
+
+    -- 兜底：处理UI异步创建导致的首帧未命中，确保默认文案会被覆盖
+    task.spawn(function()
+        for _ = 1, 30 do
+            RefreshUIReferences()
+            ResolveBonusLabels()
+            UpdateFriendBonusDisplay(LocalPlayer:GetAttribute(FRIEND_BONUS_ATTR) or 0)
+            UpdateGoldMultiplierDisplay()
+            if CoinBuffLabel and GoldMultiplierLabel then
+                break
+            end
+            task.wait(0.2)
+        end
+    end)
+
+    -- 常驻兜底：避免属性不变化时UI重建后保留默认文案
+    task.spawn(function()
+        while LocalPlayer and LocalPlayer.Parent do
+            task.wait(1)
+            ResolveBonusLabels()
+            if CoinBuffLabel then
+                UpdateFriendBonusDisplay(LocalPlayer:GetAttribute(FRIEND_BONUS_ATTR) or 0)
+            end
+            if GoldMultiplierLabel then
+                UpdateGoldMultiplierDisplay()
+            end
+        end
+    end)
 
     -- 🔥修复金币显示延迟：优化请求逻辑，添加重试机制
     task.spawn(function()

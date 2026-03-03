@@ -18,6 +18,7 @@ local camera = Workspace.CurrentCamera
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
 local UnitConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("UnitConfig"))
 local UpgradeConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("UpgradeConfig"))
+local BattleConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("BattleConfig"))
 
 local tipsGui = playerGui:WaitForChild("TipsRole", 10)
 if not tipsGui then
@@ -214,17 +215,44 @@ local function ShowUnitInfo(unitModel)
 		return
 	end
 
-	local rebirthAttackBonusRate = math.max(0, tonumber(player:GetAttribute("RebirthAttackBonusRate")) or 0)
-	local attackMultiplier = (upgradeMultipliers.AttackMultiplier or 1) + rebirthAttackBonusRate
-	local attack = UnitConfig.CalculateAttack(unitId, level) * attackMultiplier
-	attack = math.max(1, math.ceil(attack - 1e-6))
-
-	local health = UnitConfig.CalculateHealth(unitId, level) * (upgradeMultipliers.HealthMultiplier or 1)
-	health = math.max(1, math.floor(health + 0.5))
-
+	local team = unitModel:GetAttribute("Team")
+	local isEnemy = team == BattleConfig.Team.DEFENSE
 	local humanoid = unitModel:FindFirstChildOfClass("Humanoid")
-	if humanoid and humanoid.MaxHealth > 0 then
-		health = math.max(health, math.floor(humanoid.MaxHealth + 0.5))
+	local attack = nil
+	local health = nil
+
+	if isEnemy then
+		-- 敌方面板只展示其真实战斗属性，不叠加本地玩家养成加成。
+		local battleAttack = tonumber(unitModel:GetAttribute("BattleAttack"))
+		local battleMaxHealth = tonumber(unitModel:GetAttribute("BattleMaxHealth"))
+
+		if battleAttack and battleAttack > 0 then
+			attack = math.max(1, math.ceil(battleAttack - 1e-6))
+		else
+			attack = UnitConfig.CalculateAttack(unitId, level)
+			attack = math.max(1, math.ceil(attack - 1e-6))
+		end
+
+		if battleMaxHealth and battleMaxHealth > 0 then
+			health = math.max(1, math.floor(battleMaxHealth + 0.5))
+		elseif humanoid and humanoid.MaxHealth > 0 then
+			health = math.max(1, math.floor(humanoid.MaxHealth + 0.5))
+		else
+			health = UnitConfig.CalculateHealth(unitId, level)
+			health = math.max(1, math.floor(health + 0.5))
+		end
+	else
+		local rebirthAttackBonusRate = math.max(0, tonumber(player:GetAttribute("RebirthAttackBonusRate")) or 0)
+		local attackMultiplier = (upgradeMultipliers.AttackMultiplier or 1) + rebirthAttackBonusRate
+		attack = UnitConfig.CalculateAttack(unitId, level) * attackMultiplier
+		attack = math.max(1, math.ceil(attack - 1e-6))
+
+		health = UnitConfig.CalculateHealth(unitId, level) * (upgradeMultipliers.HealthMultiplier or 1)
+		health = math.max(1, math.floor(health + 0.5))
+
+		if humanoid and humanoid.MaxHealth > 0 then
+			health = math.max(health, math.floor(humanoid.MaxHealth + 0.5))
+		end
 	end
 
 	if icon and icon:IsA("ImageLabel") then

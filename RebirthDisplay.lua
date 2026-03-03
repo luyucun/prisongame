@@ -55,6 +55,7 @@ local rebirthStateChangedEvent = nil
 local currencyUpdateEvent = nil
 local inventoryRefreshEvent = nil
 local unitUpdatedEvent = nil
+local campaignStateUpdateEvent = nil
 
 local buttonEffectHelper = nil
 local popupScale = nil
@@ -67,6 +68,7 @@ local popupCloseTweenB = nil
 local popupAnimating = false
 local currentPayload = nil
 local isAttemptingRebirth = false
+local isBattleBlocked = false
 local initialized = false
 local redPointShakeToken = 0
 local redPointTweenA = nil
@@ -74,6 +76,7 @@ local redPointTweenB = nil
 local redPointTweenC = nil
 
 local COIN_CURRENCY_TYPE = tostring(GameConfig.CurrencyType and GameConfig.CurrencyType.COINS or "Coins")
+local BATTLE_BLOCK_TIP_TEXT = "Finish the battle first."
 
 local function SetBlurLock(enabled)
 	local locks = _G[BLUR_LOCKS_KEY]
@@ -116,6 +119,14 @@ local function PlayErrorSound()
 	local soundController = _G.SoundController
 	if soundController and soundController.PlaySFX then
 		soundController.PlaySFX("Error")
+	end
+end
+
+local function ShowBattleBlockedFeedback()
+	PlayErrorSound()
+	local tipsSystem = _G.TipsSystem
+	if tipsSystem and tipsSystem.ShowError then
+		tipsSystem.ShowError(BATTLE_BLOCK_TIP_TEXT)
 	end
 end
 
@@ -698,6 +709,10 @@ local function OpenPanel()
 	if not InitializeUI() then
 		return
 	end
+	if isBattleBlocked then
+		ShowBattleBlockedFeedback()
+		return
+	end
 	if currentPayload and currentPayload.IsMaxLevel == true then
 		return
 	end
@@ -725,6 +740,10 @@ local function ClosePanel(notifyServer)
 end
 
 local function OnAttemptRebirth()
+	if isBattleBlocked then
+		ShowBattleBlockedFeedback()
+		return
+	end
 	if isAttemptingRebirth then
 		return
 	end
@@ -828,6 +847,33 @@ local function BindEvents()
 
 	if rebirthResultEvent then
 		rebirthResultEvent.OnClientEvent:Connect(OnRebirthResult)
+	end
+
+	if eventsFolder then
+		local campaignEvents = eventsFolder:FindFirstChild("CampaignEvents")
+		if not campaignEvents then
+			campaignEvents = eventsFolder:WaitForChild("CampaignEvents", 5)
+		end
+		if campaignEvents then
+			campaignStateUpdateEvent = campaignEvents:FindFirstChild("CampaignStateUpdate")
+			if not campaignStateUpdateEvent then
+				campaignStateUpdateEvent = campaignEvents:WaitForChild("CampaignStateUpdate", 5)
+			end
+			if campaignStateUpdateEvent and campaignStateUpdateEvent:IsA("RemoteEvent") then
+				campaignStateUpdateEvent.OnClientEvent:Connect(function(state)
+					local battle = state ~= "Idle"
+					if isBattleBlocked == battle then
+						return
+					end
+
+					isBattleBlocked = battle
+					if isBattleBlocked and rebirthBg and rebirthBg.Visible then
+						PlayPanelClose()
+						ReleaseBackpackHide()
+					end
+				end)
+			end
+		end
 	end
 
 	if eventsFolder then

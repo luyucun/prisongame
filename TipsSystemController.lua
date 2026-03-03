@@ -14,11 +14,16 @@ local ProximityPromptService = game:GetService("ProximityPromptService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
+local MIN_TIPS_DISPLAY_ORDER = 120
 
 local tipsGui = playerGui:WaitForChild("TipsSystem", 10)
 if not tipsGui then
 	warn("[TipsSystemController] 未找到 TipsSystem 界面")
 	return
+end
+
+if tipsGui:IsA("ScreenGui") and tipsGui.DisplayOrder < MIN_TIPS_DISPLAY_ORDER then
+	tipsGui.DisplayOrder = MIN_TIPS_DISPLAY_ORDER
 end
 
 local frame = tipsGui:WaitForChild("Frame", 5)
@@ -112,6 +117,20 @@ local rebirthTipDefaultText = (rebirthTipLabel and rebirthTipLabel:IsA("TextLabe
 
 if rebirthTips then
 	rebirthTips.Visible = false
+end
+
+local function EnsureTipsAboveRebirthPopup()
+	if not tipsGui or not tipsGui:IsA("ScreenGui") then
+		return
+	end
+
+	local rebirthGui = playerGui:FindFirstChild("Rebirth")
+	if rebirthGui and rebirthGui:IsA("ScreenGui") then
+		local requiredDisplayOrder = (rebirthGui.DisplayOrder or 0) + 1
+		if tipsGui.DisplayOrder < requiredDisplayOrder then
+			tipsGui.DisplayOrder = requiredDisplayOrder
+		end
+	end
 end
 
 local targetPosition = frame.Position
@@ -429,6 +448,8 @@ local function ShowRebirthTip(customText)
 	if not rebirthTips or not rebirthTargetPosition then
 		return
 	end
+
+	EnsureTipsAboveRebirthPopup()
 
 	rebirthToken = rebirthToken + 1
 	local token = rebirthToken

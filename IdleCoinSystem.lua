@@ -30,7 +30,6 @@ local DataManager = nil
 local CurrencySystem = nil
 local PlayerManager = nil
 local SoundSystem = nil  -- V3.8新增
-local FRIEND_BONUS_ATTR = "FriendCoinBonusPercent"
 
 -- 收敛调试print，避免刷屏（仅在DEBUG_MODE开启时输出）
 local _print = print
@@ -69,37 +68,6 @@ local function LoadModules()
 	if not SoundSystem then
 		SoundSystem = require(ServerScriptService.Systems.SoundSystem)
 	end
-end
-
-local function GetFriendBonusPercent(player)
-	if not player then
-		return 0
-	end
-
-	if CurrencySystem and CurrencySystem.GetFriendBonusPercent then
-		return CurrencySystem.GetFriendBonusPercent(player, true) or 0
-	end
-
-	local percent = player:GetAttribute(FRIEND_BONUS_ATTR)
-	if type(percent) ~= "number" then
-		return 0
-	end
-	return math.max(0, percent)
-end
-
-local function ApplyFriendBonusToIdleCoins(player, baseCoins)
-	local amount = math.floor(tonumber(baseCoins) or 0)
-	if amount <= 0 then
-		return 0
-	end
-
-	local percent = GetFriendBonusPercent(player)
-	if percent <= 0 then
-		return amount
-	end
-
-	local total = amount * (1 + percent / 100)
-	return math.ceil(total)
 end
 
 local function GetHouseRankByModel(modelName)
@@ -155,21 +123,38 @@ local function GetIdleConfigForPlayer(player)
 		end
 	end
 
-	if not houseConfig then
+	if not houseConfig and HouseConfig.GetIdleConfigByCompletedChapters then
 		local completedChapters = DataManager.GetCompletedChapters(player) or 0
 		houseConfig = HouseConfig.GetIdleConfigByCompletedChapters(completedChapters)
+	end
+
+	local fallbackConfig = BuildIdleConfigFromHouse(HouseConfig.Houses and HouseConfig.Houses[1] or nil)
+	if not houseConfig then
+		houseConfig = fallbackConfig
 	end
 
 	local coinsPerMinute = houseConfig and tonumber(houseConfig.CoinsPerMinute) or 0
 	local maxMinutes = houseConfig and tonumber(houseConfig.MaxMinutes) or 0
 	local maxHours = houseConfig and tonumber(houseConfig.MaxHours) or 0
 
+	if coinsPerMinute <= 0 and fallbackConfig then
+		coinsPerMinute = tonumber(fallbackConfig.CoinsPerMinute) or 0
+	end
+
 	if coinsPerMinute <= 0 then
 		coinsPerMinute = tonumber(GameConfig.IdleCoin.CoinsPerMinute) or 0
 	end
 
-	if maxMinutes <= 0 then
-		maxMinutes = tonumber(GameConfig.IdleCoin.MaxOfflineMinutes) or 0
+	if maxMinutes <= 0 and fallbackConfig then
+		maxMinutes = tonumber(fallbackConfig.MaxMinutes) or 0
+	end
+
+	if maxHours <= 0 and fallbackConfig then
+		maxHours = tonumber(fallbackConfig.MaxHours) or 0
+	end
+
+	if maxMinutes <= 0 and maxHours > 0 then
+		maxMinutes = maxHours * 60
 	end
 
 	if maxHours <= 0 then
@@ -558,7 +543,7 @@ local function ProcessIdleCoinCollect(player, multiplier, source, productId)
 	-- 发放金币
 	local success, newAmount
 	if source == "Purchase" then
-		success, newAmount = CurrencySystem.AddCoinsFromPurchase(player, awardCoins, productId, { NoFriendBonus = true })
+		success, newAmount = CurrencySystem.AddCoinsFromPurchase(player, awardCoins, productId)
 	else
 		local idleConfig = GetIdleConfigForPlayer(player)
 		local coinsPerMinute = idleConfig.CoinsPerMinute or 0
@@ -566,7 +551,7 @@ local function ProcessIdleCoinCollect(player, multiplier, source, productId)
 		if coinsPerMinute and coinsPerMinute > 0 then
 			durationSeconds = pendingCoins * 60 / coinsPerMinute
 		end
-		success, newAmount = CurrencySystem.AddCoinsFromIdle(player, awardCoins, durationSeconds, { NoFriendBonus = true })
+		success, newAmount = CurrencySystem.AddCoinsFromIdle(player, awardCoins, durationSeconds)
 	end
 
 	if success then
@@ -716,7 +701,6 @@ function IdleCoinSystem.OnPlayerJoin(player)
 	-- 计算离线产生的金币
 	local offlineCoins = CalculateOfflineCoins(player, lastLogoutTime)
 	local offlineCoins = CalculateOfflineCoins(player, lastLogoutTime)
-	offlineCoins = ApplyFriendBonusToIdleCoins(player, offlineCoins)
 
 	-- 累加到待领取金币
 	local totalPendingCoins = existingPendingCoins + offlineCoins
@@ -804,7 +788,6 @@ function IdleCoinSystem.StartOnlineAccumulation(player)
 			-- 计算这个间隔产生的金币
 			local coinsToAdd = math.floor(coinsPerMinute * (interval / 60))
 			local coinsToAdd = math.floor(coinsPerMinute * (interval / 60))
-			coinsToAdd = ApplyFriendBonusToIdleCoins(player, coinsToAdd)
 			if coinsToAdd > 0 then
 				-- 添加到待领取金币
 				local success, newTotal = DataManager.AddPendingIdleCoins(player, coinsToAdd)

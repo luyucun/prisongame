@@ -106,6 +106,7 @@ local BindRewardButtons = nil
 local UpdateRedPoint = nil
 local campaignEventsBound = false
 local lastCampaignTotalStages = nil
+local lastSevenDaysUnlockedState = nil
 
 -- 弹框动画配置（仅Bg）
 local POPUP_OPEN_START_SCALE = 0.86
@@ -480,11 +481,7 @@ local function UpdateFeatureVisibility()
 		BindRewardButtons()
 	end
 
-	local unlocked = player:GetAttribute("SevenDaysUnlocked")
-	if unlocked == nil then
-		unlocked = true
-	end
-	unlocked = unlocked == true
+	local unlocked = player:GetAttribute("SevenDaysUnlocked") == true
 	if sevenDaysButtonContainer then
 		sevenDaysButtonContainer.Visible = unlocked
 	end
@@ -553,10 +550,7 @@ local function BindCampaignEvents()
 
 			local totalStages = tonumber(lastCampaignTotalStages)
 			if totalStages and stageNum and stageNum >= totalStages then
-				if player:GetAttribute("SevenDaysUnlocked") ~= true then
-					player:SetAttribute("SevenDaysUnlocked", true)
-				end
-				UpdateFeatureVisibility()
+				-- Unlock now depends on first rebirth, not chapter clear.
 			end
 		end)
 	end
@@ -1001,6 +995,22 @@ local function TryInitialize()
 	return eventsReady and uiReady
 end
 
+local function OnSevenDaysUnlockedChanged()
+	local unlockedNow = player:GetAttribute("SevenDaysUnlocked") == true
+	local wasUnlocked = lastSevenDaysUnlockedState == true
+	lastSevenDaysUnlockedState = unlockedNow
+
+	UpdateFeatureVisibility()
+
+	if unlockedNow and not wasUnlocked then
+		task.spawn(function()
+			task.wait()
+			TryInitialize()
+			OpenSevenDays()
+		end)
+	end
+end
+
 function SevenDaysDisplay.Initialize()
 	if TryInitialize() then
 		return
@@ -1014,7 +1024,8 @@ function SevenDaysDisplay.Initialize()
 		end
 	end)
 
-	player:GetAttributeChangedSignal("SevenDaysUnlocked"):Connect(UpdateFeatureVisibility)
+	lastSevenDaysUnlockedState = player:GetAttribute("SevenDaysUnlocked") == true
+	player:GetAttributeChangedSignal("SevenDaysUnlocked"):Connect(OnSevenDaysUnlockedChanged)
 
 	playerGui.ChildAdded:Connect(function(child)
 		if not child then

@@ -52,11 +52,11 @@ GameConfig.COIN_DISPLAY_FORMAT = "$%d"  -- $XXXXX格式
 
 -- ==================== 好友金币加成配置 (V5.8) ====================
 GameConfig.FriendCoinBonusRates = {
-	[1] = 0.2,
-	[2] = 0.4,
-	[3] = 0.6,
-	[4] = 0.8,
-	[5] = 1.0,
+	[1] = 0.1,
+	[2] = 0.2,
+	[3] = 0.3,
+	[4] = 0.4,
+	[5] = 0.5,
 }
 GameConfig.FriendCoinBonusMaxCount = 5
 

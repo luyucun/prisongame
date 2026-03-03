@@ -61,13 +61,17 @@ local popupOpenTweenA = nil
 local popupOpenTweenB = nil
 local popupCloseTweenA = nil
 local popupCloseTweenB = nil
+local popupAnimationMode = nil
+local closeCompletionCallbacks = {}
 
 local latestPayload = nil
 local chapterCardData = {}
 local selectedChapterId = nil
 local autoAttackPending = false
+local pendingAttackChapterId = nil
 local initialized = false
 local Initialize = nil
+local CloseMapAndStartPendingAttack = nil
 local HideBackpackForBattle = nil
 local medalAttrConnection = nil
 local mainGuiChildAddedConnection = nil
@@ -268,11 +272,40 @@ local function CancelTweens()
 	popupOpenTweenB = nil
 	popupCloseTweenA = nil
 	popupCloseTweenB = nil
+	popupAnimationMode = nil
+end
+
+local function QueueCloseCallback(callback)
+	if type(callback) ~= "function" then
+		return
+	end
+	table.insert(closeCompletionCallbacks, callback)
+end
+
+local function FlushCloseCallbacks()
+	if #closeCompletionCallbacks == 0 then
+		return
+	end
+
+	local callbacks = closeCompletionCallbacks
+	closeCompletionCallbacks = {}
+	for _, callback in ipairs(callbacks) do
+		task.spawn(function()
+			local ok, err = pcall(callback)
+			if not ok then
+				warn("[MapDisplay] 关闭回调执行失败:", err)
+			end
+		end)
+	end
 end
 
 local function PlayOpen()
 	if not mapBg then
 		return false
+	end
+
+	if popupAnimationMode == "opening" then
+		return true
 	end
 
 	local scale = EnsureScale()
@@ -299,6 +332,7 @@ local function PlayOpen()
 
 	CancelTweens()
 	popupAnimating = true
+	popupAnimationMode = "opening"
 	HideMainGuiForMap()
 	mapBg.Visible = true
 	if dimBg then
@@ -338,6 +372,7 @@ local function PlayOpen()
 			connB = nil
 		end
 		popupAnimating = false
+		popupAnimationMode = nil
 		scale.Scale = 1
 		SetBlurLock(true)
 	end)
@@ -346,9 +381,15 @@ local function PlayOpen()
 	return true
 end
 
-local function PlayClose()
+local function PlayClose(onClosed)
 	if not mapBg then
 		return false
+	end
+
+	QueueCloseCallback(onClosed)
+
+	if popupAnimationMode == "closing" then
+		return true
 	end
 
 	local scale = EnsureScale()
@@ -360,6 +401,7 @@ local function PlayClose()
 		SetBlurLock(false)
 		ReleaseBackpackHide()
 		RestoreMainGuiAfterMap()
+		FlushCloseCallbacks()
 		return true
 	end
 
@@ -370,11 +412,13 @@ local function PlayClose()
 		SetBlurLock(false)
 		ReleaseBackpackHide()
 		RestoreMainGuiAfterMap()
+		FlushCloseCallbacks()
 		return true
 	end
 
 	CancelTweens()
 	popupAnimating = true
+	popupAnimationMode = "closing"
 
 	popupCloseTweenA = TweenService:Create(
 		scale,
@@ -405,6 +449,7 @@ local function PlayClose()
 			connB = nil
 		end
 		popupAnimating = false
+		popupAnimationMode = nil
 		mapBg.Visible = false
 		if dimBg then
 			dimBg.Visible = false
@@ -413,6 +458,7 @@ local function PlayClose()
 		SetBlurLock(false)
 		ReleaseBackpackHide()
 		RestoreMainGuiAfterMap()
+		FlushCloseCallbacks()
 	end)
 
 	popupCloseTweenA:Play()
@@ -656,11 +702,9 @@ local function OnMapData(payload)
 	if autoAttackPending and selectedChapterId and IsChapterUnlocked(selectedChapterId) then
 		task.defer(function()
 			if autoAttackPending and mapBg and mapBg.Visible then
-				HideBackpackForBattle()
-				PlayClose()
-				if requestStartCampaignEvent then
-					requestStartCampaignEvent:FireServer(selectedChapterId)
-				end
+				local chapterIdToStart = selectedChapterId
+				pendingAttackChapterId = chapterIdToStart
+				CloseMapAndStartPendingAttack()
 				autoAttackPending = false
 			end
 		end)
@@ -675,17 +719,36 @@ local function RequestMapData()
 	end
 end
 
+local function FireStartCampaignForPendingAttack()
+	local pendingChapter = pendingAttackChapterId
+	pendingAttackChapterId = nil
+	if pendingChapter and requestStartCampaignEvent then
+		task.defer(function()
+			requestStartCampaignEvent:FireServer(pendingChapter)
+		end)
+	end
+end
+
+CloseMapAndStartPendingAttack = function()
+	HideBackpackForBattle()
+	local closeStarted = PlayClose(FireStartCampaignForPendingAttack)
+	if not closeStarted then
+		FireStartCampaignForPendingAttack()
+	end
+end
+
 local function StartAttack()
+	if pendingAttackChapterId then
+		return
+	end
+
 	if not selectedChapterId or not IsChapterUnlocked(selectedChapterId) then
 		return
 	end
 
-	HideBackpackForBattle()
-	PlayClose()
-
-	if requestStartCampaignEvent then
-		requestStartCampaignEvent:FireServer(selectedChapterId)
-	end
+	local chapterIdToStart = selectedChapterId
+	pendingAttackChapterId = chapterIdToStart
+	CloseMapAndStartPendingAttack()
 
 	autoAttackPending = false
 end
@@ -697,6 +760,7 @@ local function OpenMapInternal(isAutoAttack)
 		end
 	end
 
+	pendingAttackChapterId = nil
 	autoAttackPending = isAutoAttack == true
 	PlayOpen()
 	RequestMapData()
