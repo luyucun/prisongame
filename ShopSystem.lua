@@ -15,6 +15,15 @@ local DEBUG_MODE = false
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local Players = game:GetService("Players")
+local AdService = nil
+do
+	local ok, service = pcall(function()
+		return game:GetService("AdService")
+	end)
+	if ok then
+		AdService = service
+	end
+end
 
 -- 引用模块
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
@@ -61,6 +70,8 @@ local PurchaseResult = nil
 local ShopRefreshTip = nil
 local StockUpdate = nil       -- 库存更新事件 (V2.1库存功能)
 local RefreshTimeUpdate = nil -- 刷新倒计时更新事件 (V2.1库存功能)
+local RequestFastRestockAd = nil
+local FastRestockAdReward = nil
 
 -- ==================== 私有辅助函数 ====================
 
@@ -84,6 +95,33 @@ local function GetFastRestockConfig()
 		return nil
 	end
 	return fastCfg
+end
+
+local function GetFastRestockAdReward()
+	if FastRestockAdReward then
+		return FastRestockAdReward
+	end
+
+	if not AdService or not AdService.CreateAdRewardFromDevProductId then
+		return nil
+	end
+
+	local fastCfg = GetFastRestockConfig()
+	local productId = fastCfg and tonumber(fastCfg.ProductId) or 0
+	if productId <= 0 then
+		return nil
+	end
+
+	local ok, reward = pcall(function()
+		return AdService:CreateAdRewardFromDevProductId(productId)
+	end)
+	if not ok then
+		warn("[ShopSystem] Failed to create fast restock ad reward:", reward)
+		return nil
+	end
+
+	FastRestockAdReward = reward
+	return FastRestockAdReward
 end
 
 local function GetFastRestockEndTime(player)
@@ -220,6 +258,13 @@ local function InitializeEvents()
 	StockUpdate = ShopEvents:FindFirstChild("StockUpdate")          -- V2.1库存功能
 	RefreshTimeUpdate = ShopEvents:FindFirstChild("RefreshTimeUpdate") -- V2.1库存功能
 	ShopRefreshTip = ShopEvents:FindFirstChild("ShopRefreshTip")
+	RequestFastRestockAd = ShopEvents:FindFirstChild("RequestFastRestockAd")
+	if not RequestFastRestockAd then
+		local event = Instance.new("RemoteEvent")
+		event.Name = "RequestFastRestockAd"
+		event.Parent = ShopEvents
+		RequestFastRestockAd = event
+	end
 	if not ShopRefreshTip then
 		local event = Instance.new("RemoteEvent")
 		event.Name = "ShopRefreshTip"
@@ -1335,6 +1380,82 @@ local function OnPurchaseUnitRobux(player, unitId)
 	end
 end
 
+local function CanRequestFastRestockByAd(player)
+	local shopId = GetPlayerNearbyShopId(player)
+	if shopId ~= FAST_RESTOCK_SHOP_ID then
+		return false, "Please move closer to the prisoner shop first"
+	end
+
+	local firstOpenState = EnsureFirstOpenState(player, FAST_RESTOCK_SHOP_ID)
+	if firstOpenState ~= FIRST_OPEN_STATE.COMPLETED then
+		return false, "This feature is unavailable during the tutorial phase"
+	end
+
+	if GameConfig.Shop.EnableDistanceCheck then
+		local distance = GetDistanceToShopNPC(player)
+		if distance > GameConfig.Shop.OpenDistance then
+			return false, "You are too far from the shop NPC"
+		end
+	end
+
+	return true, nil
+end
+
+local function OnRequestFastRestockAd(player)
+	local success, result = pcall(function()
+		if not player or not player:IsA("Player") then
+			return
+		end
+
+		local canRequest, reason = CanRequestFastRestockByAd(player)
+		if not canRequest then
+			SendFailure(player, reason or "Rewarded ads are currently unavailable")
+			return
+		end
+
+		if not AdService or not AdService.ShowRewardedVideoAdAsync then
+			SendFailure(player, "Ad service is currently unavailable")
+			return
+		end
+
+		local reward = GetFastRestockAdReward()
+		if not reward then
+			SendFailure(player, "Ad reward is not configured correctly")
+			return
+		end
+
+		local ok, showResult = pcall(function()
+			return AdService:ShowRewardedVideoAdAsync(player, reward)
+		end)
+
+		if not ok then
+			SendFailure(player, "Ad is unavailable now, please try again later")
+			warn("[ShopSystem] ShowRewardedVideoAdAsync failed:", showResult)
+			return
+		end
+
+		local completed = false
+		if typeof(showResult) == "EnumItem" then
+			completed = (showResult.Name == "Completed")
+		else
+			local asString = tostring(showResult)
+			completed = string.find(asString, "Completed") ~= nil
+		end
+
+		if not completed then
+			-- 用户中途关闭/广告无填充等情况，不发放奖励
+			SendFailure(player, "Reward is granted only after you fully watch the ad")
+		end
+	end)
+
+	if not success then
+		warn("[ShopSystem] OnRequestFastRestockAd error: " .. tostring(result))
+		if player and player:IsA("Player") then
+			SendFailure(player, "Failed to request ad, please try again later")
+		end
+	end
+end
+
 --[[ 玩家离开游戏时清理数据 ]]
 local function OnPlayerRemoving(player)
 	PurchaseLocks[player] = nil
@@ -1372,6 +1493,9 @@ function ShopSystem.Initialize()
 		PurchaseUnit.OnServerEvent:Connect(OnPurchaseUnit)
 		if PurchaseUnitRobux then
 			PurchaseUnitRobux.OnServerEvent:Connect(OnPurchaseUnitRobux)
+		end
+		if RequestFastRestockAd then
+			RequestFastRestockAd.OnServerEvent:Connect(OnRequestFastRestockAd)
 		end
 	end)
 

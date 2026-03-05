@@ -23,7 +23,7 @@ RebirthConfig.Levels = {
 	},
 	{
 		RebirthCount = 2,
-		RequiredCoins = 300,
+		RequiredCoins = 600,
 		RequiredUnitId = "10002",
 		RequiredUnitCount = 5,
 		RewardCoins = 1000,
@@ -36,7 +36,7 @@ RebirthConfig.Levels = {
 	},
 	{
 		RebirthCount = 3,
-		RequiredCoins = 750,
+		RequiredCoins = 900,
 		RequiredUnitId = "10003",
 		RequiredUnitCount = 5,
 		RewardCoins = 2000,
@@ -49,7 +49,7 @@ RebirthConfig.Levels = {
 	},
 	{
 		RebirthCount = 4,
-		RequiredCoins = 1250,
+		RequiredCoins = 1500,
 		RequiredUnitId = "10004",
 		RequiredUnitCount = 5,
 		RewardCoins = 3000,

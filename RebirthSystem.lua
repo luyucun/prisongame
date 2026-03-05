@@ -36,8 +36,8 @@ local rebirthLocks = {}
 local pendingHouseUpgradeByUserId = {}
 
 local COIN_ICON = "rbxassetid://92295649647469"
-local ATTACK_BONUS_ICON = "rbxassetid://76416297088295"
-local COIN_BONUS_ICON = "rbxassetid://93607334203626"
+local ATTACK_BONUS_ICON = "rbxassetid://136576813727124"
+local COIN_BONUS_ICON = "rbxassetid://111592302930868"
 
 local function FormatNumberWithCommas(value)
 	local amount = math.floor(tonumber(value) or 0)
@@ -444,31 +444,104 @@ local function TryPlayPendingHouseUpgrade(player)
 	end)
 end
 
-local function ResetPlayerCoinsAndUnits(player)
+local function ConsumeRequiredUnitsForRebirth(player, requiredUnitId, requiredUnitCount)
+	local unitId = tostring(requiredUnitId or "")
+	local consumeCount = math.max(0, math.floor(tonumber(requiredUnitCount) or 0))
+	if unitId == "" or consumeCount <= 0 then
+		return true, "OK"
+	end
+
+	if not InventorySystem
+		or not InventorySystem.GetUnitsByUnitId
+		or not InventorySystem.RemoveUnit then
+		return false, "DEDUCT_UNITS_SYSTEM_UNAVAILABLE"
+	end
+
+	local instances = InventorySystem.GetUnitsByUnitId(player, unitId)
+	if type(instances) ~= "table" then
+		return false, "DEDUCT_UNITS_FAILED"
+	end
+
+	local unplacedInstances = {}
+	local placedInstances = {}
+	for _, instance in ipairs(instances) do
+		local instanceId = type(instance) == "table" and tostring(instance.InstanceId or "") or ""
+		if instanceId ~= "" then
+			local consumeItem = {
+				InstanceId = instanceId,
+				IsPlaced = instance.IsPlaced == true,
+			}
+			if instance.IsPlaced == true then
+				table.insert(placedInstances, consumeItem)
+			else
+				table.insert(unplacedInstances, consumeItem)
+			end
+		end
+	end
+
+	local consumeInstances = {}
+	local function PickInstances(source)
+		for _, consumeItem in ipairs(source) do
+			table.insert(consumeInstances, consumeItem)
+			if #consumeInstances >= consumeCount then
+				return
+			end
+		end
+	end
+
+	PickInstances(unplacedInstances)
+	if #consumeInstances < consumeCount then
+		PickInstances(placedInstances)
+	end
+	if #consumeInstances < consumeCount then
+		return false, "DEDUCT_UNITS_NOT_ENOUGH"
+	end
+
+	local needOrphanCleanup = false
+	for _, consumeItem in ipairs(consumeInstances) do
+		local instanceId = consumeItem.InstanceId
+
+		if consumeItem.IsPlaced and PlacementSystem and PlacementSystem.RemovePlacedUnit then
+			needOrphanCleanup = true
+			pcall(function()
+				PlacementSystem.RemovePlacedUnit(player, instanceId, true)
+			end)
+		end
+
+		local ok, removeSuccess = pcall(function()
+			return InventorySystem.RemoveUnit(player, instanceId, true)
+		end)
+		if not ok or removeSuccess ~= true then
+			return false, "DEDUCT_UNITS_FAILED"
+		end
+	end
+
+	if needOrphanCleanup and PlacementSystem and PlacementSystem.CleanupOrphanPlacedUnits then
+		pcall(function()
+			PlacementSystem.CleanupOrphanPlacedUnits(player)
+		end)
+	end
+
+	if InventorySystem.RefreshClientInventory then
+		InventorySystem.RefreshClientInventory(player)
+	end
+
+	return true, "OK"
+end
+
+local function ResetPlayerCoinsAndConsumeRequiredUnits(player, nextConfig)
+	local requiredUnitId = nextConfig and tostring(nextConfig.RequiredUnitId or "") or ""
+	local requiredUnitCount = nextConfig and (tonumber(nextConfig.RequiredUnitCount) or 0) or 0
+
+	local deductSuccess, deductCode = ConsumeRequiredUnitsForRebirth(player, requiredUnitId, requiredUnitCount)
+	if not deductSuccess then
+		return false, deductCode or "DEDUCT_UNITS_FAILED"
+	end
+
 	local currencyType = GameConfig.CurrencyType and GameConfig.CurrencyType.COINS or "Coins"
 	local setSuccess = CurrencySystem.SetCurrency(player, currencyType, 0, "RebirthReset")
 	if not setSuccess then
 		return false, "RESET_COINS_FAILED"
-	end
-
-	local clearPlacedSuccess = true
-	if PlacementSystem and PlacementSystem.ClearAllPlacedUnits then
-		local ok, result = pcall(function()
-			return PlacementSystem.ClearAllPlacedUnits(player)
-		end)
-		clearPlacedSuccess = ok and result ~= nil
-	end
-
-	local clearInventorySuccess = false
-	if InventorySystem and InventorySystem.ClearInventory then
-		local ok, result = pcall(function()
-			return InventorySystem.ClearInventory(player)
-		end)
-		clearInventorySuccess = ok and result == true
-	end
-
-	if not clearPlacedSuccess or not clearInventorySuccess then
-		return false, "RESET_UNITS_FAILED"
 	end
 
 	return true, "OK"
@@ -559,7 +632,7 @@ local function HandleAttemptRebirth(player)
 		return
 	end
 
-	local resetSuccess, resetCode = ResetPlayerCoinsAndUnits(player)
+	local resetSuccess, resetCode = ResetPlayerCoinsAndConsumeRequiredUnits(player, nextConfig)
 	if not resetSuccess then
 		if RebirthResultEvent then
 			RebirthResultEvent:FireClient(player, false, resetCode, payload)

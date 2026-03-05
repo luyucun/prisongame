@@ -24,6 +24,16 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")  -- V2.1修复：用于实时更新倒计时
 local Lighting = game:GetService("Lighting")
+local MarketplaceService = game:GetService("MarketplaceService")
+local AdService = nil
+do
+    local ok, service = pcall(function()
+        return game:GetService("AdService")
+    end)
+    if ok then
+        AdService = service
+    end
+end
 
 -- 引用配置
 local GameConfig = require(ReplicatedStorage:WaitForChild("Config"):WaitForChild("GameConfig"))
@@ -60,6 +70,9 @@ local fasterRestockContainer = nil -- 快速补货入口容器
 local fasterRestockButton = nil    -- 快速补货按钮
 local fasterRestockBoundButton = nil
 local fasterRestockPriceLabel = nil
+local fasterRestockAdContainer = nil
+local fasterRestockAdButton = nil
+local fasterRestockAdBoundButton = nil
 local FIRST_OPEN_UNIT_ID = "10001"
 
 local FAST_RESTOCK_PRODUCT_ID = 0
@@ -69,6 +82,13 @@ do
         FAST_RESTOCK_PRODUCT_ID = tonumber(fastConfig.ProductId) or 0
     end
 end
+local fastRestockPrompting = false
+local fastRestockPromptBound = false
+local FAST_RESTOCK_AD_AVAILABILITY_CACHE_SECONDS = 8
+local fastRestockAdAvailabilityCached = nil
+local fastRestockAdAvailabilityCachedAt = 0
+local fastRestockAdAvailabilityResultName = "Unknown"
+local fastRestockAdVisibilityToken = 0
 
 -- 购买状态管理
 local isPurchasing = false       -- V2.1修复：防止重复购买
@@ -88,6 +108,7 @@ local PurchaseUnitRobux = nil    -- Robux购买事件
 local PurchaseResult = nil
 local StockUpdate = nil          -- 库存更新事件 (V2.1库存功能)
 local RefreshTimeUpdate = nil    -- 刷新倒计时事件 (V2.1库存功能)
+local RequestFastRestockAd = nil -- 激励广告快速补货事件
 
 -- 库存系统变量 (V2.1库存功能)
 local currentStockData = {}      -- 当前库存数据 {[unitId] = stock}
@@ -334,6 +355,12 @@ local function InitializeUI()
         if not fasterRestockPriceLabel and fasterRestockContainer then
             fasterRestockPriceLabel = fasterRestockContainer:FindFirstChild("RightPrice", true)
         end
+        if not fasterRestockAdContainer then
+            fasterRestockAdContainer = shopFrame:FindFirstChild("FasterRestockAD")
+        end
+        if not fasterRestockAdButton then
+            fasterRestockAdButton = ResolveButton(fasterRestockAdContainer)
+        end
         UpdateFasterRestockPrice()
         return true -- 已初始化
     end
@@ -363,6 +390,8 @@ local function InitializeUI()
     fasterRestockContainer = shopFrame:FindFirstChild("FasterRestock")
     fasterRestockButton = ResolveButton(fasterRestockContainer)
     fasterRestockPriceLabel = fasterRestockContainer and fasterRestockContainer:FindFirstChild("RightPrice", true) or nil
+    fasterRestockAdContainer = shopFrame:FindFirstChild("FasterRestockAD")
+    fasterRestockAdButton = ResolveButton(fasterRestockAdContainer)
     UpdateFasterRestockPrice()
 
     if not itemContainer then
@@ -572,7 +601,7 @@ end
 @return boolean - 是否成功
 ]]
 local function InitializeEvents()
-    if RequestShopList and ShopListEvent and PurchaseUnit and PurchaseResult then
+    if RequestShopList and ShopListEvent and PurchaseUnit and PurchaseResult and RequestFastRestockAd then
         return true -- 已初始化
     end
 
@@ -595,6 +624,7 @@ local function InitializeEvents()
     PurchaseResult = shopEvents:FindFirstChild("PurchaseResult")
     StockUpdate = shopEvents:FindFirstChild("StockUpdate")              -- V2.1库存功能
     RefreshTimeUpdate = shopEvents:FindFirstChild("RefreshTimeUpdate")  -- V2.1库存功能
+    RequestFastRestockAd = shopEvents:FindFirstChild("RequestFastRestockAd")
 
     if not (RequestShopList and ShopListEvent and PurchaseUnit and PurchaseResult) then
         warn(LOG_PREFIX, "商店事件不完整")
@@ -607,6 +637,9 @@ local function InitializeEvents()
     end
     if not RefreshTimeUpdate then
         warn(LOG_PREFIX, "⚠️ RefreshTimeUpdate事件未找到，刷新倒计时将不可用")
+    end
+    if not RequestFastRestockAd then
+        warn(LOG_PREFIX, "⚠️ RequestFastRestockAd event not found, rewarded ad restock button will be unavailable")
     end
 
     return true
@@ -1318,8 +1351,110 @@ local function IsFirstOpenShopList()
     return tostring(item.UnitId or "") == FIRST_OPEN_UNIT_ID
 end
 
+local function SetFasterRestockAdVisible(visible)
+    if fasterRestockAdContainer then
+        fasterRestockAdContainer.Visible = visible
+    end
+    if fasterRestockAdButton and fasterRestockAdButton ~= fasterRestockAdContainer then
+        fasterRestockAdButton.Visible = visible
+    end
+end
+
+local function ResolveAdAvailabilityName(rawResult)
+    local availabilityResult = rawResult
+    if type(rawResult) == "table" then
+        availabilityResult = rawResult.AdAvailabilityResult or rawResult
+    end
+
+    if typeof(availabilityResult) == "EnumItem" then
+        return availabilityResult.Name
+    end
+
+    local asString = tostring(availabilityResult or "Unknown")
+    local enumName = string.match(asString, "Enum%.AdAvailabilityResult%.([%w_]+)")
+    if enumName then
+        return enumName
+    end
+
+    return asString
+end
+
+local function IsRewardedAdAvailable(rawResult)
+    local availabilityName = ResolveAdAvailabilityName(rawResult)
+    return availabilityName == "IsAvailable", availabilityName
+end
+
+local function GetAdUnavailableTip(availabilityName)
+    if availabilityName == "DeviceIneligible" then
+        return "Rewarded ads are not supported on this device. Please try on Roblox mobile app."
+    end
+    if availabilityName == "PlayerIneligible" then
+        return "This account is currently ineligible for rewarded ads."
+    end
+    if availabilityName == "PublisherIneligible" or availabilityName == "ExperienceIneligible" then
+        return "Rewarded ads are not available in this experience."
+    end
+    if availabilityName == "NoFill" then
+        return "No ad is available right now. Please try again later."
+    end
+    return "Ads unavailable"
+end
+
+local function CheckFastRestockAdAvailability(forceRefresh, showUnavailableTip)
+    if not AdService or not AdService.GetAdAvailabilityNowAsync then
+        if showUnavailableTip then
+            ShowSystemError("Ads unavailable")
+            PlayPurchaseErrorSound()
+        end
+        return false, "AdServiceUnavailable"
+    end
+
+    local now = tick()
+    if (not forceRefresh)
+        and fastRestockAdAvailabilityCached ~= nil
+        and (now - fastRestockAdAvailabilityCachedAt) <= FAST_RESTOCK_AD_AVAILABILITY_CACHE_SECONDS then
+        if showUnavailableTip and not fastRestockAdAvailabilityCached then
+            ShowSystemError(GetAdUnavailableTip(fastRestockAdAvailabilityResultName))
+            PlayPurchaseErrorSound()
+        end
+        return fastRestockAdAvailabilityCached, fastRestockAdAvailabilityResultName
+    end
+
+    local ok, availabilityResult = pcall(function()
+        return AdService:GetAdAvailabilityNowAsync(Enum.AdFormat.RewardedVideo)
+    end)
+
+    if not ok then
+        fastRestockAdAvailabilityCached = false
+        fastRestockAdAvailabilityCachedAt = now
+        fastRestockAdAvailabilityResultName = "CheckFailed"
+        warn(LOG_PREFIX, "GetAdAvailabilityNowAsync failed:", availabilityResult)
+        if showUnavailableTip then
+            ShowSystemError("Ads unavailable")
+            PlayPurchaseErrorSound()
+        end
+        return false, fastRestockAdAvailabilityResultName
+    end
+
+    local available, availabilityName = IsRewardedAdAvailable(availabilityResult)
+    fastRestockAdAvailabilityCached = available
+    fastRestockAdAvailabilityCachedAt = now
+    fastRestockAdAvailabilityResultName = availabilityName
+
+    if DEBUG_MODE then
+        print(LOG_PREFIX, "Rewarded ad availability:", availabilityName)
+    end
+
+    if showUnavailableTip and not available then
+        ShowSystemError(GetAdUnavailableTip(availabilityName))
+        PlayPurchaseErrorSound()
+    end
+
+    return available, availabilityName
+end
+
 local function UpdateFasterRestockVisibility()
-    if not fasterRestockContainer and not fasterRestockButton then
+    if not fasterRestockContainer and not fasterRestockButton and not fasterRestockAdContainer and not fasterRestockAdButton then
         return
     end
 
@@ -1330,25 +1465,91 @@ local function UpdateFasterRestockVisibility()
     if fasterRestockButton and fasterRestockButton ~= fasterRestockContainer then
         fasterRestockButton.Visible = visible
     end
+
+    if not fasterRestockAdContainer and not fasterRestockAdButton then
+        return
+    end
+
+    fastRestockAdVisibilityToken = fastRestockAdVisibilityToken + 1
+    local visibilityToken = fastRestockAdVisibilityToken
+
+    if not visible then
+        SetFasterRestockAdVisible(false)
+        return
+    end
+
+    -- 先隐藏，再异步检查当前玩家/设备是否真的可播广告
+    SetFasterRestockAdVisible(false)
+    task.spawn(function()
+        local adAvailable = CheckFastRestockAdAvailability(false, false)
+        if fastRestockAdVisibilityToken ~= visibilityToken then
+            return
+        end
+
+        if IsFirstOpenShopList() then
+            SetFasterRestockAdVisible(false)
+            return
+        end
+
+        SetFasterRestockAdVisible(adAvailable)
+    end)
+end
+
+local function PromptFastRestockPurchase()
+    if FAST_RESTOCK_PRODUCT_ID <= 0 then
+        warn(LOG_PREFIX, "FasterRestock product id is invalid, purchase prompt aborted")
+        ShowSystemError("Purchase failed")
+        PlayPurchaseErrorSound()
+        return
+    end
+
+    if fastRestockPrompting then
+        return
+    end
+
+    fastRestockPrompting = true
+    local ok, err = pcall(function()
+        MarketplaceService:PromptProductPurchase(player, FAST_RESTOCK_PRODUCT_ID)
+    end)
+
+    if not ok then
+        fastRestockPrompting = false
+        warn(LOG_PREFIX, "FasterRestock purchase prompt failed:", err)
+        ShowSystemError("Purchase failed")
+        PlayPurchaseErrorSound()
+    end
 end
 
 local function OnFasterRestockClicked()
-    local opened = false
-    local shopController = _G.DailyRewardDisplay
-    if shopController and shopController.OpenShop then
-        opened = shopController.OpenShop("ArmyStore") == true
-    else
-        local shopGui = playerGui:FindFirstChild("Shop")
-        local shopPanel = shopGui and shopGui:FindFirstChild("ShopBg")
-        if shopPanel then
-            shopPanel.Visible = true
-            opened = true
-        end
+    PromptFastRestockPurchase()
+end
+
+local function PromptFastRestockAd()
+    if not RequestFastRestockAd then
+        warn(LOG_PREFIX, "RequestFastRestockAd event not found, cannot request rewarded ad")
+        ShowSystemError("Ads unavailable")
+        PlayPurchaseErrorSound()
+        return
     end
 
-    if opened then
-        ShopDisplay.PlayClose()
+    local adAvailable = CheckFastRestockAdAvailability(true, true)
+    if not adAvailable then
+        UpdateFasterRestockVisibility()
+        return
     end
+
+    local ok, err = pcall(function()
+        RequestFastRestockAd:FireServer()
+    end)
+    if not ok then
+        warn(LOG_PREFIX, "Failed to fire RequestFastRestockAd:", err)
+        ShowSystemError("Ads unavailable")
+        PlayPurchaseErrorSound()
+    end
+end
+
+local function OnFasterRestockAdClicked()
+    PromptFastRestockAd()
 end
 
 local function BindFasterRestockButton()
@@ -1361,6 +1562,19 @@ local function BindFasterRestockButton()
         ButtonEffectHelper.AddClickEffect(fasterRestockButton, { OnClick = OnFasterRestockClicked })
     else
         fasterRestockButton.MouseButton1Click:Connect(OnFasterRestockClicked)
+    end
+end
+
+local function BindFasterRestockAdButton()
+    if not fasterRestockAdButton or fasterRestockAdButton == fasterRestockAdBoundButton then
+        return
+    end
+
+    fasterRestockAdBoundButton = fasterRestockAdButton
+    if LoadUIHelpers() and ButtonEffectHelper then
+        ButtonEffectHelper.AddClickEffect(fasterRestockAdButton, { OnClick = OnFasterRestockAdClicked })
+    else
+        fasterRestockAdButton.MouseButton1Click:Connect(OnFasterRestockAdClicked)
     end
 end
 
@@ -1650,6 +1864,20 @@ function ShopDisplay.Initialize()
     end
 
     BindFasterRestockButton()
+    BindFasterRestockAdButton()
+
+    if not fastRestockPromptBound then
+        fastRestockPromptBound = true
+        MarketplaceService.PromptProductPurchaseFinished:Connect(function(userId, productId, wasPurchased)
+            if userId ~= player.UserId then
+                return
+            end
+            if tonumber(productId) ~= tonumber(FAST_RESTOCK_PRODUCT_ID) then
+                return
+            end
+            fastRestockPrompting = false
+        end)
+    end
 
     -- V2.1修复：监听shopFrame可见性变化，实现界面打开时实时更新倒计时
     if shopFrame then

@@ -34,6 +34,7 @@ local ClientUnitAI = {}
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
+local Debris = game:GetService("Debris")
 
 -- 引用本地客户端模块
 local ClientUnitManager = nil
@@ -147,6 +148,17 @@ local updateConnection = nil
 local accumulatedTime = 0
 local positionReportTime = 0
 
+-- 普攻音效映射（按UnitConfig中的ModelPath二级目录）
+local ATTACK_SFX_BY_ROLE_FOLDER = {
+	Basic = "rbxassetid://116461386620698",
+	Handgun = "rbxassetid://800027703",
+	Rifle = "rbxassetid://799916696",
+	Shield = "rbxassetid://330595293", -- 兼容需求中重复Handgun描述，按现有Role/Shield映射
+	Stick = "rbxassetid://5835032207",
+	Tank = "rbxassetid://146163534",
+}
+local ATTACK_SFX_BY_UNIT_ID_CACHE = {}
+
 -- ==================== 日志函数 ====================
 
 local function DebugLog(...)
@@ -173,6 +185,89 @@ local function GetHorizontalDistance(pos1, pos2)
 	local dx = pos1.X - pos2.X
 	local dz = pos1.Z - pos2.Z
 	return math.sqrt(dx * dx + dz * dz)
+end
+
+local function IsSfxEnabled()
+	local soundController = rawget(_G, "SoundController")
+	if not soundController or not soundController.GetSoundSettings then
+		return true
+	end
+
+	local ok, settings = pcall(function()
+		return soundController.GetSoundSettings()
+	end)
+	if not ok or type(settings) ~= "table" then
+		return true
+	end
+
+	return settings.SfxEnabled ~= false
+end
+
+local function ResolveRoleFolderFromModelPath(modelPath)
+	if type(modelPath) ~= "string" or modelPath == "" then
+		return nil
+	end
+
+	local segments = string.split(modelPath, "/")
+	if #segments < 2 then
+		return nil
+	end
+
+	return segments[2]
+end
+
+local function ResolveAttackSoundId(unitId)
+	if ATTACK_SFX_BY_UNIT_ID_CACHE[unitId] ~= nil then
+		local cached = ATTACK_SFX_BY_UNIT_ID_CACHE[unitId]
+		return cached == false and nil or cached
+	end
+
+	local unitData = UnitConfig.GetUnitById(unitId)
+	if not unitData then
+		ATTACK_SFX_BY_UNIT_ID_CACHE[unitId] = false
+		return nil
+	end
+
+	local roleFolder = ResolveRoleFolderFromModelPath(unitData.ModelPath)
+	if not roleFolder then
+		ATTACK_SFX_BY_UNIT_ID_CACHE[unitId] = false
+		return nil
+	end
+
+	local soundId = ATTACK_SFX_BY_ROLE_FOLDER[roleFolder]
+	ATTACK_SFX_BY_UNIT_ID_CACHE[unitId] = soundId or false
+	return soundId
+end
+
+local function PlayAttackMarkerSFX(unitModel, unitId)
+	if not unitModel or not unitModel.Parent then
+		return
+	end
+
+	if not IsSfxEnabled() then
+		return
+	end
+
+	local soundId = ResolveAttackSoundId(unitId)
+	if not soundId then
+		return
+	end
+
+	local soundParent = unitModel:FindFirstChild("HumanoidRootPart") or unitModel.PrimaryPart
+	if not soundParent or not soundParent:IsA("BasePart") then
+		return
+	end
+
+	local sound = Instance.new("Sound")
+	sound.Name = "UnitAttackSFX"
+	sound.SoundId = soundId
+	sound.Volume = 0.75
+	sound.RollOffMode = Enum.RollOffMode.InverseTapered
+	sound.RollOffMinDistance = 8
+	sound.RollOffMaxDistance = 90
+	sound.Parent = soundParent
+	sound:Play()
+	Debris:AddItem(sound, 2)
 end
 
 --[[
@@ -1323,6 +1418,7 @@ function ClientUnitAI.StartAI(battleId, unitModel, unitId, level, team)
 		Move = nil,
 		Attack = nil,
 	}
+	local attackMarkerConnection = nil
 
 	if unitData.IdleAnimationId and unitData.IdleAnimationId ~= "" then
 		local anim = Instance.new("Animation")
@@ -1349,6 +1445,10 @@ function ClientUnitAI.StartAI(battleId, unitModel, unitId, level, team)
 		track.Priority = Enum.AnimationPriority.Action
 		track.Looped = false
 		animTrack.Attack = track
+		local attackEventName = UnitConfig.GetAnimationEventName(unitId) or BattleConfig.DEFAULT_ANIMATION_EVENT_NAME or "Damage"
+		attackMarkerConnection = track:GetMarkerReachedSignal(attackEventName):Connect(function()
+			PlayAttackMarkerSFX(unitModel, unitId)
+		end)
 		DebugLog(string.format("%s 加载攻击动画: %s (Priority=Action, Looped=false)", unitModel.Name, tostring(unitData.AttackAnimationId)))
 	else
 		WarnLog(string.format("%s 没有攻击动画ID!", unitModel.Name))
@@ -1385,6 +1485,7 @@ function ClientUnitAI.StartAI(battleId, unitModel, unitId, level, team)
 		AnimTrack = animTrack,
 		CurrentAnimTrack = nil,
 		CurrentAnimState = nil,
+		AttackMarkerConnection = attackMarkerConnection,
 
 		-- V4.10新增：卡住检测状态
 		_stuckTimer = 0,
@@ -1420,6 +1521,13 @@ function ClientUnitAI.StopAI(unitModel)
 		return
 	end
 
+	if aiData.AttackMarkerConnection then
+		pcall(function()
+			aiData.AttackMarkerConnection:Disconnect()
+		end)
+		aiData.AttackMarkerConnection = nil
+	end
+
 	-- 停止所有动画
 	if aiData.CurrentAnimTrack then
 		aiData.CurrentAnimTrack:Stop(0)
@@ -1449,6 +1557,13 @@ function ClientUnitAI.MarkDead(unitModel)
 	local aiData = activeAIs[unitModel]
 	if not aiData then
 		return
+	end
+
+	if aiData.AttackMarkerConnection then
+		pcall(function()
+			aiData.AttackMarkerConnection:Disconnect()
+		end)
+		aiData.AttackMarkerConnection = nil
 	end
 
 	aiData.State = AIState.DEAD
